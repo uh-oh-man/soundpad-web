@@ -1,0 +1,11 @@
+node_modules/
+dist/
+artifacts/
+.tools/
+**/bin/
+**/obj/
+test-results/
+playwright-report/
+*.user
+.env*
+!.env.example

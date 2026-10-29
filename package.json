@@ -1,0 +1,40 @@
+{
+  "name": "soundpad-web",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "license": "MIT",
+  "scripts": {
+    "dev": "vite --host 127.0.0.1",
+    "notices": "node scripts/notices.mjs",
+    "build": "npm run notices && tsc --noEmit && vite build",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint web/src tests --max-warnings 0",
+    "test": "vitest run",
+    "test:e2e": "playwright test",
+    "preview": "vite preview --host 127.0.0.1",
+    "format": "prettier --write web/src tests *.ts *.js *.json .github/workflows"
+  },
+  "dependencies": {
+    "lucide-react": "^0.548.0",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0",
+    "trystero": "0.26.0",
+    "zod": "^4.1.12"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@playwright/test": "^1.56.0",
+    "@types/node": "^24.10.0",
+    "@types/react": "^19.2.0",
+    "@types/react-dom": "^19.2.0",
+    "@vitejs/plugin-react": "^6.1.2",
+    "eslint": "^10.13.0",
+    "eslint-plugin-react-hooks": "^7.0.1",
+    "prettier": "^3.9.10",
+    "typescript": "^5.9.3",
+    "typescript-eslint": "^8.46.2",
+    "vite": "^8.3.5",
+    "vitest": "^5.0.5"
+  }
+}
