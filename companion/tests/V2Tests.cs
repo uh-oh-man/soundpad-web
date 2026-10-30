@@ -5,6 +5,25 @@ namespace SoundpadWeb.Tests;
 
 public sealed class V2Tests : IDisposable
 {
+    [Fact]
+    public async Task ConcurrentGuestsCannotSeekTheSoundThatReplacedTheirEpoch()
+    {
+        await using var mock = new MockSoundpad(); using var pipe = new SoundpadPipe(mock.Name); using var bridge = new Bridge(pipe, Store); await bridge.Poll(true); var lib = bridge.Snapshot.Library; var id = lib.Sounds[0].Id;
+        Assert.True((await bridge.Execute(Cmd("play", id, lib.Version), "guest")).Ok); var epoch = bridge.Snapshot.Playback.Epoch;
+        var seeks = await Task.WhenAll(bridge.Execute(Cmd("seek", id, position: 25, epoch: epoch), "guest"), bridge.Execute(Cmd("seek", id, position: 50, epoch: epoch), "guest")); Assert.All(seeks, r => Assert.True(r.Ok));
+        await Task.WhenAll(bridge.Execute(Cmd("seek", id, position: 100, epoch: epoch), "guest"), bridge.Execute(Cmd("play", lib.Sounds[1].Id, lib.Version), "guest"));
+        Assert.Equal(lib.Sounds[1].Id, bridge.Snapshot.Playback.SoundId); Assert.False((await bridge.Execute(Cmd("seek", id, position: 200, epoch: epoch), "guest")).Ok);
+        Assert.True(mock.Commands.FindLastIndex(c => c.StartsWith("DoSeekMs(")) < mock.Commands.FindLastIndex(c => c == "DoPlaySound(2)"));
+    }
+    [Fact]
+    public void FailedMigrationPreservesOriginalStateAndRecoveryCopy()
+    {
+        Store.Save(new DiskState()); var original = File.ReadAllBytes(Path.Combine(folder, "state.json"));
+        using var bitmap = new System.Drawing.Bitmap(12, 12); using var image = new MemoryStream(); bitmap.Save(image, System.Drawing.Imaging.ImageFormat.Png);
+        var legacy = new DiskState(); legacy.Icons[new('a', 64)] = "data:image/png;base64," + Convert.ToBase64String(image.ToArray()); Store.Save(legacy); original = File.ReadAllBytes(Path.Combine(folder, "state.json"));
+        File.WriteAllText(Path.Combine(folder, "icons"), "fixture blocks directory creation");
+        Assert.ThrowsAny<IOException>(() => Store.Load()); Assert.True(original.SequenceEqual(File.ReadAllBytes(Path.Combine(folder, "state.json")))); Assert.True(original.SequenceEqual(File.ReadAllBytes(Path.Combine(folder, "state.v1.backup.json"))));
+    }
     private readonly string folder = Path.Combine(Path.GetTempPath(), "soundpad-web-v2-" + Guid.NewGuid().ToString("N"));
     private StateStore Store => new(folder);
     public V2Tests() { Directory.CreateDirectory(folder); }

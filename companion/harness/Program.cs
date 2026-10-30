@@ -1,5 +1,12 @@
 using SoundpadWeb;
 using SoundpadWeb.Testing;
+if (args.FirstOrDefault() == "--mock-only")
+{
+    await using var isolated = new MockSoundpad(); isolated.DurationMs = 600000;
+    Console.WriteLine("TEST_PIPE " + isolated.Name);
+    while (Console.ReadLine() is string line) { if (line == "play") isolated.BeginFixturePlayback(); else if (line == "exit") break; }
+    return;
+}
 if (args.FirstOrDefault() == "--spotify-status")
 {
     var status = await new SpotifyControl().Request("status");

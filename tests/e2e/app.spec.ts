@@ -453,13 +453,11 @@ test('V2: nested personal categories, multiple membership, export, end and resum
   await expect(page.getByRole('button', { name: /^Child\s*1$/ })).toBeVisible();
   await page.getByRole('button', { name: 'Manage layout', exact: true }).click();
   exported.favorites.push('f'.repeat(64));
-  await page
-    .getByLabel('Import personal layout')
-    .setInputFiles({
-      name: 'layout.json',
-      mimeType: 'application/json',
-      buffer: Buffer.from(JSON.stringify(exported)),
-    });
+  await page.getByLabel('Import personal layout').setInputFiles({
+    name: 'layout.json',
+    mimeType: 'application/json',
+    buffer: Buffer.from(JSON.stringify(exported)),
+  });
   await expect(page.getByText(/1 referenced sounds are unavailable/)).toBeVisible();
   await page.getByRole('button', { name: 'Close dialog' }).click();
   await page.getByRole('button', { name: 'Host Layout', exact: true }).click();
@@ -580,7 +578,17 @@ test('V2: 10000-sound library keeps rendering bounded and search responsive', as
         seekAckMs.push(performance.now() - started);
       }
       await controller.run('stop');
-      return { playAckMs, seekAckMs };
+      const memory = (
+        performance as Performance & {
+          memory?: { usedJSHeapSize: number; totalJSHeapSize: number };
+        }
+      ).memory;
+      return {
+        playAckMs,
+        seekAckMs,
+        browserJsHeapBytes: memory?.usedJSHeapSize ?? null,
+        browserJsHeapAllocatedBytes: memory?.totalJSHeapSize ?? null,
+      };
     });
     await page.getByLabel('Search sounds').fill('');
     await page.getByLabel('View mode').selectOption('waveforms');
@@ -593,7 +601,7 @@ test('V2: 10000-sound library keeps rendering bounded and search responsive', as
         searchMs,
         renderedGridRows: 120,
         renderedWaveRows: 24,
-        scope: 'Chromium on this PC, synthetic native library',
+        scope: `${testInfo.project.name} on this PC, synthetic native library`,
       },
       null,
       2,
