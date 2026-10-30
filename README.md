@@ -27,7 +27,11 @@ Your friend opens the link in a modern browser. Playback starts on **your** PC, 
 - Up to 12 authorized guests per session, independent cryptographic host sessions, pinned host identity and invitation rotation.
 - Host-controlled remote playback and guest counter permissions; guests default to playback enabled and counter editing disabled.
 - Authoritative persistent Kick counter with duplicate-request protection.
-- Optional per-sound PNG/JPEG icons, stored locally and synchronized to guests. Up to 256 custom icons, input at most 512 × 512 pixels / 128 KiB; normalized to 96 × 96 PNG.
+- Five personal views, real local waveform analysis, epoch-checked seeking, pause/resume, cues, regions and zoom.
+- Browser-personal nested layouts, favorites, hidden sounds and validated layout exports/imports.
+- Named guests, durable web statistics and guarded read-only native Soundpad statistics.
+- Large-photo PNG/JPEG cropping, dedicated 96-pixel icon storage, and safe V1 metadata migration.
+- Optional host-only Spotify desktop integration and End/Resume Hosting.
 - Desktop sidebar, mobile category selector, keyboard focus, responsive sound grid and incremental rendering for large libraries.
 
 ## Access and privacy
