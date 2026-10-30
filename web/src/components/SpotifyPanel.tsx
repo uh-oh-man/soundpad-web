@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Music2, SkipBack, SkipForward, Play, Pause } from 'lucide-react';
 import { z } from 'zod';
 import { controller } from '../controller';
@@ -13,20 +13,34 @@ const schema = z.object({
   canToggle: z.boolean(),
   canNext: z.boolean(),
   canPrevious: z.boolean(),
+  artwork: z
+    .string()
+    .max(180000)
+    .regex(/^data:image\/png;base64,[A-Za-z0-9+/=]+$/)
+    .nullable()
+    .optional(),
   error: z.string().nullable().optional(),
 });
 export function SpotifyPanel() {
+  const pending = useRef(false),
+    version = useRef(0);
   const [enabled, setEnabled] = useState(false),
     [data, setData] = useState<z.infer<typeof schema> | null>(null),
     [error, setError] = useState('');
   async function request(action: 'status' | 'toggle' | 'next' | 'previous') {
+    if (pending.current) return;
+    pending.current = true;
+    const startedVersion = version.current;
     try {
       const value = schema.parse(await controller.run('spotify', { action }));
+      if (startedVersion !== version.current) return;
       setData(value);
       setEnabled(value.enabled ?? true);
       setError('');
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Spotify unavailable.');
+    } finally {
+      pending.current = false;
     }
   }
   useEffect(() => {
@@ -41,17 +55,19 @@ export function SpotifyPanel() {
   async function toggle(value: boolean) {
     try {
       await controller.run('spotify', { action: value ? 'enable' : 'disable' });
+      version.current++;
       setEnabled(value);
+      setError('');
       if (!value) setData(null);
-    } catch {
-      /* The controller reports command errors; browser storage is optional for display names. */
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Spotify setting failed.');
     }
   }
   return (
-    <section className="spotify-panel">
-      <div className="setting-row">
+    <section className="spotify-player" aria-label="Spotify player">
+      <div className="spotify-heading">
         <span>
-          <Music2 size={17} /> Spotify desktop <small>Optional · host only</small>
+          <Music2 size={15} /> Spotify
         </span>
         <input
           type="checkbox"
@@ -60,54 +76,67 @@ export function SpotifyPanel() {
           onChange={(e) => void toggle(e.target.checked)}
         />
       </div>
-      {enabled && (
+      {enabled ? (
         <>
-          <strong>{data?.available ? data.title : 'Spotify unavailable'}</strong>
-          <p className="muted">
-            {data?.available
-              ? data.artist
-              : data?.error || error || 'Checking the local Spotify media session…'}
-          </p>
-          {data?.available && (
-            <>
-              <small>{data.status}</small>
-              {data.durationMs != null && data.durationMs > 0 && (
-                <progress
-                  aria-label="Spotify track progress"
-                  max={data.durationMs}
-                  value={data.positionMs ?? 0}
-                />
-              )}
-            </>
+          <div className="spotify-track">
+            {data?.available && data.artwork ? (
+              <img src={data.artwork} alt="Spotify album artwork" />
+            ) : (
+              <span className="spotify-art-placeholder">
+                <Music2 size={26} />
+              </span>
+            )}
+            <div>
+              <strong>
+                {data?.available ? data.title || 'Track name unavailable' : 'Spotify unavailable'}
+              </strong>
+              <span>
+                {data?.available
+                  ? data.artist || 'Artist unavailable'
+                  : data?.error || error || 'Checking Spotify…'}
+              </span>
+              <small>{data?.available ? data.status : ''}</small>
+            </div>
+          </div>
+          {data?.available && data.durationMs != null && data.durationMs > 0 && (
+            <progress
+              aria-label="Spotify track progress"
+              max={data.durationMs}
+              value={data.positionMs ?? 0}
+            />
           )}
-          <div className="transport">
+          <div className="spotify-transport">
             <button
               aria-label="Previous Spotify track"
               disabled={!data?.available || !data.canPrevious}
               onClick={() => void request('previous')}
             >
-              <SkipBack size={17} />
+              <SkipBack size={16} />
             </button>
             <button
               aria-label="Play or pause Spotify"
               disabled={!data?.available || !data.canToggle}
               onClick={() => void request('toggle')}
             >
-              {data?.status === 'Playing' ? <Pause size={17} /> : <Play size={17} />}
+              {data?.status === 'Playing' ? <Pause size={18} /> : <Play size={18} />}
             </button>
             <button
               aria-label="Next Spotify track"
               disabled={!data?.available || !data.canNext}
               onClick={() => void request('next')}
             >
-              <SkipForward size={17} />
+              <SkipForward size={16} />
             </button>
           </div>
-          <p className="muted">
-            Controls only the Spotify Windows media session. Audio stays in Spotify; nothing is
-            streamed or rerouted.
-          </p>
         </>
+      ) : (
+        <p>Enable your local Spotify player.</p>
+      )}
+      <small className="spotify-scope">Spotify only · host controls</small>
+      {error && (
+        <p className="warning" role="alert">
+          {error}
+        </p>
       )}
     </section>
   );

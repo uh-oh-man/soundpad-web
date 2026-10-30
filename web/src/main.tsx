@@ -31,6 +31,7 @@ import { IconEditor } from './components/IconEditor';
 import { PersonalLayout, OrganizeSound } from './components/PersonalLayout';
 import { Statistics } from './components/Statistics';
 import { SpotifyPanel } from './components/SpotifyPanel';
+import { GuestName } from './components/GuestName';
 import { clearWaveforms } from './waveform-cache';
 import './styles.css';
 import './v2.css';
@@ -58,6 +59,8 @@ function App() {
   const connected = status === (host ? 'Host ready' : 'Connected');
   const canPlay = connected && state.available && (host || state.permissions.remotePlayback);
   const canCount = connected && (host || state.permissions.guestCounter);
+  const [nativeMajor, nativeMinor] = (state.companionVersion ?? '0.0').split('.').map(Number);
+  const needsCompanionUpdate = !(nativeMajor > 2 || (nativeMajor === 2 && nativeMinor >= 1));
   const repositoryUrl = import.meta.env.VITE_REPOSITORY_URL as string | undefined;
   const categories = useMemo(
     () => flattenCategories(state.library.categories),
@@ -250,6 +253,7 @@ function App() {
           {mode !== 'landing' && (
             <input
               className="profile-name"
+              key={view.profile.name}
               aria-label="Your display name"
               title="Display names are not authenticated identities"
               maxLength={40}
@@ -335,6 +339,7 @@ function App() {
         <>
           <div className="workspace">
             <aside className="sidebar">
+              {host && (state.protocol ?? 1) >= 2 && <SpotifyPanel />}
               <div className="sidebar-heading">
                 LIBRARY <span>{state.library.sounds.length}</span>
               </div>
@@ -442,16 +447,18 @@ function App() {
               </div>
             </aside>
             <main className="soundboard">
-              {connected && (state.protocol ?? 1) < 2 && (
+              {connected && ((state.protocol ?? 1) < 2 || needsCompanionUpdate) && (
                 <aside className="companion-update" role="status">
                   <strong>
                     {host
-                      ? 'Update your Windows companion for V2'
+                      ? (state.protocol ?? 1) < 2
+                        ? 'Update your Windows companion for V2'
+                        : 'Update your Windows companion to 2.1'
                       : 'Ask the host to update the Windows companion'}
                   </strong>
                   <p>
-                    Basic playback still works. Waveforms, personal layouts and the new player
-                    controls need the V2 companion.
+                    Basic playback still works. Install the latest companion for rapid-seek fixes
+                    and Spotify album artwork.
                   </p>
                   {host && (
                     <a
@@ -878,7 +885,6 @@ function App() {
                 >
                   Clear web statistics
                 </button>
-                <SpotifyPanel />
               </>
             )}
             <div className="dialog-foot">
@@ -895,6 +901,8 @@ function App() {
           </>,
           () => setSettings(false),
         )}
+      <small className="ai-credit">made by AI</small>
+      {view.needsName && <GuestName initial={view.profile.name} />}
       {editing &&
         modal('Sound icon', <IconEditor sound={editing} close={() => setEditing(null)} />, () =>
           setEditing(null),

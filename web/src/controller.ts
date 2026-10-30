@@ -9,7 +9,13 @@ import {
 } from './protocol';
 import { LocalBridge, type BridgeAddress } from './network/local';
 import { Session } from './network/session';
-import { createIdentity, inviteUrl, parseInvite, type HostIdentity } from './network/identity';
+import {
+  createIdentity,
+  inviteUrl,
+  parseInvite,
+  type HostIdentity,
+  type Invite,
+} from './network/identity';
 type View = {
   mode: 'landing' | 'host' | 'guest';
   status: string;
@@ -20,6 +26,7 @@ type View = {
   people: Record<string, Participant>;
   profile: Participant;
   resumeAvailable: boolean;
+  needsName: boolean;
 };
 function savedProfile(): Participant {
   try {
@@ -49,6 +56,7 @@ export class Controller {
     people: {},
     profile: savedProfile(),
     resumeAvailable: false,
+    needsName: false,
   };
   private listeners = new Set<() => void>();
   private bridge?: LocalBridge;
@@ -58,6 +66,7 @@ export class Controller {
   private starting = false;
   private live = false;
   private initialized = false;
+  private pendingInvite?: Invite;
   subscribe = (listener: () => void) => {
     this.listeners.add(listener);
     return () => {
@@ -77,18 +86,15 @@ export class Controller {
       const hash = new URLSearchParams(location.hash.slice(1));
       if (hash.has('join')) {
         const invite = parseInvite(hash.get('join')!);
-        this.update({ mode: 'guest', status: 'Connecting' });
-        this.session = new Session(
-          invite,
-          undefined,
-          () => this.view.state,
-          async () => {},
-          (state) => this.update({ state }),
-          (status) => this.update({ status }),
-          () => {},
-          undefined,
-          { get: () => this.view.profile, changed: () => {} },
-        );
+        this.pendingInvite = invite;
+        let confirmed = false;
+        try {
+          confirmed = localStorage.getItem('soundpad-name-confirmed') === '1';
+        } catch {
+          /* Prompt still works without browser storage. */
+        }
+        if (confirmed) this.connectGuest(invite);
+        else this.update({ mode: 'guest', status: 'Choose your name', needsName: true });
       } else {
         const raw = hash.get('host') || sessionStorage.getItem('soundpad-bridge');
         if (!raw) return;
@@ -110,6 +116,30 @@ export class Controller {
         notice: e instanceof Error ? e.message : 'Invalid connection link.',
       });
     }
+  }
+  private connectGuest(invite: Invite) {
+    this.update({ mode: 'guest', status: 'Connecting', needsName: false });
+    this.session = new Session(
+      invite,
+      undefined,
+      () => this.view.state,
+      async () => {},
+      (state) => this.update({ state }),
+      (status) => this.update({ status }),
+      () => {},
+      undefined,
+      { get: () => this.view.profile, changed: () => {} },
+    );
+  }
+  confirmName(name: string) {
+    if (!this.view.needsName || !name.trim() || !this.pendingInvite) return;
+    this.rename(name);
+    try {
+      localStorage.setItem('soundpad-name-confirmed', '1');
+    } catch {
+      /* This tab can still join. */
+    }
+    this.connectGuest(this.pendingInvite);
   }
   private connectHost() {
     this.update({ mode: 'host', status: 'Connecting to companion' });

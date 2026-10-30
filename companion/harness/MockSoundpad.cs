@@ -15,6 +15,12 @@ public sealed class MockSoundpad : IAsyncDisposable
     private readonly Task loop;
     private long startedTick, position;
     public long DurationMs { get; set; } = 2500;
+    public int SeekLagSamples { get; set; }
+    public bool TransientSeekStop { get; set; }
+    private int remainingLag, remainingStops;
+    private long beforeSeek;
+    private long ReportPosition() => remainingLag-- > 0 ? beforeSeek : Position;
+    private string ReportStatus() => remainingStops-- > 0 ? "STOPPED" : Status;
     private long Position => position + (Status == "PLAYING" ? Environment.TickCount64 - startedTick : 0);
     public void BeginFixturePlayback() { position = 0; startedTick = Environment.TickCount64; Status = "PLAYING"; }
     public MockSoundpad(string? name = null) { if (name != null) Name = name; loop = Run(); }
@@ -31,9 +37,9 @@ public sealed class MockSoundpad : IAsyncDisposable
                     byte[] buffer = new byte[4096]; int read = await server.ReadAsync(buffer, cancel.Token); if (read == 0) break;
                     var command = Encoding.UTF8.GetString(buffer, 0, read); lock (Commands) Commands.Add(command);
                     if (Status == "PLAYING" && Position >= DurationMs) Status = "STOPPED";
-                    string result = command switch { "GetSoundlist()" => AllXml, "GetCategories(true, true)" => CategoryXml, "GetPlayStatus()" => Status, "GetPlaybackPositionInMs()" => Position.ToString(), "GetPlaybackDurationInMs()" => DurationMs.ToString(), "IsAlive()" => "R-200", _ => command.StartsWith("Do") ? "R-200" : "R-404" };
+                    string result = command switch { "GetSoundlist()" => AllXml, "GetCategories(true, true)" => CategoryXml, "GetPlayStatus()" => ReportStatus(), "GetPlaybackPositionInMs()" => ReportPosition().ToString(), "GetPlaybackDurationInMs()" => DurationMs.ToString(), "IsAlive()" => "R-200", _ => command.StartsWith("Do") ? "R-200" : "R-404" };
                     if (command.StartsWith("DoPlaySound(")) { BeginFixturePlayback(); Console.WriteLine("TEST_PLAY " + command); }
-                    if (command.StartsWith("DoSeekMs(")) { position = long.Parse(command[9..^1]); startedTick = Environment.TickCount64; Console.WriteLine("TEST_PLAY " + command); }
+                    if (command.StartsWith("DoSeekMs(")) { beforeSeek = Position; remainingLag = SeekLagSamples; remainingStops = TransientSeekStop ? 1 : 0; position = long.Parse(command[9..^1]); startedTick = Environment.TickCount64; Console.WriteLine("TEST_PLAY " + command); }
                     if (command == "DoTogglePause()") { position = Position; Status = Status == "PLAYING" ? "PAUSED" : "PLAYING"; startedTick = Environment.TickCount64; }
                     if (command == "DoStopSound()") { Status = "STOPPED"; position = 0; }
                     await server.WriteAsync(Encoding.UTF8.GetBytes(result), cancel.Token);

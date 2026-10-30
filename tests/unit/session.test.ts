@@ -206,6 +206,21 @@ describe('authoritative sessions over deterministic transport (no public relay)'
     await vi.waitFor(() => expect(h.guests()).toHaveLength(0));
     expect(h.executed.size).toBe(0);
   });
+  it('backpressures a short legitimate command burst without revoking the guest', async () => {
+    const n = new MemoryNetwork(),
+      a = await createIdentity();
+    const h = setup(n, a, 'host', true),
+      g = setup(n, a, 'guest');
+    await vi.waitFor(() => expect(g.status()).toBe('Connected'));
+    const replies = await Promise.allSettled(
+      Array.from({ length: 14 }, () => g.session.sendCommand(command('stop'))),
+    );
+    expect(replies.some((r) => r.status === 'rejected')).toBe(true);
+    expect(h.executed.size).toBeLessThanOrEqual(12);
+    expect(h.guests()).toEqual(['guest']);
+    await new Promise((resolve) => setTimeout(resolve, 1050));
+    await expect(g.session.sendCommand(command('stop'))).resolves.toBeUndefined();
+  });
   it('disconnects a guest flooding valid commands', async () => {
     const n = new MemoryNetwork(),
       a = await createIdentity();

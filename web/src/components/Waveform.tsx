@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Plus, Minus, RotateCcw, Flag, Scissors, Play, Trash2 } from 'lucide-react';
-import { requestWaveform, clearWaveforms } from '../waveform-cache';
+import { useWaveformData, clearWaveforms } from '../waveform-cache';
 import { controller } from '../controller';
 import type { Snapshot, Sound, Waveform as WaveData } from '../protocol';
 import type { Workspace } from '../workspace';
@@ -65,7 +65,14 @@ export function usePlayhead(playback: Snapshot['playback']) {
   ]);
   return position;
 }
-export function wavePath(data: WaveData, width = 800, zoom = 1, offset = 0) {
+export function wavePath(
+  data: Pick<WaveData, 'status' | 'durationMs'> & {
+    levels?: { bins: number; peaks: ArrayLike<number> }[];
+  },
+  width = 800,
+  zoom = 1,
+  offset = 0,
+) {
   if (data.status !== 'ready' || !data.levels || !data.durationMs) return '';
   const wanted = width * zoom;
   const level = data.levels.find((l) => l.bins >= wanted) ?? data.levels[data.levels.length - 1];
@@ -103,10 +110,7 @@ export function Waveform({
   compact = false,
 }: Props) {
   const root = useRef<HTMLDivElement>(null);
-  const [data, setData] = useState<WaveData | null>(null),
-    [error, setError] = useState(''),
-    [retry, setRetry] = useState(0),
-    [visible, setVisible] = useState(compact),
+  const [visible, setVisible] = useState(compact),
     [selected, setSelected] = useState(0),
     [preview, setPreview] = useState<number | null>(null),
     [offset, setOffset] = useState(0),
@@ -124,37 +128,24 @@ export function Waveform({
   );
   useEffect(() => {
     const node = root.current;
-    if (!node || compact) return;
+    if (!node || compact || visible) return;
     const observer = new IntersectionObserver(
       (entries) => {
-        setVisible(entries.some((e) => e.isIntersecting));
+        if (entries.some((e) => e.isIntersecting)) {
+          setVisible(true);
+          observer.disconnect();
+        }
       },
       { rootMargin: '180px' },
     );
     observer.observe(node);
     return () => observer.disconnect();
-  }, [compact]);
-  useEffect(() => {
-    if (!visible || !state.hostId || (state.protocol ?? 1) < 2) {
-      setData(null);
-      return;
-    }
-    const abort = new AbortController();
-    const refresh = setInterval(() => setRetry((value) => value + 1), 35000);
-    setError('');
-    setData((previous) => (previous?.soundId === sound.id ? previous : null));
-    void requestWaveform(state.hostId, sound.id, abort.signal)
-      .then((value) => {
-        if (!abort.signal.aborted) setData(value);
-      })
-      .catch((e) => {
-        if (!abort.signal.aborted) setError(e.message);
-      });
-    return () => {
-      clearInterval(refresh);
-      abort.abort();
-    };
-  }, [visible, state.hostId, sound.id, retry, state.library.version, state.protocol]);
+  }, [compact, visible]);
+  const { data, error } = useWaveformData(
+    state.hostId,
+    sound.id,
+    visible && (state.protocol ?? 1) >= 2,
+  );
   const duration = data?.durationMs ?? sound.durationMs ?? 0,
     span = duration / zoom,
     maxOffset = Math.max(0, duration - span),
@@ -680,8 +671,7 @@ export function Waveform({
           {(error || data?.status === 'unavailable') && (
             <button
               onClick={() => {
-                clearWaveforms();
-                setRetry((n) => n + 1);
+                clearWaveforms(state.hostId ?? undefined, sound.id);
               }}
             >
               Retry waveform

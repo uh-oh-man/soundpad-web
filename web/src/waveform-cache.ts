@@ -1,53 +1,111 @@
+import { useEffect, useState, useSyncExternalStore } from 'react';
 import { waveformSchema, type Waveform } from './protocol';
 import { controller } from './controller';
-const cache = new Map<string, { at: number; data: Waveform }>();
-const pending = new Map<string, Promise<Waveform>>();
+export type CachedWaveform = Omit<Waveform, 'levels'> & {
+  levels?: { bins: number; peaks: Int16Array }[];
+};
+const cache = new Map<string, CachedWaveform>();
+const pending = new Map<string, Promise<CachedWaveform>>();
 const queue: (() => void)[] = [];
+const listeners = new Set<() => void>();
+const invalidations = new Map<string, number>();
+let resetEpoch = 0;
+let queueTimer: ReturnType<typeof setTimeout> | undefined;
 let active = 0,
-  lastStart = 0;
+  lastStart = 0,
+  generation = 0;
 function runQueue() {
   if (active >= 2 || !queue.length) return;
-  const delay = Math.max(0, 200 - (performance.now() - lastStart));
+  const delay = Math.max(0, 300 - (performance.now() - lastStart));
   if (delay) {
-    setTimeout(runQueue, delay);
+    queueTimer ??= setTimeout(() => {
+      queueTimer = undefined;
+      runQueue();
+    }, delay);
     return;
   }
   lastStart = performance.now();
   active++;
   queue.shift()!();
 }
-export function clearWaveforms() {
-  cache.clear();
+export function clearWaveforms(hostId?: string, id?: string) {
+  if (hostId && id) {
+    const key = hostId + ':' + id;
+    cache.delete(key);
+    pending.delete(key);
+    invalidations.set(key, (invalidations.get(key) ?? 0) + 1);
+  } else {
+    cache.clear();
+    pending.clear();
+    invalidations.clear();
+    resetEpoch++;
+  }
+  generation++;
+  for (const notify of listeners) notify();
 }
-export function requestWaveform(hostId: string, id: string, signal?: AbortSignal) {
+export function requestWaveform(hostId: string, id: string) {
   const key = hostId + ':' + id;
   const hit = cache.get(key);
-  if (hit && Date.now() - hit.at < 30000) return Promise.resolve(hit.data);
+  if (hit) return Promise.resolve(hit);
   if (pending.has(key)) return pending.get(key)!;
-  if (queue.length > 32)
-    return Promise.reject(Error('Waveform requests are busy. Try again after scrolling stops.'));
-  const promise = new Promise<Waveform>((resolve, reject) => {
+  const startedEpoch = resetEpoch,
+    startedInvalidation = invalidations.get(key) ?? 0;
+  const promise = new Promise<CachedWaveform>((resolve, reject) => {
     queue.push(() => {
       void (async () => {
         try {
-          if (signal?.aborted) throw Error('Cancelled');
-          const raw = await controller.run('waveform', { soundId: id });
-          const data = waveformSchema.parse(raw);
+          const session = controller.getSnapshot?.();
+          if (session && (session.mode === 'landing' || !session.state.available))
+            throw Error('Host unavailable; cached waveforms are retained.');
+          const data = waveformSchema.parse(await controller.run('waveform', { soundId: id }));
           if (data.soundId !== id) throw Error('Waveform belongs to another sound.');
-          if (cache.size >= 64) cache.delete(cache.keys().next().value!);
-          cache.set(key, { at: Date.now(), data });
-          resolve(data);
+          const stored = {
+            ...data,
+            levels: data.levels?.map((l) => ({ bins: l.bins, peaks: Int16Array.from(l.peaks) })),
+          };
+          if (startedEpoch === resetEpoch && startedInvalidation === (invalidations.get(key) ?? 0))
+            cache.set(key, stored);
+          resolve(stored);
         } catch (e) {
           reject(e);
         } finally {
-          pending.delete(key);
+          if (pending.get(key) === promise) pending.delete(key);
           active--;
           runQueue();
         }
       })();
     });
-    runQueue();
   });
   pending.set(key, promise);
+  runQueue();
   return promise;
+}
+const subscribe = (notify: () => void) => {
+  listeners.add(notify);
+  return () => {
+    listeners.delete(notify);
+  };
+};
+export function useWaveformData(hostId: string | null | undefined, id: string, enabled: boolean) {
+  const version = useSyncExternalStore(subscribe, () => generation);
+  const key = (hostId ?? '') + ':' + id;
+  const [entry, setEntry] = useState<{ key: string; data?: CachedWaveform; error?: string }>(
+    () => ({ key, data: cache.get(key) }),
+  );
+  useEffect(() => {
+    if (!hostId || !enabled) return;
+    let live = true;
+    setEntry({ key, data: cache.get(key) });
+    void requestWaveform(hostId, id)
+      .then((data) => {
+        if (live) setEntry({ key, data });
+      })
+      .catch((e) => {
+        if (live) setEntry({ key, error: String(e.message) });
+      });
+    return () => {
+      live = false;
+    };
+  }, [hostId, id, key, enabled, version]);
+  return entry.key === key ? entry : { key, data: cache.get(key) };
 }

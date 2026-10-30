@@ -20,7 +20,7 @@ public sealed partial class Bridge(ISoundpad pipe, StateStore store) : IDisposab
     public event Action? CommandAccepted;
     public void Dispose() => waveformService.Dispose();
     public Snapshot Snapshot => new(1, revision, available, error, parsed.Public, playback, disk.Counter, disk.Permissions, 2,
-        Convert.ToHexString(System.Security.Cryptography.HMACSHA256.HashData(Convert.FromBase64String(disk.IdentityKey), System.Text.Encoding.UTF8.GetBytes("workspace-host-v2"))).ToLowerInvariant(), disk.StatisticsVersion);
+        Convert.ToHexString(System.Security.Cryptography.HMACSHA256.HashData(Convert.FromBase64String(disk.IdentityKey), System.Text.Encoding.UTF8.GetBytes("workspace-host-v2"))).ToLowerInvariant(), disk.StatisticsVersion, typeof(Bridge).Assembly.GetName().Version?.ToString(3));
     public string? Website => disk.Website;
     public void SetWebsite(string site) { disk.Website = site; store.Save(disk); }
     private void Publish() { revision++; Changed?.Invoke(Snapshot); }
@@ -91,7 +91,7 @@ public sealed partial class Bridge(ISoundpad pipe, StateStore store) : IDisposab
                 case "pause": await ControlPlayback(c); break;
                 case "stop":
                     if (!(await pipe.Request("DoStopSound()")).StartsWith("R-200")) throw new InvalidDataException("Soundpad rejected Stop.");
-                    playback = new("STOPPED", SampledAt: now); regionStart = null; break;
+                    playback = new("STOPPED", SampledAt: now); regionStart = null; seekSettlesUntil = 0; break;
                 case "statistics": return StatisticsReply(c);
                 case "clearStatistics": disk.Statistics.Clear(); disk.Activity.Clear(); disk.StatisticsVersion++; break;
                 case "spotify": if (c.Action is not ("enable" or "disable")) throw new InvalidDataException("Unsupported Spotify setting."); disk.SpotifyEnabled = c.Action == "enable"; break;

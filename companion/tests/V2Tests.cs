@@ -5,6 +5,25 @@ namespace SoundpadWeb.Tests;
 
 public sealed class V2Tests : IDisposable
 {
+    [Theory]
+    [InlineData("Spotify.exe", true)]
+    [InlineData("Spotify", true)]
+    [InlineData("SpotifyAB.SpotifyMusic_zpdnekdrzrea0!Spotify", true)]
+    [InlineData("chrome.exe", false)]
+    [InlineData("NotSpotify.exe", false)]
+    [InlineData("SpotifyFake.Player", false)]
+    public void SpotifySelectionIgnoresEveryOtherMediaApplication(string source, bool expected) => Assert.Equal(expected, SpotifyControl.IsSpotifySource(source));
+    [Fact]
+    public async Task RapidSeeksKeepIdentityDuringDelayedPositionsAndTransientStops()
+    {
+        await using var mock = new MockSoundpad { DurationMs = 30000, SeekLagSamples = 4, TransientSeekStop = true }; using var pipe = new SoundpadPipe(mock.Name); using var bridge = new Bridge(pipe, Store); await bridge.Poll(true); var lib = bridge.Snapshot.Library; var id = lib.Sounds[0].Id;
+        Assert.True((await bridge.Execute(Cmd("play", id, lib.Version), "host")).Ok); var epoch = bridge.Snapshot.Playback.Epoch;
+        foreach (var at in new long[] { 15000, 2000, 21000, 6000, 18000 })
+        {
+            Assert.True((await bridge.Execute(Cmd("seek", id, position: at, epoch: epoch), "guest")).Ok); await bridge.Poll(false); Assert.Equal(id, bridge.Snapshot.Playback.SoundId); Assert.Equal(epoch, bridge.Snapshot.Playback.Epoch);
+        }
+        Assert.True((await bridge.Execute(Cmd("stop"), "host")).Ok); Assert.Null(bridge.Snapshot.Playback.SoundId);
+    }
     [Fact]
     public async Task ConcurrentGuestsCannotSeekTheSoundThatReplacedTheirEpoch()
     {

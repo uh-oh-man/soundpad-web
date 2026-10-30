@@ -38,6 +38,7 @@ export class Session {
   private sentRevision = new Map<string, number>();
   private denied = new Set<string>();
   private rates = new Map<string, RateLimit>();
+  private bursts = new Map<string, RateLimit>();
   private hostPeer?: string;
   private nonce = crypto.randomUUID();
   private pending = new Map<
@@ -117,6 +118,7 @@ export class Session {
       this.sentRevision.delete(peer);
       this.sentVersion.delete(peer);
       this.rates.delete(peer);
+      this.bursts.delete(peer);
       this.guests([...this.accepted]);
       if (peer === this.hostPeer) {
         this.hostPeer = undefined;
@@ -161,6 +163,7 @@ export class Session {
     this.people.delete(peer);
     this.profiles?.changed(Object.fromEntries(this.people));
     this.rates.delete(peer);
+    this.bursts.delete(peer);
     this.room.getPeers()[peer]?.close();
     this.guests([...this.accepted]);
   }
@@ -171,7 +174,26 @@ export class Session {
     const m = raw as Message;
     const rate = this.rates.get(peer) ?? new RateLimit(this.host ? 12 : 60);
     this.rates.set(peer, rate);
-    if (!rate.accept()) throw Error('Rate limit');
+    const burst = this.bursts.get(peer) ?? new RateLimit(this.host ? 24 : 60);
+    this.bursts.set(peer, burst);
+    if (!burst.accept()) throw Error('Rate limit');
+    if (!rate.accept()) {
+      const parsed = m.type === 'command' ? commandSchema.safeParse(m.command) : null;
+      if (this.host && this.accepted.has(peer) && parsed?.success) {
+        this.send(
+          {
+            v: 1,
+            type: 'ack',
+            id: parsed.data.id,
+            ok: false,
+            error: 'Too many requests. Please try again shortly.',
+          },
+          peer,
+        );
+        return;
+      }
+      throw Error('Rate limit');
+    }
     if (this.host) {
       if (m.type === 'hello' && typeof m.nonce === 'string' && m.nonce.length <= 64) {
         if (this.accepted.size >= 12 && !this.accepted.has(peer)) throw Error('Session full');

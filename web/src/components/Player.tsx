@@ -1,9 +1,10 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { AudioLines, Play, Pause, Square, RotateCcw, ChevronUp, ChevronDown } from 'lucide-react';
 import { controller } from '../controller';
 import type { Snapshot } from '../protocol';
 import type { Workspace } from '../workspace';
 import { Waveform, formatTime, usePlayhead } from './Waveform';
+import { seekQueue } from '../seek';
 export function Player({
   state,
   disabled,
@@ -20,11 +21,20 @@ export function Player({
   children: React.ReactNode;
 }) {
   const [expanded, setExpanded] = useState(false);
+  const [lastId, setLastId] = useState<string | null>(null);
+  useEffect(() => {
+    if (state.playback.soundId) setLastId(state.playback.soundId);
+  }, [state.playback.soundId]);
   const playback = state.playback,
-    sound = state.library.sounds.find((s) => s.id === playback.soundId),
+    known = !!playback.soundId,
+    sound = state.library.sounds.find((s) => s.id === (playback.soundId ?? lastId)),
     position = usePlayhead(playback);
   async function action(op: 'pause' | 'seek' | 'stop', at?: number) {
     try {
+      if (op === 'seek' && playback.soundId && playback.epoch && at !== undefined) {
+        await seekQueue.seek(playback.soundId, playback.epoch, at);
+        return;
+      }
       await controller.run(op, {
         soundId: playback.soundId ?? undefined,
         epoch: playback.epoch ?? undefined,
@@ -58,7 +68,9 @@ export function Player({
         <div>
           <strong>
             {sound
-              ? sound.name
+              ? known
+                ? sound.name
+                : `Last selection: ${sound.name}`
               : playback.status === 'PLAYING' || playback.status === 'PAUSED'
                 ? 'Soundpad playback · sound unknown'
                 : playback.status === 'STOPPED'
@@ -66,7 +78,7 @@ export function Player({
                   : 'Playback status unavailable'}
           </strong>
           <small>
-            {sound
+            {sound && known
               ? `Requested by ${playback.requester ?? 'Host'} · ${playback.status.toLowerCase()}`
               : 'Direct Soundpad playback remains independent.'}
           </small>
@@ -86,7 +98,7 @@ export function Player({
             compact
             sound={sound}
             state={state}
-            disabled={disabled || !canSeek}
+            disabled={disabled || !canSeek || !known || !playback.epoch}
             workspace={workspace}
             update={update}
             choose={(at) => action('seek', at)}

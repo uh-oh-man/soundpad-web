@@ -4,6 +4,7 @@ public sealed partial class Bridge
 {
     private readonly SpotifyControl spotify = new();
     private long sampledTick;
+    private long seekSettlesUntil;
     private long? regionStart;
     private async Task<Reply?> Query(Command c, string actor)
     {
@@ -27,6 +28,16 @@ public sealed partial class Bridge
             if (long.TryParse(await Pipe.Request("GetPlaybackDurationInMs()"), out var d) && d > 0) duration = d;
         }
         bool known = playback.SoundId != null; long elapsed = playback.Status == "PLAYING" ? Environment.TickCount64 - sampledTick : 0;
+        // RC can report the pre-seek position or a transient stop while an accepted seek settles.
+        // Trust only our short, epoch-bound transition window; a changed duration still invalidates identity.
+        bool sameDuration = playback.DurationMs is not > 0 || duration is not > 0 || Math.Abs(playback.DurationMs.Value - duration.Value) <= 150;
+        bool positionJump = known && position.HasValue && playback.PositionMs.HasValue && Math.Abs(position.Value - (playback.PositionMs.Value + elapsed)) > 1200;
+        if (known && Environment.TickCount64 < seekSettlesUntil && sameDuration &&
+            (status is "STOPPED" or "SEEKING" || status.StartsWith("R-") || positionJump || !position.HasValue))
+        {
+            status = playback.Status == "PAUSED" ? "PAUSED" : "SEEKING";
+            position = playback.PositionMs; duration ??= playback.DurationMs;
+        }
         // No vendor current-ID getter exists. Clear on contradictory observations; same-duration
         // native replacement cannot always be detected and is documented as a vendor limitation.
         if (status == "STOPPED" || status.StartsWith("R-") ||
@@ -48,7 +59,7 @@ public sealed partial class Bridge
         sampledTick = Environment.TickCount64;
         if (playback.Status == "PLAYING" && playback.RegionEndMs is long end && position >= end)
         {
-            if (playback.Repeat && regionStart.HasValue) { await Success($"DoSeekMs({regionStart.Value})"); playback = playback with { PositionMs = regionStart.Value, PositionRevision = playback.PositionRevision + 1 }; sampledTick = Environment.TickCount64; }
+            if (playback.Repeat && regionStart.HasValue) { await Success($"DoSeekMs({regionStart.Value})"); seekSettlesUntil = Environment.TickCount64 + 1500; playback = playback with { PositionMs = regionStart.Value, PositionRevision = playback.PositionRevision + 1 }; sampledTick = Environment.TickCount64; }
             else { await Success("DoStopSound()"); playback = new("STOPPED", SampledAt: DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()); regionStart = null; }
         }
     }
@@ -64,15 +75,16 @@ public sealed partial class Bridge
         bool started = false;
         try
         {
-            await Success($"DoPlaySound({index})"); started = true;
+            await Success($"DoPlaySound({index})"); started = true; seekSettlesUntil = Environment.TickCount64 + 1500;
             var now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(); var person = Person(actor, participant);
             playback = new("PLAYING", 0, null, c.SoundId, Guid.NewGuid().ToString(), person.Name, now, "web"); sampledTick = Environment.TickCount64; regionStart = null;
             await SamplePlayback();
             if (c.Op != "play")
             {
+                for (int attempt = 0; playback.DurationMs is not > 0 && attempt < 3; attempt++) { await Task.Delay(50); await SamplePlayback(); }
                 if (playback.DurationMs is not > 0) throw new InvalidDataException("Soundpad did not provide a duration for seeking.");
                 long start = Math.Clamp(c.PositionMs!.Value, 0, playback.DurationMs.Value - 1);
-                await Success($"DoSeekMs({start})"); playback = playback with { PositionMs = start, PositionRevision = playback.PositionRevision + 1, SampledAt = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(), RegionEndMs = c.Op == "region" ? Math.Min(c.EndMs!.Value, playback.DurationMs.Value) : null, Repeat = c.Op == "region" && c.Repeat };
+                await Success($"DoSeekMs({start})"); seekSettlesUntil = Environment.TickCount64 + 1500; playback = playback with { PositionMs = start, PositionRevision = playback.PositionRevision + 1, SampledAt = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(), RegionEndMs = c.Op == "region" ? Math.Min(c.EndMs!.Value, playback.DurationMs.Value) : null, Repeat = c.Op == "region" && c.Repeat };
                 sampledTick = Environment.TickCount64; regionStart = c.Op == "region" ? start : null;
             }
             var stats = disk.Statistics.GetValueOrDefault(c.SoundId!) ?? new SoundStatistics(); stats.Total++; stats.LastPlayedAt = now;
@@ -89,7 +101,7 @@ public sealed partial class Bridge
         await SamplePlayback();
         if (playback.SoundId != c.SoundId || playback.Epoch != c.Epoch || playback.Status is not ("PLAYING" or "PAUSED" or "SEEKING")) throw new InvalidDataException("Playback identity is unknown or changed.");
         if (c.Op == "pause") { await Success("DoTogglePause()"); playback = playback with { Status = playback.Status == "PAUSED" ? "PLAYING" : "PAUSED" }; }
-        else { if (c.PositionMs is null or < 0 || playback.DurationMs is not > 0) throw new InvalidDataException("Invalid seek target or unknown duration."); var target = Math.Min(c.PositionMs.Value, playback.DurationMs.Value - 1); await Success($"DoSeekMs({target})"); playback = playback with { PositionMs = target, PositionRevision = playback.PositionRevision + 1, RegionEndMs = null, Repeat = false }; regionStart = null; }
+        else { if (c.PositionMs is null or < 0 || playback.DurationMs is not > 0) throw new InvalidDataException("Invalid seek target or unknown duration."); var target = Math.Min(c.PositionMs.Value, playback.DurationMs.Value - 1); await Success($"DoSeekMs({target})"); seekSettlesUntil = Environment.TickCount64 + 1500; playback = playback with { PositionMs = target, PositionRevision = playback.PositionRevision + 1, RegionEndMs = null, Repeat = false }; regionStart = null; }
         playback = playback with { SampledAt = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() }; sampledTick = Environment.TickCount64;
     }
     private Reply StatisticsReply(Command c) => new("ack", c.Id, true, Data: c.SoundId == null

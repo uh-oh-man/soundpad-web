@@ -1,5 +1,7 @@
 # Soundpad Web
 
+> **made by AI** - Review the verification notes and known limitations before use.
+
 **V2 is the current update.** Refresh the website and download the latest Windows companion to enable all V2 features. See [features, verification and upgrade instructions](docs/V2.md).
 
 A private browser remote for [Leppsoft Soundpad](https://www.leppsoft.com/soundpad/). Friends see your real categories, tap a sound, and your existing Soundpad plays it through its current audio setup.
@@ -18,6 +20,15 @@ Static React website + one portable Windows companion. No accounts, audio upload
 Your friend opens the link in a modern browser. Playback starts on **your** PC, not their device. Allow the browser's local-network permission if it asks on the host. Start with current Chrome or Edge for hosting. Mobile guests do not use the loopback bridge.
 
 **Verification:** automated tests use isolated Soundpad fixtures and never trigger real audio. Real Soundpad audio playback remains an acceptance check; see [verification](docs/VERIFICATION.md).
+
+## Latest update - 2.1
+
+- Rapid seeking preserves waveform display and coalesces requests; brief native seek transitions no longer discard the current sound.
+- Requested waveforms stay cached for the browser-tab session in compact shared arrays. Scrolling or changing views reuses them; Refresh/Retry clears them explicitly.
+- Artwork fills icon-view play buttons. Sounds without artwork show real mini-waveforms.
+- Spotify has a dedicated host player above the library, with Spotify-only source selection, track/artist metadata and album artwork.
+- First-time invitation visitors choose a gamer name with **Done** or a local **Random** name generator. Their choice is remembered in that browser.
+- The website has a small, subdued `made by AI` note at the bottom.
 
 ## Features
 
@@ -44,7 +55,7 @@ Guests receive sound titles, category names/order/membership/icons, custom icons
 
 Actual application UI connected to the isolated test companion with **schema-derived fixture sounds**, not a real Soundpad library:
 
-![Desktop soundboard with fixture library](docs/screenshots/desktop-fixture.png)
+![Artwork buttons and cached mini waveforms, using fixture sounds](docs/screenshots/artwork-buttons.png)
 
 [Phone layout with fixture category](docs/screenshots/phone-fixture.png)
 

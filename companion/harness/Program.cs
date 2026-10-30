@@ -10,7 +10,7 @@ if (args.FirstOrDefault() == "--mock-only")
 if (args.FirstOrDefault() == "--spotify-status")
 {
     var status = await new SpotifyControl().Request("status");
-    Console.WriteLine(Json.Write(new { status.Available, status.CanToggle, status.CanNext, status.CanPrevious, status.Error })); return;
+    Console.WriteLine(Json.Write(new { status.Available, status.CanToggle, status.CanNext, status.CanPrevious, status.Error, status.SourceId, hasArtwork = status.Artwork != null })); return;
 }
 if (args.FirstOrDefault() == "--analyze-file" && args.Length == 2)
 {

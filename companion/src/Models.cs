@@ -8,7 +8,7 @@ public record Playback(string Status = "UNKNOWN", long? PositionMs = null, long?
     string? SoundId = null, string? Epoch = null, string? Requester = null, long SampledAt = 0, string IdentitySource = "unknown", long? RegionEndMs = null, bool Repeat = false, long PositionRevision = 0);
 public record Permissions(bool RemotePlayback = true, bool GuestCounter = false, bool GuestSeeking = true);
 public record Snapshot(int V, long Revision, bool Available, string? Error, Library Library, Playback Playback, int Counter, Permissions Permissions,
-    int Protocol = 2, string? HostId = null, long StatisticsVersion = 0);
+    int Protocol = 2, string? HostId = null, long StatisticsVersion = 0, string? CompanionVersion = null);
 public record Participant(string Id, string Name);
 public record ParticipantPlays(string Name, long Count);
 public sealed class SoundStatistics

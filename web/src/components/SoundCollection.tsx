@@ -4,7 +4,23 @@ import { controller } from '../controller';
 import { flattenCategories, type Snapshot, type Sound } from '../protocol';
 import { moveSound, toggleFavorite, type Workspace } from '../workspace';
 import { Waveform, formatTime, usePlayhead } from './Waveform';
+import { WaveformPreview } from './WaveformPreview';
+import { seekQueue } from '../seek';
 export type Totals = Record<string, { total: number; lastPlayedAt: number | null }>;
+const resumes = new Map<string, Promise<unknown>>();
+async function resumeAfterSeek(soundId: string, epoch: string) {
+  const current = controller.getSnapshot().state.playback;
+  if (current.soundId !== soundId || current.epoch !== epoch || current.status !== 'PAUSED') return;
+  const key = epoch + ':' + (current.positionRevision ?? 0);
+  let task = resumes.get(key);
+  if (!task) {
+    task = controller.run('pause', { soundId, epoch });
+    resumes.set(key, task);
+    void task.catch(() => resumes.delete(key));
+    if (resumes.size > 128) resumes.delete(resumes.keys().next().value!);
+  }
+  await task;
+}
 type Props = {
   sounds: Sound[];
   state: Snapshot;
@@ -24,13 +40,8 @@ export async function choosePosition(sound: Sound, state: Snapshot, at: number) 
     state.playback.epoch &&
     state.playback.status !== 'STOPPED'
   ) {
-    await controller.run('seek', {
-      soundId: sound.id,
-      epoch: state.playback.epoch,
-      positionMs: at,
-    });
-    if (state.playback.status === 'PAUSED')
-      await controller.run('pause', { soundId: sound.id, epoch: state.playback.epoch });
+    await seekQueue.seek(sound.id, state.playback.epoch, at);
+    if (state.playback.status === 'PAUSED') await resumeAfterSeek(sound.id, state.playback.epoch);
   } else
     await controller.run('startAt', {
       soundId: sound.id,
@@ -182,7 +193,7 @@ export function SoundCollection({
             >
               <div className="sound-play-cell" role={mode === 'details' ? 'cell' : undefined}>
                 <button
-                  className="play-sound"
+                  className={`play-sound ${sound.icon ? 'has-art' : 'no-art'}`}
                   disabled={!canPlay}
                   aria-label={`Play ${sound.name}`}
                   onClick={() => void play(sound)}
@@ -196,6 +207,8 @@ export function SoundCollection({
                           e.currentTarget.style.display = 'none';
                         }}
                       />
+                    ) : state.hostId && (state.protocol ?? 1) >= 2 ? (
+                      <WaveformPreview hostId={state.hostId} id={sound.id} />
                     ) : (
                       <Music2 size={22} />
                     )}

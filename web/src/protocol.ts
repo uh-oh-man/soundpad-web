@@ -74,6 +74,7 @@ export const snapshotSchema = z.object({
   available: z.boolean(),
   error: z.string().max(2000).nullable(),
   protocol: z.number().int().optional(),
+  companionVersion: z.string().max(40).nullable().optional(),
   hostId: z
     .string()
     .regex(/^[a-f0-9]{64}$/)

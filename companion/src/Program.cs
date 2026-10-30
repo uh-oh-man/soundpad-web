@@ -45,7 +45,7 @@ try
         bool refresh = now >= nextLibrary;
         if (refresh) nextLibrary = now + 30000;
         await bridge.Poll(refresh);
-        await wake.WaitAsync(TimeSpan.FromMilliseconds(bridge.Snapshot.Playback.Status == "PLAYING" ? 250 : bridge.Snapshot.Playback.Status == "PAUSED" ? 500 : 1500), shutdown.Token);
+        await wake.WaitAsync(TimeSpan.FromMilliseconds(bridge.Snapshot.Playback.Status is "PLAYING" or "SEEKING" ? 250 : bridge.Snapshot.Playback.Status == "PAUSED" ? 500 : 1500), shutdown.Token);
     }
 }
 catch (OperationCanceledException) { }

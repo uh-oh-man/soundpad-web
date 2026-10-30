@@ -73,6 +73,13 @@ async function invite(page: Page) {
   await page.getByRole('button', { name: 'Close dialog' }).click();
   return url;
 }
+async function finishGuestName(page: Page, name = 'Fixture Guest') {
+  const dialog = page.getByRole('dialog', { name: /gamer name/i });
+  await expect(dialog).toBeVisible();
+  await dialog.getByLabel('Gamer name').fill(name);
+  await dialog.getByRole('button', { name: 'Done', exact: true }).click();
+}
+
 test('landing page has an honest disconnected state', async ({ page }) => {
   await page.goto('/');
   await expect(
@@ -211,6 +218,7 @@ test('live Nostr/WebRTC: two guests, playback, synchronized counter and invitati
     g2 = await c2.newPage();
   try {
     await Promise.all([g1.goto(url), g2.goto(url)]);
+    await Promise.all([finishGuestName(g1, 'First Guest'), finishGuestName(g2, 'Second Guest')]);
     await expect(g1.getByRole('button', { name: 'Play Airhorn', exact: true })).toBeEnabled({
       timeout: 60000,
     });
@@ -299,6 +307,7 @@ test('live Nostr/WebRTC: independent hosts keep guests and counters isolated', a
       url2 = await invite(hp);
     expect(url1).not.toBe(url2);
     await Promise.all([g1.goto(url1), g2.goto(url2)]);
+    await Promise.all([finishGuestName(g1), finishGuestName(g2)]);
     await expect(g1.getByRole('button', { name: 'Play Airhorn', exact: true })).toBeEnabled({
       timeout: 60000,
     });
@@ -333,6 +342,7 @@ test('deployed Pages bundle connects to the authenticated Windows loopback compa
     const url = await invite(page);
     const guest = await guestContext.newPage();
     await guest.goto(url);
+    await finishGuestName(guest);
     await expect(guest.getByRole('button', { name: 'Play Airhorn', exact: true })).toBeEnabled({
       timeout: 60000,
     });
@@ -650,4 +660,157 @@ test('normal update explains the companion upgrade while preserving legacy playb
   await expect(page.getByLabel('View mode')).toBeDisabled();
   await page.getByRole('button', { name: 'Play Airhorn', exact: true }).click();
   await expect.poll(() => harness.plays).toContain('DoPlaySound(1)');
+});
+
+test('session waveforms stay mounted through rapid seeks, view changes and scrolling', async ({
+  page,
+  harness,
+}) => {
+  const requests: string[] = [];
+  page.on('websocket', (socket) =>
+    socket.on('framesent', (frame) => {
+      try {
+        const data = JSON.parse(String(frame.payload));
+        if (data.command?.op === 'waveform') requests.push(data.command.soundId);
+      } catch {
+        /* Ignore non-JSON transport frames. */
+      }
+    }),
+  );
+  await host(page, harness);
+  await expect(page.locator('.mini-waveform svg[viewBox="0 0 220 64"]')).toHaveCount(4);
+  await page.getByLabel('View mode').selectOption('waveforms');
+  const before = requests.length;
+  await page.getByRole('button', { name: 'Play Airhorn', exact: true }).click();
+  await page.getByRole('button', { name: 'Pause playback', exact: true }).click();
+  const wave = page.locator('.player-wave .wave-surface');
+  await expect(wave).toBeVisible();
+  await wave.evaluate((el) => el.setAttribute('data-retained', 'yes'));
+  const box = (await wave.boundingBox())!;
+  for (let i = 0; i < 14; i++)
+    await wave.click({ position: { x: Math.max(2, (box.width * ((i % 8) + 1)) / 10), y: 20 } });
+  await expect(page.getByRole('button', { name: 'Resume playback', exact: true })).toBeEnabled();
+  await expect(wave).toHaveAttribute('data-retained', 'yes');
+  await expect(wave.locator('svg path')).toHaveAttribute('d', /^M/);
+  await page.locator('.sound-entry').last().scrollIntoViewIfNeeded();
+  await page.getByLabel('View mode').scrollIntoViewIfNeeded();
+  await page.getByLabel('View mode').selectOption('icons');
+  await page.getByLabel('View mode').selectOption('waveforms');
+  expect(requests.length).toBe(before);
+  expect(new Set(requests).size).toBe(requests.length);
+  await page.getByRole('button', { name: 'Stop', exact: true }).click();
+  await expect(page.locator('.player-wave svg path')).toHaveAttribute('d', /^M/);
+  await page.screenshot({ path: 'artifacts/screenshots/session-waveforms.png', fullPage: true });
+});
+
+test('artwork fills the play button and iconless buttons have cached mini waveforms', async ({
+  page,
+  harness,
+}) => {
+  await host(page, harness);
+  const png = await page.evaluate(() => {
+    const c = document.createElement('canvas');
+    c.width = c.height = 96;
+    const context = c.getContext('2d')!;
+    context.fillStyle = '#bb6622';
+    context.fillRect(0, 0, 96, 96);
+    return c.toDataURL().split(',')[1];
+  });
+  await page.getByRole('button', { name: 'Edit icon for Airhorn', exact: true }).click();
+  await page.getByLabel('Choose sound icon').setInputFiles({
+    name: 'cover.png',
+    mimeType: 'image/png',
+    buffer: Buffer.from(png, 'base64'),
+  });
+  await page.getByRole('button', { name: 'Save icon', exact: true }).click();
+  const button = page.getByRole('button', { name: 'Play Airhorn', exact: true });
+  const image = button.locator('img');
+  await expect(image).toBeVisible();
+  const a = (await button.boundingBox())!,
+    b = (await image.boundingBox())!;
+  expect(Math.abs(a.width - b.width)).toBeLessThan(3);
+  expect(Math.abs(a.height - b.height)).toBeLessThan(3);
+  await button.click({ position: { x: 5, y: 5 } });
+  await expect.poll(() => harness.plays).toContain('DoPlaySound(1)');
+  await expect(page.locator('.mini-waveform svg[viewBox="0 0 220 64"]')).toHaveCount(3);
+  await page.getByRole('button', { name: 'Stop', exact: true }).click();
+  await page.screenshot({ path: 'artifacts/screenshots/artwork-buttons.png', fullPage: true });
+});
+
+test('first invite asks for a gamer name with only Done and Random, then remembers it', async ({
+  page,
+}) => {
+  const { createIdentity } = await import('../../web/src/network/identity');
+  const identity = await createIdentity();
+  const invitation = {
+    v: identity.v,
+    room: identity.room,
+    secret: identity.secret,
+    publicKey: identity.publicKey,
+  };
+  await page.routeWebSocket(/wss:\/\//, (socket) => socket.close());
+  await page.goto('/#join=' + Buffer.from(JSON.stringify(invitation)).toString('base64url'));
+  const dialog = page.getByRole('dialog', { name: /gamer name/i });
+  await expect(dialog).toBeVisible();
+  await expect(dialog.getByRole('button')).toHaveCount(2);
+  await expect(dialog.getByRole('button', { name: 'Done', exact: true })).toBeDisabled();
+  await dialog.getByRole('button', { name: 'Random', exact: true }).click();
+  await expect(dialog.getByLabel('Gamer name')).toHaveValue(/^[A-Za-z]+\d{3}$/);
+  await dialog.getByLabel('Gamer name').fill('Night Owl');
+  await page.screenshot({ path: 'artifacts/screenshots/gamer-name.png' });
+  await dialog.getByRole('button', { name: 'Done', exact: true }).click();
+  await expect(dialog).toHaveCount(0);
+  await expect(page.getByLabel('Your display name')).toHaveValue('Night Owl');
+  await page.reload();
+  await expect(page.getByLabel('Your display name')).toHaveValue('Night Owl');
+  await expect(dialog).toHaveCount(0);
+});
+
+test('Spotify has one dedicated sidebar player with track, artist and artwork', async ({
+  page,
+  harness,
+}) => {
+  await host(page, harness);
+  await page.evaluate(async () => {
+    const { controller } = await import(/* @vite-ignore */ '/src/' + 'controller.ts');
+    const original = controller.run.bind(controller);
+    const c = document.createElement('canvas');
+    c.width = c.height = 128;
+    const context = c.getContext('2d')!;
+    context.fillStyle = '#408360';
+    context.fillRect(0, 0, 128, 128);
+    controller.run = async (op: string, fields: Record<string, unknown>) =>
+      op === 'spotify'
+        ? {
+            enabled: true,
+            available: true,
+            title: 'Fixture song',
+            artist: 'Fixture artist',
+            status: 'Paused',
+            positionMs: 20000,
+            durationMs: 180000,
+            artwork: c.toDataURL(),
+            canToggle: true,
+            canNext: true,
+            canPrevious: true,
+          }
+        : original(op, fields);
+  });
+  const player = page.getByRole('region', { name: 'Spotify player' });
+  await player.getByLabel('Enable Spotify desktop integration').check();
+  await expect(player.getByText('Fixture song', { exact: true })).toBeVisible();
+  await expect(player.getByText('Fixture artist', { exact: true })).toBeVisible();
+  await expect(player.getByAltText('Spotify album artwork')).toBeVisible();
+  const library = page.locator('.sidebar-heading');
+  expect((await player.boundingBox())!.y).toBeLessThan((await library.boundingBox())!.y);
+  await page.getByRole('button', { name: 'Access settings' }).click();
+  await expect(player).toHaveCount(1);
+  await page.getByRole('button', { name: 'Close dialog' }).click();
+  await page.screenshot({ path: 'artifacts/screenshots/spotify-sidebar.png', fullPage: true });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect(player).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBe(
+    true,
+  );
+  await page.screenshot({ path: 'artifacts/screenshots/spotify-phone.png', fullPage: true });
 });
