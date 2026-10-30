@@ -226,6 +226,7 @@ function App() {
           <span>
             soundpad<span className="brand-light"> web</span>
           </span>
+          <span className="release-version">V2</span>
         </a>
         <span className="edition">BROWSER REMOTE</span>
         <div className="top-actions">
@@ -441,6 +442,26 @@ function App() {
               </div>
             </aside>
             <main className="soundboard">
+              {connected && (state.protocol ?? 1) < 2 && (
+                <aside className="companion-update" role="status">
+                  <strong>
+                    {host
+                      ? 'Update your Windows companion for V2'
+                      : 'Ask the host to update the Windows companion'}
+                  </strong>
+                  <p>
+                    Basic playback still works. Waveforms, personal layouts and the new player
+                    controls need the V2 companion.
+                  </p>
+                  {host && (
+                    <a
+                      href={`${repositoryUrl || 'https://github.com/uh-oh-man/soundpad-web'}/releases/latest/download/SoundpadWeb.exe`}
+                    >
+                      Download the updated companion
+                    </a>
+                  )}
+                </aside>
+              )}
               <div className="board-heading">
                 <div>
                   <div className="eyebrow">{host ? 'YOUR SOUNDBOARD' : 'SHARED SOUNDBOARD'}</div>

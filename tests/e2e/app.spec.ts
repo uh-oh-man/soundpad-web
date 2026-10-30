@@ -617,3 +617,37 @@ test('V2: 10000-sound library keeps rendering bounded and search responsive', as
     await large.stop();
   }
 });
+
+test('normal update explains the companion upgrade while preserving legacy playback', async ({
+  page,
+  harness,
+}) => {
+  await page.routeWebSocket(/ws:\/\/127\.0\.0\.1:\d+\/bridge/, (socket) => {
+    const server = socket.connectToServer();
+    socket.onMessage((message) => {
+      const frame = JSON.parse(String(message));
+      if (frame.token) frame.protocol = 1;
+      server.send(JSON.stringify(frame));
+    });
+    server.onMessage((message) => {
+      const frame = JSON.parse(String(message));
+      if (frame.state) {
+        delete frame.state.protocol;
+        delete frame.state.hostId;
+      }
+      socket.send(JSON.stringify(frame));
+    });
+  });
+  await host(page, harness);
+  await expect(page.getByText('V2', { exact: true })).toBeVisible();
+  await expect(
+    page.getByText('Update your Windows companion for V2', { exact: true }),
+  ).toBeVisible();
+  await expect(page.getByRole('link', { name: 'Download the updated companion' })).toHaveAttribute(
+    'href',
+    /releases\/latest\/download\/SoundpadWeb\.exe$/,
+  );
+  await expect(page.getByLabel('View mode')).toBeDisabled();
+  await page.getByRole('button', { name: 'Play Airhorn', exact: true }).click();
+  await expect.poll(() => harness.plays).toContain('DoPlaySound(1)');
+});

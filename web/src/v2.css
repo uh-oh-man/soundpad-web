@@ -945,3 +945,27 @@
 .view-details .sound-play-cell .play-sound {
   width: 100%;
 }
+.release-version {
+  font-size: 10px;
+  font-weight: 700;
+  color: #c5b6ff;
+  border: 1px solid #8d79d966;
+  padding: 3px 5px;
+  border-radius: 5px;
+}
+.companion-update {
+  border: 1px solid #8d79d966;
+  background: #a599f012;
+  border-radius: 9px;
+  padding: 16px;
+  margin-bottom: 20px;
+  font-size: 13px;
+}
+.companion-update p {
+  color: #a4afc4;
+  margin: 8px 0;
+}
+.companion-update a {
+  color: #c4b4ff;
+  text-decoration: underline;
+}

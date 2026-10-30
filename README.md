@@ -1,6 +1,6 @@
 # Soundpad Web
 
-**V2 candidate branch:** see [V2 features, verification, upgrade and limitations](docs/V2.md). The public links below continue to serve V1 until deployment is approved.
+**V2 is the current update.** Refresh the website and download the latest Windows companion to enable all V2 features. See [features, verification and upgrade instructions](docs/V2.md).
 
 A private browser remote for [Leppsoft Soundpad](https://www.leppsoft.com/soundpad/). Friends see your real categories, tap a sound, and your existing Soundpad plays it through its current audio setup.
 
