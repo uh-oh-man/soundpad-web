@@ -4,6 +4,8 @@ A private browser remote for [Leppsoft Soundpad](https://www.leppsoft.com/soundp
 
 Static React website + one portable Windows companion. No accounts, audio uploads, hosted application backend, or cloud database. Guests install nothing.
 
+[Open Soundpad Web](https://uh-oh-man.github.io/soundpad-web/) · [Download the Windows companion](https://github.com/uh-oh-man/soundpad-web/releases/latest/download/SoundpadWeb.exe)
+
 ## Start a session
 
 1. Download **SoundpadWeb.exe** from this repository's Releases. Before a tagged release exists, download the **SoundpadWeb-win-x64** artifact from a successful Windows Actions run and unzip it.

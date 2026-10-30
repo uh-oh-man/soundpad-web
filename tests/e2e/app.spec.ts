@@ -300,19 +300,29 @@ test('live Nostr/WebRTC: independent hosts keep guests and counters isolated', a
 test('deployed Pages bundle connects to the authenticated Windows loopback companion', async ({
   page,
   browserName,
+  browser,
 }) => {
   test.skip(!process.env.DEPLOYED_URL, 'Requires an actual deployed website URL.');
   const website = new URL(process.env.DEPLOYED_URL!);
   const harness = await startHarness(website.origin);
+  const guestContext = await browser.newContext();
   try {
     if (browserName === 'chromium') await page.context().grantPermissions(['local-network-access']);
     await host(page, { ...harness, launch: website.href + '#' + harness.launch.split('#')[1] });
-    await page.getByRole('button', { name: 'Play Airhorn', exact: true }).click();
+    const url = await invite(page);
+    const guest = await guestContext.newPage();
+    await guest.goto(url);
+    await expect(guest.getByRole('button', { name: 'Play Airhorn', exact: true })).toBeEnabled({
+      timeout: 60000,
+    });
+    await guest.getByRole('button', { name: 'Play Airhorn', exact: true }).click();
     await expect.poll(() => harness.plays).toContain('DoPlaySound(1)');
     await page.getByRole('button', { name: 'Stop', exact: true }).click();
     await page.getByRole('button', { name: 'Increase Kick counter' }).click();
     await expect(page.getByLabel('Kick count', { exact: true })).toHaveText('1');
+    await expect(guest.getByLabel('Kick count', { exact: true })).toHaveText('1');
   } finally {
+    await guestContext.close();
     await harness.stop();
   }
 });

@@ -9,7 +9,7 @@ Built and tested locally on Windows 11 Pro x64 (10.0.26200), Node.js 24.16.0 and
 | ESLint | Passed | `npm run lint`, zero warnings |
 | Browser protocol/library tests | **19 passed** | Deterministic Vitest transport: two guests, independent hosts, signatures, guest refresh, isolation, permissions, malformed messages, floods, counter synchronization, duplicate IDs, search/order/duplicates and host-unavailable state |
 | Native companion tests | **19 passed** | xUnit: isolated real Windows message-mode pipes, large UTF-8 responses, reconnect, Soundpad restart, XML validation/nesting/indexes, stale-play rejection, durable counters/icons, duplicate receipts, wrong Origin/token and loopback-only binding |
-| Chromium browser tests | **8 passed** with live relays enabled | Actual website + native companion bridge + mock Soundpad pipe; see below |
+| Chromium browser tests | **8 passed** with live relays enabled, plus **1 deployed-Pages acceptance test passed** | Actual website + native companion bridge + mock Soundpad pipe; see below |
 | Static frontend build | Passed | `dist/`, approximately 130 KiB gzipped JavaScript + 4 KiB CSS, plus separate notices; no runtime server required |
 | Windows publish | Passed | `artifacts/release/SoundpadWeb.exe`, single EXE with included .NET / ASP.NET Core runtime |
 | Published EXE smoke | Passed | `scripts/smoke-exe.ps1`: start real EXE without browser, numeric loopback-only listener owned by that process, Enter shutdown, embedded notices |
@@ -21,7 +21,7 @@ Built and tested locally on Windows 11 Pro x64 (10.0.26200), Node.js 24.16.0 and
 
 The six deterministic Chromium E2E cases exercise the landing state; real loopback authentication; nested category order; duplicate titles; empty categories; cross-category search; correct `DoPlaySound(1)` received by the mock pipe; Stop; counter and icon persistence through browser refresh; permission controls; reset confirmation; and layouts at 1280 × 720, 820 × 1180 and 390 × 844 without horizontal overflow.
 
-The static production bundle was also loaded using a **synthetic HTTPS origin** intercepted by Playwright, with Chromium's local-network permission granted normally. Its real authenticated `ws://127.0.0.1` connection and counter command passed. This tests the secure-origin browser path, but is not an actual deployed GitHub Pages test.
+The static production bundle was first tested using a synthetic HTTPS origin. After publishing, an additional acceptance test loaded the **actual GitHub Pages site** at https://uh-oh-man.github.io/soundpad-web/ with Chromium's local-network permission granted normally. Its real authenticated `ws://127.0.0.1` connection passed. A separate guest context opened the generated Pages invitation, completed live Nostr/WebRTC pairing, delivered the correct playback command to the isolated mock pipe, and received synchronized counter state. This closes the deployed HTTPS-to-loopback verification gap for this Chromium/Windows configuration.
 
 Two optional live Nostr/WebRTC tests passed. Separate browser contexts used the real Trystero Nostr strategy/public relays, actual WebRTC transport, host signatures and application acknowledgments:
 
@@ -45,8 +45,7 @@ Firefox 157 / Playwright Firefox 1555 was installed and attempted. All eight cas
 ## Remaining acceptance work
 
 - **Real Soundpad:** none was running. Steam/standalone actual library captures and audible playback through existing speaker/microphone routing remain unverified. Tests used a private mock pipe. No games, Steam, Soundpad, audio devices, drivers, firewall rules or registry settings were changed.
-- **Deployment:** the public repository [uh-oh-man/soundpad-web](https://github.com/uh-oh-man/soundpad-web) has now been created and Pages configured through the user's browser-authorized GitHub CLI connection. Workflow/deployment results are recorded after verification; initial local-only results above do not themselves prove deployment.
-- **Real HTTPS hosting:** test the companion from the eventual GitHub Pages/custom-domain URL in the intended host browser. Loopback permission policies vary.
+- **Browser policies:** actual Pages-to-loopback and guest pairing passed in automated Chromium on this Windows PC. Other browser versions and managed browser policies still require acceptance; do not disable browser security protections.
 - **Devices/networks:** physical mobile browsers, multi-PC WAN conditions, TURN configuration and browser background/sleep recovery need acceptance on the intended devices/networks. Public relays have no availability guarantee.
 - **Vendor limitation:** Soundpad has no atomic play-by-persistent-ID transaction. The bridge revalidates immediately before playback but cannot eliminate a reorder between the last query and command. Moving files or identical duplicate URLs can change icon identity associations; see API research.
 
@@ -60,3 +59,12 @@ Firefox 157 / Playwright Firefox 1555 was installed and attempted. All eight cas
 - `.github/workflows/deploy.yml` and `.github/workflows/build-windows.yml` — Pages deployment, native/browser CI and tagged EXE releases.
 
 Default CI uses deterministic tests and skips the two live-relay tests. To include them locally: `$env:LIVE_RELAY='1'; npm run test:e2e`. See the README for full build commands.
+
+## Public deployment follow-up
+
+- Public source: https://github.com/uh-oh-man/soundpad-web
+- Live website: https://uh-oh-man.github.io/soundpad-web/
+- Initial Pages deployment passed: https://github.com/uh-oh-man/soundpad-web/actions/runs/40976631693
+- GitHub's Windows/native/browser workflow runs independently; published run results are available in the repository's Actions tab.
+- Release builds embed the configured Pages URL, so the normal release EXE opens the website without asking for a URL. `--site` and saved website overrides remain supported.
+- The extra deployed acceptance test is opt-in: set `DEPLOYED_URL` to the actual HTTPS site and run `npm run test:e2e -- --grep 'deployed Pages'`. It uses live public relays and an isolated mock Soundpad. Default CI skips it as well as the two live-relay cases.
