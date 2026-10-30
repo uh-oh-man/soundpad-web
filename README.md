@@ -1,5 +1,7 @@
 # Soundpad Web
 
+**V2 is the current update.** Refresh the website and download the latest Windows companion to enable all V2 features. See [features, verification and upgrade instructions](docs/V2.md).
+
 A private browser remote for [Leppsoft Soundpad](https://www.leppsoft.com/soundpad/). Friends see your real categories, tap a sound, and your existing Soundpad plays it through its current audio setup.
 
 Static React website + one portable Windows companion. No accounts, audio uploads, hosted application backend, or cloud database. Guests install nothing.
@@ -25,7 +27,11 @@ Your friend opens the link in a modern browser. Playback starts on **your** PC, 
 - Up to 12 authorized guests per session, independent cryptographic host sessions, pinned host identity and invitation rotation.
 - Host-controlled remote playback and guest counter permissions; guests default to playback enabled and counter editing disabled.
 - Authoritative persistent Kick counter with duplicate-request protection.
-- Optional per-sound PNG/JPEG icons, stored locally and synchronized to guests. Up to 256 custom icons, input at most 512 × 512 pixels / 128 KiB; normalized to 96 × 96 PNG.
+- Five personal views, real local waveform analysis, epoch-checked seeking, pause/resume, cues, regions and zoom.
+- Browser-personal nested layouts, favorites, hidden sounds and validated layout exports/imports.
+- Named guests, durable web statistics and guarded read-only native Soundpad statistics.
+- Large-photo PNG/JPEG cropping, dedicated 96-pixel icon storage, and safe V1 metadata migration.
+- Optional host-only Spotify desktop integration and End/Resume Hosting.
 - Desktop sidebar, mobile category selector, keyboard focus, responsive sound grid and incremental rendering for large libraries.
 
 ## Access and privacy
@@ -42,7 +48,7 @@ Actual application UI connected to the isolated test companion with **schema-der
 
 [Phone layout with fixture category](docs/screenshots/phone-fixture.png)
 
-Counter, permissions, icons and an opaque-identity key live in `%LOCALAPPDATA%\SoundpadWeb\state.json`. Small settings are saved atomically; unreadable data stops startup instead of silently resetting your counter. Browser refresh retains the session within the same host tab. Restarting the EXE or ending the host tab starts a new invitation session. Other people's hosts have separate state and secrets.
+Counter, permissions, statistics, icon references and an opaque-identity key live in `%LOCALAPPDATA%\SoundpadWeb\state.json`. Icon images live beside it in `icons/`; waveform caches live in `waveforms/`. Small settings are saved atomically; unreadable data stops startup instead of silently resetting your counter. Browser refresh retains the session within the same host tab. Restarting the EXE or ending the host tab starts a new invitation session. Other people's hosts have separate state and secrets.
 
 ## Connection problems
 

@@ -6,6 +6,7 @@ public interface ISoundpad { Task<string> Request(string command, CancellationTo
 // The vendor writes UTF-8 commands without newline or terminator. Responses are pipe messages.
 public sealed class SoundpadPipe(string name = "sp_remote_control") : ISoundpad, IDisposable
 {
+    public bool IsProduction => name == "sp_remote_control";
     private readonly SemaphoreSlim gate = new(1);
     private NamedPipeClientStream? pipe;
     public async Task<string> Request(string command, CancellationToken cancel = default)

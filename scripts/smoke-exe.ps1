@@ -24,7 +24,7 @@ try {
     if (-not $process.WaitForExit(10000)) { throw 'Graceful shutdown timed out' }
     if ($process.ExitCode -ne 0) { throw 'EXE exited unsuccessfully' }
     $licenses = & $exePath --licenses
-    if (($licenses -join "`n") -notmatch '2017 Leppsoft' -or ($licenses -join "`n") -notmatch 'Microsoft') { throw 'Embedded notices missing' }
+    if (($licenses -join "`n") -notmatch '2017 Leppsoft' -or ($licenses -join "`n") -notmatch 'Microsoft' -or ($licenses -join "`n") -notmatch 'Mark Heath' -or ($licenses -join "`n") -notmatch 'Andrew Ward') { throw 'Embedded notices missing' }
     Write-Output 'PASS: standalone EXE startup, numeric loopback-only listener, clean Enter shutdown, embedded notices. No browser or Soundpad launched; no audio played.'
 } finally {
     if (-not $process.HasExited) { $process.Kill() }

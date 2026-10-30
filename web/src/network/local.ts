@@ -1,11 +1,23 @@
-import { ackSchema, snapshotSchema, type Command, type Snapshot } from '../protocol';
+import {
+  ackSchema,
+  parseSnapshot,
+  type Command,
+  type Snapshot,
+  type Participant,
+} from '../protocol';
 export type BridgeAddress = { port: number; token: string };
 export class LocalBridge {
   private socket?: WebSocket;
   private stopped = false;
+  private latest?: Snapshot;
+  private retry?: ReturnType<typeof setTimeout>;
   private pending = new Map<
     string,
-    { resolve: () => void; reject: (e: Error) => void; timer: ReturnType<typeof setTimeout> }
+    {
+      resolve: (data: unknown) => void;
+      reject: (e: Error) => void;
+      timer: ReturnType<typeof setTimeout>;
+    }
   >();
   constructor(
     private address: BridgeAddress,
@@ -21,13 +33,17 @@ export class LocalBridge {
     this.socket = ws;
     const timeout = setTimeout(() => ws.close(), 8000);
     ws.onopen = () => {
-      ws.send(JSON.stringify({ token: this.address.token }));
+      ws.send(JSON.stringify({ token: this.address.token, protocol: 2 }));
     };
     ws.onmessage = (e) => {
       try {
         const data = JSON.parse(e.data);
-        if (data.type === 'state') {
-          const s = snapshotSchema.parse(data.state);
+        if (data.type === 'state' || data.type === 'tick') {
+          const s = parseSnapshot(
+            data.state,
+            data.type === 'tick' ? this.latest?.library : undefined,
+          );
+          this.latest = s;
           clearTimeout(timeout);
           this.state(s);
         } else {
@@ -36,7 +52,7 @@ export class LocalBridge {
           if (p) {
             clearTimeout(p.timer);
             this.pending.delete(ack.id);
-            if (ack.ok) p.resolve();
+            if (ack.ok) p.resolve(ack.data);
             else p.reject(Error(ack.error || 'Command rejected.'));
           }
         }
@@ -58,12 +74,12 @@ export class LocalBridge {
       this.pending.clear();
       if (!this.stopped) {
         this.status('Companion disconnected. Reconnecting…');
-        setTimeout(() => this.connect(), 2500);
+        this.retry = setTimeout(() => this.connect(), 2500);
       }
     };
   }
-  send(command: Command, actor = 'host') {
-    return new Promise<void>((resolve, reject) => {
+  send(command: Command, actor = 'host', participant?: Participant) {
+    return new Promise<unknown>((resolve, reject) => {
       if (this.socket?.readyState !== WebSocket.OPEN) {
         reject(Error('Companion is unavailable.'));
         return;
@@ -72,16 +88,20 @@ export class LocalBridge {
         reject(Error('Too many pending commands.'));
         return;
       }
-      const timer = setTimeout(() => {
-        this.pending.delete(command.id);
-        reject(Error('Command timed out. Playback is never retried automatically.'));
-      }, 12000);
+      const timer = setTimeout(
+        () => {
+          this.pending.delete(command.id);
+          reject(Error('Command timed out. Playback is never retried automatically.'));
+        },
+        command.op === 'waveform' ? 45000 : 12000,
+      );
       this.pending.set(command.id, { resolve, reject, timer });
-      this.socket.send(JSON.stringify({ actor, command }));
+      this.socket.send(JSON.stringify({ actor, command, participant }));
     });
   }
   close() {
     this.stopped = true;
+    clearTimeout(this.retry);
     this.socket?.close();
   }
 }
