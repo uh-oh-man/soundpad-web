@@ -36,17 +36,18 @@ try
     var url = clean + "#host=" + server.Port + "." + server.Token;
     if (!args.Contains("--no-browser")) Process.Start(new ProcessStartInfo(url) { UseShellExecute = true });
     Console.WriteLine($"Soundpad Web is running on loopback port {server.Port}.\nKeep this window and your host browser tab open. Enter or Ctrl+C stops the companion.\nAudio devices and Soundpad settings are unchanged.");
+    try { await bridge.CleanupSession(); } catch (Exception) { Console.WriteLine("Temporary audio cleanup will retry when Soundpad is available."); }
     long nextLibrary = 0;
     using var wake = new SemaphoreSlim(0, 1);
     bridge.CommandAccepted += () => { if (wake.CurrentCount == 0) wake.Release(); };
-    while (!shutdown.IsCancellationRequested)
+    try { while (!shutdown.IsCancellationRequested)
     {
         var now = Environment.TickCount64;
         bool refresh = now >= nextLibrary;
         if (refresh) nextLibrary = now + 30000;
         await bridge.Poll(refresh);
         await wake.WaitAsync(TimeSpan.FromMilliseconds(bridge.Snapshot.Playback.Status is "PLAYING" or "SEEKING" ? 250 : bridge.Snapshot.Playback.Status == "PAUSED" ? 500 : 1500), shutdown.Token);
-    }
+    } } finally { try { await bridge.CleanupSession(); } catch (Exception) { Console.WriteLine("Temporary entries retained for cleanup on next launch."); } }
 }
 catch (OperationCanceledException) { }
 catch (Exception ex) { Console.Error.WriteLine("Soundpad Web: " + ex.Message); Environment.ExitCode = 1; }

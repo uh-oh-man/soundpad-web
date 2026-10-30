@@ -6,6 +6,7 @@ using System.Text.Json;
 using Microsoft.AspNetCore.Hosting.Server;
 using Microsoft.AspNetCore.Hosting.Server.Features;
 using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.DependencyInjection;
@@ -22,8 +23,28 @@ public sealed class LocalServer(Bridge bridge, string origin) : IAsyncDisposable
     {
         var builder = WebApplication.CreateSlimBuilder();
         builder.Logging.ClearProviders();
-        builder.WebHost.ConfigureKestrel(k => { k.Listen(IPAddress.Loopback, 0); k.Limits.MaxRequestBodySize = 200000; });
+        builder.WebHost.ConfigureKestrel(k => { k.Listen(IPAddress.Loopback, 0); k.Limits.MaxRequestBodySize = 16777216; });
         app = builder.Build();
+        app.MapMethods("/session-audio", ["POST", "OPTIONS"], async context =>
+        {
+            if (context.Request.Headers.Origin != origin || context.Request.Host.Host != "127.0.0.1") { context.Response.StatusCode = 403; return; }
+            context.Response.Headers.AccessControlAllowOrigin = origin;
+            context.Response.Headers.AccessControlAllowMethods = "POST, OPTIONS";
+            context.Response.Headers.AccessControlAllowHeaders = "Authorization, X-Audio-Name, X-Audio-By, X-Audio-Actor, Content-Type";
+            if (context.Request.Method == "OPTIONS") { context.Response.StatusCode = 204; return; }
+            var supplied = context.Request.Headers.Authorization.ToString();
+            var expected = "Bearer " + Token;
+            if (supplied.Length != expected.Length || !CryptographicOperations.FixedTimeEquals(Encoding.UTF8.GetBytes(supplied), Encoding.UTF8.GetBytes(expected))) { context.Response.StatusCode = 403; return; }
+            if (context.Request.ContentLength is null or < 1 or > 16777216) { context.Response.StatusCode = 413; return; }
+            using var input = new MemoryStream(); await context.Request.Body.CopyToAsync(input, context.RequestAborted);
+            string name, by;
+            try { name = Uri.UnescapeDataString(context.Request.Headers["X-Audio-Name"].ToString()); by = Uri.UnescapeDataString(context.Request.Headers["X-Audio-By"].ToString()); }
+            catch (UriFormatException) { context.Response.StatusCode = 400; return; }
+            if (name.Length > 256 || by.Length > 80) { context.Response.StatusCode = 400; return; }
+            var result = await bridge.Upload(input.ToArray(), name, by, context.Request.Headers["X-Audio-Actor"] == "host");
+            context.Response.ContentType = "application/json";
+            await context.Response.WriteAsync(Json.Write(result));
+        });
         app.UseWebSockets(new WebSocketOptions { KeepAliveInterval = TimeSpan.FromSeconds(20) });
         app.MapGet("/bridge", async context =>
         {
@@ -50,6 +71,10 @@ public sealed class LocalServer(Bridge bridge, string origin) : IAsyncDisposable
                 var changes = Channel.CreateBounded<byte>(new BoundedChannelOptions(1) { FullMode = BoundedChannelFullMode.DropOldest });
                 void Changed(Snapshot _) => changes.Writer.TryWrite(0);
                 bridge.Changed += Changed; changes.Writer.TryWrite(0);
+                var waves = Channel.CreateBounded<Waveform>(new BoundedChannelOptions(64) { FullMode = BoundedChannelFullMode.DropOldest });
+                void WaveChanged(Waveform value) => waves.Writer.TryWrite(value);
+                bridge.WaveformChanged += WaveChanged;
+                var waveSender = Task.Run(async () => { await foreach (var value in waves.Reader.ReadAllAsync(lifetime.Token)) await Send(new { type = "waveform", data = value }); });
                 string? sentLibrary = null;
                 var sender = Task.Run(async () =>
                 {
@@ -86,7 +111,7 @@ public sealed class LocalServer(Bridge bridge, string origin) : IAsyncDisposable
                         else await Send(await bridge.Execute(command, actor, person));
                     }
                 }
-                finally { bridge.Changed -= Changed; lifetime.Cancel(); try { await sender; await Task.WhenAll(running); } catch (Exception) { } }
+                finally { bridge.Changed -= Changed; bridge.WaveformChanged -= WaveChanged; lifetime.Cancel(); try { await sender; await waveSender; await Task.WhenAll(running); } catch (Exception) { } }
             }
             catch (Exception ex) when (ex is WebSocketException or OperationCanceledException or JsonException or KeyNotFoundException or InvalidOperationException or IOException or InvalidDataException or TimeoutException) { }
             finally { Interlocked.Exchange(ref connected, 0); }

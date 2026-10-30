@@ -6,7 +6,7 @@
 
 A private browser remote for [Leppsoft Soundpad](https://www.leppsoft.com/soundpad/). Friends see your real categories, tap a sound, and your existing Soundpad plays it through its current audio setup.
 
-Static React website + one portable Windows companion. No accounts, audio uploads, hosted application backend, or cloud database. Guests install nothing.
+Static React website + one portable Windows companion. No accounts, hosted application backend, or cloud database. Optional session uploads go directly to the host over WebRTC. Guests install nothing.
 
 [Open Soundpad Web](https://uh-oh-man.github.io/soundpad-web/) · [Download the Windows companion](https://github.com/uh-oh-man/soundpad-web/releases/latest/download/SoundpadWeb.exe)
 
@@ -21,14 +21,19 @@ Your friend opens the link in a modern browser. Playback starts on **your** PC, 
 
 **Verification:** automated tests use isolated Soundpad fixtures and never trigger real audio. Real Soundpad audio playback remains an acceptance check; see [verification](docs/VERIFICATION.md).
 
-## Latest update - 2.1
+## Latest update - 2.2
 
-- Rapid seeking preserves waveform display and coalesces requests; brief native seek transitions no longer discard the current sound.
-- Requested waveforms stay cached for the browser-tab session in compact shared arrays. Scrolling or changing views reuses them; Refresh/Retry clears them explicitly.
-- Artwork fills icon-view play buttons. Sounds without artwork show real mini-waveforms.
-- Spotify has a dedicated host player above the library, with Spotify-only source selection, track/artist metadata and album artwork.
-- First-time invitation visitors choose a gamer name with **Done** or a local **Random** name generator. Their choice is remembered in that browser.
-- The website has a small, subdued `made by AI` note at the bottom.
+- Real waveforms fill iconless play buttons; click a precise position or use keyboard arrows (10 ms, Shift: 1 s) and Enter.
+- The bottom player has 1–32× zoom, panning and a millisecond seek input for long recordings.
+- The host analyzes each requested file once and streams progress/ready peaks to guests; guests reuse the same session cache.
+- New invitations use a 44-character token with pinned host authentication. Older invitations remain supported.
+- Spotify's dedicated sidebar player is visible to guests too; host opt-in and guest control permission apply.
+- Personal organization automatically becomes available to everyone as a named shared layout. Copy it explicitly into My Layout; remote edits do not overwrite your layout.
+- Add session audio from any participant, or **Reverse & play** an existing sound. Both use app-managed Soundpad entries in **temp** and the normal Soundpad mic playback route. Reversal automatically plays once its temporary copy is prepared.
+- Only the host can **Keep permanently**. Other managed entries/files are removed on End hosting or companion shutdown, with a journal for cleanup after a crash/reconnect. Existing user files are never deleted. Approved files remain in Soundpad's temp category and can be reorganized in Soundpad.
+- The `made by AI` credit remains small text at the bottom of the website.
+
+Session uploads accept supported audio up to 16 MiB; decoded audio is limited to ten minutes / 64 MiB per file, with 32 temporary files / 256 MiB per session. Soundpad import/reverse/cleanup requires companion 2.2.0. Close the old companion normally, download the updated EXE, relaunch and refresh the site.
 
 ## Features
 
@@ -42,14 +47,14 @@ Your friend opens the link in a modern browser. Playback starts on **your** PC, 
 - Browser-personal nested layouts, favorites, hidden sounds and validated layout exports/imports.
 - Named guests, durable web statistics and guarded read-only native Soundpad statistics.
 - Large-photo PNG/JPEG cropping, dedicated 96-pixel icon storage, and safe V1 metadata migration.
-- Optional host-only Spotify desktop integration and End/Resume Hosting.
+- Optional shared Spotify desktop integration and End/Resume Hosting.
 - Desktop sidebar, mobile category selector, keyboard focus, responsive sound grid and incremental rendering for large libraries.
 
 ## Access and privacy
 
 Treat an invitation as a password. Anyone with it can join and use the permissions you enable. **Session & access → Replace invite** revokes the previous invitation and disconnects existing guests. Disconnecting one peer alone does not invalidate a bearer invitation; that person could return with a new browser identity.
 
-Guests receive sound titles, category names/order/membership/icons, custom icons, playback status, counter and permissions. Audio files, local paths, native access tokens and host signing keys stay local. There are no analytics, third-party fonts, arbitrary file endpoints, shell commands, recording, or Soundpad library-edit commands. WebRTC exposes network connection information to peers; signaling relays see network metadata and encrypted session descriptions.
+Guests receive sound titles, category names/order/membership/icons, custom icons, playback status, counter and permissions. Host library audio is not sent to guests. Guest uploads travel directly to the host; local paths, native access tokens and host signing keys stay local. Shared organization and enabled Spotify metadata/artwork are visible to session participants. There are no analytics, third-party fonts, arbitrary file endpoints, shell commands, recording, or arbitrary Soundpad API access. Managed temp imports and cleanup are the only automatic Soundpad library edits. WebRTC exposes network connection information to peers; signaling relays see network metadata and encrypted session descriptions.
 
 ## Screenshots
 
@@ -59,7 +64,7 @@ Actual application UI connected to the isolated test companion with **schema-der
 
 [Phone layout with fixture category](docs/screenshots/phone-fixture.png)
 
-Counter, permissions, statistics, icon references and an opaque-identity key live in `%LOCALAPPDATA%\SoundpadWeb\state.json`. Icon images live beside it in `icons/`; waveform caches live in `waveforms/`. Small settings are saved atomically; unreadable data stops startup instead of silently resetting your counter. Browser refresh retains the session within the same host tab. Restarting the EXE or ending the host tab starts a new invitation session. Other people's hosts have separate state and secrets.
+Counter, permissions, statistics, icon references and an opaque-identity key live in `%LOCALAPPDATA%\SoundpadWeb\state.json`. Icon images live beside it in `icons/`; waveform caches live in `waveforms/`. Managed uploads/reversed WAVs and their recovery journal live in `session-audio/`; do not manually remove approved files. Small settings are saved atomically; unreadable data stops startup instead of silently resetting your counter. Browser refresh retains the session within the same host tab. Restarting the EXE or ending the host tab starts a new invitation session. Other people's hosts have separate state and secrets.
 
 ## Connection problems
 

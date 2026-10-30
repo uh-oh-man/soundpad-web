@@ -66,23 +66,25 @@ export function usePlayhead(playback: Snapshot['playback']) {
   return position;
 }
 export function wavePath(
-  data: Pick<WaveData, 'status' | 'durationMs'> & {
+  data: Pick<WaveData, 'status' | 'durationMs' | 'analyzedMs'> & {
     levels?: { bins: number; peaks: ArrayLike<number> }[];
   },
   width = 800,
   zoom = 1,
   offset = 0,
 ) {
-  if (data.status !== 'ready' || !data.levels || !data.durationMs) return '';
+  if (!['ready', 'loading'].includes(data.status) || !data.levels || !data.durationMs) return '';
   const wanted = width * zoom;
   const level = data.levels.find((l) => l.bins >= wanted) ?? data.levels[data.levels.length - 1];
   const span = data.durationMs / zoom;
+  const analyzed =
+    data.status === 'loading' ? (data.analyzedMs ?? data.durationMs) : data.durationMs;
   let path = '';
   for (let x = 0; x < width; x++) {
     let min = 32767,
       max = -32767;
-    const a = Math.floor(((offset + (x / width) * span) / data.durationMs) * level.bins),
-      b = Math.ceil(((offset + ((x + 1) / width) * span) / data.durationMs) * level.bins);
+    const a = Math.floor(((offset + (x / width) * span) / analyzed) * level.bins),
+      b = Math.ceil(((offset + ((x + 1) / width) * span) / analyzed) * level.bins);
     for (let i = Math.max(0, a); i < Math.min(level.bins, b); i++) {
       min = Math.min(min, level.peaks[i * 2]);
       max = Math.max(max, level.peaks[i * 2 + 1]);
@@ -174,7 +176,7 @@ export function Waveform({
   const percentage = (at: number) => ((at - viewOffset) / Math.max(1, span)) * 100;
   return (
     <div className={`wave-block ${compact ? 'compact' : ''}`} ref={root}>
-      {data?.status === 'ready' ? (
+      {data?.levels && data.durationMs ? (
         <>
           <div
             className="wave-surface"
@@ -297,6 +299,7 @@ export function Waveform({
               ))}
           </div>
           <div className="wave-caption">
+            {data.status === 'loading' && <small>Analyzing on host…</small>}
             <span>{formatTime(viewOffset)}</span>
             <span>
               {preview !== null
@@ -308,7 +311,7 @@ export function Waveform({
             </span>
             <span>{formatTime(viewOffset + span)}</span>
           </div>
-          {!compact && (
+          {
             <div className="wave-controls">
               <button
                 aria-label={`Zoom out ${sound.name}`}
@@ -337,15 +340,43 @@ export function Waveform({
               >
                 <RotateCcw size={13} /> Fit
               </button>
-              <button onClick={() => setTools((t) => !t)} aria-expanded={tools}>
-                <Flag size={13} /> Cues & regions
-              </button>
-              <button
-                aria-pressed={selectRegion}
-                onClick={() => setSelectRegion((value) => !value)}
-              >
-                Select region
-              </button>
+              {!compact && (
+                <button onClick={() => setTools((t) => !t)} aria-expanded={tools}>
+                  <Flag size={13} /> Cues & regions
+                </button>
+              )}
+              {!compact && (
+                <button
+                  aria-pressed={selectRegion}
+                  onClick={() => setSelectRegion((value) => !value)}
+                >
+                  Select region
+                </button>
+              )}
+              {compact && (
+                <label className="precision-seek">
+                  Seek (s)
+                  <input
+                    aria-label={`Precise seek seconds ${sound.name}`}
+                    type="number"
+                    min={0}
+                    max={duration / 1000}
+                    step="0.001"
+                    value={selected / 1000}
+                    onChange={(e) =>
+                      setSelected(
+                        Math.round(Math.max(0, Math.min(duration - 1, +e.target.value * 1000))),
+                      )
+                    }
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') void pick(selected);
+                    }}
+                  />
+                  <button disabled={disabled} onClick={() => void pick(selected)}>
+                    Go
+                  </button>
+                </label>
+              )}
               {zoom > 1 && (
                 <input
                   type="range"
@@ -357,7 +388,7 @@ export function Waveform({
                 />
               )}
             </div>
-          )}
+          }
           {tools && !compact && (
             <div className="wave-tools">
               <div className="cue-create">

@@ -3,6 +3,7 @@ namespace SoundpadWeb;
 
 public sealed partial class Bridge(ISoundpad pipe, StateStore store) : IDisposable
 {
+    private readonly SessionAudio sessionAudio = new(store.DirectoryPath);
     private ISoundpad Pipe => pipe;
     private StateStore Store => store;
     private readonly NativeStatistics nativeStatistics = new(pipe is SoundpadPipe { IsProduction: true } ? null : Path.Combine(store.DirectoryPath, "vendor-fixture"));
@@ -12,11 +13,14 @@ public sealed partial class Bridge(ISoundpad pipe, StateStore store) : IDisposab
     private int waiting;
     private DiskState disk = store.Load();
     private ParsedLibrary parsed = new(new("empty", [], []), [], []);
+    private bool recoveryPending = true;
+    private bool sessionOpen = true;
     private bool available;
     private string? error = "Waiting for Soundpad. Open it normally; the companion will reconnect.";
     private Playback playback = new();
     private long revision;
     public event Action<Snapshot>? Changed;
+    public event Action<Waveform> WaveformChanged { add => waveformService.Changed += value; remove => waveformService.Changed -= value; }
     public event Action? CommandAccepted;
     public void Dispose() => waveformService.Dispose();
     public Snapshot Snapshot => new(1, revision, available, error, parsed.Public, playback, disk.Counter, disk.Permissions, 2,
@@ -32,7 +36,7 @@ public sealed partial class Bridge(ISoundpad pipe, StateStore store) : IDisposab
             var cats = await pipe.Request("GetCategories(true, true)");
             if (cats.StartsWith("R-404")) throw new InvalidDataException("This Soundpad version does not support categories. Update Soundpad.");
             var next = LibraryParser.Parse(all, cats, disk, iconCache ??= store.ReadIcons(disk), nativeStatistics);
-            parsed = next; available = true; error = null;
+            parsed = next with { Public = next.Public with { Sounds = next.Public.Sounds.Select(s => sessionAudio.Find(next.Paths[s.Id]) is { } managed ? s with { Name = managed.Name, Temporary = !managed.Permanent, UploadedBy = managed.By } : s).ToArray() } }; parsed = parsed with { Public = parsed.Public with { Version = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(Json.Write(parsed.Public)))).ToLowerInvariant()[..24] } }; available = true; error = null;
         }
         catch (Exception ex) when (ex is IOException or InvalidDataException or OperationCanceledException or System.Xml.XmlException or ArgumentException)
         {
@@ -45,6 +49,7 @@ public sealed partial class Bridge(ISoundpad pipe, StateStore store) : IDisposab
         if (!await gate.WaitAsync(0)) return;
         try
         {
+            if (recoveryPending) { try { await sessionAudio.Cleanup(pipe); recoveryPending = false; } catch (Exception ex) when (ex is IOException or InvalidDataException or System.Xml.XmlException) { } }
             if (library) nativeStatistics.Refresh();
             if (library || !available) await RefreshInner();
             if (available)
@@ -59,6 +64,34 @@ public sealed partial class Bridge(ISoundpad pipe, StateStore store) : IDisposab
         }
         finally { gate.Release(); }
     }
+    public async Task<Reply> Upload(byte[] bytes, string name, string by, bool host = false)
+    {
+        if (bytes.Length is < 1 or > 16777216) return new("ack", "upload", false, "Upload limit is 16 MiB.");
+        await gate.WaitAsync();
+        string? input = null;
+        try
+        {
+            if (!sessionOpen || !available || (!host && !disk.Permissions.RemotePlayback)) throw new InvalidDataException("Session uploads are disabled while remote playback is unavailable.");
+            var ext = Path.GetExtension(name).ToLowerInvariant();
+            if (ext is not (".wav" or ".mp3" or ".ogg" or ".flac" or ".m4a" or ".aac" or ".wma")) throw new InvalidDataException("Choose a WAV, MP3, OGG, FLAC, M4A, AAC or WMA audio file.");
+            input = Path.Combine(store.DirectoryPath, Guid.NewGuid().ToString("N") + ext);
+            await File.WriteAllBytesAsync(input, bytes);
+            var entry = await sessionAudio.Prepare(input, Path.GetFileNameWithoutExtension(name), new string(by.Where(c => !char.IsControl(c)).Take(40).ToArray()), false);
+            await sessionAudio.Import(pipe, entry); await RefreshInner(); Publish();
+            return new("ack", "upload", true);
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException) { return new("ack", "upload", false, ex is InvalidDataException ? ex.Message : "Audio could not be decoded or imported."); }
+        finally { if (input != null && File.Exists(input)) File.Delete(input); gate.Release(); }
+    }
+    private async Task RemoveSessionAudio()
+    {
+        if (playback.SoundId != null && parsed.Paths.TryGetValue(playback.SoundId, out var path) && sessionAudio.Find(path) is { Permanent: false })
+        {
+            await Success("DoStopSound()"); playback = new("STOPPED", SampledAt: DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()); regionStart = null; seekSettlesUntil = 0;
+        }
+        await sessionAudio.Cleanup(pipe);
+    }
+    public async Task CleanupSession() { await gate.WaitAsync(); try { sessionOpen = false; await RemoveSessionAudio(); recoveryPending = false; await RefreshInner(); Publish(); } finally { gate.Release(); } }
     public async Task<Reply> Execute(Command c, string actor, Participant? participant = null)
     {
         var query = await Query(c, actor); if (query != null) return query;
@@ -70,8 +103,8 @@ public sealed partial class Bridge(ISoundpad pipe, StateStore store) : IDisposab
             var ttl = c.Op is "play" or "seek" or "startAt" or "region" ? 5000 : 30000;
             if (c.V is not (1 or 2) || !Guid.TryParseExact(c.Id, "D", out _) || c.At < now - ttl || c.At > now + ttl) throw new InvalidDataException("Invalid or expired command.");
             bool host = actor == "host";
-            if (!host && c.Op is not ("play" or "stop" or "counter" or "seek" or "pause" or "startAt" or "region" or "statistics")) throw new InvalidDataException("Host permission required.");
-            if (!host && (c.Op is "play" or "stop" or "seek" or "pause" or "startAt" or "region") && !disk.Permissions.RemotePlayback) throw new InvalidDataException("Remote playback is disabled.");
+            if (!host && c.Op is not ("play" or "stop" or "counter" or "seek" or "pause" or "startAt" or "region" or "statistics" or "reverse")) throw new InvalidDataException("Host permission required.");
+            if (!host && (c.Op is "play" or "stop" or "seek" or "pause" or "startAt" or "region" or "reverse") && !disk.Permissions.RemotePlayback) throw new InvalidDataException("Remote playback is disabled.");
             if (!host && (c.Op is "seek" or "pause" or "startAt" or "region") && !disk.Permissions.GuestSeeking) throw new InvalidDataException("Guest seeking is disabled.");
             if (!host && c.Op == "counter" && !disk.Permissions.GuestCounter) throw new InvalidDataException("Guest counter changes are disabled.");
             if (disk.Receipts.ContainsKey(c.Id)) return new("ack", c.Id, true);
@@ -92,6 +125,19 @@ public sealed partial class Bridge(ISoundpad pipe, StateStore store) : IDisposab
                 case "stop":
                     if (!(await pipe.Request("DoStopSound()")).StartsWith("R-200")) throw new InvalidDataException("Soundpad rejected Stop.");
                     playback = new("STOPPED", SampledAt: now); regionStart = null; seekSettlesUntil = 0; break;
+                case "reverse":
+                    if (!sessionOpen) throw new InvalidDataException("Hosting has ended.");
+                    if (!available || c.LibraryVersion != parsed.Public.Version || c.SoundId == null || !parsed.Paths.TryGetValue(c.SoundId, out var source)) throw new InvalidDataException("Library changed. Try again.");
+                    var original = parsed.Public.Sounds.Single(s => s.Id == c.SoundId);
+                    var reversed = await sessionAudio.Prepare(source, original.Name + " (reversed)", Person(actor, participant).Name, true);
+                    await sessionAudio.Import(pipe, reversed); await RefreshInner();
+                    var reversedId = parsed.Paths.Single(p => p.Value.Equals(sessionAudio.PathFor(reversed), StringComparison.OrdinalIgnoreCase)).Key;
+                    await StartPlayback(c with { Op = "play", SoundId = reversedId }, actor, participant, parsed.Indexes[reversedId]); break;
+                case "keepAudio":
+                    if (c.SoundId == null || !parsed.Paths.TryGetValue(c.SoundId, out var keepPath)) throw new InvalidDataException("Unknown upload.");
+                    sessionAudio.Keep(keepPath); await RefreshInner(); break;
+                case "beginSession": sessionOpen = true; break;
+                case "endSession": sessionOpen = false; await RemoveSessionAudio(); await RefreshInner(); break;
                 case "statistics": return StatisticsReply(c);
                 case "clearStatistics": disk.Statistics.Clear(); disk.Activity.Clear(); disk.StatisticsVersion++; break;
                 case "spotify": if (c.Action is not ("enable" or "disable")) throw new InvalidDataException("Unsupported Spotify setting."); disk.SpotifyEnabled = c.Action == "enable"; break;

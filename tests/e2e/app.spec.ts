@@ -678,7 +678,7 @@ test('session waveforms stay mounted through rapid seeks, view changes and scrol
     }),
   );
   await host(page, harness);
-  await expect(page.locator('.mini-waveform svg[viewBox="0 0 220 64"]')).toHaveCount(4);
+  await expect(page.locator('.full-wave-button svg[viewBox="0 0 800 64"]')).toHaveCount(4);
   await page.getByLabel('View mode').selectOption('waveforms');
   const before = requests.length;
   await page.getByRole('button', { name: 'Play Airhorn', exact: true }).click();
@@ -699,7 +699,7 @@ test('session waveforms stay mounted through rapid seeks, view changes and scrol
   expect(requests.length).toBe(before);
   expect(new Set(requests).size).toBe(requests.length);
   await page.getByRole('button', { name: 'Stop', exact: true }).click();
-  await expect(page.locator('.player-wave svg path')).toHaveAttribute('d', /^M/);
+  await expect(page.locator('.player-wave .wave-surface svg path')).toHaveAttribute('d', /^M/);
   await page.screenshot({ path: 'artifacts/screenshots/session-waveforms.png', fullPage: true });
 });
 
@@ -732,7 +732,7 @@ test('artwork fills the play button and iconless buttons have cached mini wavefo
   expect(Math.abs(a.height - b.height)).toBeLessThan(3);
   await button.click({ position: { x: 5, y: 5 } });
   await expect.poll(() => harness.plays).toContain('DoPlaySound(1)');
-  await expect(page.locator('.mini-waveform svg[viewBox="0 0 220 64"]')).toHaveCount(3);
+  await expect(page.locator('.full-wave-button svg[viewBox="0 0 800 64"]')).toHaveCount(3);
   await page.getByRole('button', { name: 'Stop', exact: true }).click();
   await page.screenshot({ path: 'artifacts/screenshots/artwork-buttons.png', fullPage: true });
 });
@@ -813,4 +813,155 @@ test('Spotify has one dedicated sidebar player with track, artist and artwork', 
     true,
   );
   await page.screenshot({ path: 'artifacts/screenshots/spotify-phone.png', fullPage: true });
+});
+function sessionWave() {
+  const frames = 48000,
+    wave = Buffer.alloc(44 + frames * 4);
+  wave.write('RIFF', 0);
+  wave.writeUInt32LE(wave.length - 8, 4);
+  wave.write('WAVEfmt ', 8);
+  wave.writeUInt32LE(16, 16);
+  wave.writeUInt16LE(1, 20);
+  wave.writeUInt16LE(2, 22);
+  wave.writeUInt32LE(48000, 24);
+  wave.writeUInt32LE(192000, 28);
+  wave.writeUInt16LE(4, 32);
+  wave.writeUInt16LE(16, 34);
+  wave.write('data', 36);
+  wave.writeUInt32LE(frames * 4, 40);
+  for (let i = 0; i < frames; i++) {
+    const sample = Math.round(Math.sin((i * Math.PI * 2 * 440) / 48000) * 12000);
+    wave.writeInt16LE(sample, 44 + i * 4);
+    wave.writeInt16LE(-sample, 46 + i * 4);
+  }
+  return wave;
+}
+
+test('session uploads use temp, reverse immediately, and only approved files survive End Hosting', async ({
+  page,
+  harness,
+}) => {
+  await host(page, harness);
+  await page
+    .getByLabel('Add session audio', { exact: true })
+    .setInputFiles({ name: 'Session tone.wav', mimeType: 'audio/wav', buffer: sessionWave() });
+  const sound = page.getByRole('button', { name: 'Play Session tone', exact: true });
+  await expect(sound).toBeEnabled();
+  await expect(
+    page
+      .getByRole('navigation', { name: 'Sound categories' })
+      .getByRole('button', { name: /^temp\s*1$/ }),
+  ).toBeVisible();
+  await page.getByRole('button', { name: 'Reverse and play Session tone', exact: true }).click();
+  await expect.poll(() => harness.plays).toContain('DoPlaySound(6)');
+  await expect(page.locator('.player-track')).toContainText('Session tone (reversed)');
+  await page.getByRole('button', { name: 'Stop', exact: true }).click();
+  await page.getByRole('button', { name: 'Keep Session tone permanently', exact: true }).click();
+  await expect(
+    page.getByRole('button', { name: 'Keep Session tone permanently', exact: true }),
+  ).toHaveCount(0);
+  await page.getByRole('button', { name: 'Access settings' }).click();
+  page.once('dialog', (d) => d.accept());
+  await page.getByRole('button', { name: 'End hosting', exact: true }).click();
+  await page.getByRole('button', { name: 'Resume hosting', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Play Session tone', exact: true })).toBeEnabled();
+  await expect(
+    page.getByRole('button', { name: 'Play Session tone (reversed)', exact: true }),
+  ).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Play Airhorn', exact: true })).toBeEnabled();
+});
+
+test('full tile scrubbing and bottom-player precision zoom work at desktop and phone widths', async ({
+  page,
+  harness,
+}) => {
+  await host(page, harness);
+  const button = page.getByRole('button', { name: 'Play Airhorn', exact: true });
+  await expect(button.locator('svg[viewBox="0 0 800 64"]')).toBeVisible();
+  const geometry = await button.evaluate((el) => {
+    const a = el.getBoundingClientRect(),
+      b = el.querySelector('.sound-icon')!.getBoundingClientRect();
+    return { w: Math.abs(a.width - b.width), h: Math.abs(a.height - b.height) };
+  });
+  expect(geometry.w).toBeLessThan(2);
+  expect(geometry.h).toBeLessThan(2);
+  await button.press('Home');
+  await button.press('ArrowRight');
+  await button.press('Enter');
+  await expect.poll(() => harness.plays).toContain('DoSeekMs(10)');
+  await page.getByRole('button', { name: 'Pause playback', exact: true }).click();
+  const footer = page.locator('.player');
+  await footer.getByRole('button', { name: 'Zoom in Airhorn' }).click();
+  await expect(footer.getByLabel('Waveform offset Airhorn')).toBeVisible();
+  await footer.getByLabel('Precise seek seconds Airhorn').fill('0.123');
+  await footer.getByRole('button', { name: 'Go', exact: true }).click();
+  await expect.poll(() => harness.plays).toContain('DoSeekMs(123)');
+  await page.screenshot({
+    path: 'artifacts/screenshots/v22-precision-desktop.png',
+    fullPage: true,
+  });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.getByRole('button', { name: 'Expand player waveform' }).click();
+  await expect(footer.getByRole('button', { name: 'Zoom in Airhorn' })).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBe(
+    true,
+  );
+  await page.screenshot({ path: 'artifacts/screenshots/v22-precision-phone.png', fullPage: true });
+});
+
+test('live Nostr/WebRTC: compact invites, guest upload, shared organization and guest Spotify panel', async ({
+  browser,
+  page,
+  harness,
+}) => {
+  test.skip(process.env.LIVE_RELAY !== '1', 'Optional public-relay integration test.');
+  test.setTimeout(150000);
+  await host(page, harness);
+  const url = await invite(page);
+  expect(new URL(url).hash.slice('#join='.length)).toHaveLength(44);
+  const c1 = await browser.newContext(),
+    c2 = await browser.newContext();
+  try {
+    const g1 = await c1.newPage(),
+      g2 = await c2.newPage();
+    await Promise.all([g1.goto(url), g2.goto(url)]);
+    await Promise.all([finishGuestName(g1, 'Upload Alice'), finishGuestName(g2, 'Layout Bob')]);
+    for (const guest of [g1, g2])
+      await expect(guest.getByRole('button', { name: 'Play Airhorn', exact: true })).toBeEnabled({
+        timeout: 60000,
+      });
+    await expect(g1.getByRole('region', { name: 'Spotify player' })).toBeVisible();
+    await expect(g1.getByLabel('Enable Spotify desktop integration')).toHaveCount(0);
+    await g1.getByRole('button', { name: 'Favorite Airhorn', exact: true }).click();
+    const shared = g2.getByRole('button', { name: /Upload Alice.*Copy into My Layout/ });
+    await expect(shared).toBeVisible();
+    await shared.click();
+    await expect(g2.getByRole('button', { name: 'Favorite Airhorn', exact: true })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    );
+    await g1
+      .getByLabel('Add session audio', { exact: true })
+      .setInputFiles({ name: 'Guest tone.wav', mimeType: 'audio/wav', buffer: sessionWave() });
+    await expect(g1.locator('.toast')).toContainText('Added to temp for this session');
+    await expect(g1.getByLabel('Add session audio', { exact: true })).toBeEnabled();
+    for (const participant of [page, g1, g2])
+      await expect(
+        participant.getByRole('button', { name: 'Play Guest tone', exact: true }),
+      ).toBeEnabled();
+    await expect(g1.getByRole('button', { name: 'Keep Guest tone permanently' })).toHaveCount(0);
+    await g2.getByRole('button', { name: 'Reverse and play Guest tone', exact: true }).click();
+    await expect.poll(() => harness.plays).toContain('DoPlaySound(6)');
+    await page.getByRole('button', { name: 'Stop', exact: true }).click();
+    await page.getByRole('button', { name: 'Keep Guest tone permanently', exact: true }).click();
+    await expect(
+      g1
+        .locator('.sound-entry')
+        .filter({ has: g1.getByRole('button', { name: 'Play Guest tone', exact: true }) })
+        .locator('.temp-badge'),
+    ).toHaveCount(0);
+  } finally {
+    await c1.close();
+    await c2.close();
+  }
 });

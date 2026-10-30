@@ -23,6 +23,7 @@ export class LocalBridge {
     private address: BridgeAddress,
     private state: (s: Snapshot) => void,
     private status: (s: string) => void,
+    private waveform?: (data: unknown) => void,
   ) {
     this.connect();
   }
@@ -38,6 +39,10 @@ export class LocalBridge {
     ws.onmessage = (e) => {
       try {
         const data = JSON.parse(e.data);
+        if (data.type === 'waveform') {
+          this.waveform?.(data.data);
+          return;
+        }
         if (data.type === 'state' || data.type === 'tick') {
           const s = parseSnapshot(
             data.state,
@@ -93,11 +98,27 @@ export class LocalBridge {
           this.pending.delete(command.id);
           reject(Error('Command timed out. Playback is never retried automatically.'));
         },
-        command.op === 'waveform' ? 45000 : 12000,
+        command.op === 'reverse' ? 90000 : command.op === 'waveform' ? 45000 : 12000,
       );
       this.pending.set(command.id, { resolve, reject, timer });
       this.socket.send(JSON.stringify({ actor, command, participant }));
     });
+  }
+  async upload(bytes: Uint8Array, name: string, by: string, host = false) {
+    const response = await fetch(`http://127.0.0.1:${this.address.port}/session-audio`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${this.address.token}`,
+        'Content-Type': 'application/octet-stream',
+        'X-Audio-Name': encodeURIComponent(name),
+        'X-Audio-By': encodeURIComponent(by),
+        'X-Audio-Actor': host ? 'host' : 'guest',
+      },
+      body: bytes as Uint8Array<ArrayBuffer>,
+    });
+    if (!response.ok) throw Error(`Upload rejected (${response.status}).`);
+    const result = ackSchema.omit({ id: true }).parse(await response.json());
+    if (!result.ok) throw Error(result.error || 'Audio import failed.');
   }
   close() {
     this.stopped = true;

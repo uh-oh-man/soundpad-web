@@ -134,7 +134,9 @@ describe('extended protocol', () => {
     ).toBe(false);
     expect(isGuestAllowed(command('waveform'), EMPTY)).toBe(true);
     expect(isGuestAllowed(command('clearStatistics'), EMPTY)).toBe(false);
-    expect(isGuestAllowed(command('spotify'), EMPTY)).toBe(false);
+    expect(isGuestAllowed(command('spotify'), EMPTY)).toBe(true);
+    expect(isGuestAllowed(command('spotify', { action: 'enable' }), EMPTY)).toBe(false);
+    expect(isGuestAllowed(command('keepAudio'), EMPTY)).toBe(false);
   });
   it('does not clone or revalidate trusted libraries for lightweight ticks', () => {
     const light = { ...EMPTY, library: null };

@@ -1,10 +1,19 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Music2, ImagePlus, Star, FolderPlus, BarChart3, ArrowUp, ArrowDown } from 'lucide-react';
+import {
+  ImagePlus,
+  Star,
+  FolderPlus,
+  BarChart3,
+  ArrowUp,
+  ArrowDown,
+  Rewind,
+  Save,
+} from 'lucide-react';
 import { controller } from '../controller';
 import { flattenCategories, type Snapshot, type Sound } from '../protocol';
 import { moveSound, toggleFavorite, type Workspace } from '../workspace';
 import { Waveform, formatTime, usePlayhead } from './Waveform';
-import { WaveformPreview } from './WaveformPreview';
+import { SoundButton } from './SoundButton';
 import { seekQueue } from '../seek';
 export type Totals = Record<string, { total: number; lastPlayedAt: number | null }>;
 const resumes = new Map<string, Promise<unknown>>();
@@ -192,46 +201,17 @@ export function SoundCollection({
               }}
             >
               <div className="sound-play-cell" role={mode === 'details' ? 'cell' : undefined}>
-                <button
-                  className={`play-sound ${sound.icon ? 'has-art' : 'no-art'}`}
-                  disabled={!canPlay}
-                  aria-label={`Play ${sound.name}`}
-                  onClick={() => void play(sound)}
-                >
-                  <span className={`sound-icon tone-${i % 5}`}>
-                    {sound.icon ? (
-                      <img
-                        src={sound.icon}
-                        alt=""
-                        onError={(e) => {
-                          e.currentTarget.style.display = 'none';
-                        }}
-                      />
-                    ) : state.hostId && (state.protocol ?? 1) >= 2 ? (
-                      <WaveformPreview hostId={state.hostId} id={sound.id} />
-                    ) : (
-                      <Music2 size={22} />
-                    )}
-                  </span>
-                  <span className="sound-label">
-                    <span className="sound-name">{sound.name}</span>
-                    <span className="sound-hint">
-                      {pending === sound.id
-                        ? 'SENDING…'
-                        : active
-                          ? state.playback.status === 'PAUSED'
-                            ? 'PAUSED'
-                            : 'NOW PLAYING'
-                          : 'PLAY SOUND'}
-                    </span>
-                    {mode === 'list' && (
-                      <small>
-                        {formatTime(sound.durationMs)}
-                        {totals[sound.id] ? ` · ${totals[sound.id].total} web plays` : ''}
-                      </small>
-                    )}
-                  </span>
-                </button>
+                <SoundButton
+                  sound={sound}
+                  state={state}
+                  canPlay={canPlay}
+                  canSeek={host || state.permissions.guestSeeking !== false}
+                  index={i}
+                  pending={pending === sound.id}
+                  active={active}
+                  play={() => play(sound)}
+                  choose={(at) => choosePosition(sound, state, at)}
+                />
               </div>
               {mode === 'details' && (
                 <>
@@ -260,6 +240,38 @@ export function SoundCollection({
                 </>
               )}
               <div className="sound-actions" role={mode === 'details' ? 'cell' : undefined}>
+                <button
+                  className="icon-button"
+                  aria-label={`Reverse and play ${sound.name}`}
+                  title="Reverse & play · temporary copy"
+                  disabled={!canPlay || pending === sound.id}
+                  onClick={() => {
+                    setPending(sound.id);
+                    void controller
+                      .run('reverse', { soundId: sound.id, libraryVersion: state.library.version })
+                      .catch(() => {})
+                      .finally(() => setPending(''));
+                  }}
+                >
+                  <Rewind size={14} />
+                </button>
+                {sound.temporary && (
+                  <small className="temp-badge" title={`Added by ${sound.uploadedBy ?? 'Guest'}`}>
+                    temp
+                  </small>
+                )}
+                {host && sound.temporary && (
+                  <button
+                    className="icon-button"
+                    aria-label={`Keep ${sound.name} permanently`}
+                    title="Accept permanently"
+                    onClick={() =>
+                      void controller.run('keepAudio', { soundId: sound.id }).catch(() => {})
+                    }
+                  >
+                    <Save size={14} />
+                  </button>
+                )}
                 {w && (
                   <>
                     <button

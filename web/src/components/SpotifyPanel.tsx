@@ -21,7 +21,7 @@ const schema = z.object({
     .optional(),
   error: z.string().nullable().optional(),
 });
-export function SpotifyPanel() {
+export function SpotifyPanel({ host = true }: { host?: boolean }) {
   const pending = useRef(false),
     version = useRef(0);
   const [enabled, setEnabled] = useState(false),
@@ -47,11 +47,11 @@ export function SpotifyPanel() {
     void request('status');
   }, []);
   useEffect(() => {
-    if (!enabled) return;
+    if (!enabled && host) return;
     void request('status');
     const timer = setInterval(() => void request('status'), 3000);
     return () => clearInterval(timer);
-  }, [enabled]);
+  }, [enabled, host]);
   async function toggle(value: boolean) {
     try {
       await controller.run('spotify', { action: value ? 'enable' : 'disable' });
@@ -69,12 +69,14 @@ export function SpotifyPanel() {
         <span>
           <Music2 size={15} /> Spotify
         </span>
-        <input
-          type="checkbox"
-          aria-label="Enable Spotify desktop integration"
-          checked={enabled}
-          onChange={(e) => void toggle(e.target.checked)}
-        />
+        {host && (
+          <input
+            type="checkbox"
+            aria-label="Enable Spotify desktop integration"
+            checked={enabled}
+            onChange={(e) => void toggle(e.target.checked)}
+          />
+        )}
       </div>
       {enabled ? (
         <>
@@ -130,9 +132,11 @@ export function SpotifyPanel() {
           </div>
         </>
       ) : (
-        <p>Enable your local Spotify player.</p>
+        <p>
+          {host ? 'Enable your local Spotify player.' : 'Waiting for the host to enable Spotify.'}
+        </p>
       )}
-      <small className="spotify-scope">Spotify only · host controls</small>
+      <small className="spotify-scope">Spotify only · shared session player</small>
       {error && (
         <p className="warning" role="alert">
           {error}

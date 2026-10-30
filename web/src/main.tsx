@@ -32,6 +32,7 @@ import { PersonalLayout, OrganizeSound } from './components/PersonalLayout';
 import { Statistics } from './components/Statistics';
 import { SpotifyPanel } from './components/SpotifyPanel';
 import { GuestName } from './components/GuestName';
+import { organization } from './shared-layout';
 import { clearWaveforms } from './waveform-cache';
 import './styles.css';
 import './v2.css';
@@ -59,8 +60,18 @@ function App() {
   const connected = status === (host ? 'Host ready' : 'Connected');
   const canPlay = connected && state.available && (host || state.permissions.remotePlayback);
   const canCount = connected && (host || state.permissions.guestCounter);
+  const organizationText = w ? JSON.stringify(organization(w)) : '';
+  useEffect(() => {
+    if (!connected || !organizationText) return;
+    const timer = setTimeout(() => {
+      void controller
+        .publishLayout(JSON.parse(organizationText))
+        .catch((e) => controller.notify(String(e)));
+    }, 700);
+    return () => clearTimeout(timer);
+  }, [connected, organizationText]);
   const [nativeMajor, nativeMinor] = (state.companionVersion ?? '0.0').split('.').map(Number);
-  const needsCompanionUpdate = !(nativeMajor > 2 || (nativeMajor === 2 && nativeMinor >= 1));
+  const needsCompanionUpdate = !(nativeMajor > 2 || (nativeMajor === 2 && nativeMinor >= 2));
   const repositoryUrl = import.meta.env.VITE_REPOSITORY_URL as string | undefined;
   const categories = useMemo(
     () => flattenCategories(state.library.categories),
@@ -287,7 +298,7 @@ function App() {
           </h1>
           <p>
             Share your Soundpad library with friends. They tap a sound, your Soundpad plays it. No
-            accounts, no audio uploads.
+            accounts. Session audio goes directly to your host.
           </p>
           {view.resumeAvailable && (
             <button className="primary resume-host" onClick={() => controller.resume()}>
@@ -339,7 +350,7 @@ function App() {
         <>
           <div className="workspace">
             <aside className="sidebar">
-              {host && (state.protocol ?? 1) >= 2 && <SpotifyPanel />}
+              {(state.protocol ?? 1) >= 2 && <SpotifyPanel host={host} />}
               <div className="sidebar-heading">
                 LIBRARY <span>{state.library.sounds.length}</span>
               </div>
@@ -453,12 +464,12 @@ function App() {
                     {host
                       ? (state.protocol ?? 1) < 2
                         ? 'Update your Windows companion for V2'
-                        : 'Update your Windows companion to 2.1'
+                        : 'Update your Windows companion to 2.2'
                       : 'Ask the host to update the Windows companion'}
                   </strong>
                   <p>
-                    Basic playback still works. Install the latest companion for rapid-seek fixes
-                    and Spotify album artwork.
+                    Basic playback still works. Install the latest companion for session audio,
+                    reverse playback, shared waveforms and guest Spotify.
                   </p>
                   {host && (
                     <a
@@ -516,6 +527,55 @@ function App() {
                   </span>
                 </div>
               )}
+              {!!view.layouts.length && (
+                <section className="shared-layouts" aria-label="Shared guest layouts">
+                  <small>Shared layouts · updates automatically</small>
+                  {view.layouts.map((layout) => (
+                    <button
+                      key={layout.owner}
+                      disabled={!w}
+                      onClick={() => {
+                        personal.update((current) => ({
+                          ...current,
+                          ...layout.organization,
+                          layout: 'mine',
+                        }));
+                        setMyCategory('all');
+                        setSearch('');
+                      }}
+                    >
+                      {layout.name} · {layout.organization.folders.length} folders · Copy into My
+                      Layout
+                    </button>
+                  ))}
+                </section>
+              )}
+              <div className="session-upload">
+                <label className="upload-audio">
+                  Add session audio
+                  <input
+                    type="file"
+                    aria-label="Add session audio"
+                    accept="audio/*,.ogg,.flac"
+                    disabled={!canPlay || needsCompanionUpdate}
+                    onChange={(e) => {
+                      const file = e.target.files?.[0];
+                      if (file) {
+                        e.target.disabled = true;
+                        const input = e.target;
+                        void controller
+                          .upload(file)
+                          .catch(() => {})
+                          .finally(() => {
+                            input.value = '';
+                            input.disabled = false;
+                          });
+                      }
+                    }}
+                  />
+                </label>
+                <small>Uploads & reversed copies go in temp · host approval to keep</small>
+              </div>
               <div className="toolbar">
                 <label className="search">
                   <Search size={18} />
@@ -806,22 +866,40 @@ function App() {
                   />
                 </div>
                 {(state.protocol ?? 1) >= 2 && (
-                  <div className="setting-row">
-                    <div>
-                      <strong>Guest seeking & pause</strong>
-                      <p>Allow waveform seeking, cues and regions.</p>
+                  <>
+                    <div className="setting-row">
+                      <div>
+                        <strong>Guest Spotify controls</strong>
+                        <p>Guests can control the host's enabled Spotify player.</p>
+                      </div>
+                      <input
+                        type="checkbox"
+                        aria-label="Allow guest Spotify controls"
+                        checked={state.permissions.guestSpotify !== false}
+                        onChange={(e) =>
+                          void run('permissions', {
+                            permissions: { ...state.permissions, guestSpotify: e.target.checked },
+                          })
+                        }
+                      />
                     </div>
-                    <input
-                      type="checkbox"
-                      aria-label="Allow guest seeking"
-                      checked={state.permissions.guestSeeking !== false}
-                      onChange={(e) =>
-                        void run('permissions', {
-                          permissions: { ...state.permissions, guestSeeking: e.target.checked },
-                        })
-                      }
-                    />
-                  </div>
+                    <div className="setting-row">
+                      <div>
+                        <strong>Guest seeking & pause</strong>
+                        <p>Allow waveform seeking, cues and regions.</p>
+                      </div>
+                      <input
+                        type="checkbox"
+                        aria-label="Allow guest seeking"
+                        checked={state.permissions.guestSeeking !== false}
+                        onChange={(e) =>
+                          void run('permissions', {
+                            permissions: { ...state.permissions, guestSeeking: e.target.checked },
+                          })
+                        }
+                      />
+                    </div>
+                  </>
                 )}
                 <div className="invite-field">
                   <label htmlFor="invite">Invitation link · anyone with this link can join</label>

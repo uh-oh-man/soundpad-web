@@ -1,4 +1,4 @@
-import { joinRoom, selfId, type JsonValue } from 'trystero';
+import { joinRoom, selfId, type JsonValue, type RequestAction } from 'trystero';
 import {
   commandSchema,
   parseSnapshot,
@@ -10,6 +10,8 @@ import {
   participantSchema,
   type Participant,
 } from '../protocol';
+import { parseOrganization, type SharedLayout, type Organization } from '../shared-layout';
+import { cleanName } from '../protocol';
 import { sign, verify, type HostIdentity, type Invite } from './identity';
 
 type Message = {
@@ -26,8 +28,15 @@ type Message = {
   data?: JsonValue;
   person?: Participant;
   hostNow?: number;
+  publicKey?: string;
 };
 export class Session {
+  private layoutAction?: RequestAction<string, string>;
+  private layouts = new Map<string, SharedLayout>();
+  private layoutRates = new Map<string, RateLimit>();
+  private uploadAction?: RequestAction<Uint8Array, string>;
+  private uploading = new Set<string>();
+  private waveSubscriptions = new Map<string, Set<string>>();
   private room: ReturnType<typeof joinRoom>;
   private action: {
     send: (data: Message, options: { target: string }) => Promise<unknown>;
@@ -71,6 +80,11 @@ export class Session {
       get: () => Participant;
       changed: (people: Record<string, Participant>) => void;
     },
+    private extensions?: {
+      layouts?: (layouts: SharedLayout[]) => void;
+      waveform?: (data: unknown) => void;
+      upload: (bytes: Uint8Array, name: string, by: string) => Promise<void>;
+    },
   ) {
     this.peerId = transport.id;
     let turnConfig: RTCIceServer[] | undefined;
@@ -97,6 +111,62 @@ export class Session {
         },
       },
     );
+    if (extensions)
+      this.layoutAction = this.room.makeAction<string, string>('organization', {
+        kind: 'request',
+        onReceive: ({ peerId, byteLength, kind }) =>
+          kind === 'response'
+            ? !this.host && peerId === this.hostPeer && byteLength <= 1024
+            : !!this.host &&
+              this.accepted.has(peerId) &&
+              !this.denied.has(peerId) &&
+              byteLength <= 2 * 1024 * 1024,
+        onRequest: (text, { peerId }) => {
+          if (!this.accepted.has(peerId) || this.denied.has(peerId)) throw Error('Not authorized.');
+          const rate = this.layoutRates.get(peerId) ?? new RateLimit(4, 1000);
+          this.layoutRates.set(peerId, rate);
+          if (!rate.accept()) throw Error('Too many layout changes.');
+          this.storeLayout(
+            peerId,
+            this.people.get(peerId)?.name ?? 'Guest',
+            parseOrganization(text, this.current().hostId!),
+          );
+          return 'ok';
+        },
+      });
+    if (extensions)
+      this.uploadAction = this.room.makeAction<Uint8Array, string>('audio-upload', {
+        kind: 'request',
+        onReceive: ({ peerId, byteLength, kind }) =>
+          kind === 'response'
+            ? !this.host && peerId === this.hostPeer && byteLength <= 1024
+            : !!this.host &&
+              this.accepted.has(peerId) &&
+              !this.denied.has(peerId) &&
+              byteLength <= 16 * 1024 * 1024 &&
+              this.uploading.size < 2 &&
+              !this.uploading.has(peerId) &&
+              this.current().permissions.remotePlayback,
+        onRequest: async (bytes, { peerId, metadata }) => {
+          if (
+            !this.accepted.has(peerId) ||
+            this.denied.has(peerId) ||
+            this.uploading.size >= 2 ||
+            this.uploading.has(peerId)
+          )
+            throw Error('Upload unavailable.');
+          const name =
+            typeof metadata === 'string' && metadata.length <= 256 ? metadata : 'audio.wav';
+          this.uploading.add(peerId);
+          try {
+            await extensions.upload(bytes, name, this.people.get(peerId)?.name ?? 'Guest');
+            this.broadcast();
+            return 'ok';
+          } finally {
+            this.uploading.delete(peerId);
+          }
+        },
+      });
     this.action = this.room.makeAction<Message>('protocol', {
       onReceive: ({ byteLength, peerId }) =>
         byteLength <= (host ? 8192 : 16 * 1024 * 1024) && !this.denied.has(peerId),
@@ -215,8 +285,10 @@ export class Session {
             type: 'welcome',
             nonce: m.nonce,
             signature,
+            publicKey: this.host.publicKey,
             state: this.current(),
             hostNow: Date.now(),
+            data: [...this.layouts.values()] as unknown as JsonValue,
           },
           peer,
         );
@@ -227,6 +299,11 @@ export class Session {
       const parsed = commandSchema.safeParse(m.command);
       if (!parsed.success) throw Error('Invalid command');
       const c = parsed.data;
+      if (c.op === 'waveform' && c.soundId) {
+        const ids = this.waveSubscriptions.get(peer) ?? new Set<string>();
+        if (ids.size < 50000) ids.add(c.soundId);
+        this.waveSubscriptions.set(peer, ids);
+      }
       if (!isGuestAllowed(c, this.current())) {
         this.send(
           { v: 1, type: 'ack', id: c.id, ok: false, error: 'The host has disabled this action.' },
@@ -255,16 +332,25 @@ export class Session {
         m.type === 'welcome' &&
         m.nonce === this.nonce &&
         typeof m.signature === 'string' &&
-        (await verify(this.identity, this.nonce, peer, this.peerId, m.signature))
+        (await verify(this.identity, this.nonce, peer, this.peerId, m.signature, m.publicKey))
       ) {
         this.hostPeer = peer;
         if (typeof m.hostNow === 'number' && Number.isFinite(m.hostNow))
           this.hostOffset = m.hostNow - Date.now();
         this.lastRevision = -1;
         this.apply(m.state);
+        this.receiveLayouts(m.data);
         return;
       }
       if (peer !== this.hostPeer) return;
+      if (m.type === 'layouts') {
+        this.receiveLayouts(m.data);
+        return;
+      }
+      if (m.type === 'waveform') {
+        this.extensions?.waveform?.(m.data);
+        return;
+      }
       if (m.type === 'state') this.apply(m.state);
       else if (m.type === 'tick') {
         if (m.libraryVersion === this.current().library.version)
@@ -313,6 +399,71 @@ export class Session {
       }
     }
   }
+  private receiveLayouts(raw: unknown) {
+    if (!Array.isArray(raw) || raw.length > 32 || !this.current().hostId) return;
+    const layouts = raw.map((value) => {
+      if (
+        !value ||
+        typeof value.owner !== 'string' ||
+        value.owner.length > 128 ||
+        typeof value.name !== 'string'
+      )
+        throw Error('Invalid shared layout.');
+      return {
+        owner: value.owner,
+        name: cleanName(value.name),
+        organization: parseOrganization(JSON.stringify(value.organization), this.current().hostId!),
+      };
+    });
+    this.extensions?.layouts?.(layouts);
+  }
+  private storeLayout(owner: string, name: string, organization: Organization) {
+    if (this.layouts.size >= 32 && !this.layouts.has(owner))
+      throw Error('Shared layout limit reached.');
+    if (
+      !organization.folders.length &&
+      !organization.favorites.length &&
+      !organization.hidden.length &&
+      !organization.order.length
+    )
+      this.layouts.delete(owner);
+    else {
+      const candidate = { owner, name: cleanName(name), organization };
+      const others = [...this.layouts.values()].filter((l) => l.owner !== owner);
+      if (JSON.stringify([...others, candidate]).length > 4 * 1024 * 1024)
+        throw Error('Shared layouts exceed the 4 MiB session budget.');
+      this.layouts.set(owner, candidate);
+    }
+    const layouts = [...this.layouts.values()];
+    this.extensions?.layouts?.(layouts);
+    for (const peer of this.accepted)
+      this.send({ v: 1, type: 'layouts', data: layouts as unknown as JsonValue }, peer);
+  }
+  async publishLayout(organization: Organization) {
+    if (this.host)
+      this.storeLayout(
+        this.peerId,
+        this.profiles?.get().name === 'Guest' ? 'Host' : (this.profiles?.get().name ?? 'Host'),
+        organization,
+      );
+    else if (this.hostPeer && this.layoutAction)
+      await this.layoutAction.request(JSON.stringify(organization), { target: this.hostPeer });
+  }
+  broadcastWaveform(data: { soundId: string }) {
+    if (!this.host) return;
+    for (const peer of this.accepted)
+      if (this.waveSubscriptions.get(peer)?.has(data.soundId))
+        this.send({ v: 1, type: 'waveform', data: data as unknown as JsonValue }, peer);
+  }
+  async upload(bytes: Uint8Array, name: string) {
+    if (!this.hostPeer || !this.uploadAction || this.revoked)
+      throw Error('Connect to the host first.');
+    await this.uploadAction.request(bytes, {
+      target: this.hostPeer,
+      metadata: name,
+      timeoutMs: 90000,
+    });
+  }
   sendCommand(c: Command) {
     return new Promise<unknown>((resolve, reject) => {
       if (!this.hostPeer || this.revoked) {
@@ -328,7 +479,7 @@ export class Session {
           this.pending.delete(c.id);
           reject(Error('Host did not acknowledge the command.'));
         },
-        c.op === 'waveform' ? 45000 : 12000,
+        c.op === 'reverse' ? 90000 : c.op === 'waveform' ? 45000 : 12000,
       );
       this.pending.set(c.id, { resolve, reject, timer });
       this.send(

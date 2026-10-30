@@ -13,9 +13,9 @@ public sealed partial class Bridge
         if (c.Op == "waveform")
         {
             var catalog = parsed; if (c.SoundId == null || !catalog.Paths.TryGetValue(c.SoundId, out var path)) return new("ack", c.Id, false, "Unknown sound.");
-            return new("ack", c.Id, true, Data: await waveformService.Request(c.SoundId, path, playback.SoundId == c.SoundId ? 0 : 10));
+            return new("ack", c.Id, true, Data: waveformService.GetSnapshot(c.SoundId, path, playback.SoundId == c.SoundId ? 0 : 10));
         }
-        if (c.Op == "spotify" && actor == "host" && c.Action is not ("enable" or "disable")) return new("ack", c.Id, true, Data: disk.SpotifyEnabled ? await spotify.Request(c.Action ?? "status") : new SpotifyState(false, Error: "Spotify integration is disabled.", Enabled: false));
+        if (c.Op == "spotify" && c.Action is not ("enable" or "disable")) { if (actor != "host" && c.Action is not (null or "status") && !disk.Permissions.GuestSpotify) return new("ack", c.Id, false, "Guest Spotify controls are disabled."); return new("ack", c.Id, true, Data: disk.SpotifyEnabled ? await spotify.Request(c.Action ?? "status") : new SpotifyState(false, Error: "Spotify integration is disabled.", Enabled: false)); }
         return null;
     }
     private async Task Success(string command) { if (!(await Pipe.Request(command)).StartsWith("R-200", StringComparison.Ordinal)) throw new InvalidDataException("Soundpad rejected this action or its API does not support it."); }

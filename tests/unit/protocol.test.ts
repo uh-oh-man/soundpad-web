@@ -99,7 +99,28 @@ describe('host authentication', () => {
     expect(a.room).not.toBe(b.room);
     expect(a.secret).not.toBe(b.secret);
     const raw = encode(new TextEncoder().encode(JSON.stringify(a)));
-    expect(parseInvite(raw)).not.toHaveProperty('privateKey');
+    expect(await parseInvite(raw)).not.toHaveProperty('privateKey');
+  });
+  it('uses a 44 character secure invite token and rejects an unpinned host key', async () => {
+    const host = await createIdentity(),
+      evil = await createIdentity();
+    expect(host.shortCode).toHaveLength(44);
+    const guest = await parseInvite(host.shortCode!);
+    expect(guest.room).toBe(host.room);
+    expect(guest.secret).toBe(host.secret);
+    const signature = await sign(host, 'nonce', 'host', 'guest');
+    expect(await verify(guest, 'nonce', 'host', 'guest', signature, host.publicKey)).toBe(true);
+    expect(
+      await verify(
+        guest,
+        'nonce',
+        'host',
+        'guest',
+        await sign(evil, 'nonce', 'host', 'guest'),
+        evil.publicKey,
+      ),
+    ).toBe(false);
+    expect(await verify(guest, 'nonce', 'host', 'guest', signature)).toBe(false);
   });
   it('binds signatures to the room, challenge, host and guest', async () => {
     const a = await createIdentity();
@@ -116,5 +137,7 @@ describe('host authentication', () => {
       await verify(a, 'nonce', 'evil', 'guest', await sign(evil, 'nonce', 'evil', 'guest')),
     ).toBe(false);
   });
-  it('rejects malformed invitation material', () => expect(() => parseInvite('bad')).toThrow());
+  it('rejects malformed invitation material', async () => {
+    await expect(parseInvite('bad')).rejects.toThrow();
+  });
 });

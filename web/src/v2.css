@@ -1226,3 +1226,141 @@
   content-visibility: visible;
   contain-intrinsic-size: none;
 }
+/* Session tools stay secondary to the soundboard. */
+.session-upload,
+.shared-layouts {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  margin: 0 0 12px;
+  font-size: 12px;
+}
+.session-upload small,
+.shared-layouts small {
+  color: var(--muted, #8a91a3);
+}
+.upload-audio {
+  border: 1px solid #353b50;
+  border-radius: 7px;
+  padding: 7px 10px;
+  cursor: pointer;
+}
+.upload-audio input {
+  display: block;
+  max-width: 210px;
+  margin-top: 5px;
+  font-size: 11px;
+}
+.shared-layouts button {
+  font-size: 11px;
+  padding: 6px 9px;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
+.temp-badge {
+  color: #a8a2ff;
+  padding: 2px 4px;
+  font-size: 10px;
+}
+.view-icons .play-sound.full-wave-button,
+.view-large .play-sound.full-wave-button {
+  position: relative;
+  overflow: hidden;
+  isolation: isolate;
+  min-height: 130px;
+  justify-content: flex-end;
+}
+.view-icons .full-wave-button .sound-icon,
+.view-large .full-wave-button .sound-icon {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  border-radius: inherit;
+  margin: 0;
+  z-index: -1;
+  opacity: 0.8;
+  background: linear-gradient(145deg, #222743, #171c31);
+}
+.full-wave-button .sound-icon svg {
+  width: 100%;
+  height: 100%;
+  stroke: #9b92ee;
+  stroke-width: 1;
+  fill: none;
+}
+.view-icons .full-wave-button .sound-label,
+.view-large .full-wave-button .sound-label {
+  width: 100%;
+  padding: 28px 8px 8px;
+  background: linear-gradient(transparent, rgba(10, 12, 22, 0.9));
+  pointer-events: none;
+}
+.full-wave-button .tile-playhead {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: #e8e0ff;
+  pointer-events: none;
+}
+.view-list .full-wave-button .sound-icon,
+.view-details .full-wave-button .sound-icon,
+.view-waveforms .full-wave-button .sound-icon {
+  width: 100px;
+  min-width: 70px;
+  height: 40px;
+}
+.precision-seek {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 10px;
+}
+.precision-seek input {
+  width: 77px;
+  padding: 3px;
+}
+.player .wave-controls {
+  gap: 4px;
+  flex-wrap: wrap;
+}
+.player .wave-controls button {
+  min-height: 24px;
+  padding: 3px 5px;
+  font-size: 10px;
+}
+.player .wave-controls > input[type='range'] {
+  min-width: 70px;
+  flex: 1;
+  width: 80px;
+}
+.player .wave-controls span {
+  font-size: 10px;
+}
+@media (max-width: 700px) {
+  .session-upload small {
+    max-width: 230px;
+  }
+  .shared-layouts {
+    max-height: 130px;
+    overflow: auto;
+  }
+}
+.view-icons .play-sound.full-wave-button {
+  min-height: 180px;
+}
+.view-large .play-sound.full-wave-button {
+  min-height: 260px;
+}
+.view-icons .has-art .sound-icon img,
+.view-large .has-art .sound-icon img {
+  position: absolute;
+  inset: 0;
+  min-height: 0;
+}
+.view-large .full-wave-button .sound-icon svg {
+  width: 100%;
+  height: 100%;
+}

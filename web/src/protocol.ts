@@ -20,6 +20,10 @@ export const commandSchema = z
       'statistics',
       'clearStatistics',
       'spotify',
+      'reverse',
+      'keepAudio',
+      'endSession',
+      'beginSession',
     ]),
     soundId: z.string().max(64).optional(),
     libraryVersion: z.string().max(64).optional(),
@@ -35,6 +39,7 @@ export const commandSchema = z
         remotePlayback: z.boolean(),
         guestCounter: z.boolean(),
         guestSeeking: z.boolean().optional(),
+        guestSpotify: z.boolean().optional(),
       })
       .strict()
       .optional(),
@@ -48,6 +53,8 @@ export type Sound = {
   durationMs?: number | null;
   nativePlays?: number | null;
   nativeLastPlayed?: string | null;
+  temporary?: boolean;
+  uploadedBy?: string | null;
 };
 export type Category = {
   id: string;
@@ -92,6 +99,8 @@ export const snapshotSchema = z.object({
           durationMs: z.number().nonnegative().nullable().optional(),
           nativePlays: z.number().int().nonnegative().nullable().optional(),
           nativeLastPlayed: z.string().nullable().optional(),
+          temporary: z.boolean().optional(),
+          uploadedBy: z.string().max(40).nullable().optional(),
         }),
       )
       .max(50000),
@@ -115,6 +124,7 @@ export const snapshotSchema = z.object({
     remotePlayback: z.boolean(),
     guestCounter: z.boolean(),
     guestSeeking: z.boolean().optional(),
+    guestSpotify: z.boolean().optional(),
   }),
 });
 export type Snapshot = z.infer<typeof snapshotSchema>;
@@ -144,6 +154,13 @@ export function command(op: Command['op'], fields: Partial<Command> = {}): Comma
   return { ...fields, v: 2, id: crypto.randomUUID(), at: Date.now(), op };
 }
 export function isGuestAllowed(c: Command, s: Snapshot) {
+  if (c.op === 'spotify')
+    return (
+      c.action !== 'enable' &&
+      c.action !== 'disable' &&
+      (c.action === 'status' || c.action === undefined || s.permissions.guestSpotify !== false)
+    );
+  if (c.op === 'reverse') return s.permissions.remotePlayback;
   if (c.op === 'waveform' || c.op === 'statistics') return true;
   if (['seek', 'pause', 'startAt', 'region'].includes(c.op))
     return s.permissions.remotePlayback && s.permissions.guestSeeking !== false;
@@ -173,15 +190,16 @@ export const waveformSchema = z
   .object({
     soundId: z.string().max(64),
     version: z.string().max(64),
-    status: z.enum(['ready', 'unavailable']),
+    status: z.enum(['ready', 'loading', 'unavailable']),
     durationMs: z.number().int().positive().max(1800000).nullable().optional(),
+    analyzedMs: z.number().int().nonnegative().max(1800000).nullable().optional(),
     error: z.string().max(2000).nullable().optional(),
     levels: z
       .array(
         z
           .object({
-            bins: z.number().int().min(1).max(8192),
-            peaks: z.array(z.number().int().min(-32767).max(32767)).max(16384),
+            bins: z.number().int().min(1).max(32768),
+            peaks: z.array(z.number().int().min(-32767).max(32767)).max(65536),
           })
           .refine((l) => l.peaks.length === l.bins * 2),
       )

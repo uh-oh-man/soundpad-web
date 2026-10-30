@@ -1,4 +1,4 @@
-export type Invite = { v: 1; room: string; secret: string; publicKey: string };
+export type Invite = { v: 1; room: string; secret: string; publicKey: string; shortCode?: string };
 export type HostIdentity = Invite & { privateKey: string };
 export function encode(bytes: Uint8Array) {
   return btoa(String.fromCharCode(...bytes))
@@ -11,20 +11,50 @@ export function decode(text: string) {
     c.charCodeAt(0),
   );
 }
+async function hash(bytes: Uint8Array) {
+  return new Uint8Array(await crypto.subtle.digest('SHA-256', bytes as Uint8Array<ArrayBuffer>));
+}
+async function credentials(seed: Uint8Array) {
+  const derive = (label: string) =>
+    hash(new Uint8Array([...seed, ...new TextEncoder().encode(label)]));
+  return {
+    room: encode((await derive('soundpad-room-v2')).slice(0, 24)),
+    secret: encode(await derive('soundpad-secret-v2')),
+  };
+}
+async function fingerprint(publicKey: string) {
+  return (await hash(decode(publicKey))).slice(0, 16);
+}
+export async function prepareInvite(identity: HostIdentity) {
+  identity.shortCode ??=
+    '1' +
+    encode(
+      new Uint8Array([
+        ...decode(identity.room),
+        ...decode(identity.secret),
+        ...(await fingerprint(identity.publicKey)),
+      ]),
+    );
+  return identity;
+}
 export async function createIdentity(): Promise<HostIdentity> {
   const pair = await crypto.subtle.generateKey({ name: 'ECDSA', namedCurve: 'P-256' }, true, [
     'sign',
     'verify',
   ]);
+  const seed = crypto.getRandomValues(new Uint8Array(16));
+  const derived = await credentials(seed);
+  const publicKey = encode(new Uint8Array(await crypto.subtle.exportKey('spki', pair.publicKey)));
   return {
     v: 1,
-    room: encode(crypto.getRandomValues(new Uint8Array(24))),
-    secret: encode(crypto.getRandomValues(new Uint8Array(32))),
-    publicKey: encode(new Uint8Array(await crypto.subtle.exportKey('spki', pair.publicKey))),
+    ...derived,
+    shortCode: '2' + encode(new Uint8Array([...seed, ...(await fingerprint(publicKey))])),
+    publicKey,
     privateKey: encode(new Uint8Array(await crypto.subtle.exportKey('pkcs8', pair.privateKey))),
   };
 }
 export function inviteUrl(identity: Invite) {
+  if (identity.shortCode) return location.href.split('#')[0] + '#join=' + identity.shortCode;
   const { v, room, secret, publicKey } = identity;
   return (
     location.href.split('#')[0] +
@@ -32,7 +62,28 @@ export function inviteUrl(identity: Invite) {
     encode(new TextEncoder().encode(JSON.stringify({ v, room, secret, publicKey })))
   );
 }
-export function parseInvite(raw: string): Invite {
+export async function parseInvite(raw: string): Promise<Invite> {
+  if (/^2[-\w]{43}$/.test(raw)) {
+    const bytes = decode(raw.slice(1));
+    if (bytes.length !== 32) throw Error('Invalid invitation.');
+    return {
+      v: 1,
+      ...(await credentials(bytes.slice(0, 16))),
+      publicKey: 'fp:' + encode(bytes.slice(16)),
+      shortCode: raw,
+    };
+  }
+  if (/^1[-\w]{96}$/.test(raw)) {
+    const bytes = decode(raw.slice(1));
+    if (bytes.length !== 72) throw Error('Invalid invitation.');
+    return {
+      v: 1,
+      room: encode(bytes.slice(0, 24)),
+      secret: encode(bytes.slice(24, 56)),
+      publicKey: 'fp:' + encode(bytes.slice(56)),
+      shortCode: raw,
+    };
+  }
   if (raw.length > 2000) throw Error('Invalid invitation.');
   const x = JSON.parse(new TextDecoder().decode(decode(raw)));
   if (
@@ -71,11 +122,22 @@ export async function verify(
   host: string,
   guest: string,
   signature: string,
+  suppliedKey?: string,
 ) {
   try {
+    let publicKey = identity.publicKey;
+    if (publicKey.startsWith('fp:')) {
+      if (
+        !suppliedKey ||
+        !/^[-\w]{100,200}$/.test(suppliedKey) ||
+        'fp:' + encode(await fingerprint(suppliedKey)) !== publicKey
+      )
+        return false;
+      publicKey = suppliedKey;
+    }
     const key = await crypto.subtle.importKey(
       'spki',
-      decode(identity.publicKey),
+      decode(publicKey),
       { name: 'ECDSA', namedCurve: 'P-256' },
       false,
       ['verify'],

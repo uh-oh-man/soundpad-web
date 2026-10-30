@@ -28,6 +28,24 @@ function runQueue() {
   active++;
   queue.shift()!();
 }
+export function acceptWaveform(hostId: string | null | undefined, raw: unknown) {
+  if (!hostId) return;
+  const data = waveformSchema.parse(raw),
+    key = hostId + ':' + data.soundId;
+  const previous = cache.get(key);
+  if (
+    previous?.version === data.version &&
+    previous.status === 'ready' &&
+    data.status === 'loading'
+  )
+    return;
+  cache.set(key, {
+    ...data,
+    levels: data.levels?.map((l) => ({ bins: l.bins, peaks: Int16Array.from(l.peaks) })),
+  });
+  generation++;
+  for (const notify of listeners) notify();
+}
 export function clearWaveforms(hostId?: string, id?: string) {
   if (hostId && id) {
     const key = hostId + ':' + id;
@@ -63,9 +81,20 @@ export function requestWaveform(hostId: string, id: string) {
             ...data,
             levels: data.levels?.map((l) => ({ bins: l.bins, peaks: Int16Array.from(l.peaks) })),
           };
-          if (startedEpoch === resetEpoch && startedInvalidation === (invalidations.get(key) ?? 0))
-            cache.set(key, stored);
-          resolve(stored);
+          if (
+            startedEpoch === resetEpoch &&
+            startedInvalidation === (invalidations.get(key) ?? 0)
+          ) {
+            const previous = cache.get(key);
+            if (!(
+              previous &&
+              (!stored.version || previous.version === stored.version) &&
+              previous.status === 'ready' &&
+              stored.status === 'loading'
+            ))
+              cache.set(key, stored);
+          }
+          resolve(cache.get(key) ?? stored);
         } catch (e) {
           reject(e);
         } finally {

@@ -7,16 +7,21 @@ import {
   type Command,
   type Snapshot,
 } from './protocol';
+import { acceptWaveform } from './waveform-cache';
+import { waveformSchema } from './protocol';
 import { LocalBridge, type BridgeAddress } from './network/local';
 import { Session } from './network/session';
 import {
   createIdentity,
+  prepareInvite,
   inviteUrl,
   parseInvite,
   type HostIdentity,
   type Invite,
 } from './network/identity';
+import type { SharedLayout, Organization } from './shared-layout';
 type View = {
+  layouts: SharedLayout[];
   mode: 'landing' | 'host' | 'guest';
   status: string;
   state: Snapshot;
@@ -47,6 +52,7 @@ function savedProfile(): Participant {
 }
 export class Controller {
   private view: View = {
+    layouts: [],
     mode: 'landing',
     status: 'Not connected',
     state: EMPTY,
@@ -79,13 +85,13 @@ export class Controller {
     for (const f of this.listeners) f();
   }
   notify = (notice: string) => this.update({ notice });
-  start() {
+  async start() {
     if (this.initialized) return;
     this.initialized = true;
     try {
       const hash = new URLSearchParams(location.hash.slice(1));
       if (hash.has('join')) {
-        const invite = parseInvite(hash.get('join')!);
+        const invite = await parseInvite(hash.get('join')!);
         this.pendingInvite = invite;
         let confirmed = false;
         try {
@@ -129,6 +135,13 @@ export class Controller {
       () => {},
       undefined,
       { get: () => this.view.profile, changed: () => {} },
+      {
+        layouts: (layouts) => this.update({ layouts }),
+        waveform: (data) => acceptWaveform(this.view.state.hostId, data),
+        upload: async () => {
+          throw Error('Host only.');
+        },
+      },
     );
   }
   confirmName(name: string) {
@@ -157,6 +170,11 @@ export class Controller {
         this.update({ status, state: { ...this.view.state, available: false, error: status } });
         this.session?.broadcast(true);
       },
+      (raw) => {
+        const data = waveformSchema.parse(raw);
+        acceptWaveform(this.view.state.hostId, data);
+        this.session?.broadcastWaveform(data);
+      },
     );
   }
   resume() {
@@ -179,9 +197,13 @@ export class Controller {
     this.starting = true;
     try {
       if (rotate) await this.session?.close(true);
+      const [major, minor] = (this.view.state.companionVersion ?? '0.0').split('.').map(Number);
+      if (major > 2 || (major === 2 && minor >= 2))
+        await this.bridge!.send(command('beginSession'), 'host');
       const key = 'soundpad-identity-' + this.address!.token;
       const stored = rotate ? null : sessionStorage.getItem(key);
       this.identity = stored ? JSON.parse(stored) : await createIdentity();
+      await prepareInvite(this.identity!);
       sessionStorage.setItem(key, JSON.stringify(this.identity));
       this.session = new Session(
         this.identity!,
@@ -193,6 +215,10 @@ export class Controller {
         (guests) => this.update({ guests }),
         undefined,
         { get: () => this.view.profile, changed: (people) => this.update({ people }) },
+        {
+          layouts: (layouts) => this.update({ layouts }),
+          upload: (bytes, name, by) => this.bridge!.upload(bytes, name, by),
+        },
       );
       this.update({ invite: inviteUrl(this.identity!), guests: [] });
     } finally {
@@ -222,6 +248,28 @@ export class Controller {
       throw e;
     }
   }
+  async publishLayout(organization: Organization) {
+    await this.session?.publishLayout(organization);
+  }
+  async upload(file: File) {
+    try {
+      if (!file.size || file.size > 16 * 1024 * 1024) throw Error('Choose audio up to 16 MiB.');
+      const bytes = new Uint8Array(await file.arrayBuffer());
+      if (this.view.mode === 'host' && this.live)
+        await this.bridge!.upload(
+          bytes,
+          file.name,
+          this.view.profile.name === 'Guest' ? 'Host' : this.view.profile.name,
+          true,
+        );
+      else if (this.view.mode === 'guest') await this.session!.upload(bytes, file.name);
+      else throw Error('Connect first.');
+      this.notify('Added to temp for this session. Only the host can keep it permanently.');
+    } catch (e) {
+      this.notify(e instanceof Error ? e.message : 'Upload failed.');
+      throw e;
+    }
+  }
   async copyInvite() {
     try {
       if (!this.view.invite) throw Error('Session is still starting.');
@@ -245,6 +293,13 @@ export class Controller {
   async leave() {
     const wasHost = this.view.mode === 'host';
     try {
+      if (wasHost && this.live) {
+        try {
+          await this.run('endSession');
+        } catch {
+          this.notify('Hosting ended. Temporary audio cleanup will retry from the companion.');
+        }
+      }
       await this.session?.close(wasHost);
     } finally {
       this.bridge?.close();
@@ -256,6 +311,7 @@ export class Controller {
         sessionStorage.removeItem('soundpad-identity-' + this.address!.token);
       }
       this.update({
+        layouts: [],
         mode: 'landing',
         state: EMPTY,
         status: wasHost ? 'Hosting ended' : 'Disconnected',
