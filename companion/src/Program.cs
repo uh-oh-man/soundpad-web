@@ -15,7 +15,7 @@ try
     Directory.CreateDirectory(directory);
     using var instanceLock = new FileStream(Path.Combine(directory, "companion.lock"), FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
     using var pipe = new SoundpadPipe(Arg("--pipe") ?? "sp_remote_control");
-    var bridge = new Bridge(pipe, new StateStore(directory));
+    using var bridge = new Bridge(pipe, new StateStore(directory));
     var builtInWebsite = System.Reflection.Assembly.GetExecutingAssembly()
         .GetCustomAttributes(typeof(System.Reflection.AssemblyMetadataAttribute), false)
         .Cast<System.Reflection.AssemblyMetadataAttribute>().FirstOrDefault(a => a.Key == "WebsiteUrl")?.Value;
@@ -36,11 +36,16 @@ try
     var url = clean + "#host=" + server.Port + "." + server.Token;
     if (!args.Contains("--no-browser")) Process.Start(new ProcessStartInfo(url) { UseShellExecute = true });
     Console.WriteLine($"Soundpad Web is running on loopback port {server.Port}.\nKeep this window and your host browser tab open. Enter or Ctrl+C stops the companion.\nAudio devices and Soundpad settings are unchanged.");
-    int tick = 0;
+    long nextLibrary = 0;
+    using var wake = new SemaphoreSlim(0, 1);
+    bridge.CommandAccepted += () => { if (wake.CurrentCount == 0) wake.Release(); };
     while (!shutdown.IsCancellationRequested)
     {
-        await bridge.Poll(tick++ % 15 == 0);
-        await Task.Delay(2000, shutdown.Token);
+        var now = Environment.TickCount64;
+        bool refresh = now >= nextLibrary;
+        if (refresh) nextLibrary = now + 30000;
+        await bridge.Poll(refresh);
+        await wake.WaitAsync(TimeSpan.FromMilliseconds(bridge.Snapshot.Playback.Status == "PLAYING" ? 250 : bridge.Snapshot.Playback.Status == "PAUSED" ? 500 : 1500), shutdown.Token);
     }
 }
 catch (OperationCanceledException) { }

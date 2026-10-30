@@ -1,12 +1,14 @@
-import { joinRoom, selfId } from 'trystero';
+import { joinRoom, selfId, type JsonValue } from 'trystero';
 import {
   commandSchema,
-  snapshotSchema,
+  parseSnapshot,
   ackSchema,
   isGuestAllowed,
   RateLimit,
   type Command,
   type Snapshot,
+  participantSchema,
+  type Participant,
 } from '../protocol';
 import { sign, verify, type HostIdentity, type Invite } from './identity';
 
@@ -21,6 +23,9 @@ type Message = {
   id?: string;
   ok?: boolean;
   error?: string;
+  data?: JsonValue;
+  person?: Participant;
+  hostNow?: number;
 };
 export class Session {
   private room: ReturnType<typeof joinRoom>;
@@ -29,13 +34,19 @@ export class Session {
     onMessage: ((data: Message, context: { peerId: string }) => void) | null;
   };
   private accepted = new Set<string>();
+  private people = new Map<string, Participant>();
+  private sentRevision = new Map<string, number>();
   private denied = new Set<string>();
   private rates = new Map<string, RateLimit>();
   private hostPeer?: string;
   private nonce = crypto.randomUUID();
   private pending = new Map<
     string,
-    { resolve: () => void; reject: (e: Error) => void; timer: ReturnType<typeof setTimeout> }
+    {
+      resolve: (data: unknown) => void;
+      reject: (e: Error) => void;
+      timer: ReturnType<typeof setTimeout>;
+    }
   >();
   private timer: ReturnType<typeof setInterval>;
   private lastState = 0;
@@ -45,15 +56,20 @@ export class Session {
   private revoked = false;
   private sentVersion = new Map<string, string>();
   private peerId: string;
+  private hostOffset = 0;
   constructor(
     private identity: Invite,
     private host: HostIdentity | undefined,
     private current: () => Snapshot,
-    private execute: (c: Command, peer: string) => Promise<void>,
+    private execute: (c: Command, peer: string, person?: Participant) => Promise<unknown>,
     private receive: (s: Snapshot) => void,
     private status: (s: string) => void,
     private guests: (ids: string[]) => void,
     transport = { join: joinRoom, id: selfId },
+    private profiles?: {
+      get: () => Participant;
+      changed: (people: Record<string, Participant>) => void;
+    },
   ) {
     this.peerId = transport.id;
     let turnConfig: RTCIceServer[] | undefined;
@@ -92,10 +108,13 @@ export class Session {
         this.room.getPeers()[peer]?.close();
         return;
       }
-      if (!host) this.send({ v: 1, type: 'hello', nonce: this.nonce }, peer);
+      if (!host) this.sendHello(peer);
     };
     this.room.onPeerLeave = (peer) => {
       this.accepted.delete(peer);
+      this.people.delete(peer);
+      this.profiles?.changed(Object.fromEntries(this.people));
+      this.sentRevision.delete(peer);
       this.sentVersion.delete(peer);
       this.rates.delete(peer);
       this.guests([...this.accepted]);
@@ -109,7 +128,7 @@ export class Session {
     this.timer = setInterval(() => {
       if (this.stopped || this.revoked) return;
       if (host) {
-        this.broadcast();
+        this.broadcast(true);
       } else {
         if (this.hostPeer && Date.now() - this.lastState > 10000) {
           this.status('Reconnecting');
@@ -118,8 +137,7 @@ export class Session {
           this.rejectPending();
         }
         if (!this.hostPeer) {
-          for (const peer of Object.keys(this.room.getPeers()))
-            this.send({ v: 1, type: 'hello', nonce: this.nonce }, peer);
+          for (const peer of Object.keys(this.room.getPeers())) this.sendHello(peer);
           if (Date.now() - this.started > 25000)
             this.status(
               'Host unavailable. Keep the host tab open, check the invite, or try another network. Public relays and direct WebRTC can be blocked.',
@@ -131,9 +149,17 @@ export class Session {
   private send(data: Message, peer: string) {
     if (!this.stopped) void this.action.send(data, { target: peer }).catch(() => {});
   }
+  private sendHello(peer: string) {
+    this.send({ v: 1, type: 'hello', nonce: this.nonce, person: this.profiles?.get() }, peer);
+  }
+  rename() {
+    if (this.hostPeer) this.sendHello(this.hostPeer);
+  }
   private drop(peer: string) {
     this.denied.add(peer);
     this.accepted.delete(peer);
+    this.people.delete(peer);
+    this.profiles?.changed(Object.fromEntries(this.people));
     this.rates.delete(peer);
     this.room.getPeers()[peer]?.close();
     this.guests([...this.accepted]);
@@ -143,7 +169,7 @@ export class Session {
     if (!raw || typeof raw !== 'object' || !('v' in raw) || raw.v !== 1 || !('type' in raw))
       throw Error('Protocol mismatch');
     const m = raw as Message;
-    const rate = this.rates.get(peer) ?? new RateLimit(this.host ? 12 : 20);
+    const rate = this.rates.get(peer) ?? new RateLimit(this.host ? 12 : 60);
     this.rates.set(peer, rate);
     if (!rate.accept()) throw Error('Rate limit');
     if (this.host) {
@@ -152,9 +178,24 @@ export class Session {
         const signature = await sign(this.host, m.nonce, this.peerId, peer);
         if (this.denied.has(peer) || this.stopped) return;
         this.accepted.add(peer);
+        const person = participantSchema.safeParse(m.person);
+        this.people.set(
+          peer,
+          person.success
+            ? person.data
+            : (this.people.get(peer) ?? { id: crypto.randomUUID(), name: 'Guest' }),
+        );
+        this.profiles?.changed(Object.fromEntries(this.people));
         this.guests([...this.accepted]);
         this.send(
-          { v: 1, type: 'welcome', nonce: m.nonce, signature, state: this.current() },
+          {
+            v: 1,
+            type: 'welcome',
+            nonce: m.nonce,
+            signature,
+            state: this.current(),
+            hostNow: Date.now(),
+          },
           peer,
         );
         this.sentVersion.set(peer, this.current().library.version);
@@ -172,8 +213,8 @@ export class Session {
         return;
       }
       try {
-        await this.execute(c, peer);
-        this.send({ v: 1, type: 'ack', id: c.id, ok: true }, peer);
+        const data = (await this.execute(c, peer, this.people.get(peer))) as JsonValue;
+        this.send({ v: 1, type: 'ack', id: c.id, ok: true, data }, peer);
         this.broadcast();
       } catch (e) {
         this.send(
@@ -195,6 +236,8 @@ export class Session {
         (await verify(this.identity, this.nonce, peer, this.peerId, m.signature))
       ) {
         this.hostPeer = peer;
+        if (typeof m.hostNow === 'number' && Number.isFinite(m.hostNow))
+          this.hostOffset = m.hostNow - Date.now();
         this.lastRevision = -1;
         this.apply(m.state);
         return;
@@ -203,7 +246,7 @@ export class Session {
       if (m.type === 'state') this.apply(m.state);
       else if (m.type === 'tick') {
         if (m.libraryVersion === this.current().library.version)
-          this.apply({ ...m.state, library: this.current().library });
+          this.apply(m.state, this.current().library);
         else this.send({ v: 1, type: 'hello', nonce: this.nonce }, peer);
       } else if (m.type === 'ack') {
         const ack = ackSchema.parse({ ...m, type: 'ack', v: undefined });
@@ -211,7 +254,7 @@ export class Session {
         if (p) {
           clearTimeout(p.timer);
           this.pending.delete(ack.id);
-          if (ack.ok) p.resolve();
+          if (ack.ok) p.resolve(ack.data);
           else p.reject(Error(ack.error || 'Host rejected command.'));
         }
       } else if (m.type === 'revoked') {
@@ -223,8 +266,8 @@ export class Session {
       }
     }
   }
-  private apply(raw: unknown) {
-    const state = snapshotSchema.parse(raw);
+  private apply(raw: unknown, library?: Snapshot['library']) {
+    const state = parseSnapshot(raw, library);
     this.lastState = Date.now();
     if (state.revision >= this.lastRevision) {
       this.lastRevision = state.revision;
@@ -232,10 +275,12 @@ export class Session {
       this.status('Connected');
     }
   }
-  broadcast() {
+  broadcast(force = false) {
     if (!this.host) return;
     const state = this.current();
     for (const peer of this.accepted) {
+      if (!force && this.sentRevision.get(peer) === state.revision) continue;
+      this.sentRevision.set(peer, state.revision);
       const version = state.library.version;
       if (this.sentVersion.get(peer) === version) {
         const light = { ...state, library: undefined } as unknown as Snapshot;
@@ -247,7 +292,7 @@ export class Session {
     }
   }
   sendCommand(c: Command) {
-    return new Promise<void>((resolve, reject) => {
+    return new Promise<unknown>((resolve, reject) => {
       if (!this.hostPeer || this.revoked) {
         reject(Error('Host is not connected.'));
         return;
@@ -256,12 +301,18 @@ export class Session {
         reject(Error('Too many pending commands.'));
         return;
       }
-      const timer = setTimeout(() => {
-        this.pending.delete(c.id);
-        reject(Error('Host did not acknowledge the command.'));
-      }, 12000);
+      const timer = setTimeout(
+        () => {
+          this.pending.delete(c.id);
+          reject(Error('Host did not acknowledge the command.'));
+        },
+        c.op === 'waveform' ? 45000 : 12000,
+      );
       this.pending.set(c.id, { resolve, reject, timer });
-      this.send({ v: 1, type: 'command', command: c }, this.hostPeer);
+      this.send(
+        { v: 1, type: 'command', command: { ...c, at: Math.round(c.at + this.hostOffset) } },
+        this.hostPeer,
+      );
     });
   }
   disconnect(peer: string) {

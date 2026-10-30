@@ -1,12 +1,13 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
-    <OutputType>Exe</OutputType><TargetFramework>net10.0-windows</TargetFramework><Nullable>enable</Nullable><ImplicitUsings>enable</ImplicitUsings>
-    <AssemblyName>SoundpadWeb</AssemblyName><Version>1.0.0</Version><RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <OutputType>Exe</OutputType><TargetFramework>net10.0-windows10.0.19041.0</TargetFramework><Nullable>enable</Nullable><ImplicitUsings>enable</ImplicitUsings>
+    <AssemblyName>SoundpadWeb</AssemblyName><Version>2.0.0-rc.1</Version><RuntimeIdentifier>win-x64</RuntimeIdentifier>
     <PublishSingleFile>true</PublishSingleFile><SelfContained>true</SelfContained><IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
     <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile><DebugType>embedded</DebugType>
-    <RuntimeFrameworkVersion>10.0.13</RuntimeFrameworkVersion>
   </PropertyGroup>
   <ItemGroup><Compile Remove="tests/**/*.cs;harness/**/*.cs"/><FrameworkReference Include="Microsoft.AspNetCore.App"/><PackageReference Include="System.Drawing.Common" Version="10.0.0"/></ItemGroup>
   <ItemGroup><EmbeddedResource Include="../docs/licenses/*.txt" Link="Licenses/%(Filename)%(Extension)"/></ItemGroup>
+  <ItemGroup><EmbeddedResource Include="../docs/licenses/*.rtf" Link="Licenses/%(Filename)%(Extension)"/></ItemGroup>
   <ItemGroup><AssemblyMetadata Include="WebsiteUrl" Value="$(WebsiteUrl)" Condition="'$(WebsiteUrl)' != ''"/></ItemGroup>
-</Project>
+  <ItemGroup><FrameworkReference Update="Microsoft.NETCore.App" RuntimeFrameworkVersion="10.0.13"/><FrameworkReference Update="Microsoft.AspNetCore.App" RuntimeFrameworkVersion="10.0.13"/></ItemGroup>
+<ItemGroup><PackageReference Include="NAudio.Wasapi" Version="3.3.0"/><PackageReference Include="NVorbis" Version="0.10.5"/></ItemGroup></Project>

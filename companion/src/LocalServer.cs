@@ -9,6 +9,7 @@ using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.DependencyInjection;
+using System.Threading.Channels;
 namespace SoundpadWeb;
 
 public sealed class LocalServer(Bridge bridge, string origin) : IAsyncDisposable
@@ -44,19 +45,24 @@ public sealed class LocalServer(Bridge bridge, string origin) : IAsyncDisposable
                 using (var deadline = CancellationTokenSource.CreateLinkedTokenSource(lifetime.Token)) { deadline.CancelAfter(5000); auth = await Receive(socket, deadline.Token); }
                 var hello = JsonDocument.Parse(auth);
                 var supplied = hello.RootElement.GetProperty("token").GetString() ?? "";
+                bool modern = hello.RootElement.TryGetProperty("protocol", out var protocol) && protocol.TryGetInt32(out int version) && version >= 2;
                 if (supplied.Length != Token.Length || !CryptographicOperations.FixedTimeEquals(Encoding.UTF8.GetBytes(supplied), Encoding.UTF8.GetBytes(Token))) { await socket.CloseAsync(WebSocketCloseStatus.PolicyViolation, "Unauthorized", CancellationToken.None); return; }
-                // Poll sender sends current snapshots, coalescing updates rather than accumulating queues.
+                var changes = Channel.CreateBounded<byte>(new BoundedChannelOptions(1) { FullMode = BoundedChannelFullMode.DropOldest });
+                void Changed(Snapshot _) => changes.Writer.TryWrite(0);
+                bridge.Changed += Changed; changes.Writer.TryWrite(0);
+                string? sentLibrary = null;
                 var sender = Task.Run(async () =>
                 {
-                    long last = -1;
-                    while (!lifetime.IsCancellationRequested)
+                    await foreach (var _ in changes.Reader.ReadAllAsync(lifetime.Token))
                     {
                         var state = bridge.Snapshot;
-                        if (state.Revision != last) { await Send(new { type = "state", state }); last = state.Revision; }
-                        await Task.Delay(150, lifetime.Token);
+                        bool full = !modern || sentLibrary != state.Library.Version;
+                        await Send(new { type = full ? "state" : "tick", state = full ? state : state with { Library = null! } }); sentLibrary = state.Library.Version;
                     }
                 });
                 var bucket = new Queue<long>();
+                using var queries = new SemaphoreSlim(16);
+                var running = new List<Task>();
                 try
                 {
                     while (socket.State == WebSocketState.Open)
@@ -64,15 +70,23 @@ public sealed class LocalServer(Bridge bridge, string origin) : IAsyncDisposable
                         var input = await Receive(socket, lifetime.Token);
                         var now = Environment.TickCount64;
                         while (bucket.Count > 0 && bucket.Peek() < now - 1000) bucket.Dequeue();
-                        if (bucket.Count >= 20) throw new InvalidDataException("Request rate exceeded."); bucket.Enqueue(now);
                         using var doc = JsonDocument.Parse(input, new JsonDocumentOptions { MaxDepth = 24 });
                         var root = doc.RootElement;
                         var actor = root.GetProperty("actor").GetString() == "host" ? "host" : "guest";
                         var command = root.GetProperty("command").Deserialize<Command>(Json.Options) ?? throw new InvalidDataException();
-                        await Send(await bridge.Execute(command, actor));
+                        if (bucket.Count >= 32) { await Send(new Reply("ack", command.Id, false, "Too many requests. Try again shortly.")); continue; }
+                        bucket.Enqueue(now);
+                        Participant? person = root.TryGetProperty("participant", out var p) ? p.Deserialize<Participant>(Json.Options) : null;
+                        if (command.Op is "waveform" or "spotify")
+                        {
+                            running.RemoveAll(t => t.IsCompleted);
+                            if (!await queries.WaitAsync(0)) { await Send(new Reply("ack", command.Id, false, "Too many background requests.")); continue; }
+                            running.Add(Task.Run(async () => { try { await Send(await bridge.Execute(command, actor, person).WaitAsync(lifetime.Token)); } catch (Exception ex) when (ex is WebSocketException or OperationCanceledException or TimeoutException) { } finally { queries.Release(); } }));
+                        }
+                        else await Send(await bridge.Execute(command, actor, person));
                     }
                 }
-                finally { lifetime.Cancel(); try { await sender; } catch (Exception) { } }
+                finally { bridge.Changed -= Changed; lifetime.Cancel(); try { await sender; await Task.WhenAll(running); } catch (Exception) { } }
             }
             catch (Exception ex) when (ex is WebSocketException or OperationCanceledException or JsonException or KeyNotFoundException or InvalidOperationException or IOException or InvalidDataException or TimeoutException) { }
             finally { Interlocked.Exchange(ref connected, 0); }

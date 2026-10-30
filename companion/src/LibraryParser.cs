@@ -15,7 +15,8 @@ public static class LibraryParser
         return doc;
     }
     private static string A(XElement e, string name) => e.Attribute(name)?.Value ?? "";
-    public static ParsedLibrary Parse(string allXml, string categoriesXml, DiskState state)
+    public static long? ParseDuration(string text) { var parts = text.Split(':'); if (parts.Length is not (2 or 3)) return null; double total = 0; foreach (var part in parts) { if (!double.TryParse(part, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out double n) || !double.IsFinite(n) || n < 0) return null; total = total * 60 + n; } return total <= 3600000 ? (long)(total * 1000) : null; }
+    public static ParsedLibrary Parse(string allXml, string categoriesXml, DiskState state, Dictionary<string, string>? icons = null, NativeStatistics? native = null)
     {
         var all = Xml(allXml, "Soundlist");
         var cats = Xml(categoriesXml, "Categories");
@@ -31,7 +32,9 @@ public static class LibraryParser
             var id = Convert.ToHexString(HMACSHA256.HashData(Convert.FromBase64String(state.IdentityKey), Encoding.UTF8.GetBytes(normalized + "\n" + n))).ToLowerInvariant();
             var title = A(e, "title");
             if (string.IsNullOrWhiteSpace(title)) title = Path.GetFileNameWithoutExtension(path);
-            sounds.Add(new(id, title, state.Icons.GetValueOrDefault(id))); indexes[id] = index; paths[id] = path; byIndex[index] = id;
+            long? duration = ParseDuration(A(e, "duration"));
+            var nativeStat = native?.Find(path, A(e, "hash"));
+            sounds.Add(new(id, title, (icons ?? state.Icons).GetValueOrDefault(id), duration, nativeStat?.Count, nativeStat?.LastPlayed)); indexes[id] = index; paths[id] = path; byIndex[index] = id;
         }
         var catIds = new HashSet<string>();
         Category ParseCategory(XElement e, int depth)
