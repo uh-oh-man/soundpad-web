@@ -1,5 +1,7 @@
 # Soundpad Web
 
+**V2 candidate branch:** see [V2 features, verification, upgrade and limitations](docs/V2.md). The public links below continue to serve V1 until deployment is approved.
+
 A private browser remote for [Leppsoft Soundpad](https://www.leppsoft.com/soundpad/). Friends see your real categories, tap a sound, and your existing Soundpad plays it through its current audio setup.
 
 Static React website + one portable Windows companion. No accounts, audio uploads, hosted application backend, or cloud database. Guests install nothing.
@@ -42,7 +44,7 @@ Actual application UI connected to the isolated test companion with **schema-der
 
 [Phone layout with fixture category](docs/screenshots/phone-fixture.png)
 
-Counter, permissions, icons and an opaque-identity key live in `%LOCALAPPDATA%\SoundpadWeb\state.json`. Small settings are saved atomically; unreadable data stops startup instead of silently resetting your counter. Browser refresh retains the session within the same host tab. Restarting the EXE or ending the host tab starts a new invitation session. Other people's hosts have separate state and secrets.
+Counter, permissions, statistics, icon references and an opaque-identity key live in `%LOCALAPPDATA%\SoundpadWeb\state.json`. Icon images live beside it in `icons/`; waveform caches live in `waveforms/`. Small settings are saved atomically; unreadable data stops startup instead of silently resetting your counter. Browser refresh retains the session within the same host tab. Restarting the EXE or ending the host tab starts a new invitation session. Other people's hosts have separate state and secrets.
 
 ## Connection problems
 
