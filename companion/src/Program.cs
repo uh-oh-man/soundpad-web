@@ -33,10 +33,10 @@ try
     using var shutdown = new CancellationTokenSource();
     Console.CancelKeyPress += (_, e) => { e.Cancel = true; shutdown.Cancel(); };
     _ = Task.Run(() => { if (Console.ReadLine() != null) shutdown.Cancel(); });
+    try { await bridge.CleanupSession(); } catch (Exception) { Console.WriteLine("Temporary audio cleanup will retry when Soundpad is available."); }
     var url = clean + "#host=" + server.Port + "." + server.Token;
     if (!args.Contains("--no-browser")) Process.Start(new ProcessStartInfo(url) { UseShellExecute = true });
     Console.WriteLine($"Soundpad Web is running on loopback port {server.Port}.\nKeep this window and your host browser tab open. Enter or Ctrl+C stops the companion.\nAudio devices and Soundpad settings are unchanged.");
-    try { await bridge.CleanupSession(); } catch (Exception) { Console.WriteLine("Temporary audio cleanup will retry when Soundpad is available."); }
     long nextLibrary = 0;
     using var wake = new SemaphoreSlim(0, 1);
     bridge.CommandAccepted += () => { if (wake.CurrentCount == 0) wake.Release(); };

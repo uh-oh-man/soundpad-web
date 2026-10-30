@@ -21,7 +21,7 @@ Your friend opens the link in a modern browser. Playback starts on **your** PC, 
 
 **Verification:** automated tests use isolated Soundpad fixtures and never trigger real audio. Real Soundpad audio playback remains an acceptance check; see [verification](docs/VERIFICATION.md).
 
-## Latest update - 2.2
+## Latest update - 2.2.1
 
 - Real waveforms fill iconless play buttons; click a precise position or use keyboard arrows (10 ms, Shift: 1 s) and Enter.
 - The bottom player has 1–32× zoom, panning and a millisecond seek input for long recordings.
@@ -32,6 +32,8 @@ Your friend opens the link in a modern browser. Playback starts on **your** PC, 
 - Add session audio from any participant, or **Reverse & play** an existing sound. Both use app-managed Soundpad entries in **temp** and the normal Soundpad mic playback route. Reversal automatically plays once its temporary copy is prepared.
 - Only the host can **Keep permanently**. Other managed entries/files are removed on End hosting or companion shutdown, with a journal for cleanup after a crash/reconnect. Existing user files are never deleted. Approved files remain in Soundpad's temp category and can be reorganized in Soundpad.
 - The `made by AI` credit remains small text at the bottom of the website.
+
+The 2.2.1 patch also completes startup recovery before opening the browser, preventing a host-session timing race.
 
 Session uploads accept supported audio up to 16 MiB; decoded audio is limited to ten minutes / 64 MiB per file, with 32 temporary files / 256 MiB per session. Soundpad import/reverse/cleanup requires companion 2.2.0. Close the old companion normally, download the updated EXE, relaunch and refresh the site.
 
