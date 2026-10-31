@@ -180,6 +180,7 @@ public sealed class MimicTests : IDisposable
         await using var mock = new MockSoundpad(); using var pipe = new SoundpadPipe(mock.Name, true); using var bridge = new Bridge(pipe, new StateStore(folder));
         var fixture = new MimicFixture(); bridge.UseMimicCapture(fixture); bridge.UseTranscriptEngine(new TranscriptFixture());
         var key = new HotkeyFixture { Taken = true }; bridge.UseHotkey(key); await bridge.Poll(true);
+        var log = new List<string>(); bridge.MimicLog += log.Add;
         Assert.True((await bridge.Execute(Cmd("beginSession"), "host")).Ok);
         var taken = await bridge.Execute(Cmd("mimicHotkey") with { Action = "enable" }, "host");
         Assert.False(taken.Ok); Assert.Contains("already used", taken.Error);
@@ -202,8 +203,12 @@ public sealed class MimicTests : IDisposable
         using (var wave = new NAudio.Wave.WaveFileReader(journal.Assets.Single().Variants.Single().Path))
             Assert.InRange(wave.TotalTime.TotalSeconds, 9.9, 10.1);
         Assert.Equal("Host", Assert.Single(bridge.Snapshot.Mimic!.Recent!).By);
+        Assert.Contains(log, l => l.StartsWith("Listening to Fixture"));
+        Assert.Contains(log, l => l.StartsWith("Host mimicked \"Fixture tone") && l.EndsWith("now in Temp"));
+        Assert.Contains(log, l => l.Contains("not listening"));
         Assert.True((await bridge.Execute(Cmd("endSession"), "host")).Ok);
         Assert.False(key.Active); Assert.False(bridge.Snapshot.Mimic!.Hotkey);
+        Assert.Contains(log, l => l.StartsWith("Hosting ended"));
         Assert.Empty(bridge.Snapshot.Mimic!.Recent!);
     }
 

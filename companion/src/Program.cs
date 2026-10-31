@@ -41,6 +41,7 @@ try
     var builtInWebsite = System.Reflection.Assembly.GetExecutingAssembly()
         .GetCustomAttributes(typeof(System.Reflection.AssemblyMetadataAttribute), false)
         .Cast<System.Reflection.AssemblyMetadataAttribute>().FirstOrDefault(a => a.Key == "WebsiteUrl")?.Value;
+    bridge.MimicLog += message => Console.WriteLine($"[{DateTime.Now:HH:mm:ss}] Mimic: {message}");
     var site = Arg("--site") ?? bridge.Website ?? Environment.GetEnvironmentVariable("SOUNDPAD_WEB_URL") ?? builtInWebsite;
     if (string.IsNullOrWhiteSpace(site))
     {

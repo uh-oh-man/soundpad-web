@@ -22,7 +22,11 @@ public sealed partial class Bridge
     /// <summary>Replaces the system-wide hotkey; tests use a fixture that can be "pressed" directly.</summary>
     public void UseHotkey(IGlobalHotkey key) { hotkey.Dispose(); hotkey = key; }
 
-    private void StopMimic() { mimicCapture.Stop(); transcriber.Disable(); hotkey.Unregister(); hotkeyStatus = "Off"; lock (recentClips) recentClips.Clear(); lock (peekGate) lastPeek = null; }
+    /// <summary>One-line Mimic events for the companion console (its only interface on the host PC).</summary>
+    public event Action<string>? MimicLog;
+    private void Log(string message) => MimicLog?.Invoke(message);
+
+    private void StopMimic() { if (mimicCapture.Running) Log("Hosting ended: stopped listening and discarded the buffer"); mimicCapture.Stop(); transcriber.Disable(); hotkey.Unregister(); hotkeyStatus = "Off"; lock (recentClips) recentClips.Clear(); lock (peekGate) lastPeek = null; }
 
     /// <summary>The host pressed the hotkey: save the last <see cref="HotkeySeconds"/> seconds, like Voice Replay Studio's F6.</summary>
     public async Task HotkeyPressed()
@@ -34,8 +38,9 @@ public sealed partial class Bridge
             var words = string.Join(" ", transcriber.Lines(ring, start, stop).Select(l => l.Text.Trim())).Trim();
             var reply = await SaveMimic(ring, start, stop, words.Length > 0 ? words : null, "Host", true, "host", audioAudience);
             hotkeyStatus = reply.Ok ? $"Saved the last {HotkeySeconds} s at {DateTime.Now:HH:mm:ss}" : reply.Error ?? "Could not save.";
+            if (!reply.Ok) Log($"{hotkey.Name}: {hotkeyStatus}");
         }
-        catch (InvalidDataException ex) { hotkeyStatus = ex.Message; }
+        catch (InvalidDataException ex) { hotkeyStatus = ex.Message; Log($"{hotkey.Name}: {ex.Message}"); }
         Publish(); CommandAccepted?.Invoke();
     }
 
@@ -53,6 +58,7 @@ public sealed partial class Bridge
             {
                 recentClips.RemoveAll(c => c.AssetId == assetId);
                 recentClips.Insert(0, new(assetId, name, by, DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()));
+                Log($"{by} mimicked \"{name}\" ({samples.Length / (double)ring.Rate:0.0} s), now in Temp");
                 if (recentClips.Count > RecentClips) recentClips.RemoveRange(RecentClips, recentClips.Count - RecentClips);
             }
             Publish();
@@ -108,20 +114,21 @@ public sealed partial class Bridge
                 case "mimicStart":
                     var source = mimicCapture.Sources().FirstOrDefault(s => s.Id == c.SourceId) ?? throw new InvalidDataException("That source is no longer available. Refresh the list.");
                     await mimicCapture.Start(source, MimicWindowMs / 1000 + MimicGraceSeconds);
+                    Log($"Listening to {source.Name} (last 30 s kept in memory only)");
                     Publish(); CommandAccepted?.Invoke();
                     return new("ack", c.Id, true);
                 case "mimicHotkey":
-                    if (c.Action == "disable") { hotkey.Unregister(); hotkeyStatus = "Off"; }
-                    else if (c.Action == "enable") { hotkey.Register(() => _ = HotkeyPressed()); hotkeyStatus = $"Press {hotkey.Name} in any app to save the last {HotkeySeconds} s"; }
+                    if (c.Action == "disable") { hotkey.Unregister(); hotkeyStatus = "Off"; Log($"{hotkey.Name} hotkey off"); }
+                    else if (c.Action == "enable") { hotkey.Register(() => _ = HotkeyPressed()); hotkeyStatus = $"Press {hotkey.Name} in any app to save the last {HotkeySeconds} s"; Log($"{hotkey.Name} hotkey on: press it in any app to save the last {HotkeySeconds} s"); }
                     else throw new InvalidDataException("Unsupported hotkey setting.");
                     Publish();
                     return new("ack", c.Id, true);
                 case "mimicStop":
-                    mimicCapture.Stop(); lock (peekGate) lastPeek = null; Publish();
+                    mimicCapture.Stop(); lock (peekGate) lastPeek = null; Log("Stopped listening; the buffer was discarded"); Publish();
                     return new("ack", c.Id, true);
                 case "mimicTranscribe":
-                    if (c.Action == "disable") transcriber.Disable();
-                    else if (c.Action == "enable") await transcriber.Enable(() => mimicCapture.Ring, false);
+                    if (c.Action == "disable") { transcriber.Disable(); Log("Transcripts off"); }
+                    else if (c.Action == "enable") { await transcriber.Enable(() => mimicCapture.Ring, false); Log("Transcripts on (speech is recognized on this PC)"); }
                     else if (c.Action == "download") { if (transcriber.ModelReady) await transcriber.Enable(() => mimicCapture.Ring, false); else transcriber.BeginDownload(() => mimicCapture.Ring, Publish); }
                     else throw new InvalidDataException("Unsupported transcript setting.");
                     Publish();

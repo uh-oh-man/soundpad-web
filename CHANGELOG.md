@@ -2,6 +2,26 @@
 
 Notable changes to Soundpad Web. Versions follow the website's `package.json`; the Windows companion is versioned separately and only needs updating when a release says so.
 
+## 2.10.4 — Mimic in the companion window
+
+**Update the Windows companion** to get this; the website is unchanged.
+
+### Added
+
+- The companion's console window, its only interface on the host PC, now logs Mimic events with the time:
+  - listening started on a source, or stopped (with the buffer discarded);
+  - each clip, with who made it, its name and its length ("Alice mimicked "…" (3.0 s), now in Temp"), including clips saved with F6 mid-game;
+  - an F6 press that could not save, for example when Mimic was not listening;
+  - transcripts and the F6 hotkey turned on or off;
+  - hosting ended while listening.
+
+  It is useful on a second monitor while gaming.
+
+### Verified
+
+- Guests cannot flood Temp with clips: Mimic clips and edited copies go through the same per-guest limit as uploads (6 new files per minute), within Temp's 32-file / 256 MiB cap. No change was needed.
+- The hotkey test now checks the console lines (78 C# tests).
+
 ## 2.10.3 — Accessibility audit
 
 Website update; the companion is rebuilt as 2.10.3 with no code changes.

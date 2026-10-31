@@ -22,6 +22,8 @@ The capture engine in the companion is a port of Voice Replay Studio's `CaptureS
 5. Optional (2.7.0): turn on **F6 hotkey**. While Mimic is listening, pressing **F6 in any app** on the host PC saves the last 10 seconds to Temp, named after its transcript when transcripts are on, just like Voice Replay Studio's F6. It is off by default so it never takes F6 from a game; if another app already owns F6 (for example Voice Replay Studio itself), the window says so. End hosting and quitting release the key.
 6. **Stop listening**, **End hosting**, or closing the companion all stop capture and drop the buffer.
 
+The companion's console window logs each of these events with the time (2.10.4), including who made each clip and anything F6 saved.
+
 **Anyone allowed**
 
 1. Open **Mimic** (or click the **Mimic on** badge).
