@@ -37,7 +37,7 @@ if (args.Length > 1 && int.TryParse(args[1], out var count) && count is > 4 and 
 }
 foreach (var element in all.Descendants("Sound").Concat(categories.Descendants("Sound"))) { var original = (string?)element.Attribute("url"); if (original == null) continue; var path = Path.Combine(directory, Path.GetFileName(original)); if (!File.Exists(path)) AudioFixtures.Wave(path); element.SetAttributeValue("url", path); element.SetAttributeValue("duration", "00:02.500"); }
 mock.AllXml = all.ToString(); mock.CategoryXml = categories.ToString();
-using var pipe = new SoundpadPipe(mock.Name);
+using var pipe = new SoundpadPipe(mock.Name, true);
 using var bridge = new Bridge(pipe, new StateStore(directory));
 await bridge.Poll(true);
 await using var server = new LocalServer(bridge, args.FirstOrDefault() ?? "http://127.0.0.1:5173");

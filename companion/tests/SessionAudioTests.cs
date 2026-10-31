@@ -16,9 +16,11 @@ public sealed class SessionAudioTests : IDisposable
         writer.Write([0x10, 0x00, 0x20, 0x00, 0x30, 0x00, 0x40, 0x00, 0x50, 0x00, 0x60, 0x00], 0, 12); return path;
     }
     [Fact]
-    public void ReversePreservesChannelsAndOriginalBytes()
+    public async Task ReversePreservesChannelsAndOriginalBytes()
     {
-        var input = Wave(); var before = File.ReadAllBytes(input); var output = Path.Combine(folder, "reverse.wav"); SessionAudio.ConvertAudio(input, output, true);
+        var input = Wave(); var before = File.ReadAllBytes(input); await using var mock=new MockSoundpad(); using var pipe=new SoundpadPipe(mock.Name,true);
+        var store=new ManagedAudioStore(folder,pipe,p=>Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(p))).ToLowerInvariant(),async w=>await w()); store.BeginSession();
+        var asset=await store.Upload(before,"fixture.wav","Host","host",true); var output=(await store.Prepare(asset.Id,"reversed",true)).Variant.Path;
         using var wave = new NAudio.Wave.WaveFileReader(output); var data = new byte[12]; Assert.Equal(12, wave.Read(data, 0, 12));
         // Float conversion to PCM may round down by one; compare the ordered sample pattern.
         Assert.InRange(BitConverter.ToInt16(data, 0), 79, 80); Assert.InRange(BitConverter.ToInt16(data, 2), 95, 96);
@@ -28,43 +30,47 @@ public sealed class SessionAudioTests : IDisposable
     [Fact]
     public async Task UploadsUseTempAndOnlyHostCanKeepBeforeCleanup()
     {
-        var input = Wave(); await using var mock = new MockSoundpad(); using var pipe = new SoundpadPipe(mock.Name); using var bridge = new Bridge(pipe, new StateStore(folder)); await bridge.Poll(true);
+        var input = Wave(); await using var mock = new MockSoundpad(); using var pipe = new SoundpadPipe(mock.Name, true); using var bridge = new Bridge(pipe, new StateStore(folder)); await bridge.Poll(true);
+        Assert.True((await bridge.Execute(Cmd("beginSession"), "host")).Ok);
         var originals = bridge.Snapshot.Library.Sounds.Select(s => s.Id).ToArray();
         Assert.True((await bridge.Upload(File.ReadAllBytes(input), "First.wav", "Alice")).Ok);
         var first = bridge.Snapshot.Library.Sounds.Single(s => s.Temporary); Assert.Equal("Alice", first.UploadedBy);
-        Assert.Contains(bridge.Snapshot.Library.Categories, c => c.Name == "temp" && c.SoundIds.Contains(first.Id));
+        Assert.Contains(bridge.Snapshot.Library.Categories, c => c.Name.StartsWith("Temp · Soundpad Web") && c.SoundIds.Contains(first.Id));
         Assert.False((await bridge.Execute(Cmd("keepAudio", first.Id), "guest")).Ok);
         var beforeKeep = bridge.Snapshot.Library.Version;
-        Assert.True((await bridge.Execute(Cmd("keepAudio", first.Id), "host")).Ok); Assert.NotEqual(beforeKeep, bridge.Snapshot.Library.Version);
+        var journal = System.Text.Json.JsonSerializer.Deserialize<AudioJournal>(File.ReadAllText(Path.Combine(folder,"managed-audio","journal.json")),Json.Options)!; var asset=journal.Assets.Single();
+        Assert.True((await bridge.Execute(Cmd("keepAudio") with { AssetId=asset.Id,VariantId=asset.Variants.Single().Id,Confirmed=true }, "host")).Ok); Assert.NotEqual(beforeKeep, bridge.Snapshot.Library.Version);
         Assert.True((await bridge.Upload(File.ReadAllBytes(input), "Second.wav", "Bob")).Ok);
         Assert.True((await bridge.Execute(Cmd("endSession"), "host")).Ok);
         Assert.False((await bridge.Upload(File.ReadAllBytes(input), "Late.wav", "Guest")).Ok);
-        Assert.Equal(5, bridge.Snapshot.Library.Sounds.Length); Assert.Contains(bridge.Snapshot.Library.Sounds, s => s.Id == first.Id && !s.Temporary); Assert.All(originals, id => Assert.Contains(bridge.Snapshot.Library.Sounds, s => s.Id == id));
+        Assert.Equal(5, bridge.Snapshot.Library.Sounds.Length); Assert.Contains(bridge.Snapshot.Library.Sounds, s => s.AssetId == first.AssetId && !s.Temporary); Assert.All(originals, id => Assert.Contains(bridge.Snapshot.Library.Sounds, s => s.Id == id));
         Assert.DoesNotContain("DoRemoveSelectedEntries(true)", mock.Commands);
-        Assert.Single(Directory.GetFiles(Path.Combine(folder, "session-audio"), "*.wav"));
+        Assert.Single(Directory.GetFiles(Path.Combine(folder, "library"), "*.wav", SearchOption.AllDirectories));
     }
     [Fact]
     public async Task ReverseImportsOnceAndPlaysThroughNormalSoundpadRoute()
     {
         var input = Wave(); await using var mock = new MockSoundpad { AllXml = MockSoundpad.Sounds.Replace(@"C:\Private\airhorn.wav", input), CategoryXml = MockSoundpad.Categories.Replace(@"C:\Private\airhorn.wav", input) };
-        using var pipe = new SoundpadPipe(mock.Name); using var bridge = new Bridge(pipe, new StateStore(folder)); await bridge.Poll(true);
+        using var pipe = new SoundpadPipe(mock.Name, true); using var bridge = new Bridge(pipe, new StateStore(folder)); await bridge.Poll(true);
+        Assert.True((await bridge.Execute(Cmd("beginSession"), "host")).Ok);
         var original = bridge.Snapshot.Library.Sounds[0].Id;
         for (int i = 0; i < 2; i++) Assert.True((await bridge.Execute(Cmd("reverse", original, bridge.Snapshot.Library.Version), "guest")).Ok);
         Assert.Single(bridge.Snapshot.Library.Sounds, s => s.Temporary); Assert.Equal(2, mock.Commands.Count(c => c == "DoPlaySound(5)"));
-        Assert.True((await bridge.Execute(Cmd("endSession"), "host")).Ok); Assert.Equal(4, bridge.Snapshot.Library.Sounds.Length);
+        Assert.True((await bridge.Execute(Cmd("stop"), "host")).Ok); Assert.True((await bridge.Execute(Cmd("endSession"), "host")).Ok); Assert.Equal(4, bridge.Snapshot.Library.Sounds.Length);
     }
     [Fact]
     public async Task RecoveryCleanupNeverRemovesUnownedEntriesInExistingTemp()
     {
-        var input = Wave(); await using var mock = new MockSoundpad { CategoryXml = MockSoundpad.Categories.Replace("</Categories>", "<Category index=\"9\" name=\"temp\"><Sound index=\"1\" url=\"C:\\Private\\airhorn.wav\"/></Category></Categories>") }; using var pipe = new SoundpadPipe(mock.Name);
-        var audio = new SessionAudio(folder); var entry = await audio.Prepare(input, "Temp", "Guest", false); await audio.Import(pipe, entry);
-        // New manager simulates a restarted companion reading its recovery journal.
-        await new SessionAudio(folder).Cleanup(pipe); Assert.False(File.Exists(audio.PathFor(entry))); Assert.Contains("airhorn.wav", mock.CategoryXml); Assert.DoesNotContain(mock.Commands, c => c.StartsWith("DoAddCategory(")); Assert.Equal(4, System.Xml.Linq.XDocument.Parse(mock.AllXml).Descendants("Sound").Count());
+        var input = Wave(); await using var mock = new MockSoundpad { CategoryXml = MockSoundpad.Categories.Replace("</Categories>", "<Category index=\"9\" name=\"temp\"><Sound index=\"1\" url=\"C:\\Private\\airhorn.wav\"/></Category></Categories>") }; using var pipe = new SoundpadPipe(mock.Name, true);
+        var audio = new ManagedAudioStore(folder, pipe, path => Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(path))).ToLowerInvariant(), async work => await work()); audio.BeginSession();
+        var entry = await audio.Upload(File.ReadAllBytes(input), "Temp.wav", "Guest", "peer", false); var file = entry.Variants.Single().Path;
+        var restarted = new ManagedAudioStore(folder, pipe, path => Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(path))).ToLowerInvariant(), async work => await work());
+        await restarted.Recover(true); Assert.False(File.Exists(file)); Assert.Contains("airhorn.wav", mock.CategoryXml); Assert.Equal(4, System.Xml.Linq.XDocument.Parse(mock.AllXml).Descendants("Sound").Count());
     }
     [Fact]
     public async Task GuestCannotEnableSpotifyAndHostCanRestrictGuestTransport()
     {
-        await using var mock = new MockSoundpad(); using var pipe = new SoundpadPipe(mock.Name); using var bridge = new Bridge(pipe, new StateStore(folder));
+        await using var mock = new MockSoundpad(); using var pipe = new SoundpadPipe(mock.Name, true); using var bridge = new Bridge(pipe, new StateStore(folder));
         Assert.False((await bridge.Execute(Cmd("spotify") with { Action = "enable" }, "guest")).Ok);
         Assert.True((await bridge.Execute(Cmd("spotify") with { Action = "status" }, "guest")).Ok);
         Assert.True((await bridge.Execute(Cmd("permissions") with { Permissions = new(GuestSpotify: false) }, "host")).Ok);
@@ -73,7 +79,7 @@ public sealed class SessionAudioTests : IDisposable
     [Fact]
     public async Task UploadEndpointRequiresExactOriginAndTokenAndRejectsUnsupportedAudio()
     {
-        await using var mock = new MockSoundpad(); using var pipe = new SoundpadPipe(mock.Name); using var bridge = new Bridge(pipe, new StateStore(folder)); await bridge.Poll(true);
+        await using var mock = new MockSoundpad(); using var pipe = new SoundpadPipe(mock.Name, true); using var bridge = new Bridge(pipe, new StateStore(folder)); await bridge.Poll(true);
         await using var server = new LocalServer(bridge, "https://example.test"); await server.Start(); using var client = new HttpClient();
         using var request = new HttpRequestMessage(HttpMethod.Post, $"http://127.0.0.1:{server.Port}/session-audio") { Content = new ByteArrayContent([1, 2, 3]) };
         request.Headers.Add("Origin", "https://example.test");

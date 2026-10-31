@@ -1,14 +1,14 @@
 using System.Text.Json;
 namespace SoundpadWeb;
 
-public record Sound(string Id, string Name, string? Icon, long? DurationMs = null, long? NativePlays = null, string? NativeLastPlayed = null, bool Temporary = false, string? UploadedBy = null);
+public record Sound(string Id, string Name, string? Icon, long? DurationMs = null, long? NativePlays = null, string? NativeLastPlayed = null, bool Temporary = false, string? UploadedBy = null, string? AssetId = null, string? Orientation = null, string? AudioKind = null, bool InternalVariant = false, string? AliasOf = null, string? WorkspaceId = null, string[]? Aliases = null);
 public record Category(string Id, string Name, string? Icon, string[] SoundIds, Category[] Children);
 public record Library(string Version, Sound[] Sounds, Category[] Categories);
 public record Playback(string Status = "UNKNOWN", long? PositionMs = null, long? DurationMs = null,
     string? SoundId = null, string? Epoch = null, string? Requester = null, long SampledAt = 0, string IdentitySource = "unknown", long? RegionEndMs = null, bool Repeat = false, long PositionRevision = 0);
-public record Permissions(bool RemotePlayback = true, bool GuestCounter = false, bool GuestSeeking = true, bool GuestSpotify = true);
+public record Permissions(bool RemotePlayback = true, bool GuestCounter = false, bool GuestSeeking = true, bool GuestSpotify = true, bool GuestUploads = true, bool GuestTransforms = true);
 public record Snapshot(int V, long Revision, bool Available, string? Error, Library Library, Playback Playback, int Counter, Permissions Permissions,
-    int Protocol = 2, string? HostId = null, long StatisticsVersion = 0, string? CompanionVersion = null);
+    int Protocol = 2, string? HostId = null, long StatisticsVersion = 0, string? CompanionVersion = null, long ManagedAudioVersion = 0);
 public record Participant(string Id, string Name);
 public record ParticipantPlays(string Name, long Count);
 public sealed class SoundStatistics
@@ -34,7 +34,7 @@ public sealed class DiskState
     public string? Website { get; set; }
 }
 public record Command(int V, string Id, long At, string Op, string? SoundId = null, string? LibraryVersion = null, int? Delta = null, string? Image = null, Permissions? Permissions = null,
-    long? PositionMs = null, string? Epoch = null, long? EndMs = null, bool Repeat = false, string? Action = null);
+    long? PositionMs = null, string? Epoch = null, long? EndMs = null, bool Repeat = false, string? Action = null, string? AssetId = null, string? VariantId = null, string? Orientation = null, string? DestinationDirectory = null, int? CategoryId = null, string? CategoryName = null, bool Confirmed = false, string? AudienceId = null, string? OwnerId = null);
 public record Reply(string Type, string Id, bool Ok, string? Error = null, object? Data = null);
 public static class Json
 {

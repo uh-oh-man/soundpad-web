@@ -4,9 +4,16 @@ namespace SoundpadWeb;
 
 public interface ISoundpad { Task<string> Request(string command, CancellationToken cancel = default); }
 // The vendor writes UTF-8 commands without newline or terminator. Responses are pipe messages.
-public sealed class SoundpadPipe(string name = "sp_remote_control") : ISoundpad, IDisposable
+public sealed class SoundpadPipe(string name = "sp_remote_control", bool enableFixtureOwnedRemoval = false) : ISoundpad, IAtomicOwnedEntryRemoval, IDisposable
 {
     public bool IsProduction => name == "sp_remote_control";
+    public bool CanRemoveOwnedAtomically => enableFixtureOwnedRemoval && name.StartsWith("soundpad-web-test-", StringComparison.Ordinal);
+    public async Task<bool> RemoveOwnedEntry(string path, string expectedCatalogFingerprint)
+    {
+        if (!CanRemoveOwnedAtomically) return false;
+        var payload = Convert.ToBase64String(Encoding.UTF8.GetBytes(Json.Write(new { path, fingerprint = expectedCatalogFingerprint })));
+        return (await Request("FixtureRemoveOwnedEntry(" + payload + ")")).StartsWith("R-200", StringComparison.Ordinal);
+    }
     private readonly SemaphoreSlim gate = new(1);
     private NamedPipeClientStream? pipe;
     public async Task<string> Request(string command, CancellationToken cancel = default)

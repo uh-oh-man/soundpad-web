@@ -129,11 +129,11 @@ test('real loopback bridge: nested library, search, correct play command, counte
     .setInputFiles({ name: 'icon.png', mimeType: 'image/png', buffer: Buffer.from(png, 'base64') });
   await page.getByRole('button', { name: 'Save icon', exact: true }).click();
   await expect(
-    page.getByRole('button', { name: 'Play Airhorn', exact: true }).locator('img'),
+    page.getByRole('button', { name: 'Play artwork Airhorn', exact: true }).locator('img'),
   ).toBeVisible();
   await page.reload();
   await expect(
-    page.getByRole('button', { name: 'Play Airhorn', exact: true }).locator('img'),
+    page.getByRole('button', { name: 'Play artwork Airhorn', exact: true }).locator('img'),
   ).toBeVisible();
   await page.screenshot({ path: 'artifacts/screenshots/desktop-fixture.png', fullPage: true });
   expect(errors).toEqual([]);
@@ -240,7 +240,7 @@ test('live Nostr/WebRTC: two guests, playback, synchronized counter and invitati
     await remoteWave.press('Home');
     await remoteWave.press('ArrowRight');
     await remoteWave.press('Enter');
-    await expect.poll(() => harness.plays).toContain('DoSeekMs(100)');
+    await expect.poll(() => harness.plays).toContain('DoSeekMs(10)');
     await page.getByRole('button', { name: 'Statistics for Airhorn', exact: true }).click();
     await expect(page.getByRole('dialog').getByText('Relay Alice', { exact: true })).toBeVisible();
     await page.getByRole('button', { name: 'Close dialog' }).click();
@@ -272,10 +272,10 @@ test('live Nostr/WebRTC: two guests, playback, synchronized counter and invitati
     });
     await page.getByRole('button', { name: 'Save icon', exact: true }).click();
     await expect(
-      g1.getByRole('button', { name: 'Play Airhorn', exact: true }).locator('img'),
+      g1.getByRole('button', { name: 'Play artwork Airhorn', exact: true }).locator('img'),
     ).toBeVisible();
     await expect(
-      g2.getByRole('button', { name: 'Play Airhorn', exact: true }).locator('img'),
+      g2.getByRole('button', { name: 'Play artwork Airhorn', exact: true }).locator('img'),
     ).toBeVisible();
     await page.getByRole('button', { name: 'Access settings' }).click();
     page.once('dialog', (d) => d.accept());
@@ -406,8 +406,12 @@ test('V2: real waveform, pause, epoch seek, cue and region metadata, named stati
   await wave.getByRole('button', { name: 'Save region', exact: true }).click();
   await expect(wave.getByLabel('Region Middle start seconds')).toHaveValue('0.4');
   await wave.getByLabel('Repeat region Middle', { exact: true }).check();
-  await wave.getByRole('button', { name: 'Zoom in Airhorn', exact: true }).click();
-  await expect(wave.getByLabel('Waveform offset Airhorn')).toBeVisible();
+  const detailSurface = wave.getByRole('slider', { name: 'Seek Airhorn', exact: true });
+  await detailSurface.hover();
+  await page.mouse.wheel(0, -240);
+  await expect(
+    wave.getByRole('button', { name: 'Fit waveform Airhorn', exact: true }),
+  ).toBeVisible();
   await wave.getByRole('button', { name: 'Play cue Opening', exact: true }).click();
   await expect.poll(() => harness.plays).toContain('DoSeekMs(700)');
   await page.getByRole('button', { name: 'Pause playback', exact: true }).click();
@@ -415,7 +419,7 @@ test('V2: real waveform, pause, epoch seek, cue and region metadata, named stati
   await wave.getByRole('slider', { name: 'Seek Airhorn', exact: true }).press('Home');
   await wave.getByRole('slider', { name: 'Seek Airhorn', exact: true }).press('ArrowRight');
   await wave.getByRole('slider', { name: 'Seek Airhorn', exact: true }).press('Enter');
-  await expect.poll(() => harness.plays).toContain('DoSeekMs(100)');
+  await expect.poll(() => harness.plays).toContain('DoSeekMs(10)');
   await page.getByRole('button', { name: 'Stop', exact: true }).click();
   await page.getByRole('button', { name: 'Statistics for Airhorn', exact: true }).click();
   await expect(page.getByRole('dialog').getByText('Fixture Alice', { exact: true })).toBeVisible();
@@ -503,7 +507,9 @@ test('V2: large-photo crop, cancel, failed save retention and remove', async ({
   await page.screenshot({ path: 'artifacts/screenshots/v2-crop.png' });
   await page.getByRole('button', { name: 'Save icon', exact: true }).click();
   await expect(page.getByRole('dialog')).toHaveCount(0);
-  const image = page.getByRole('button', { name: 'Play Airhorn', exact: true }).locator('img');
+  const image = page
+    .getByRole('button', { name: 'Play artwork Airhorn', exact: true })
+    .locator('img');
   await expect(image).toBeVisible();
   expect(
     await image.evaluate((img: HTMLImageElement) => [img.naturalWidth, img.naturalHeight]),
@@ -678,7 +684,7 @@ test('session waveforms stay mounted through rapid seeks, view changes and scrol
     }),
   );
   await host(page, harness);
-  await expect(page.locator('.full-wave-button svg[viewBox="0 0 800 64"]')).toHaveCount(4);
+  await expect(page.locator('.tile-wave-surface svg[viewBox="0 0 800 64"]')).toHaveCount(4);
   await page.getByLabel('View mode').selectOption('waveforms');
   const before = requests.length;
   await page.getByRole('button', { name: 'Play Airhorn', exact: true }).click();
@@ -724,15 +730,16 @@ test('artwork fills the play button and iconless buttons have cached mini wavefo
   });
   await page.getByRole('button', { name: 'Save icon', exact: true }).click();
   const button = page.getByRole('button', { name: 'Play Airhorn', exact: true });
-  const image = button.locator('img');
+  const art = page.getByRole('button', { name: 'Play artwork Airhorn', exact: true });
+  const image = art.locator('img');
   await expect(image).toBeVisible();
-  const a = (await button.boundingBox())!,
+  const a = (await art.boundingBox())!,
     b = (await image.boundingBox())!;
   expect(Math.abs(a.width - b.width)).toBeLessThan(3);
   expect(Math.abs(a.height - b.height)).toBeLessThan(3);
   await button.click({ position: { x: 5, y: 5 } });
   await expect.poll(() => harness.plays).toContain('DoPlaySound(1)');
-  await expect(page.locator('.full-wave-button svg[viewBox="0 0 800 64"]')).toHaveCount(3);
+  await expect(page.locator('.tile-wave-surface svg[viewBox="0 0 800 64"]')).toHaveCount(3);
   await page.getByRole('button', { name: 'Stop', exact: true }).click();
   await page.screenshot({ path: 'artifacts/screenshots/artwork-buttons.png', fullPage: true });
 });
@@ -850,16 +857,16 @@ test('session uploads use temp, reverse immediately, and only approved files sur
   await expect(
     page
       .getByRole('navigation', { name: 'Sound categories' })
-      .getByRole('button', { name: /^temp\s*1$/ }),
+      .getByRole('button', { name: /^Temp · Soundpad Web.*1$/ }),
   ).toBeVisible();
   await page.getByRole('button', { name: 'Reverse and play Session tone', exact: true }).click();
   await expect.poll(() => harness.plays).toContain('DoPlaySound(6)');
   await expect(page.locator('.player-track')).toContainText('Session tone (reversed)');
   await page.getByRole('button', { name: 'Stop', exact: true }).click();
-  await page.getByRole('button', { name: 'Keep Session tone permanently', exact: true }).click();
-  await expect(
-    page.getByRole('button', { name: 'Keep Session tone permanently', exact: true }),
-  ).toHaveCount(0);
+  await page.locator('#temp-manager > summary').click();
+  await page.getByRole('button', { name: 'Keep normal permanently', exact: true }).click();
+  await page.getByRole('button', { name: 'Confirm permanent save', exact: true }).click();
+  await expect(page.locator('.temp-save')).toHaveCount(0);
   await page.getByRole('button', { name: 'Access settings' }).click();
   page.once('dialog', (d) => d.accept());
   await page.getByRole('button', { name: 'End hosting', exact: true }).click();
@@ -877,32 +884,40 @@ test('full tile scrubbing and bottom-player precision zoom work at desktop and p
 }) => {
   await host(page, harness);
   const button = page.getByRole('button', { name: 'Play Airhorn', exact: true });
-  await expect(button.locator('svg[viewBox="0 0 800 64"]')).toBeVisible();
-  const geometry = await button.evaluate((el) => {
+  const cue = page.getByRole('slider', { name: 'Cue Airhorn waveform', exact: true });
+  await expect(cue.locator('svg[viewBox="0 0 800 64"]')).toBeVisible();
+  const geometry = await cue.evaluate((el) => {
     const a = el.getBoundingClientRect(),
-      b = el.querySelector('.sound-icon')!.getBoundingClientRect();
+      b = el.querySelector('.tile-shade')!.getBoundingClientRect();
     return { w: Math.abs(a.width - b.width), h: Math.abs(a.height - b.height) };
   });
   expect(geometry.w).toBeLessThan(2);
   expect(geometry.h).toBeLessThan(2);
-  await button.press('Home');
-  await button.press('ArrowRight');
-  await button.press('Enter');
+  await button.click();
+  await expect.poll(() => harness.plays).toContain('DoPlaySound(1)');
+  expect(harness.plays.filter((p) => p.startsWith('DoSeekMs'))).toHaveLength(0);
+  await cue.press('Home');
+  await cue.press('ArrowRight');
+  await cue.press('Enter');
   await expect.poll(() => harness.plays).toContain('DoSeekMs(10)');
   await page.getByRole('button', { name: 'Pause playback', exact: true }).click();
   const footer = page.locator('.player');
-  await footer.getByRole('button', { name: 'Zoom in Airhorn' }).click();
-  await expect(footer.getByLabel('Waveform offset Airhorn')).toBeVisible();
-  await footer.getByLabel('Precise seek seconds Airhorn').fill('0.123');
-  await footer.getByRole('button', { name: 'Go', exact: true }).click();
+  const surface = footer.getByRole('slider', { name: 'Seek Airhorn', exact: true });
+  await surface.hover();
+  await page.mouse.wheel(0, -240);
+  await expect(footer.getByRole('button', { name: 'Fit waveform Airhorn' })).toBeVisible();
+  await footer.getByRole('button', { name: 'Edit', exact: true }).click();
+  await footer.getByLabel('Cue time seconds', { exact: true }).fill('0.123');
+  await footer.getByRole('button', { name: 'Seek selected position Airhorn' }).click();
   await expect.poll(() => harness.plays).toContain('DoSeekMs(123)');
+  await footer.getByRole('button', { name: 'Edit', exact: true }).click();
   await page.screenshot({
     path: 'artifacts/screenshots/v22-precision-desktop.png',
     fullPage: true,
   });
   await page.setViewportSize({ width: 390, height: 844 });
   await page.getByRole('button', { name: 'Expand player waveform' }).click();
-  await expect(footer.getByRole('button', { name: 'Zoom in Airhorn' })).toBeVisible();
+  await expect(footer.getByRole('slider', { name: 'Seek Airhorn', exact: true })).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBe(
     true,
   );
@@ -943,7 +958,7 @@ test('live Nostr/WebRTC: compact invites, guest upload, shared organization and 
     await g1
       .getByLabel('Add session audio', { exact: true })
       .setInputFiles({ name: 'Guest tone.wav', mimeType: 'audio/wav', buffer: sessionWave() });
-    await expect(g1.locator('.toast')).toContainText('Added to temp for this session');
+    await expect(g1.locator('.notification-stack')).toContainText('Added to Temp for this session');
     await expect(g1.getByLabel('Add session audio', { exact: true })).toBeEnabled();
     for (const participant of [page, g1, g2])
       await expect(
@@ -953,7 +968,10 @@ test('live Nostr/WebRTC: compact invites, guest upload, shared organization and 
     await g2.getByRole('button', { name: 'Reverse and play Guest tone', exact: true }).click();
     await expect.poll(() => harness.plays).toContain('DoPlaySound(6)');
     await page.getByRole('button', { name: 'Stop', exact: true }).click();
-    await page.getByRole('button', { name: 'Keep Guest tone permanently', exact: true }).click();
+    await page.locator('#temp-manager > summary').click();
+    await page.getByRole('button', { name: 'Keep normal permanently', exact: true }).click();
+    await page.getByRole('button', { name: 'Confirm permanent save', exact: true }).click();
+    await expect(page.locator('.temp-save')).toHaveCount(0);
     await expect(
       g1
         .locator('.sound-entry')
@@ -964,4 +982,169 @@ test('live Nostr/WebRTC: compact invites, guest upload, shared organization and 
     await c1.close();
     await c2.close();
   }
+});
+
+test('Space toggles playback from the media surface but leaves typing and dialogs alone', async ({
+  page,
+  harness,
+}) => {
+  await host(page, harness);
+  const play = page.getByRole('button', { name: 'Play Airhorn', exact: true });
+  await play.click();
+  await expect(page.getByRole('button', { name: 'Pause playback', exact: true })).toBeEnabled();
+  await play.press('Space');
+  await expect(page.getByRole('button', { name: 'Resume playback', exact: true })).toBeEnabled();
+  await play.press('Space');
+  await expect(page.getByRole('button', { name: 'Pause playback', exact: true })).toBeEnabled();
+  const count = () => harness.plays.filter((c) => c === 'DoTogglePause()').length;
+  expect(count()).toBe(2);
+  const input = page.getByRole('textbox', { name: 'Search sounds' });
+  await input.fill('Air');
+  await input.press('Space');
+  expect(await input.inputValue()).toBe('Air ');
+  expect(count()).toBe(2);
+  await page.getByRole('button', { name: 'Access settings' }).click();
+  await page.getByRole('combobox', { name: 'Theme', exact: true }).press('Space');
+  expect(count()).toBe(2);
+});
+
+test('themes persist locally, notifications deduplicate and expire, upload errors remain inline', async ({
+  page,
+  harness,
+}) => {
+  await host(page, harness);
+  await page.getByRole('button', { name: 'Access settings' }).click();
+  await page.getByRole('combobox', { name: 'Theme', exact: true }).selectOption('purple');
+  await expect(page.locator('html')).toHaveAttribute('data-theme', 'purple');
+  await page.getByRole('button', { name: 'Close dialog' }).click();
+  await page.reload();
+  await expect(page.locator('html')).toHaveAttribute('data-theme', 'purple');
+  await page.evaluate(async () => {
+    const path = '/src/notifications.ts';
+    const { notify } = await import(path);
+    notify('Fixture notification');
+    notify('Fixture notification');
+  });
+  await expect(page.locator('.notification-stack .toast')).toHaveCount(1);
+  await expect(page.locator('.notification-stack .toast')).toHaveCount(0, { timeout: 6000 });
+  await page.getByLabel('Add session audio', { exact: true }).setInputFiles({
+    name: 'bad.exe',
+    mimeType: 'application/octet-stream',
+    buffer: Buffer.from([1, 2, 3]),
+  });
+  await expect(page.locator('.session-upload [role="alert"]')).toBeVisible();
+  await expect(page.locator('.notification-stack .toast')).toHaveCount(0, { timeout: 10000 });
+  await expect(page.locator('.session-upload [role="alert"]')).toBeVisible();
+  await page.screenshot({ path: 'artifacts/screenshots/v23-purple-errors.png', fullPage: true });
+});
+
+test('desktop panels scroll independently and layouts remain usable at narrow widths', async ({
+  page,
+}) => {
+  const harness = await startHarness('http://127.0.0.1:5173', 300);
+  try {
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await host(page, harness);
+    const panels = await page.evaluate(() => {
+      const main = document.querySelector('main')!,
+        side = document.querySelector('aside')!;
+      const before = side.scrollTop;
+      main.scrollTop = 400;
+      return {
+        main: main.scrollTop,
+        side: side.scrollTop - before,
+        body: document.documentElement.scrollHeight <= innerHeight + 1,
+      };
+    });
+    expect(panels.main).toBeGreaterThan(0);
+    expect(panels.side).toBe(0);
+    expect(panels.body).toBe(true);
+    await page.locator('main').evaluate((el) => {
+      el.scrollTop = 0;
+    });
+    for (const [width, height] of [
+      [1440, 900],
+      [1024, 768],
+      [820, 1180],
+      [390, 844],
+    ]) {
+      await page.setViewportSize({ width, height });
+      await expect(page.getByRole('button', { name: 'Stop', exact: true })).toBeVisible();
+      expect(
+        await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1),
+      ).toBe(true);
+      await page.screenshot({
+        path: `artifacts/screenshots/v23-layout-${width}.png`,
+        fullPage: false,
+      });
+    }
+  } finally {
+    await harness.stop();
+  }
+});
+
+test('polished tile and Temp review screenshots in both themes and mobile', async ({
+  page,
+  harness,
+}) => {
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await host(page, harness);
+  const image = await page.evaluate(() => {
+    const c = document.createElement('canvas');
+    c.width = 128;
+    c.height = 128;
+    const ctx = c.getContext('2d')!;
+    const g = ctx.createLinearGradient(0, 0, 128, 128);
+    g.addColorStop(0, '#104d99');
+    g.addColorStop(1, '#d75670');
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, 128, 128);
+    ctx.fillStyle = '#fff';
+    ctx.font = '64px sans-serif';
+    ctx.fillText('♪', 38, 88);
+    return c.toDataURL('image/png').split(',')[1];
+  });
+  await page.getByRole('button', { name: 'Edit icon for Airhorn', exact: true }).click();
+  await page.getByLabel('Choose sound icon').setInputFiles({
+    name: 'art.png',
+    mimeType: 'image/png',
+    buffer: Buffer.from(image, 'base64'),
+  });
+  await page.getByRole('button', { name: 'Save icon', exact: true }).click();
+  await page.getByRole('button', { name: 'Play Airhorn', exact: true }).click();
+  await expect(page.getByRole('slider', { name: 'Seek Airhorn', exact: true })).toBeVisible();
+  await page.screenshot({ path: 'artifacts/screenshots/v23-red-blue.png' });
+  await page.getByRole('combobox', { name: 'View mode' }).selectOption('large');
+  await page.screenshot({ path: 'artifacts/screenshots/v23-large-artwork.png' });
+  await page.getByRole('button', { name: 'Stop', exact: true }).click();
+  await page
+    .getByLabel('Add session audio', { exact: true })
+    .setInputFiles({ name: 'Session review.wav', mimeType: 'audio/wav', buffer: sessionWave() });
+  await expect(
+    page.getByRole('button', { name: 'Play Session review', exact: true }),
+  ).toBeEnabled();
+  await page.getByRole('button', { name: 'Reverse and play Session review', exact: true }).click();
+  await expect(page.locator('.player-track')).toContainText('Session review (reversed)');
+  await page.getByRole('button', { name: 'Stop', exact: true }).click();
+  await page.locator('#temp-manager > summary').click();
+  await expect(page.locator('.temp-source')).toContainText('Session review');
+  await page.screenshot({ path: 'artifacts/screenshots/v23-temp.png' });
+  await page.getByRole('button', { name: 'Keep normal permanently', exact: true }).click();
+  await page.screenshot({ path: 'artifacts/screenshots/v23-permanent-confirmation.png' });
+  await page.getByRole('button', { name: 'Cancel', exact: true }).click();
+  await page.locator('#temp-manager > summary').click();
+  await page.getByRole('combobox', { name: 'View mode' }).selectOption('icons');
+  await page.getByRole('button', { name: 'Access settings' }).click();
+  await page.getByRole('combobox', { name: 'Theme', exact: true }).selectOption('purple');
+  await page.getByRole('button', { name: 'Close dialog' }).click();
+  await page.screenshot({ path: 'artifacts/screenshots/v23-purple.png' });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.locator('.sound-collection').scrollIntoViewIfNeeded();
+  await page.evaluate(
+    () =>
+      new Promise<void>((resolve) =>
+        requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
+      ),
+  );
+  await page.screenshot({ path: 'artifacts/screenshots/v23-phone.png' });
 });

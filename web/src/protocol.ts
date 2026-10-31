@@ -24,7 +24,22 @@ export const commandSchema = z
       'keepAudio',
       'endSession',
       'beginSession',
+      'audioAssets',
+      'audioPlay',
+      'removeAudio',
+      'retryAudio',
+      'retryCleanup',
+      'revokePeer',
     ]),
+    assetId: z.uuid().optional(),
+    variantId: z.uuid().optional(),
+    orientation: z.enum(['normal', 'reversed']).optional(),
+    destinationDirectory: z.string().max(1024).optional(),
+    categoryId: z.number().int().nonnegative().optional(),
+    categoryName: z.string().max(256).optional(),
+    confirmed: z.boolean().optional(),
+    audienceId: z.uuid().optional(),
+    ownerId: z.string().max(128).optional(),
     soundId: z.string().max(64).optional(),
     libraryVersion: z.string().max(64).optional(),
     delta: z.union([z.literal(-1), z.literal(1)]).optional(),
@@ -40,6 +55,8 @@ export const commandSchema = z
         guestCounter: z.boolean(),
         guestSeeking: z.boolean().optional(),
         guestSpotify: z.boolean().optional(),
+        guestUploads: z.boolean().optional(),
+        guestTransforms: z.boolean().optional(),
       })
       .strict()
       .optional(),
@@ -53,6 +70,13 @@ export type Sound = {
   durationMs?: number | null;
   nativePlays?: number | null;
   nativeLastPlayed?: string | null;
+  assetId?: string | null;
+  orientation?: string | null;
+  audioKind?: string | null;
+  internalVariant?: boolean;
+  aliasOf?: string | null;
+  workspaceId?: string | null;
+  aliases?: string[] | null;
   temporary?: boolean;
   uploadedBy?: string | null;
 };
@@ -87,6 +111,7 @@ export const snapshotSchema = z.object({
     .regex(/^[a-f0-9]{64}$/)
     .nullable()
     .optional(),
+  managedAudioVersion: z.number().int().nonnegative().optional(),
   statisticsVersion: z.number().int().nonnegative().optional(),
   library: z.object({
     version: z.string().max(64),
@@ -99,6 +124,13 @@ export const snapshotSchema = z.object({
           durationMs: z.number().nonnegative().nullable().optional(),
           nativePlays: z.number().int().nonnegative().nullable().optional(),
           nativeLastPlayed: z.string().nullable().optional(),
+          assetId: z.string().nullable().optional(),
+          orientation: z.string().nullable().optional(),
+          audioKind: z.string().nullable().optional(),
+          internalVariant: z.boolean().optional(),
+          aliasOf: z.string().nullable().optional(),
+          workspaceId: z.string().nullable().optional(),
+          aliases: z.array(z.string().max(64)).max(64).nullable().optional(),
           temporary: z.boolean().optional(),
           uploadedBy: z.string().max(40).nullable().optional(),
         }),
@@ -125,6 +157,8 @@ export const snapshotSchema = z.object({
     guestCounter: z.boolean(),
     guestSeeking: z.boolean().optional(),
     guestSpotify: z.boolean().optional(),
+    guestUploads: z.boolean().optional(),
+    guestTransforms: z.boolean().optional(),
   }),
 });
 export type Snapshot = z.infer<typeof snapshotSchema>;
@@ -160,7 +194,10 @@ export function isGuestAllowed(c: Command, s: Snapshot) {
       c.action !== 'disable' &&
       (c.action === 'status' || c.action === undefined || s.permissions.guestSpotify !== false)
     );
-  if (c.op === 'reverse') return s.permissions.remotePlayback;
+  if (c.op === 'reverse')
+    return s.permissions.remotePlayback && s.permissions.guestTransforms !== false;
+  if (c.op === 'audioPlay') return s.permissions.remotePlayback;
+  if (c.op === 'audioAssets') return true;
   if (c.op === 'waveform' || c.op === 'statistics') return true;
   if (['seek', 'pause', 'startAt', 'region'].includes(c.op))
     return s.permissions.remotePlayback && s.permissions.guestSeeking !== false;
@@ -261,7 +298,13 @@ export function selectSounds(s: Snapshot, categoryId: string, search: string) {
       : flattenCategories(s.library.categories).find((c) => c.category.id === categoryId)?.category
           .soundIds;
   const byId = new Map(s.library.sounds.map((sound) => [sound.id, sound]));
-  return (
-    ids ? ids.map((id) => byId.get(id)).filter((x): x is Sound => !!x) : s.library.sounds
-  ).filter((sound) => !query || sound.name.toLocaleLowerCase().includes(query));
+  return (ids ? ids.map((id) => byId.get(id)).filter((x): x is Sound => !!x) : s.library.sounds)
+    .filter((sound) => !sound.internalVariant)
+    .filter((sound) => !query || sound.name.toLocaleLowerCase().includes(query));
 }
+
+export const soundKeys = (sound: Sound) => [
+  ...new Set([sound.workspaceId ?? sound.id, sound.id, ...(sound.aliases ?? [])]),
+];
+export const hasSound = (ids: string[], sound: Sound) =>
+  soundKeys(sound).some((id) => ids.includes(id));

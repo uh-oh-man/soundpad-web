@@ -83,7 +83,7 @@ export class Session {
     private extensions?: {
       layouts?: (layouts: SharedLayout[]) => void;
       waveform?: (data: unknown) => void;
-      upload: (bytes: Uint8Array, name: string, by: string) => Promise<void>;
+      upload: (bytes: Uint8Array, name: string, by: string, peer: string) => Promise<unknown>;
     },
   ) {
     this.peerId = transport.id;
@@ -146,22 +146,28 @@ export class Session {
               byteLength <= 16 * 1024 * 1024 &&
               this.uploading.size < 2 &&
               !this.uploading.has(peerId) &&
-              this.current().permissions.remotePlayback,
+              this.current().permissions.guestUploads !== false,
         onRequest: async (bytes, { peerId, metadata }) => {
           if (
             !this.accepted.has(peerId) ||
             this.denied.has(peerId) ||
             this.uploading.size >= 2 ||
-            this.uploading.has(peerId)
+            this.uploading.has(peerId) ||
+            this.current().permissions.guestUploads === false
           )
             throw Error('Upload unavailable.');
           const name =
             typeof metadata === 'string' && metadata.length <= 256 ? metadata : 'audio.wav';
           this.uploading.add(peerId);
           try {
-            await extensions.upload(bytes, name, this.people.get(peerId)?.name ?? 'Guest');
+            const result = await extensions.upload(
+              bytes,
+              name,
+              this.people.get(peerId)?.name ?? 'Guest',
+              peerId,
+            );
             this.broadcast();
-            return 'ok';
+            return JSON.stringify(result ?? {});
           } finally {
             this.uploading.delete(peerId);
           }
@@ -458,11 +464,12 @@ export class Session {
   async upload(bytes: Uint8Array, name: string) {
     if (!this.hostPeer || !this.uploadAction || this.revoked)
       throw Error('Connect to the host first.');
-    await this.uploadAction.request(bytes, {
+    const result = await this.uploadAction.request(bytes, {
       target: this.hostPeer,
       metadata: name,
       timeoutMs: 90000,
     });
+    return JSON.parse(result);
   }
   sendCommand(c: Command) {
     return new Promise<unknown>((resolve, reject) => {
@@ -479,7 +486,19 @@ export class Session {
           this.pending.delete(c.id);
           reject(Error('Host did not acknowledge the command.'));
         },
-        c.op === 'reverse' ? 90000 : c.op === 'waveform' ? 45000 : 12000,
+        [
+          'reverse',
+          'audioPlay',
+          'keepAudio',
+          'removeAudio',
+          'retryAudio',
+          'retryCleanup',
+          'endSession',
+        ].includes(c.op)
+          ? 90000
+          : c.op === 'waveform'
+            ? 45000
+            : 12000,
       );
       this.pending.set(c.id, { resolve, reject, timer });
       this.send(

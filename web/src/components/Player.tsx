@@ -1,5 +1,6 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { AudioLines, Play, Pause, Square, RotateCcw, ChevronUp, ChevronDown } from 'lucide-react';
+import { hasSound } from '../protocol';
 import { controller } from '../controller';
 import type { Snapshot } from '../protocol';
 import type { Workspace } from '../workspace';
@@ -20,6 +21,22 @@ export function Player({
   update: (fn: (w: Workspace) => Workspace) => void;
   children: React.ReactNode;
 }) {
+  const root = useRef<HTMLElement>(null);
+  useEffect(() => {
+    const element = root.current;
+    if (!element) return;
+    const resize = new ResizeObserver(() =>
+      document.documentElement.style.setProperty(
+        '--player-height',
+        `${element.getBoundingClientRect().height}px`,
+      ),
+    );
+    resize.observe(element);
+    return () => {
+      resize.disconnect();
+      document.documentElement.style.removeProperty('--player-height');
+    };
+  }, []);
   const [expanded, setExpanded] = useState(false);
   const [lastId, setLastId] = useState<string | null>(null);
   useEffect(() => {
@@ -47,9 +64,11 @@ export function Player({
   async function replay() {
     const cue = workspace?.lastCue;
     if (!cue) return;
+    const target = state.library.sounds.find((s) => hasSound([cue.soundId], s));
+    if (!target) return;
     try {
       await controller.run(cue.end ? 'region' : 'startAt', {
-        soundId: cue.soundId,
+        soundId: target.id,
         libraryVersion: state.library.version,
         positionMs: cue.at,
         endMs: cue.end,
@@ -60,7 +79,7 @@ export function Player({
     }
   }
   return (
-    <footer className={`player player-v2 ${expanded ? 'expanded' : ''}`}>
+    <footer ref={root} className={`player player-v2 ${expanded ? 'expanded' : ''}`}>
       <div className="player-track">
         <span className="playback-icon">
           {sound?.icon ? <img src={sound.icon} alt="" /> : <AudioLines size={22} />}
@@ -136,7 +155,7 @@ export function Player({
             disabled ||
             !canSeek ||
             !workspace?.lastCue ||
-            !state.library.sounds.some((s) => s.id === workspace.lastCue?.soundId)
+            !state.library.sounds.some((s) => hasSound([workspace.lastCue!.soundId], s))
           }
           onClick={() => void replay()}
         >
