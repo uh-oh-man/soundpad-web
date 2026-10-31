@@ -1445,6 +1445,13 @@ test('live Nostr/WebRTC: guests see Mimic only when allowed and can clip from it
         .getByRole('region', { name: 'Just mimicked' })
         .getByRole('button', { name: 'Replay Guest mimic' }),
     ).toBeVisible();
+    // Guests only exist over real relays, so the guest view's accessibility is checked here.
+    const { violations } = await new AxeBuilder({ page: guest }).analyze();
+    expect(
+      violations
+        .filter((v) => v.impact === 'serious' || v.impact === 'critical')
+        .map((v) => `${v.id} (${v.nodes.map((n) => n.target.join(' ')).join(', ')})`),
+    ).toEqual([]);
   } finally {
     await context.close();
   }

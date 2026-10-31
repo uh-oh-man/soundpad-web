@@ -956,7 +956,10 @@
 .guest-name-dialog {
   max-width: 390px;
 }
-.guest-name-dialog > input {
+.guest-name-form {
+  display: contents;
+}
+.guest-name-dialog input {
   width: 100%;
   border: 1px solid var(--line);
   border-radius: 8px;

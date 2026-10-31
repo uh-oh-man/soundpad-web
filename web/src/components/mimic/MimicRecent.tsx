@@ -24,13 +24,10 @@ export function MimicRecent({
       <small>Just mimicked</small>
       {recent.map((clip) => (
         <div className="mimic-recent-item" key={clip.assetId}>
-          <button
-            disabled={!canPlay}
-            aria-label={`Replay ${clip.name}`}
-            onClick={() => play(clip.assetId, 'normal')}
-          >
-            <Play size={13} /> <span className="mimic-recent-name">{clip.name}</span>{' '}
-            <small>· {clip.by}</small>
+          <button disabled={!canPlay} onClick={() => play(clip.assetId, 'normal')}>
+            {/* The spoken name keeps the visible text: "Replay <name> · <who>". */}
+            <Play size={13} aria-hidden="true" /> <span className="sr-only">Replay </span>
+            <span className="mimic-recent-name">{clip.name}</span> <small>· {clip.by}</small>
           </button>
           {/* Hear it backwards: the same reverse Temp offers, under the same guest permissions. */}
           <button

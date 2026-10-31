@@ -56,50 +56,55 @@ export function GuestName({ initial }: { initial: string }) {
   const [name, setName] = useState(initial === 'Guest' ? '' : initial);
   return (
     <div className="scrim">
-      <form
+      {/* A <form> may not carry role="dialog", so the dialog wraps it and the form lays out as its contents. */}
+      <div
         className="dialog guest-name-dialog"
         role="dialog"
         aria-modal="true"
         aria-labelledby="guest-name-title"
-        onSubmit={(e) => {
-          e.preventDefault();
-          if (name.trim()) controller.confirmName(name);
-        }}
-        onKeyDown={(e) => {
-          if (e.key !== 'Tab') return;
-          const nodes = e.currentTarget.querySelectorAll<HTMLElement>(
-            'input,button:not(:disabled)',
-          );
-          const first = nodes[0],
-            last = nodes[nodes.length - 1];
-          if (e.shiftKey && document.activeElement === first) {
-            e.preventDefault();
-            last.focus();
-          } else if (!e.shiftKey && document.activeElement === last) {
-            e.preventDefault();
-            first.focus();
-          }
-        }}
       >
-        <h2 id="guest-name-title">What’s your gamer name?</h2>
-        <p>Your friends will see this name when you play a sound.</p>
-        <input
-          autoFocus
-          aria-label="Gamer name"
-          value={name}
-          maxLength={40}
-          onChange={(e) => setName(e.target.value)}
-          autoComplete="nickname"
-        />
-        <div className="editor-actions">
-          <button type="button" onClick={() => setName(randomGamerName())}>
-            Random
-          </button>
-          <button className="primary" type="submit" disabled={!name.trim()}>
-            Done
-          </button>
-        </div>
-      </form>
+        <form
+          className="guest-name-form"
+          onSubmit={(e) => {
+            e.preventDefault();
+            if (name.trim()) controller.confirmName(name);
+          }}
+          onKeyDown={(e) => {
+            if (e.key !== 'Tab') return;
+            const nodes = e.currentTarget.querySelectorAll<HTMLElement>(
+              'input,button:not(:disabled)',
+            );
+            const first = nodes[0],
+              last = nodes[nodes.length - 1];
+            if (e.shiftKey && document.activeElement === first) {
+              e.preventDefault();
+              last.focus();
+            } else if (!e.shiftKey && document.activeElement === last) {
+              e.preventDefault();
+              first.focus();
+            }
+          }}
+        >
+          <h2 id="guest-name-title">What’s your gamer name?</h2>
+          <p>Your friends will see this name when you play a sound.</p>
+          <input
+            autoFocus
+            aria-label="Gamer name"
+            value={name}
+            maxLength={40}
+            onChange={(e) => setName(e.target.value)}
+            autoComplete="nickname"
+          />
+          <div className="editor-actions">
+            <button type="button" onClick={() => setName(randomGamerName())}>
+              Random
+            </button>
+            <button className="primary" type="submit" disabled={!name.trim()}>
+              Done
+            </button>
+          </div>
+        </form>
+      </div>
     </div>
   );
 }

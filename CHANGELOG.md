@@ -2,6 +2,19 @@
 
 Notable changes to Soundpad Web. Versions follow the website's `package.json`; the Windows companion is versioned separately and only needs updating when a release says so.
 
+## 2.12.5 — Guest accessibility
+
+Website fixes; the companion is unchanged apart from its version number, which is back in step with the website (it reports 2.12.5).
+
+### Fixed
+
+- **Mimic's "Just mimicked" list:** each Replay button's spoken name is now "Replay <clip> · <who>", matching what is on screen, instead of a shorter label that hid who made the clip. Screen-reader and voice-control users now get the same information as everyone else.
+- **Gamer-name dialog:** the dialog role moved from the `<form>` (where it is not allowed) to a wrapper around it. The form still submits with Enter and looks pixel-identical.
+
+### Tests
+
+- Guests only exist over the real Nostr relays, so the weekly live-relay test now also runs axe on the guest's view with Mimic open and fails on any serious or critical finding. A one-off live scan of the gamer-name dialog, the guest board, guest Mimic, the phone layout and guest settings found only the two issues above.
+
 ## 2.12.4 — Accessibility in dialogs and player tools
 
 Website only; no companion update needed. The companion in this release is unchanged and still reports itself as 2.12.3.
