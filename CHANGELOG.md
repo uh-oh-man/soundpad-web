@@ -2,6 +2,18 @@
 
 Notable changes to Soundpad Web. Versions follow the website's `package.json`; the Windows companion is versioned separately and only needs updating when a release says so.
 
+## 2.15.7 — Touch wording in Mimic on phones
+
+Website only; the companion is unchanged apart from its version number (it reports 2.15.7).
+
+### Changed
+
+- **Mimic's help speaks touch on phones and tablets.** It used to tell everyone to press 3, 5, 0, Enter, Shift+Enter and Esc, keys a phone doesn't have. On touch screens it now says to drag across the waveform, tap a transcript line or a Last 3/5/10 s button, then Mimic it. With a mouse, the keyboard shortcuts are shown as before. The choice is made by the device's pointer (`hover: none` and `pointer: coarse`), not by screen width.
+
+### Tests
+
+- Two new e2e tests, in both browsers: with a mouse the shortcuts are shown and the touch wording is hidden; on an emulated touch phone it's the other way round.
+
 ## 2.15.6 — Guest phones: no false "Too many requests", notices out of the way
 
 Website only; the companion is unchanged apart from its version number (it reports 2.15.6). Found by screenshotting a guest on a phone over the real relays.

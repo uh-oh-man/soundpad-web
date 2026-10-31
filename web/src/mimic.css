@@ -328,3 +328,15 @@
   gap: 6px;
   flex: none;
 }
+/* Selection help: keyboard wording with a mouse, touch wording on touch screens. */
+.mimic-help-touch {
+  display: none;
+}
+@media (hover: none) and (pointer: coarse) {
+  .mimic-help-keys {
+    display: none;
+  }
+  .mimic-help-touch {
+    display: block;
+  }
+}

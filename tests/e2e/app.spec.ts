@@ -1843,6 +1843,27 @@ test('the current companion gets no update note', async ({ page, harness }) => {
   await expect(page.getByText('A newer one adds')).toHaveCount(0);
 });
 
+test('Mimic help shows keyboard shortcuts with a mouse', async ({ page, harness }) => {
+  await host(page, harness);
+  await page.getByRole('button', { name: 'Mimic', exact: true }).click();
+  const dialog = page.getByRole('dialog', { name: 'Mimic' });
+  await dialog.getByRole('button', { name: 'Start listening' }).click();
+  await expect(dialog.getByText('or press', { exact: false })).toBeVisible();
+  await expect(dialog.getByText('tap a transcript line', { exact: false })).toBeHidden();
+});
+
+test.describe('on a touch phone', () => {
+  test.use({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true });
+  test('Mimic help speaks touch instead of keys', async ({ page, harness }) => {
+    await host(page, harness);
+    await page.getByRole('button', { name: 'Mimic', exact: true }).click();
+    const dialog = page.getByRole('dialog', { name: 'Mimic' });
+    await dialog.getByRole('button', { name: 'Start listening' }).click();
+    await expect(dialog.getByText('tap a transcript line', { exact: false })).toBeVisible();
+    await expect(dialog.getByText('or press', { exact: false })).toBeHidden();
+  });
+});
+
 test('Mimic fits a phone: header keeps Settings on screen and long clip names do not widen the window', async ({
   page,
   harness,

@@ -295,11 +295,18 @@ export function MimicPanel({
               </button>
             </div>
           ) : (
-            <p className="muted">
-              Drag across the waveform, click a transcript line, or press <kbd>3</kbd> <kbd>5</kbd>{' '}
-              <kbd>0</kbd> for the last 3, 5 or 10 seconds. Then <kbd>Enter</kbd> mimics,{' '}
-              <kbd>Shift</kbd>+<kbd>Enter</kbd> mimics and plays, <kbd>Esc</kbd> clears.
-            </p>
+            <>
+              {/* Keyboard help is shown where there is a mouse; touch screens get touch wording (mimic.css). */}
+              <p className="muted mimic-help-keys">
+                Drag across the waveform, click a transcript line, or press <kbd>3</kbd>{' '}
+                <kbd>5</kbd> <kbd>0</kbd> for the last 3, 5 or 10 seconds. Then <kbd>Enter</kbd>{' '}
+                mimics, <kbd>Shift</kbd>+<kbd>Enter</kbd> mimics and plays, <kbd>Esc</kbd> clears.
+              </p>
+              <p className="muted mimic-help-touch">
+                Drag across the waveform, tap a transcript line, or tap Last 3 s, 5 s or 10 s. Then
+                Mimic it.
+              </p>
+            </>
           )}
         </>
       ) : (
