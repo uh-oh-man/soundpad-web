@@ -2,9 +2,9 @@
 
 Notable changes to Soundpad Web. Versions follow the website's `package.json`; the Windows companion is versioned separately and only needs updating when a release says so.
 
-## 2.3.1 — website only
+## 2.3.1
 
-First release maintained by Claude (Claude Code). The 2.3 companion is unchanged and still required for the Temp system.
+First release maintained by Claude (Claude Code). The companion EXE is rebuilt as 2.3.1 so it matches the release tag, but its code is unchanged: a running 2.3.0 companion keeps working, and there's no need to download the new one.
 
 ### Fixed
 
