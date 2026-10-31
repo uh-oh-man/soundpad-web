@@ -24,6 +24,34 @@ if (args.FirstOrDefault() == "--mimic-probe")
     Console.WriteLine(Json.Write(new { source = pick.Name, capture.Status, capture.Running, frames = ring.Written, capture.Packets, rate = ring.Rate, peak = levels.Max() }));
     return;
 }
+if (args.FirstOrDefault() == "--mimic-stream-transcript" && args.Length == 2)
+{
+    // Streams a WAV into Mimic's ring in 10 ms packets at real-time pace, with the real Whisper engine and
+    // transcriber loop, then prints the lines as the Mimic window would show them. No audio device is used.
+    using var file = new NAudio.Wave.WaveFileReader(args[1]);
+    var provider = NAudio.Wave.WaveExtensionMethods.ToSampleProvider(file);
+    var mono = new List<float>(); var frame = new float[provider.WaveFormat.Channels * 4096]; int read;
+    while ((read = provider.Read(frame)) > 0)
+        for (int i = 0; i + provider.WaveFormat.Channels <= read; i += provider.WaveFormat.Channels) mono.Add(frame.AsSpan(i, provider.WaveFormat.Channels).ToArray().Average());
+    var audio = MimicTranscriber.Resample(mono.ToArray(), provider.WaveFormat.SampleRate, 48000);
+    var data = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "SoundpadWeb");
+    using var transcriber = new MimicTranscriber(new WhisperEngine(Path.Combine(data, "models", "ggml-base.en.bin"), null, Path.Combine(data, "native", "whisper-1.9.1")));
+    var ring = new MimicRing(48000, 45);
+    ring.WriteSilence(48000);
+    await transcriber.Enable(() => ring, false);
+    var clock = System.Diagnostics.Stopwatch.StartNew();
+    for (int offset = 0; offset < audio.Length; offset += 480)
+    {
+        ring.Write(audio.AsSpan(offset, Math.Min(480, audio.Length - offset)));
+        var due = TimeSpan.FromSeconds((offset + 480) / 48000.0) - clock.Elapsed;
+        if (due > TimeSpan.Zero) await Task.Delay(due);
+    }
+    for (int i = 0; i < 30; i++) { ring.WriteSilence(4800); await Task.Delay(100); } // 3 s of trailing silence, like a pause
+    long end = ring.Written;
+    foreach (var line in transcriber.Lines(ring, end - 48000L * 30, end)) Console.WriteLine($"[{line.StartMs / 1000.0:0.00} s - {line.EndMs / 1000.0:0.00} s] {line.Text}");
+    Console.WriteLine($"Speech starts at {(end - 48000L * 30 < 48000 ? (48000 - (end - 48000L * 30)) / 48.0 : 0):0} ms into the window; streamed {audio.Length / 48000.0:0.0} s in {clock.Elapsed.TotalSeconds:0.0} s.");
+    return;
+}
 if (args.FirstOrDefault() == "--analyze-file" && args.Length == 2)
 {
     var scratch = Path.Combine(Path.GetTempPath(), "soundpad-web-analysis-" + Guid.NewGuid().ToString("N"));

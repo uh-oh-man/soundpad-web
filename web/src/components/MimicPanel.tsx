@@ -47,6 +47,8 @@ export function transcriptFor(lines: TranscriptLine[], selection: Selection) {
 
 const POLL_MS = 500;
 const MIN_MS = 150;
+/** How close (in CSS pixels) the pointer must be to a selection edge to grab its handle. */
+const EDGE_PX = 8;
 const QUICK_SECONDS = [3, 5, 10];
 /** Keys that select the last N seconds, like Voice Replay Studio's F6 "save the last few seconds". */
 export const QUICK_KEYS: Record<string, number> = { '3': 3, '5': 5, '0': 10 };
@@ -101,6 +103,7 @@ function MimicWave({
         x1 = (shown.to / peek.windowMs) * width;
       ctx.fillRect(x0, 0, x1 - x0, height);
     }
+    const edges = shown ? [shown.from, shown.to].map((t) => (t / peek.windowMs) * width) : [];
     const bar = width / peek.levels.length;
     peek.levels.forEach((level, i) => {
       const t = ((i + 0.5) / peek.levels.length) * peek.windowMs;
@@ -112,25 +115,41 @@ function MimicWave({
     ctx.fillStyle = colors.line;
     for (let s = 5000; s < peek.windowMs; s += 5000)
       ctx.fillRect((s / peek.windowMs) * width, height - 6 * ratio, ratio, 6 * ratio);
+    // Edge handles, like Voice Replay Studio's: drag one to adjust that end of the selection.
+    ctx.fillStyle = colors.accent;
+    for (const x of edges) {
+      ctx.fillRect(x - ratio, 0, 2 * ratio, height);
+      ctx.fillRect(x - 4 * ratio, height / 2 - 12 * ratio, 8 * ratio, 24 * ratio);
+    }
   }, [peek, shown, colors.accent, colors.wave, colors.line]);
   const at = (e: PointerEvent<HTMLCanvasElement>) => {
     const box = e.currentTarget.getBoundingClientRect();
     return (Math.min(Math.max(e.clientX - box.left, 0), box.width) / box.width) * peek.windowMs;
+  };
+  /** The opposite end of the selection when the pointer is on one of its edge handles. */
+  const anchorFor = (e: PointerEvent<HTMLCanvasElement>) => {
+    if (!selection) return null;
+    const msPerPixel = peek.windowMs / e.currentTarget.getBoundingClientRect().width;
+    const t = at(e);
+    if (Math.abs(t - selection.from) <= EDGE_PX * msPerPixel) return selection.to;
+    if (Math.abs(t - selection.to) <= EDGE_PX * msPerPixel) return selection.from;
+    return null;
   };
   return (
     <div className="mimic-wave">
       <canvas
         ref={canvas}
         role="img"
-        aria-label={`Mimic buffer, last ${peek.windowMs / 1000} seconds. Drag to select.`}
+        aria-label={`Mimic buffer, last ${peek.windowMs / 1000} seconds. Drag to select; drag an edge to adjust it.`}
         onPointerDown={(e) => {
           e.currentTarget.setPointerCapture(e.pointerId);
-          drag.current = at(e);
+          drag.current = anchorFor(e) ?? at(e);
           setDraft(null);
         }}
         onPointerMove={(e) => {
-          if (drag.current !== null)
-            setDraft({ from: Math.min(drag.current, at(e)), to: Math.max(drag.current, at(e)) });
+          if (drag.current === null)
+            e.currentTarget.style.cursor = anchorFor(e) === null ? '' : 'ew-resize';
+          else setDraft({ from: Math.min(drag.current, at(e)), to: Math.max(drag.current, at(e)) });
         }}
         onPointerUp={(e) => {
           if (drag.current === null) return;

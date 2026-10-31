@@ -1218,6 +1218,12 @@ test('Mimic: host listens, everyone sees it, and a selection becomes a playable 
   await page.mouse.move(box.x + box.width * 0.9, box.y + box.height / 2);
   await page.mouse.up();
   await expect(dialog.locator('.mimic-range')).toContainText('3.0 s');
+  // Dragging the right edge handle extends the same selection instead of starting a new one.
+  await page.mouse.move(box.x + box.width * 0.9, box.y + box.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(box.x + box.width * 0.95, box.y + box.height / 2);
+  await page.mouse.up();
+  await expect(dialog.locator('.mimic-range')).toContainText('· 4.5 s');
   await dialog.getByRole('button', { name: 'Clear' }).click();
   await expect(dialog.locator('.mimic-range')).toHaveCount(0);
   await dialog.getByRole('button', { name: 'Stop listening' }).click();

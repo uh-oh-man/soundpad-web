@@ -97,7 +97,7 @@ public sealed class WhisperEngine(string modelPath, string? sharedModelPath = nu
 public sealed class MimicTranscriber(ITranscriptEngine engine) : IDisposable
 {
     public const int SpeechRate = 16000;
-    private const double MinChunkSeconds = 2, PreferredChunkSeconds = 4, MaxChunkSeconds = 15, PauseSeconds = 0.6;
+    private const double MinChunkSeconds = 2, MaxChunkSeconds = 15, PauseSeconds = 0.4;
     private readonly object gate = new();
     private readonly List<TranscriptSegment> segments = [];
     private MimicRing? ring;
@@ -169,20 +169,21 @@ public sealed class MimicTranscriber(ITranscriptEngine engine) : IDisposable
         if (length < MinChunkSeconds * rate) return false;
         end = start + Math.Min(length, (long)(MaxChunkSeconds * rate));
         var audio = current.Read(start, end);
-        bool forced = force || end - start >= MaxChunkSeconds * rate;
+        bool full = end - start >= MaxChunkSeconds * rate;
         bool pause = Quiet(audio.AsSpan(Math.Max(0, audio.Length - (int)(PauseSeconds * rate))));
-        if (!forced && !pause && end - start < PreferredChunkSeconds * rate) return false;
+        // Cut at a pause so no sentence is split (a split makes Whisper guess the missing words).
+        // Only 15 s of unbroken speech forces a cut.
+        if (!force && !full && !pause) return false;
         if (Quiet(audio)) { lock (gate) if (ReferenceEquals(current, ring)) committed = end; return true; }
         lock (gate) status = "Transcribing";
         var spans = await engine.Transcribe(Resample(audio, (int)rate, SpeechRate), cancel);
         long next = end;
         var accepted = spans.ToList();
-        // A sentence still being spoken at the chunk edge is held back and retried with what follows.
-        if (!forced && !pause && accepted.Count > 0 && (end - start) - (long)(accepted[^1].End.TotalSeconds * rate) < 0.4 * rate)
+        // After a forced cut, a sentence still being spoken at the edge is held back and retried with what follows.
+        if (full && !pause && accepted.Count > 1 && (end - start) - (long)(accepted[^1].End.TotalSeconds * rate) < 0.4 * rate)
         {
             next = start + (long)(accepted[^1].Start.TotalSeconds * rate);
             accepted.RemoveAt(accepted.Count - 1);
-            if (next <= start) { next = end; accepted = spans.ToList(); }
         }
         lock (gate)
         {

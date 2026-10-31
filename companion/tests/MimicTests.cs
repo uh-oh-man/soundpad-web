@@ -152,4 +152,23 @@ public sealed class MimicTests : IDisposable
         Assert.True((await bridge.Execute(Cmd("endSession"), "host")).Ok);
         Assert.False(bridge.Snapshot.Mimic!.Transcribing);
     }
+
+    [Fact]
+    public async Task TranscriptChunksEndAtPausesNotMidSpeech()
+    {
+        var engine = new TranscriptFixture();
+        using var transcriber = new MimicTranscriber(engine);
+        var ring = new MimicRing(MimicFixture.Rate, 45);
+        Assert.False(await transcriber.Step(ring, false, default));
+        float[] Tone(double seconds) => Enumerable.Range(0, (int)(seconds * MimicFixture.Rate)).Select(i => 0.5f * MathF.Sin(i * 0.17f)).ToArray();
+        ring.Write(Tone(5));
+        Assert.False(await transcriber.Step(ring, false, default)); // still talking: wait
+        Assert.Equal(0, engine.Calls);
+        ring.WriteSilence(MimicFixture.Rate / 2);
+        Assert.True(await transcriber.Step(ring, false, default)); // pause: transcribe the whole sentence
+        Assert.Single(transcriber.Lines(ring, 0, ring.Written));
+        ring.Write(Tone(16));
+        Assert.True(await transcriber.Step(ring, false, default)); // 15 s without a pause forces a cut
+        Assert.Equal(2, engine.Calls);
+    }
 }

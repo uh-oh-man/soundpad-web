@@ -2,6 +2,20 @@
 
 Notable changes to Soundpad Web. Versions follow the website's `package.json`; the Windows companion is versioned separately and only needs updating when a release says so.
 
+## 2.6.0 — Better live transcripts, selection handles
+
+**Update the Windows companion** for the transcript fix; the website works with 2.5 companions.
+
+### Changed
+
+- Live transcripts now wait for the speaker to pause (0.4 s) instead of cutting every few seconds. Streaming Voice Replay Studio's JFK test recording through Mimic in real time used to give "And so my fellow Americans ask not **to**…", with a word Whisper invented at the cut. It now gives the exact sentence, the same as transcribing the whole file. After 15 s of unbroken speech it still cuts, holding back the unfinished sentence.
+
+### Added
+
+- Edge handles on a Mimic selection, as in Voice Replay Studio: drag either end to adjust it without starting over. The cursor changes over a handle.
+- `SoundpadWeb.Harness.exe --mimic-stream-transcript <wav>`: end-to-end live transcription check with the real Whisper engine and no audio device.
+- Tests: pause-based chunking (C#), handle dragging (e2e).
+
 ## 2.5.1 — Mimic keyboard shortcuts
 
 Website update; the companion is rebuilt as 2.5.1 with no code changes, so a 2.5.0 companion keeps working.

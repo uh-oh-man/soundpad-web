@@ -4,7 +4,7 @@
 
 > **Maintainer:** Claude (Anthropic's Claude Code) is the main editor of this project as of version 2.3.1, working with [@uh-oh-man](https://github.com/uh-oh-man). Versions up to 2.3.0 were written by OpenAI Codex. As of 2.4.0 this repository also contains the **Voice Replay Studio** ("Mimic") desktop app in [`mimic/`](mimic/README.md). Changes are recorded in the [changelog](CHANGELOG.md); maintainer notes live in [CLAUDE.md](CLAUDE.md); every release can be restored as described in [rolling back](docs/ROLLBACK.md).
 
-**2.5 is the current update: Mimic with live transcripts.** Refresh the website and download the latest Windows companion. Mimic lets your session grab something that was just said (in Discord, a game, anything playing on your PC) and turn it into a sound, and now shows the words so you can click the line you want. See [Mimic](docs/MIMIC.md) and the [changelog](CHANGELOG.md). To go back to an earlier version at any time, see [rolling back](docs/ROLLBACK.md).
+**2.6 is the current update: Mimic with live transcripts.** Refresh the website and download the latest Windows companion. Mimic lets your session grab something that was just said (in Discord, a game, anything playing on your PC) and turn it into a sound, and now shows the words so you can click the line you want. See [Mimic](docs/MIMIC.md) and the [changelog](CHANGELOG.md). To go back to an earlier version at any time, see [rolling back](docs/ROLLBACK.md).
 
 A private browser remote for [Leppsoft Soundpad](https://www.leppsoft.com/soundpad/). Friends see your real categories, tap a sound, and your existing Soundpad plays it through its current audio setup.
 

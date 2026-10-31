@@ -24,7 +24,7 @@ The capture engine in the companion is a port of Voice Replay Studio's `CaptureS
 **Anyone allowed**
 
 1. Open **Mimic** (or click the **Mimic on** badge).
-2. Drag across the waveform, or use **Last 3 s / 5 s / 10 s**. A selection freezes the view so the moment stays put.
+2. Drag across the waveform, or use **Last 3 s / 5 s / 10 s**. A selection freezes the view so the moment stays put. Drag either edge handle of a selection to adjust just that end (2.6.0).
 3. Optionally name it, then **Mimic it** (adds it to Temp) or **Mimic & play** (adds it and plays it through Soundpad).
 
 Keyboard (2.5.1): **3**, **5** or **0** select the last 3, 5 or 10 seconds and move focus to the name field, **Enter** mimics, **Shift+Enter** mimics and plays, **Esc** clears the selection (press it again to close the window). This is the browser counterpart of Voice Replay Studio's F6 key; a website cannot register system-wide hotkeys.
@@ -37,11 +37,11 @@ Mimic can show what was said, line by line, under the waveform. Click a line to 
 
 - **Host turns it on** in the Mimic window. The first time, **Get transcripts (148 MB, once)** downloads Whisper's English `base.en` model to `%LOCALAPPDATA%\SoundpadWeb\models\`. If Voice Replay Studio already downloaded it on this PC, that copy is reused and nothing is downloaded.
 - **Recognition runs on the host PC.** Audio is never uploaded. People allowed to use Mimic receive only the text of the last 30 seconds, with timings.
-- **Behind live by a few seconds.** The companion transcribes in chunks of 2–15 seconds, ideally ending at a pause. A sentence still being spoken at the edge of a chunk is held back and finished with the next one. Silent chunks are skipped, which saves CPU and stops Whisper inventing words from silence.
+- **Appears when the speaker pauses.** The companion waits for a pause of at least 0.4 seconds before transcribing what was said (2.6.0). Cutting mid-sentence made Whisper guess the missing words. After 15 seconds of unbroken speech it cuts anyway, holding back the unfinished sentence for the next chunk. Silent chunks are skipped, which saves CPU and stops Whisper inventing words from silence.
 - **English only**, using the same model and confidence filters as Voice Replay Studio. On the owner's PC the model transcribed 11 seconds of speech in 2.2 seconds.
 - Turning transcripts off, **Stop listening**, **End hosting** and quitting all discard the text. Nothing is saved except a clip's name.
 
-`SoundpadWeb.exe --transcribe-file <file.wav> [--download] [--verbose]` transcribes a local WAV with the same engine, which is useful to check the model and native libraries on a PC.
+`SoundpadWeb.exe --transcribe-file <file.wav> [--download] [--verbose]` transcribes a local WAV with the same engine, which is useful to check the model and native libraries on a PC. `SoundpadWeb.Harness.exe --mimic-stream-transcript <file.wav>` streams a WAV into Mimic's buffer in real-time 10 ms packets with the real Whisper engine and prints the lines the Mimic window would show; no audio device is used. Streaming the JFK sample gives the same sentence, word for word, as transcribing the whole file.
 
 ## Privacy and safety rules
 
@@ -70,4 +70,4 @@ Requires companion 2.4. Older companions ignore the new permission, and the webs
 
 ## Not yet included
 
-Voice Replay Studio features that are not in the browser version yet: transcript search over saved clips, the clip trim editor, and a system-wide hotkey (the Mimic window has in-window shortcuts instead). They remain available in the desktop app under `mimic/`.
+Voice Replay Studio features that are not in the browser version yet: trimming a clip after it is saved (in the browser you set exact edges before clipping instead), and a system-wide hotkey (the Mimic window has in-window shortcuts instead). Saved Mimic clips are named after their transcript, so the normal sound search finds them by their words. They remain available in the desktop app under `mimic/`.
