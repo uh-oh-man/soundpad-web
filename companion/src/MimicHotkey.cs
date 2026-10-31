@@ -57,7 +57,7 @@ public sealed class WindowsHotkey(uint key = 0x75, string name = "F6") : IGlobal
             if (error != 0)
             {
                 worker.Join();
-                throw new InvalidDataException($"{Name} is already used by another app (for example Voice Replay Studio). Close it or keep using the Mimic window. ({new Win32Exception(error).Message})");
+                throw new InvalidDataException($"{Name} is already used by another app (for example Voice Replay Studio). Pick another key next to Hotkey in the Mimic window, or close that app. ({new Win32Exception(error).Message})");
             }
             thread = worker;
         }

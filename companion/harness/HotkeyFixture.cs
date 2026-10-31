@@ -9,7 +9,7 @@ public sealed class HotkeyFixture(string name = "F6") : IGlobalHotkey
     public bool Active => pressed != null;
     public void Register(Action action)
     {
-        if (Taken) throw new InvalidDataException($"{Name} is already used by another app (fixture).");
+        if (Taken) throw new InvalidDataException($"{Name} is already used by another app (fixture). Pick another key next to Hotkey in the Mimic window, or close that app.");
         pressed = action;
     }
     public void Press() => pressed?.Invoke();

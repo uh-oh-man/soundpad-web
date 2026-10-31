@@ -1361,6 +1361,7 @@ test('Mimic: host listens, everyone sees it, and a selection becomes a playable 
   await dialog.getByLabel('Hotkey key', { exact: true }).selectOption('F9');
   await expect(page.getByText('F9 is already used by another app', { exact: false })).toBeVisible();
   await expect(dialog.getByLabel('Hotkey key', { exact: true })).toHaveValue('F6');
+  await expect(page.getByText('Pick another key next to Hotkey', { exact: false }).first()).toBeVisible();
   // The F6 hotkey is host-only and reports its state (the harness uses a fixture key, never real F6).
   await dialog.getByLabel('F6 hotkey').check();
   await expect(dialog.getByText('Press F6 in any app to save the last 10 s')).toBeVisible();

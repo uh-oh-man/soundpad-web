@@ -2,6 +2,18 @@
 
 Notable changes to Soundpad Web. Versions follow the website's `package.json`; the Windows companion is versioned separately and only needs updating when a release says so.
 
+## 2.15.8 — A taken hotkey points at the key picker
+
+**Update the Windows companion** to get the new wording.
+
+### Changed
+
+- **When another app already uses the hotkey's key, the message says what to do.** It used to say "Close it or keep using the Mimic window", written before the key could be changed. Since 2.14 the key can be changed, so the message now says "Pick another key next to Hotkey in the Mimic window, or close that app".
+
+### Tests
+
+- The Mimic e2e test checks the new wording when the harness's taken key (F9) is chosen. 82 C# tests pass.
+
 ## 2.15.7 — Touch wording in Mimic on phones
 
 Website only; the companion is unchanged apart from its version number (it reports 2.15.7).
