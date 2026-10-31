@@ -1653,6 +1653,34 @@ test('slow connection: busy buttons, Temp and Mimic toggles keep keyboard focus 
   await expect(f6).toBeFocused();
 });
 
+test('Mimic hotkey: the host browser remembers its key and length across companion restarts', async ({
+  page,
+  harness,
+}) => {
+  // As if this browser chose F7 and 15 s in an earlier session; the (restarted) companion is on F6 and 10 s.
+  await page.addInitScript(() =>
+    localStorage.setItem('soundpad-mimic-hotkey', JSON.stringify({ key: 'F7', seconds: 15 })),
+  );
+  await host(page, harness);
+  await page.getByRole('button', { name: 'Mimic', exact: true }).click();
+  const dialog = page.getByRole('dialog', { name: 'Mimic' });
+  await dialog.getByRole('button', { name: 'Start listening' }).click();
+  await expect(dialog.getByLabel('Hotkey key', { exact: true })).toHaveValue('F6');
+  await dialog.getByLabel('F6 hotkey').check();
+  await expect(dialog.getByText('Press F7 in any app to save the last 15 s')).toBeVisible();
+  await expect(dialog.getByLabel('Hotkey key', { exact: true })).toHaveValue('F7');
+  await expect(dialog.getByLabel('F7 hotkey')).toBeChecked();
+  // A remembered key that another app now owns (the harness pretends F9 is) is reported, and the
+  // hotkey still turns on with the current key.
+  await dialog.getByLabel('F7 hotkey').uncheck();
+  await page.evaluate(() =>
+    localStorage.setItem('soundpad-mimic-hotkey', JSON.stringify({ key: 'F9', seconds: 15 })),
+  );
+  await dialog.getByLabel('F7 hotkey').check();
+  await expect(page.getByText('F9 is already used by another app', { exact: false })).toBeVisible();
+  await expect(dialog.getByText('Press F7 in any app to save the last 15 s')).toBeVisible();
+});
+
 test('Mimic fits a phone: header keeps Settings on screen and long clip names do not widen the window', async ({
   page,
   harness,

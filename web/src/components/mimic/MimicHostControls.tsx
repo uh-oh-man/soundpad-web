@@ -15,6 +15,32 @@ const sourcesSchema = z.object({
 
 /** Keys the companion accepts for the Mimic hotkey (2.14+); F6 is Voice Replay Studio's. */
 const HOTKEY_KEYS = ['F6', 'F7', 'F8', 'F9', 'F10'];
+const HOTKEY_LENGTHS = [3, 5, 10, 15, 30];
+const HOTKEY_PREFS = 'soundpad-mimic-hotkey';
+
+/**
+ * The host's last hotkey key and length. The companion forgets them when it closes, so this browser
+ * remembers them and applies them the next time the host turns the hotkey on.
+ */
+function hotkeyPrefs(): { key?: string; seconds?: number } {
+  try {
+    const saved = JSON.parse(localStorage.getItem(HOTKEY_PREFS) ?? '{}') as Record<string, unknown>;
+    return {
+      key: HOTKEY_KEYS.find((k) => k === saved.key),
+      seconds: HOTKEY_LENGTHS.find((s) => s === saved.seconds),
+    };
+  } catch {
+    return {}; // unavailable or damaged storage: use the companion's defaults
+  }
+}
+
+function rememberHotkey(change: { key?: string; seconds?: number }) {
+  try {
+    localStorage.setItem(HOTKEY_PREFS, JSON.stringify({ ...hotkeyPrefs(), ...change }));
+  } catch {
+    // not remembered; the choice still applies until the companion closes
+  }
+}
 
 function rememberedSource() {
   try {
@@ -45,6 +71,25 @@ export function MimicHostControls({ state, connected }: { state: Snapshot; conne
   const [transcribing, setWantTranscript] = useOptimistic(!!mimic?.transcribing);
   const [hotkey, setWantHotkey] = useOptimistic(!!mimic?.hotkey);
   const hotkeyKey = mimic?.hotkeyKey ?? 'F6';
+
+  /**
+   * Once the hotkey is on, put back the key and length this browser last chose. Moving a hotkey that is
+   * on only succeeds if Windows grants the new key, so a remembered key another app now owns is
+   * reported and the hotkey stays on its current key.
+   */
+  async function restoreHotkeyPrefs() {
+    const saved = hotkeyPrefs();
+    if (saved.key && saved.key !== hotkeyKey && supports(state.companionVersion, 'hotkeyKey'))
+      await controller.run('mimicHotkey', { action: 'key', name: saved.key }).catch(() => {});
+    if (
+      saved.seconds &&
+      saved.seconds !== (mimic?.hotkeySeconds ?? 10) &&
+      supports(state.companionVersion, 'hotkeyLength')
+    )
+      await controller
+        .run('mimicHotkey', { action: 'length', positionMs: saved.seconds * 1000 })
+        .catch(() => {});
+  }
 
   const loadSources = useCallback(async () => {
     try {
@@ -173,7 +218,10 @@ export function MimicHostControls({ state, connected }: { state: Snapshot; conne
                 const on = e.target.checked;
                 setWantHotkey(on);
                 void command(
-                  () => controller.run('mimicHotkey', { action: on ? 'enable' : 'disable' }),
+                  async () => {
+                    await controller.run('mimicHotkey', { action: on ? 'enable' : 'disable' });
+                    if (on) await restoreHotkeyPrefs();
+                  },
                   () => setWantHotkey(null),
                 );
               }}
@@ -190,7 +238,10 @@ export function MimicHostControls({ state, connected }: { state: Snapshot; conne
               onChange={(e) => {
                 if (running.current) return;
                 const key = e.target.value;
-                void command(() => controller.run('mimicHotkey', { action: 'key', name: key }));
+                void command(async () => {
+                  await controller.run('mimicHotkey', { action: 'key', name: key });
+                  rememberHotkey({ key });
+                });
               }}
             >
               {HOTKEY_KEYS.map((k) => (
@@ -205,17 +256,16 @@ export function MimicHostControls({ state, connected }: { state: Snapshot; conne
                 aria-label={`${hotkeyKey} saves the last`}
                 value={mimic?.hotkeySeconds ?? 10}
                 aria-disabled={busy || undefined}
-                onChange={(e) =>
-                  !running.current &&
+                onChange={(e) => {
+                  if (running.current) return;
+                  const seconds = Number(e.target.value);
                   void controller
-                    .run('mimicHotkey', {
-                      action: 'length',
-                      positionMs: Number(e.target.value) * 1000,
-                    })
-                    .catch(() => {})
-                }
+                    .run('mimicHotkey', { action: 'length', positionMs: seconds * 1000 })
+                    .then(() => rememberHotkey({ seconds }))
+                    .catch(() => {});
+                }}
               >
-                {[3, 5, 10, 15, 30].map((s) => (
+                {HOTKEY_LENGTHS.map((s) => (
                   <option key={s} value={s}>
                     {s} s
                   </option>

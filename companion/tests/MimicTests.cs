@@ -380,6 +380,6 @@ public sealed class MimicTests : IDisposable
         var wav = Convert.FromBase64String(JsonSerializer.SerializeToElement(preview.Data, Json.Options).GetProperty("wav").GetString()!);
         using var reader = new NAudio.Wave.WaveFileReader(new MemoryStream(wav));
         Assert.InRange(reader.TotalTime.TotalMilliseconds, 2490, 2510);
-        Assert.Empty(bridge.Snapshot.Library.Sounds.Where(s => s.Temporary)); // a preview saves nothing
+        Assert.DoesNotContain(bridge.Snapshot.Library.Sounds, s => s.Temporary); // a preview saves nothing
     }
 }

@@ -2,6 +2,19 @@
 
 Notable changes to Soundpad Web. Versions follow the website's `package.json`; the Windows companion is versioned separately and only needs updating when a release says so.
 
+## 2.14.1 — The Mimic hotkey remembers your key
+
+Website only; the companion is unchanged apart from its version number (it reports 2.14.1).
+
+### Changed
+
+- **The host's browser remembers the hotkey's key and length.** The companion forgets them when it closes, so someone who needs F8 used to pick it again every session. Now ticking **Hotkey** turns it on and then puts back this browser's last key and length. The hotkey is turned on first and moved afterwards, so a remembered key that another app now owns is reported and the hotkey stays on its working key. Storage problems are ignored, and the companion's defaults (F6, 10 s) still work. Nothing new is saved on the host PC.
+
+### Tests
+
+- New e2e test: with F7 and 15 s remembered, ticking Hotkey gives "Press F7 … 15 s"; with a remembered key the harness treats as taken (F9), the error is shown and the hotkey stays on F7.
+- Fixed an xUnit analyzer warning (xUnit2029) in the Mimic preview test.
+
 ## 2.14.0 — Choose the Mimic hotkey
 
 **Update the Windows companion** to get this; with an older companion the window keeps F6, as before.
