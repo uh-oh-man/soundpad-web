@@ -5,7 +5,8 @@ Claude (Claude Code) is the main editor of this repository as of 2.3.1. The owne
 ## Layout
 
 - `web/src`: React website (Vite). `main.tsx` holds the app shell. `controller.ts` owns connection state. `arrange.ts` is the pure sound sorting and filtering logic. `components/` holds UI pieces.
-- `companion/`: .NET 10 Windows companion (`src`), its xUnit tests (`tests`) and the mock-Soundpad harness used by e2e tests (`harness`). Mimic capture lives in `MimicCapture.cs` / `BridgeMimic.cs`; `harness/MimicFixture.cs` is its test source.
+- `companion/`: .NET 10 Windows companion (`src`), its xUnit tests (`tests`) and the mock-Soundpad harness used by e2e tests (`harness`). Mimic capture lives in `MimicCapture.cs` / `BridgeMimic.cs` and transcripts in `MimicTranscript.cs`; `harness/MimicFixture.cs` and `harness/TranscriptFixture.cs` are their test stand-ins (the harness always uses them, so e2e never touches real audio or Whisper).
+- Whisper's native DLLs are embedded resources written to `<data>\native\whisper-1.9.1\runtimes\win-x64\`. Whisper.net probes `<folder of RuntimeOptions.LibraryPath>\runtimes\win-x64`, so keep that layout. Check single-file loading with `SoundpadWeb.exe --transcribe-file <wav> --verbose` on a published EXE; the Whisper model is at `%LOCALAPPDATA%\SoundpadWeb\models\` on the owner's PC.
 - `mimic/`: Voice Replay Studio V1.1 desktop app (WPF, NAudio 2.2.1, Whisper.net), imported unchanged in 2.4.0. It shares no code with the companion; the companion's Mimic is a port onto NAudio 3.3.
 - `docs/MIMIC.md` describes Mimic; `docs/ROLLBACK.md` lists restore points and must gain a row for every release.
 - CSS is layered: `tokens.css` → `styles.css` → `v2.css` → `polish.css`. Later files override earlier ones, and about 36 selectors are defined in more than one file. Check every file before changing a selector.
