@@ -6,6 +6,7 @@ Every release stays on GitHub permanently, so any earlier version can be restore
 
 | Version | What it is | Git tag | Download |
 | --- | --- | --- | --- |
+| 2.15.4 | Security review follow-ups | `v2.15.4` | [Release](https://github.com/uh-oh-man/soundpad-web/releases/tag/v2.15.4) |
 | 2.15.3 | Import & play from Voice Replay Studio | `v2.15.3` | [Release](https://github.com/uh-oh-man/soundpad-web/releases/tag/v2.15.3) |
 | 2.15.2 | Tell the host what a companion update adds | `v2.15.2` | [Release](https://github.com/uh-oh-man/soundpad-web/releases/tag/v2.15.2) |
 | 2.15.1 | Review fixes for the Voice Replay Studio import | `v2.15.1` | [Release](https://github.com/uh-oh-man/soundpad-web/releases/tag/v2.15.1) |

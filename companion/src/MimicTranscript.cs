@@ -233,7 +233,7 @@ public sealed class MimicTranscriber(ITranscriptEngine engine) : IDisposable
             }
         }
         catch (OperationCanceledException) { }
-        catch (Exception ex) when (ex is not OutOfMemoryException) { lock (gate) if (generation == loopGeneration) { Enabled = false; status = "Transcripts stopped: " + ex.Message; } }
+        catch (Exception ex) when (ex is not OutOfMemoryException) { lock (gate) if (generation == loopGeneration) { Enabled = false; ring = null; segments.Clear(); status = "Transcripts stopped: " + ex.Message; } } // like Disable: no stale lines keep reaching guests
     }
 
     private static bool Quiet(ReadOnlySpan<float> samples)

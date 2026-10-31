@@ -103,6 +103,36 @@ public sealed class MimicTests : IDisposable
         Assert.False((await bridge.Execute(Cmd("mimicClip") with { MimicEnd = peek.End, PositionMs = 0, EndMs = 500 }, "guest")).Ok);
     }
 
+    /// <summary>Recognises the first chunk like the fixture, then fails, as a crashed Whisper would.</summary>
+    private sealed class FailingEngine : ITranscriptEngine
+    {
+        private readonly TranscriptFixture inner = new();
+        public bool Available => true;
+        public string Status => "";
+        public Task Prepare(CancellationToken cancel) => inner.Prepare(cancel);
+        public Task<IReadOnlyList<TranscribedSpan>> Transcribe(float[] samples16k, CancellationToken cancel) =>
+            inner.Calls == 0 ? inner.Transcribe(samples16k, cancel) : throw new InvalidOperationException("engine crashed");
+        public void Dispose() => inner.Dispose();
+    }
+
+    [Fact]
+    public async Task AFailedTranscriberDropsItsLinesSoGuestsStopSeeingThem()
+    {
+        using var transcriber = new MimicTranscriber(new FailingEngine());
+        var ring = new MimicRing(MimicFixture.Rate, 45);
+        await transcriber.Enable(() => ring, false);
+        ring.Write(Enumerable.Range(0, MimicFixture.Rate / 2).Select(i => MimicFixture.Sample(i)).ToArray());
+        ring.WriteSilence(MimicFixture.Rate * 3);
+        for (int i = 0; i < 50 && transcriber.Lines(ring, 0, ring.Written).Length == 0; i++) await Task.Delay(100);
+        Assert.Single(transcriber.Lines(ring, 0, ring.Written));
+        ring.Write(Enumerable.Range(0, MimicFixture.Rate / 2).Select(i => MimicFixture.Sample(i)).ToArray());
+        ring.WriteSilence(MimicFixture.Rate * 3);
+        for (int i = 0; i < 50 && transcriber.Enabled; i++) await Task.Delay(100);
+        Assert.False(transcriber.Enabled);
+        Assert.StartsWith("Transcripts stopped", transcriber.Status);
+        Assert.Empty(transcriber.Lines(ring, 0, ring.Written)); // the earlier line is gone too
+    }
+
     [Fact]
     public async Task TranscriptLinesLineUpWithTheBufferAndSilenceIsSkipped()
     {

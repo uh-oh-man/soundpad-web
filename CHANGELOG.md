@@ -2,7 +2,30 @@
 
 Notable changes to Soundpad Web. Versions follow the website's `package.json`; the Windows companion is versioned separately and only needs updating when a release says so.
 
-## Unreleased
+## 2.15.4 — Security review follow-ups
+
+**Update the Windows companion** to get these; nothing looks different.
+
+A fresh security review of everything guests can reach since 2.12.3 found **no vulnerabilities**. It confirmed:
+- guests can't reach host-only commands, including the Voice Replay Studio list and import and the hotkey settings;
+- guests can't spoof who sent a command;
+- the existing rate limits cap what one guest can do;
+- Mimic audio reaches guests only as waveform levels.
+
+It suggested three hardening steps, all done here:
+
+### Fixed
+
+- **If the speech engine fails, its transcript lines are cleared**, as when transcripts are turned off. Before, the last 30 s of recognised text kept going to guests while the status said "Transcripts stopped".
+- **An unreadable Voice Replay Studio clip gets an answer.** A WAV that Windows won't let the companion read (locked, or no access) left the host's import waiting with no reply. It now says the file "couldn't be read".
+- **docs/MIMIC.md** now says that hotkey clips are named after their transcript words while transcripts are on, and that guests see those names.
+
+### Tests
+
+- New C# test: a speech engine that recognises one line and then crashes leaves no lines behind. It fails on 2.15.3. There are now 82 C# tests.
+
+
+### Documentation
 
 - **docs/ROLLBACK.md:** v2.14.3 now links its source-code zip, which GitHub provides for every tag. That version can be downloaded and built even though it has no prebuilt EXE. The row explains why: its CI caught a real bug, fixed in 2.14.4.
 

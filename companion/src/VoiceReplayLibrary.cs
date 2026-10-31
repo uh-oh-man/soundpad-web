@@ -31,7 +31,9 @@ public sealed class VoiceReplayLibrary(string? root = null)
         if (clip.AudioPath is not { } path || !File.Exists(path)) throw new InvalidDataException("That clip's audio file is missing.");
         if (!string.Equals(Path.GetExtension(path), ".wav", StringComparison.OrdinalIgnoreCase)) throw new InvalidDataException("Only WAV clips can be imported.");
         if (new FileInfo(path).Length > MaxBytes) throw new InvalidDataException("That clip is larger than Temp's 16 MiB limit.");
-        return (ReadAtMost(path, MaxBytes, "That clip is larger than Temp's 16 MiB limit."), Clip(clip.Title, 100, "Recording"));
+        // Report a file Windows won't let us read (locked, no access) like any other refusal, so the host gets an answer.
+        try { return (ReadAtMost(path, MaxBytes, "That clip is larger than Temp's 16 MiB limit."), Clip(clip.Title, 100, "Recording")); }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { throw new InvalidDataException("That clip's audio file couldn't be read."); }
     }
 
     private List<Stored> Load()
