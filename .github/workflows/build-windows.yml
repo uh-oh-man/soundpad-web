@@ -28,6 +28,13 @@ jobs:
         run: dotnet run --project mimic/tests/VoiceReplay.Tests -c Release
       - run: npx playwright install chromium
       - run: npm run test:e2e
+      # Guests often join from an iPhone or a Mac, so the same suite also runs in WebKit, Safari's engine.
+      # (Playwright's Firefox build is covered by no job yet.)
+      - run: npx playwright install webkit
+      - name: Browser tests in WebKit (Safari's engine)
+        run: npx playwright test --output test-results/webkit
+        env:
+          TEST_BROWSER: webkit
       - name: Publish portable companion
         run: dotnet publish companion/SoundpadWeb.Companion.csproj -c Release -r win-x64 --self-contained true -o artifacts/release "-p:WebsiteUrl=$env:PUBLIC_WEBSITE_URL"
         env:

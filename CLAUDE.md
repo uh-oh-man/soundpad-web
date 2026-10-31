@@ -22,6 +22,7 @@ npm run test:e2e                  # needs the prebuilt harness in companion/harn
 - E2E tests start `companion/harness/bin/Release/net10.0-windows10.0.19041.0/win-x64/SoundpadWeb.Harness.exe`. Rebuild it after any companion change.
 - No global .NET SDK is installed on the owner's PC. Use the one bundled with their original Mimic folder: `..\Mimic\.tools\dotnet\dotnet.exe` (10.0.402), e.g. `test companion/tests/SoundpadWeb.Tests.csproj -c Release` and `build companion/harness/SoundpadWeb.Harness.csproj -c Release`.
 - With the current harness, the expected e2e result is all passing plus 5 skipped (the four opt-in `LIVE_RELAY` Nostr tests and the `DEPLOYED_URL` check).
+- WebKit (Safari's engine) also runs in CI: `npx playwright install webkit`, then `$env:TEST_BROWSER='webkit'; npx playwright test --output test-results/webkit`. Expect 6 skipped: the loopback HTTPS test is also skipped, because hosts never use Safari. Playwright's Windows WebKit has no WebRTC, so the live guest tests can't run in it. Playwright's Firefox build is blocked from starting on the owner's PC (`spawn UNKNOWN` / permission denied, likely Smart App Control). Don't change that security setting to run it.
 - The e2e suite runs against the Vite dev server in the working tree. Don't edit `web/src` while it runs, because hot reload will affect the results.
 
 ## Conventions

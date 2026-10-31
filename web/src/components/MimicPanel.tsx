@@ -134,9 +134,15 @@ export function MimicPanel({
       audio.onended = stopPreview;
       preview.current = audio;
       setPreviewing(true);
-      await audio.play();
+      try {
+        await audio.play();
+      } catch {
+        // The browser refused to play (no output device, or it decided the click was too long ago).
+        stopPreview();
+        controller.notify('This browser blocked the preview sound. Press Preview again.', 'error');
+      }
     } catch {
-      stopPreview(); /* Controller shows command errors; a blocked autoplay just ends the preview. */
+      stopPreview(); // the controller already shows command errors
     }
   }
 

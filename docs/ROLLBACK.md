@@ -6,6 +6,7 @@ Every release stays on GitHub permanently, so any earlier version can be restore
 
 | Version | What it is | Git tag | Download |
 | --- | --- | --- | --- |
+| 2.14.3 | Safari checks and a clear message when WebRTC is blocked | `v2.14.3` | [Release](https://github.com/uh-oh-man/soundpad-web/releases/tag/v2.14.3) |
 | 2.14.2 | A taken hotkey key is reported straight away | `v2.14.2` | [Release](https://github.com/uh-oh-man/soundpad-web/releases/tag/v2.14.2) |
 | 2.14.1 | The Mimic hotkey remembers your key | `v2.14.1` | [Release](https://github.com/uh-oh-man/soundpad-web/releases/tag/v2.14.1) |
 | 2.14.0 | Choose the Mimic hotkey (F6–F10) | `v2.14.0` | [Release](https://github.com/uh-oh-man/soundpad-web/releases/tag/v2.14.0) |

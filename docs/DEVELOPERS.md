@@ -15,6 +15,9 @@ dotnet test companion/tests/SoundpadWeb.Tests.csproj -c Release
 dotnet build companion/harness/SoundpadWeb.Harness.csproj -c Release
 npx playwright install chromium
 npm run test:e2e
+# Safari's engine, as CI also runs it:
+npx playwright install webkit
+$env:TEST_BROWSER='webkit'; npx playwright test --output test-results/webkit
 dotnet publish companion/SoundpadWeb.Companion.csproj -c Release -r win-x64 --self-contained true -o artifacts/release
 ```
 

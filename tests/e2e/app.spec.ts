@@ -188,6 +188,9 @@ test('production static bundle on a synthetic HTTPS origin reaches only its auth
   page,
   browserName,
 }) => {
+  // Only the host's browser on the Windows PC talks to the companion, and Safari doesn't run on Windows;
+  // Playwright's Windows WebKit also lacks the loopback permission this check relies on.
+  test.skip(browserName === 'webkit', 'Hosts never use Safari: it has no Windows version.');
   const harness = await startHarness('https://soundpad-web.test');
   try {
     if (browserName === 'chromium') await page.context().grantPermissions(['local-network-access']);
@@ -1225,6 +1228,7 @@ test('polished tile and Temp review screenshots in both themes and mobile', asyn
 test('Mimic: host listens, everyone sees it, and a selection becomes a playable Temp sound', async ({
   page,
   harness,
+  browserName,
 }) => {
   await host(page, harness);
   await expect(page.locator('.mimic-badge')).toHaveCount(0);
@@ -1243,12 +1247,15 @@ test('Mimic: host listens, everyone sees it, and a selection becomes a playable 
   await page.waitForTimeout(2600);
   await dialog.getByRole('button', { name: 'Last 3 s' }).click();
   await expect(dialog.locator('.mimic-range')).toContainText('3.0 s');
-  // Private preview: plays in this tab only, saves nothing, and Soundpad plays nothing.
-  const playsBefore = harness.plays.length;
-  await dialog.getByRole('button', { name: 'Preview' }).click();
-  await expect(dialog.getByRole('button', { name: 'Stop preview' })).toBeVisible();
-  await expect(dialog.getByRole('button', { name: 'Preview' })).toBeVisible({ timeout: 8000 });
-  expect(harness.plays.length).toBe(playsBefore);
+  // Private preview: plays in this tab only, saves nothing, and Soundpad plays nothing. Preview is
+  // host-only and hosts run on Windows, where Safari doesn't exist; headless WebKit often refuses to play.
+  if (browserName !== 'webkit') {
+    const playsBefore = harness.plays.length;
+    await dialog.getByRole('button', { name: 'Preview' }).click();
+    await expect(dialog.getByRole('button', { name: 'Stop preview' })).toBeVisible();
+    await expect(dialog.getByRole('button', { name: 'Preview' })).toBeVisible({ timeout: 8000 });
+    expect(harness.plays.length).toBe(playsBefore);
+  }
   await dialog.getByLabel('Clip name').fill('Fixture mimic');
   await dialog.getByRole('button', { name: 'Mimic & play' }).click();
   const sound = page.getByRole('button', { name: 'Play from start: Fixture mimic', exact: true });
@@ -1406,8 +1413,10 @@ test('Mimic keyboard: number keys grab recent audio, Enter mimics, Escape clears
   const dialog = page.getByRole('dialog', { name: 'Mimic' });
   await dialog.getByRole('button', { name: 'Start listening' }).click();
   await page.waitForTimeout(2600);
-  // Shortcuts still work right after ticking a checkbox (focus stays on it).
-  await dialog.getByLabel('F6 hotkey').check();
+  // Shortcuts still work right after ticking a checkbox (focus stays on it). Safari doesn't focus a
+  // checkbox on click, so focus it the way a keyboard user would.
+  await dialog.getByLabel('F6 hotkey').focus();
+  await page.keyboard.press('Space');
   await expect(dialog.getByLabel('F6 hotkey')).toBeFocused();
   await page.keyboard.press('5');
   await expect(dialog.locator('.mimic-range')).toContainText('5.0 s');
@@ -1493,6 +1502,31 @@ test('live Nostr/WebRTC: guests see Mimic only when allowed and can clip from it
         .filter((v) => v.impact === 'serious' || v.impact === 'critical')
         .map((v) => `${v.id} (${v.nodes.map((n) => n.target.join(' ')).join(', ')})`),
     ).toEqual([]);
+  } finally {
+    await context.close();
+  }
+});
+
+test('a guest whose browser has no WebRTC is told why at once', async ({
+  page,
+  harness,
+  browser,
+}) => {
+  await host(page, harness);
+  const url = await invite(page);
+  const context = await browser.newContext();
+  try {
+    // As if WebRTC were turned off by a setting or a privacy extension.
+    await context.addInitScript(() => {
+      delete (window as { RTCPeerConnection?: unknown }).RTCPeerConnection;
+    });
+    const guest = await context.newPage();
+    await guest.goto(url);
+    await finishGuestName(guest, 'No RTC');
+    await expect(guest.getByText('WebRTC is turned off or not supported')).toBeVisible({
+      timeout: 3000,
+    });
+    await expect(guest.getByText('WebRTC blocked', { exact: true })).toBeVisible(); // header
   } finally {
     await context.close();
   }

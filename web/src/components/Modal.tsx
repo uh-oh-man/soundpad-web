@@ -4,6 +4,21 @@ import { X } from 'lucide-react';
 const focusable =
   'button:not(:disabled),input:not(:disabled),select:not(:disabled),textarea:not(:disabled),a[href],[tabindex]:not([tabindex="-1"])';
 
+/**
+ * The control last pressed with a pointer. Safari doesn't focus buttons on click, so when a dialog
+ * opens from a click, focus is still on the page body; this lets the dialog return focus to the
+ * button that opened it anyway.
+ */
+let lastPressed: HTMLElement | null = null;
+if (typeof document !== 'undefined')
+  document.addEventListener(
+    'pointerdown',
+    (e) => {
+      lastPressed = e.target instanceof Element ? e.target.closest<HTMLElement>(focusable) : null;
+    },
+    true,
+  );
+
 /** True while any app dialog is open; used by global shortcuts that must not fire behind one. */
 export const dialogOpen = () => !!document.querySelector('[role="dialog"][aria-modal="true"]');
 
@@ -24,7 +39,8 @@ export function Modal({
   });
   useEffect(() => {
     // Return focus to whatever opened the dialog once it closes.
-    const opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const active = document.activeElement;
+    const opener = active instanceof HTMLElement && active !== document.body ? active : lastPressed;
     dialog.current?.querySelector<HTMLElement>('button')?.focus();
     function escape(event: KeyboardEvent) {
       if (event.key === 'Escape' && !event.defaultPrevented) close.current();

@@ -2,6 +2,26 @@
 
 Notable changes to Soundpad Web. Versions follow the website's `package.json`; the Windows companion is versioned separately and only needs updating when a release says so.
 
+## 2.14.3 — Safari checks and a clear message when WebRTC is blocked
+
+Website only; the companion is unchanged apart from its version number (it reports 2.14.3).
+
+### Fixed
+
+- **A guest whose browser has no WebRTC is told why straight away.** WebRTC can be turned off by a browser setting or a privacy extension, or missing from an old browser. Before, such a guest waited 25 s for a generic "Host unavailable … can be blocked". Now the header says **WebRTC blocked** at once, and the board explains what to change.
+- **Closing a dialog returns focus to the button that opened it in Safari too.** Safari doesn't focus a button when you click it, so focus used to drop to the top of the page. The dialog now falls back to the button that was clicked.
+- **If the browser refuses to play Mimic's Preview,** the window now says so ("press Preview again") instead of silently ending the preview.
+
+### Tests and CI
+
+- The whole e2e suite now also runs in **WebKit**, Safari's engine, on every CI build, because guests often join from iPhones and Macs. Locally it gives 32 passed and 6 skipped:
+  - Skipped as everywhere else: the opt-in live-relay and deployed-site tests.
+  - Also skipped: the HTTPS-to-loopback test, because hosts run on Windows, where there is no Safari.
+  - Preview is likewise not checked in WebKit.
+- Playwright's Windows WebKit has no WebRTC, so the live guest tests stay Chromium-only. Real Safari has WebRTC.
+- New e2e test, in both browsers: a guest without WebRTC sees the message within 3 seconds.
+- Firefox couldn't be added: Windows on the owner's PC refuses to start Playwright's Firefox build, probably Smart App Control. That setting was left unchanged.
+
 ## 2.14.2 — A taken hotkey key is reported straight away
 
 **Update the Windows companion** to get this; with 2.14.0–2.14.1 the hotkey works as before.

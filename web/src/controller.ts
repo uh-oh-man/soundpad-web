@@ -54,6 +54,10 @@ function savedProfile(): Participant {
   }
   return profile;
 }
+/** Shown to a guest whose browser has no WebRTC, which joining needs. */
+export const NO_WEBRTC =
+  "WebRTC blocked. This browser can't reach the host because WebRTC is turned off or not supported. Use an up-to-date Chrome, Edge, Firefox or Safari, and check that no setting or privacy extension blocks WebRTC.";
+
 export class Controller {
   private view: View = {
     layouts: [],
@@ -151,6 +155,12 @@ export class Controller {
     }
   }
   private connectGuest(invite: Invite) {
+    // Guests reach the host over WebRTC. Without it (turned off by a setting or privacy extension, or an
+    // old browser) say so at once instead of waiting for the generic "Host unavailable" after 25 s.
+    if (typeof RTCPeerConnection === 'undefined') {
+      this.update({ mode: 'guest', status: NO_WEBRTC, needsName: false });
+      return;
+    }
     this.update({ mode: 'guest', status: 'Connecting', needsName: false });
     this.session = new Session(
       invite,
