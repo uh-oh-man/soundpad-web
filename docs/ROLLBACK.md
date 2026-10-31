@@ -12,7 +12,7 @@ Every release stays on GitHub permanently, so any earlier version can be restore
 | 2.15.0 | Import clips from Voice Replay Studio | `v2.15.0` | [Release](https://github.com/uh-oh-man/soundpad-web/releases/tag/v2.15.0) |
 | 2.14.5 | CI upkeep (no app changes) | `v2.14.5` | [Release](https://github.com/uh-oh-man/soundpad-web/releases/tag/v2.14.5) |
 | 2.14.4 | Wheel zoom on waveforms that load late | `v2.14.4` | [Release](https://github.com/uh-oh-man/soundpad-web/releases/tag/v2.14.4) |
-| 2.14.3 | Safari checks and a clear message when WebRTC is blocked | `v2.14.3` | No release: its new WebKit CI step failed, so no EXE was built. Its companion code is identical to [2.14.2](https://github.com/uh-oh-man/soundpad-web/releases/tag/v2.14.2) apart from the version number, so download that one to get the same companion. Its website is in 2.14.4. |
+| 2.14.3 | Safari checks and a clear message when WebRTC is blocked | `v2.14.3` | [Source code (zip)](https://github.com/uh-oh-man/soundpad-web/archive/refs/tags/v2.14.3.zip) only: its CI failed (its new WebKit tests caught a real bug, fixed in 2.14.4), so no EXE was built. For a ready-made companion use [2.14.2](https://github.com/uh-oh-man/soundpad-web/releases/tag/v2.14.2), identical apart from the version number. |
 | 2.14.2 | A taken hotkey key is reported straight away | `v2.14.2` | [Release](https://github.com/uh-oh-man/soundpad-web/releases/tag/v2.14.2) |
 | 2.14.1 | The Mimic hotkey remembers your key | `v2.14.1` | [Release](https://github.com/uh-oh-man/soundpad-web/releases/tag/v2.14.1) |
 | 2.14.0 | Choose the Mimic hotkey (F6–F10) | `v2.14.0` | [Release](https://github.com/uh-oh-man/soundpad-web/releases/tag/v2.14.0) |
@@ -106,7 +106,7 @@ You don't need to roll back the website for an older companion to work: the 2.4 
 
 ## Run an old version locally without touching GitHub
 
-Download **Source code (zip)** from the release page, or:
+Download **Source code (zip)** from the release page (or, for a tag without a release such as v2.14.3, `https://github.com/uh-oh-man/soundpad-web/archive/refs/tags/<tag>.zip`), or:
 
 ```bash
 git worktree add ../soundpad-web-2.3.1 v2.3.1

@@ -2,6 +2,10 @@
 
 Notable changes to Soundpad Web. Versions follow the website's `package.json`; the Windows companion is versioned separately and only needs updating when a release says so.
 
+## Unreleased
+
+- **docs/ROLLBACK.md:** v2.14.3 now links its source-code zip, which GitHub provides for every tag. That version can be downloaded and built even though it has no prebuilt EXE. The row explains why: its CI caught a real bug, fixed in 2.14.4.
+
 ## 2.15.3 — Import & play, and a real-chain check
 
 Website only; works with any 2.15 companion, which reports 2.15.3 in this release.
