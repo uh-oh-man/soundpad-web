@@ -202,7 +202,17 @@ public sealed class MimicTests : IDisposable
         var journal = JsonSerializer.Deserialize<AudioJournal>(File.ReadAllText(Path.Combine(folder, "managed-audio", "journal.json")), Json.Options)!;
         using (var wave = new NAudio.Wave.WaveFileReader(journal.Assets.Single().Variants.Single().Path))
             Assert.InRange(wave.TotalTime.TotalSeconds, 9.9, 10.1);
-        Assert.Equal("Host", Assert.Single(bridge.Snapshot.Mimic!.Recent!).By);
+        Assert.False((await bridge.Execute(Cmd("mimicHotkey") with { Action = "length", PositionMs = 7000 }, "host")).Ok);
+        Assert.False((await bridge.Execute(Cmd("mimicHotkey") with { Action = "length", PositionMs = 3000 }, "guest")).Ok);
+        Assert.True((await bridge.Execute(Cmd("mimicHotkey") with { Action = "length", PositionMs = 3000 }, "host")).Ok);
+        Assert.Equal(3, bridge.Snapshot.Mimic!.HotkeySeconds);
+        Assert.Contains("last 3 s", bridge.Snapshot.Mimic.HotkeyStatus);
+        fixture.Advance(TimeSpan.FromSeconds(4));
+        await bridge.HotkeyPressed();
+        var shortClip = JsonSerializer.Deserialize<AudioJournal>(File.ReadAllText(Path.Combine(folder, "managed-audio", "journal.json")), Json.Options)!.Assets.OrderBy(x => x.CreatedAt).Last();
+        using (var wave = new NAudio.Wave.WaveFileReader(shortClip.Variants.Single().Path))
+            Assert.InRange(wave.TotalTime.TotalSeconds, 2.9, 3.1);
+        Assert.All(bridge.Snapshot.Mimic!.Recent!, r => Assert.Equal("Host", r.By));
         Assert.Contains(log, l => l.StartsWith("Listening to Fixture"));
         Assert.Contains(log, l => l.StartsWith("Host mimicked \"Fixture tone") && l.EndsWith("now in Temp"));
         Assert.Contains(log, l => l.Contains("not listening"));

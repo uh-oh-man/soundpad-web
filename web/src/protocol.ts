@@ -72,6 +72,7 @@ export const commandSchema = z
         'chipmunk',
         'slowmo',
         'echo',
+        'length',
       ])
       .optional(),
     permissions: z
@@ -198,6 +199,7 @@ export const snapshotSchema = z.object({
       transcriptStatus: z.string().max(600).optional(),
       hotkey: z.boolean().optional(),
       hotkeyStatus: z.string().max(600).optional(),
+      hotkeySeconds: z.number().int().positive().max(60).optional(),
       recent: z
         .array(
           z.object({

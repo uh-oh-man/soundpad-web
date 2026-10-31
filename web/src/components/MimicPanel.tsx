@@ -515,7 +515,7 @@ export function MimicPanel({
           <label>
             <input
               type="checkbox"
-              aria-label="F6 saves the last 10 seconds"
+              aria-label="F6 hotkey"
               checked={wantHotkey ?? !!mimic?.hotkey}
               disabled={busy}
               onChange={async (e) => {
@@ -530,10 +530,34 @@ export function MimicPanel({
             />
             F6 hotkey
           </label>
+          {supports(state.companionVersion, 'hotkeyLength') && (
+            <label>
+              saves the last
+              <select
+                aria-label="F6 saves the last"
+                value={mimic?.hotkeySeconds ?? 10}
+                disabled={busy}
+                onChange={(e) =>
+                  void controller
+                    .run('mimicHotkey', {
+                      action: 'length',
+                      positionMs: Number(e.target.value) * 1000,
+                    })
+                    .catch(() => {})
+                }
+              >
+                {[3, 5, 10, 15, 30].map((s) => (
+                  <option key={s} value={s}>
+                    {s} s
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
           <small>
             {mimic?.hotkeyStatus && mimic.hotkeyStatus !== 'Off'
               ? mimic.hotkeyStatus
-              : 'Press F6 in any app on this PC to save the last 10 seconds, like Voice Replay Studio.'}
+              : `Press F6 in any app on this PC to save the last ${mimic?.hotkeySeconds ?? 10} seconds, like Voice Replay Studio.`}
           </small>
         </div>
       )}

@@ -1302,10 +1302,12 @@ test('Mimic: host listens, everyone sees it, and a selection becomes a playable 
   await dialog.getByRole('button', { name: 'Clear' }).click();
   await expect(dialog.locator('.mimic-range')).toHaveCount(0);
   // The F6 hotkey is host-only and reports its state (the harness uses a fixture key, never real F6).
-  await dialog.getByLabel('F6 saves the last 10 seconds').check();
+  await dialog.getByLabel('F6 hotkey').check();
   await expect(dialog.getByText('Press F6 in any app to save the last 10 s')).toBeVisible();
-  await dialog.getByLabel('F6 saves the last 10 seconds').uncheck();
-  await expect(dialog.getByLabel('F6 saves the last 10 seconds')).not.toBeChecked();
+  await dialog.getByLabel('F6 saves the last').selectOption('5');
+  await expect(dialog.getByText('Press F6 in any app to save the last 5 s')).toBeVisible();
+  await dialog.getByLabel('F6 hotkey').uncheck();
+  await expect(dialog.getByLabel('F6 hotkey')).not.toBeChecked();
   await dialog.getByRole('button', { name: 'Stop listening' }).click();
   await expect(page.locator('.mimic-badge')).toHaveCount(0);
   await page.keyboard.press('Escape');
@@ -1397,7 +1399,7 @@ test('live Nostr/WebRTC: guests see Mimic only when allowed and can clip from it
     const dialog = guest.getByRole('dialog', { name: 'Mimic' });
     await expect(dialog.getByLabel('Mimic source', { exact: true })).toHaveCount(0);
     await expect(dialog.getByLabel('Transcribe Mimic audio')).toHaveCount(0);
-    await expect(dialog.getByLabel('F6 saves the last 10 seconds')).toHaveCount(0);
+    await expect(dialog.getByLabel('F6 hotkey')).toHaveCount(0);
     // The host's transcript reaches the guest as text; clicking a line selects that audio.
     await expect(
       dialog

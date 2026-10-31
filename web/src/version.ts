@@ -26,6 +26,7 @@ export const FEATURES = {
   hotkey: [2, 7],
   trim: [2, 8],
   effects: [2, 9],
+  hotkeyLength: [2, 11],
 } as const satisfies Record<string, readonly [number, number]>;
 
 export const supports = (version: string | null | undefined, feature: keyof typeof FEATURES) =>

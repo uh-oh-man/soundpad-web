@@ -27,7 +27,7 @@ The companion's capture is a port of Voice Replay Studio's `CaptureService` onto
 3. Click **Start listening**. A pulsing **Mimic on** badge appears in everyone's header.
 4. To let guests clip, turn on **Session & access → Guest Mimic**. It is off by default.
 5. Optional: tick **Transcript**. The first time, **Get transcripts (148 MB, once)** downloads the speech model; see [Transcripts](#transcripts).
-6. Optional: tick **F6 hotkey**. While Mimic is listening, **F6 in any app** saves the last 10 seconds to Temp, named after its transcript when transcripts are on, just like Voice Replay Studio's F6. It is off by default so it never takes F6 from a game. If another app already owns F6, for example Voice Replay Studio itself, the window says so.
+6. Optional: tick **F6 hotkey** and choose how much it saves (3, 5, 10, 15 or 30 seconds; default 10). While Mimic is listening, **F6 in any app** saves that much to Temp, named after its transcript when transcripts are on, just like Voice Replay Studio's F6. It is off by default so it never takes F6 from a game. If another app already owns F6, for example Voice Replay Studio itself, the window says so.
 7. **Stop listening**, **End hosting** or closing the companion stops capture, discards the buffer and the transcript, and releases F6.
 
 The companion's console window logs these events with the time, including who made each clip and anything F6 saved.
@@ -90,6 +90,7 @@ The website always serves the newest version and hides anything the host's compa
 | Edit copy (trim) | 2.8 |
 | Voice effects | 2.9 |
 | Shared recent clips and notices | 2.10 |
+| F6 length choice | 2.11 |
 
 ## Protocol
 
@@ -98,14 +99,14 @@ The website always serves the newest version and hides anything the host's compa
   - `mimicStart` with `sourceId`;
   - `mimicStop`;
   - `mimicTranscribe` with `action` `enable`, `disable` or `download`;
-  - `mimicHotkey` with `enable` or `disable`.
+  - `mimicHotkey` with `enable`, `disable` or `length`, and `positionMs` set to the F6 length (3000–30000).
 - **Host, or guests with `guestMimic`:** `mimicPeek` and `mimicClip`. A clip sends `mimicEnd`, `positionMs`/`endMs`, an optional `name`, and the capture's `sourceId`.
 - **Host, or guests with uploads:** `trimAudio`, with `assetId`, `positionMs`/`endMs`, `action` (`none`, `chipmunk`, `slowmo` or `echo`) and an optional `name`.
 - **New permission:** `guestMimic`, default `false`.
 - **The `mimic` snapshot object:**
   - `active`, `source`, `status`, `windowMs`;
   - `transcribing`, `transcriptModel`, `transcriptStatus`;
-  - `hotkey`, `hotkeyStatus`;
+  - `hotkey`, `hotkeyStatus`, `hotkeySeconds`;
   - `recent`: the last 5 clips as `assetId`, `name`, `by` and `at`.
 - **`mimicPeek` returns:**
   - `end`, an absolute frame counter for the window's right edge;

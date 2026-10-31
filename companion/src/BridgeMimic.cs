@@ -11,13 +11,15 @@ public sealed partial class Bridge
         // Reuse the model Voice Replay Studio already downloaded, if this PC has one.
         Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Voice Replay Studio", "Models", "ggml-base.en.bin"),
         Path.Combine(store.DirectoryPath, "native", "whisper-1.9.1")));
-    public const int HotkeySeconds = 10;
+    /// <summary>F6 lengths, as Voice Replay Studio offered them; 10 s is the default.</summary>
+    public static readonly int[] HotkeyLengths = [3, 5, 10, 15, 30];
+    private volatile int hotkeySeconds = 10;
     private IGlobalHotkey hotkey = new WindowsHotkey();
     private volatile string hotkeyStatus = "Off";
     public const int RecentClips = 5;
     private readonly List<MimicClipInfo> recentClips = [];
     private MimicClipInfo[] RecentSnapshot { get { lock (recentClips) return [.. recentClips]; } }
-    private MimicState MimicSnapshot => new(mimicCapture.Running, mimicCapture.SourceName, mimicCapture.Status, MimicWindowMs, transcriber.Enabled, transcriber.ModelReady, transcriber.Status, hotkey.Active, hotkeyStatus, RecentSnapshot);
+    private MimicState MimicSnapshot => new(mimicCapture.Running, mimicCapture.SourceName, mimicCapture.Status, MimicWindowMs, transcriber.Enabled, transcriber.ModelReady, transcriber.Status, hotkey.Active, hotkeyStatus, RecentSnapshot, hotkeySeconds);
 
     /// <summary>Replaces the system-wide hotkey; tests use a fixture that can be "pressed" directly.</summary>
     public void UseHotkey(IGlobalHotkey key) { hotkey.Dispose(); hotkey = key; }
@@ -28,16 +30,17 @@ public sealed partial class Bridge
 
     private void StopMimic() { if (mimicCapture.Running) Log("Hosting ended: stopped listening and discarded the buffer"); mimicCapture.Stop(); transcriber.Disable(); hotkey.Unregister(); hotkeyStatus = "Off"; lock (recentClips) recentClips.Clear(); lock (peekGate) lastPeek = null; }
 
-    /// <summary>The host pressed the hotkey: save the last <see cref="HotkeySeconds"/> seconds, like Voice Replay Studio's F6.</summary>
+    /// <summary>The host pressed the hotkey: save the last few seconds (3–30, host's choice), like Voice Replay Studio's F6.</summary>
     public async Task HotkeyPressed()
     {
         try
         {
             var ring = mimicCapture.Ring ?? throw new InvalidDataException($"{hotkey.Name} was pressed while Mimic was not listening.");
-            long stop = ring.Written, start = Math.Max(0, stop - (long)ring.Rate * HotkeySeconds);
+            int seconds = hotkeySeconds;
+            long stop = ring.Written, start = Math.Max(0, stop - (long)ring.Rate * seconds);
             var words = string.Join(" ", transcriber.Lines(ring, start, stop).Select(l => l.Text.Trim())).Trim();
             var reply = await SaveMimic(ring, start, stop, words.Length > 0 ? words : null, "Host", true, "host", audioAudience);
-            hotkeyStatus = reply.Ok ? $"Saved the last {HotkeySeconds} s at {DateTime.Now:HH:mm:ss}" : reply.Error ?? "Could not save.";
+            hotkeyStatus = reply.Ok ? $"Saved the last {seconds} s at {DateTime.Now:HH:mm:ss}" : reply.Error ?? "Could not save.";
             if (!reply.Ok) Log($"{hotkey.Name}: {hotkeyStatus}");
         }
         catch (InvalidDataException ex) { hotkeyStatus = ex.Message; Log($"{hotkey.Name}: {ex.Message}"); }
@@ -118,8 +121,15 @@ public sealed partial class Bridge
                     Publish(); CommandAccepted?.Invoke();
                     return new("ack", c.Id, true);
                 case "mimicHotkey":
-                    if (c.Action == "disable") { hotkey.Unregister(); hotkeyStatus = "Off"; Log($"{hotkey.Name} hotkey off"); }
-                    else if (c.Action == "enable") { hotkey.Register(() => _ = HotkeyPressed()); hotkeyStatus = $"Press {hotkey.Name} in any app to save the last {HotkeySeconds} s"; Log($"{hotkey.Name} hotkey on: press it in any app to save the last {HotkeySeconds} s"); }
+                    if (c.PositionMs is long lengthMs)
+                    {
+                        if (!HotkeyLengths.Contains((int)(lengthMs / 1000)) || lengthMs % 1000 != 0) throw new InvalidDataException("Choose 3, 5, 10, 15 or 30 seconds for F6.");
+                        hotkeySeconds = (int)(lengthMs / 1000);
+                        if (hotkey.Active) hotkeyStatus = $"Press {hotkey.Name} in any app to save the last {hotkeySeconds} s";
+                    }
+                    if (c.Action == "length") { Log($"{hotkey.Name} saves the last {hotkeySeconds} s"); }
+                    else if (c.Action == "disable") { hotkey.Unregister(); hotkeyStatus = "Off"; Log($"{hotkey.Name} hotkey off"); }
+                    else if (c.Action == "enable") { hotkey.Register(() => _ = HotkeyPressed()); hotkeyStatus = $"Press {hotkey.Name} in any app to save the last {hotkeySeconds} s"; Log($"{hotkey.Name} hotkey on: press it in any app to save the last {hotkeySeconds} s"); }
                     else throw new InvalidDataException("Unsupported hotkey setting.");
                     Publish();
                     return new("ack", c.Id, true);

@@ -2,7 +2,16 @@
 
 Notable changes to Soundpad Web. Versions follow the website's `package.json`; the Windows companion is versioned separately and only needs updating when a release says so.
 
-## Unreleased
+## 2.11.0 — Choose how much F6 saves
+
+**Update the Windows companion** for this; with older companions the website hides the choice.
+
+### Added
+
+- **F6 length:** next to the F6 hotkey in the Mimic window, the host picks how much F6 saves: 3, 5, 10, 15 or 30 seconds (default 10). These are the same choices Voice Replay Studio offered. The choice applies immediately, is shown in the status line, and is logged in the companion window.
+- Tests: C# (3 s save, invalid length refused, host only); e2e picks 5 s; unit gate `hotkeyLength` (2.11).
+
+### Documentation
 
 - **docs/MIMIC.md rewritten** into one current guide after about fifteen incremental edits since 2.4. It adds a complete file map, the Edit copy rules (including how long copies are fitted into Temp), the guest rate limits, a companion-version table, the full protocol (`trimAudio`, capture `ringId`), and all PC checks in one place. The README's privacy link now points at the renamed section.
 
