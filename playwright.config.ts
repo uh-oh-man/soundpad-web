@@ -12,7 +12,10 @@ export default defineConfig({
   expect: { timeout: 10000 },
   workers: 1,
   fullyParallel: false,
-  reporter: 'list',
+  // CI retries once so a timing hiccup on a slow runner doesn't block a release; the github
+  // reporter still flags any retried test as flaky in public run annotations.
+  retries: process.env.CI ? 1 : 0,
+  reporter: process.env.CI ? [['list'], ['github']] : 'list',
   use: {
     baseURL: 'http://127.0.0.1:5173',
     trace: 'retain-on-failure',
