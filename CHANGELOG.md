@@ -2,6 +2,12 @@
 
 Notable changes to Soundpad Web. Versions follow the website's `package.json`; the Windows companion is versioned separately and only needs updating when a release says so.
 
+## 2.15.5 — 2.15.4, released
+
+**Update the Windows companion** for 2.15.4's fixes. The app code is identical to 2.15.4 apart from the version number.
+
+- **2.15.4's CI failed on its own new test,** so no EXE was published. The test turned on Mimic transcripts and spoke straight away. Transcripts start from "now" once their loop picks up the buffer, every 0.5 s, so on a slow runner the speech came too early and was rightly skipped. The test now waits for the loop before speaking. Its fake speech engine also fails only after it has produced a line. The test fails on 2.15.3 and passes on 2.15.5, 5 runs out of 5.
+
 ## 2.15.4 — Security review follow-ups
 
 **Update the Windows companion** to get these; nothing looks different.
