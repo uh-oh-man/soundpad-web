@@ -2,6 +2,15 @@
 
 Notable changes to Soundpad Web. Versions follow the website's `package.json`; the Windows companion is versioned separately and only needs updating when a release says so.
 
+## 2.12.2 — Everyone is told when Mimic listens
+
+Website update; works with any Mimic-capable companion. The companion is rebuilt as 2.12.2 with no code changes.
+
+### Added
+
+- Because Mimic records other people's voices, every participant now gets a notice when it starts listening, including which source, and when it stops ("Mimic stopped listening."). Anyone who joins while Mimic is on is told immediately ("The host's Mimic is listening to … (the last 30 s, kept on their PC)"). Before this, the only sign was the small header badge.
+- Tests: the host flow checks the start and stop notices; the live-relay guest test checks that a guest joining mid-listen is told.
+
 ## 2.12.1 — Mimic window code split up
 
 Website maintenance; the companion is rebuilt as 2.12.1 with no code changes.

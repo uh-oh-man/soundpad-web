@@ -279,6 +279,23 @@ function App() {
     }
   }, [mode, newestClip]);
 
+  // Mimic records other people's voices, so everyone is told when it starts, changes source or
+  // stops, and anyone joining while it is on is told right away.
+  const listeningTo =
+    mode !== 'landing' && state.mimic?.active ? (state.mimic.source ?? 'a source') : null;
+  const heardListening = useRef<string | null>(null);
+  useEffect(() => {
+    if (listeningTo === heardListening.current) return;
+    if (listeningTo)
+      controller.notify(
+        host
+          ? `Mimic is listening to ${listeningTo}. Everyone in the session can see this.`
+          : `The host's Mimic is listening to ${listeningTo} (the last 30 s, kept on their PC).`,
+      );
+    else if (heardListening.current) controller.notify('Mimic stopped listening.');
+    heardListening.current = listeningTo;
+  }, [listeningTo, host]);
+
   const organizationText = w ? JSON.stringify(organization(w)) : '';
   useEffect(() => {
     if (!connected || !organizationText) return;

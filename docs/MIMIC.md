@@ -73,7 +73,7 @@ Like Voice Replay Studio's trim, it saves a new Temp sound and never changes the
 
 - **Off until the host starts it.** Capture never starts on launch and is never restored after a restart.
 - **No microphones.** Only output devices and app loopback are offered, so Mimic cannot listen to the host's room.
-- **Everyone can see it.** While capture runs, every participant's header shows **Mimic on** with the source name, and every new clip is announced.
+- **Everyone can see it.** Everyone gets a notice when Mimic starts (with the source) and stops, anyone joining while it is on is told immediately, every participant's header shows **Mimic on** while it runs, and every new clip is announced.
 - **Audio stays on the host PC.** Guests receive 300 peak levels for the waveform and, if the host enables it, the transcript text. Clips are cut and imported on the host.
 - **Separate permissions.** Clipping needs **Guest Mimic**, playing needs **Remote playback**, and Edit copy needs uploads. Only the host chooses the source, transcripts and F6.
 - **Bounded.** The buffer is 45 s in memory: the 30 s window plus 15 s so a guest's selection survives the round trip. Each guest can add at most 6 new files per minute, the same limit as uploads, within Temp's 32 files / 256 MiB. Edit copies run one at a time, and the guest's permissions are checked before any decoding.

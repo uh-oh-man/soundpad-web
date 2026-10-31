@@ -1235,6 +1235,9 @@ test('Mimic: host listens, everyone sees it, and a selection becomes a playable 
   await dialog.getByRole('button', { name: 'Start listening' }).click();
   await expect(dialog.getByRole('status')).toContainText('Listening to Fixture: tone every 2 s');
   await expect(page.getByRole('button', { name: 'Mimic on' })).toBeVisible();
+  await expect(
+    page.getByText('Mimic is listening to Fixture: tone every 2 s.', { exact: false }),
+  ).toBeVisible();
   await expect(dialog.getByRole('slider', { name: /Mimic buffer/ })).toBeVisible();
   // Let the fixture produce at least one tone burst, then grab it with a quick select.
   await page.waitForTimeout(2600);
@@ -1323,6 +1326,7 @@ test('Mimic: host listens, everyone sees it, and a selection becomes a playable 
   await expect(dialog.getByLabel('F6 hotkey')).not.toBeChecked();
   await dialog.getByRole('button', { name: 'Stop listening' }).click();
   await expect(page.locator('.mimic-badge')).toHaveCount(0);
+  await expect(page.getByText('Mimic stopped listening.')).toBeVisible();
   await page.keyboard.press('Escape');
   await page.getByRole('button', { name: 'Access settings' }).click();
   await expect(page.getByLabel('Allow guest Mimic')).not.toBeChecked();
@@ -1407,6 +1411,10 @@ test('live Nostr/WebRTC: guests see Mimic only when allowed and can clip from it
       timeout: 60000,
     });
     await expect(guest.getByRole('button', { name: 'Mimic on' })).toBeDisabled();
+    // A guest who joins while Mimic is on is told right away.
+    await expect(
+      guest.getByText("The host's Mimic is listening to Fixture: tone every 2 s", { exact: false }),
+    ).toBeVisible();
     await expect(guest.getByRole('button', { name: 'Mimic', exact: true })).toHaveCount(0);
     await page.getByRole('button', { name: 'Access settings' }).click();
     await page.getByLabel('Allow guest Mimic').check();
