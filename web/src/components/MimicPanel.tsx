@@ -369,7 +369,12 @@ export function MimicPanel({
   useEffect(() => {
     shortcut.current = (e: KeyboardEvent) => {
       if (!peek || e.ctrlKey || e.metaKey || e.altKey || e.defaultPrevented) return;
-      const typing = e.target instanceof HTMLElement && e.target.matches('input, select, textarea');
+      // Only real text entry (and menus, which use keys) blocks shortcuts; a ticked checkbox must not.
+      const typing =
+        e.target instanceof HTMLElement &&
+        e.target.matches(
+          'select, textarea, input:not([type="checkbox"]):not([type="radio"]):not([type="button"])',
+        );
       if (e.key === 'Escape' && selection) {
         e.preventDefault(); // clear the selection first; the next Escape closes the window
         e.stopPropagation();
@@ -664,7 +669,8 @@ export function MimicPanel({
                   .catch(() => {})
               }
             >
-              <Play size={13} /> {clip.name} <small>· {clip.by}</small>
+              <Play size={13} /> <span className="mimic-recent-name">{clip.name}</span>{' '}
+              <small>· {clip.by}</small>
             </button>
           ))}
         </section>

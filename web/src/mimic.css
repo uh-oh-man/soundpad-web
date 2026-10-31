@@ -41,6 +41,8 @@
 }
 .mimic-panel {
   display: grid;
+  /* One column that never grows past the dialog, however long a clip name or line is. */
+  grid-template-columns: minmax(0, 1fr);
   gap: 14px;
 }
 .mimic-intro {
@@ -210,6 +212,26 @@
 }
 .mimic-recent button {
   max-width: 100%;
+  min-width: 0;
   padding: 6px 10px;
   font-size: 12px;
+}
+
+.mimic-recent button small {
+  flex: none;
+}
+.mimic-recent-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* On phones the header has no room for the badge's words: keep the pulsing dot (its text stays
+   readable to screen readers) so the Settings button is not pushed off-screen. */
+@media (max-width: 600px) {
+  .mimic-badge {
+    gap: 0;
+    padding: 9px;
+    font-size: 0;
+  }
 }

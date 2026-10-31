@@ -2,6 +2,20 @@
 
 Notable changes to Soundpad Web. Versions follow the website's `package.json`; the Windows companion is versioned separately and only needs updating when a release says so.
 
+## 2.11.1 — Mimic on phones
+
+Website update; the companion is rebuilt as 2.11.1 with no code changes.
+
+### Fixed
+
+- **On phones, the Settings button was pushed off-screen while Mimic was on.** The "Mimic on" badge made the header 44 px wider than a 390 px screen, so neither host nor guests could reach Settings. On narrow screens the badge is now just its pulsing dot, and screen readers still hear "Mimic on".
+- **A long clip name in Just mimicked widened the whole Mimic window** on phones, cutting off the waveform and buttons. Names now end in "…" on one line, and the window's layout can no longer grow past its edge.
+- **The 3 / 5 / 0 shortcuts stopped working after ticking Transcript or F6,** because focus stays on the checkbox and any input counted as typing. Only text fields and menus block shortcuts now.
+
+### Added
+
+- e2e: a phone-width Mimic test (no page or window overflow, Settings stays on screen) and a keyboard test step with focus on a checkbox. Full e2e 29/29.
+
 ## 2.11.0 — Choose how much F6 saves
 
 **Update the Windows companion** for this; with older companions the website hides the choice.

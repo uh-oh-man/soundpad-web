@@ -1348,6 +1348,9 @@ test('Mimic keyboard: number keys grab recent audio, Enter mimics, Escape clears
   const dialog = page.getByRole('dialog', { name: 'Mimic' });
   await dialog.getByRole('button', { name: 'Start listening' }).click();
   await page.waitForTimeout(2600);
+  // Shortcuts still work right after ticking a checkbox (focus stays on it).
+  await dialog.getByLabel('F6 hotkey').check();
+  await expect(dialog.getByLabel('F6 hotkey')).toBeFocused();
   await page.keyboard.press('5');
   await expect(dialog.locator('.mimic-range')).toContainText('5.0 s');
   const name = dialog.getByLabel('Clip name');
@@ -1476,4 +1479,37 @@ test('accessibility: no serious or critical axe violations on the main screens',
   await page.setViewportSize({ width: 390, height: 844 });
   await scan(page, 'phone');
   expect(problems).toEqual([]);
+});
+
+test('Mimic fits a phone: header keeps Settings on screen and long clip names do not widen the window', async ({
+  page,
+  harness,
+}) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await host(page, harness);
+  await page.getByRole('button', { name: 'Mimic', exact: true }).click();
+  const dialog = page.getByRole('dialog', { name: 'Mimic' });
+  await dialog.getByRole('button', { name: 'Start listening' }).click();
+  await page.waitForTimeout(2600);
+  await page.keyboard.press('5');
+  await dialog
+    .getByLabel('Clip name')
+    .fill('A rather long clip name that would wrap on a phone screen');
+  await page.keyboard.press('Enter');
+  await expect(dialog.getByRole('region', { name: 'Just mimicked' })).toBeVisible();
+  const pastDialog = await page.evaluate(() => {
+    const edge = document.querySelector('.dialog')!.getBoundingClientRect().right + 1;
+    return [...document.querySelectorAll('.dialog *')].filter(
+      (e) => e.getBoundingClientRect().right > edge,
+    ).length;
+  });
+  expect(pastDialog).toBe(0);
+  await page.keyboard.press('Escape');
+  await page.keyboard.press('Escape');
+  await expect(page.getByRole('button', { name: 'Mimic on' })).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth)).toBe(
+    false,
+  );
+  const settings = await page.getByRole('button', { name: 'Access settings' }).boundingBox();
+  expect(settings!.x + settings!.width).toBeLessThanOrEqual(390);
 });
