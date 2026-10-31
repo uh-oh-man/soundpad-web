@@ -2,6 +2,21 @@
 
 Notable changes to Soundpad Web. Versions follow the website's `package.json`; the Windows companion is versioned separately and only needs updating when a release says so.
 
+## 2.12.1 — Mimic window code split up
+
+Website maintenance; the companion is rebuilt as 2.12.1 with no code changes.
+
+### Changed
+
+- `MimicPanel.tsx` had grown to 740 lines over a dozen releases. It is now split into focused pieces:
+  - the panel itself (303 lines): live view, selection, transcript, preview, clipping and shortcuts;
+  - `components/mimic/MimicHostControls.tsx`: source, start/stop, transcripts, F6 and its length;
+  - `components/mimic/MimicWave.tsx`: the waveform canvas;
+  - `components/mimic/MimicRecent.tsx`: Just mimicked;
+  - `mimic/selection.ts`: pure selection, transcript and source helpers, which the unit tests now import directly.
+- The only visible difference: the transcript list now appears once the companion confirms transcripts are on, instead of the instant the checkbox is ticked. The checkbox itself still responds immediately.
+- Verified: unit 60/60, e2e 29/29, all 4 live-relay guest tests.
+
 ## 2.12.0 — Private preview
 
 **Update the Windows companion** for this; with older companions the button is hidden.

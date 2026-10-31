@@ -11,7 +11,8 @@ Mimic came from a separate desktop project, **Voice Replay Studio**: a rolling "
 | F6 hotkey | `companion/src/MimicHotkey.cs` |
 | Commands, permissions, clips, recent list | `companion/src/BridgeMimic.cs` |
 | Edit copy (trim and voice effects) | `companion/src/BridgeTrim.cs` |
-| The Mimic window | `web/src/components/MimicPanel.tsx` |
+| The Mimic window | `web/src/components/MimicPanel.tsx`, with `components/mimic/` (`MimicHostControls`, `MimicWave`, `MimicRecent`) |
+| Pure selection, transcript and source helpers | `web/src/mimic/selection.ts` |
 | Edit copy form | `web/src/components/TempManager.tsx` |
 | Test stand-ins (tone source, speech, hotkey) | `companion/harness/MimicFixture.cs`, `TranscriptFixture.cs`, `HotkeyFixture.cs` |
 | Voice Replay Studio V1.1 desktop app | `mimic/`, imported unchanged apart from a pointer at the top of its README |

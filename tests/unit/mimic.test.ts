@@ -7,7 +7,7 @@ import {
   preferredSource,
   sourceKey,
   transcriptFor,
-} from '../../web/src/components/MimicPanel';
+} from '../../web/src/mimic/selection';
 import {
   command,
   commandSchema,
