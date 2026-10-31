@@ -19,6 +19,7 @@ import {
   type HostIdentity,
   type Invite,
 } from './network/identity';
+import { notify, type NoticeKind } from './notifications';
 import type { SharedLayout, Organization } from './shared-layout';
 type View = {
   layouts: SharedLayout[];
@@ -72,6 +73,28 @@ export class Controller {
   private starting = false;
   private live = false;
   private initialized = false;
+  private permissionSequence = 0;
+  private pendingPermissions?: { sequence: number; value: Snapshot['permissions'] };
+  private canonicalPermissions?: Snapshot['permissions'];
+  private visibleState(state: Snapshot) {
+    this.canonicalPermissions = state.permissions;
+    const desired = this.pendingPermissions?.value;
+    if (desired) {
+      const keys = [
+        'remotePlayback',
+        'guestCounter',
+        'guestSeeking',
+        'guestSpotify',
+        'guestUploads',
+        'guestTransforms',
+      ] as const;
+      if (keys.every((key) => (state.permissions[key] ?? true) === (desired[key] ?? true)))
+        this.pendingPermissions = undefined;
+    }
+    return this.pendingPermissions
+      ? { ...state, permissions: this.pendingPermissions.value }
+      : state;
+  }
   private pendingInvite?: Invite;
   subscribe = (listener: () => void) => {
     this.listeners.add(listener);
@@ -84,7 +107,7 @@ export class Controller {
     this.view = { ...this.view, ...p };
     for (const f of this.listeners) f();
   }
-  notify = (notice: string) => this.update({ notice });
+  notify = (message: string, kind: NoticeKind = 'info') => notify(message, kind);
   async start() {
     if (this.initialized) return;
     this.initialized = true;
@@ -160,7 +183,7 @@ export class Controller {
       this.address!,
       (state) => {
         this.live = true;
-        this.update({ state, status: 'Host ready' });
+        this.update({ state: this.visibleState(state), status: 'Host ready' });
         this.session?.broadcast();
         if (!this.session && !this.starting)
           void this.hostSession(false).catch((e) => this.notify(String(e)));
@@ -197,9 +220,11 @@ export class Controller {
     this.starting = true;
     try {
       if (rotate) await this.session?.close(true);
+      const audienceId = crypto.randomUUID();
+      this.bridge!.setAudience(audienceId);
       const [major, minor] = (this.view.state.companionVersion ?? '0.0').split('.').map(Number);
       if (major > 2 || (major === 2 && minor >= 2))
-        await this.bridge!.send(command('beginSession'), 'host');
+        await this.bridge!.send(command('beginSession', { audienceId }), 'host');
       const key = 'soundpad-identity-' + this.address!.token;
       const stored = rotate ? null : sessionStorage.getItem(key);
       this.identity = stored ? JSON.parse(stored) : await createIdentity();
@@ -209,7 +234,7 @@ export class Controller {
         this.identity!,
         this.identity,
         () => this.view.state,
-        (c, _peer, person) => this.bridge!.send(c, 'guest', person),
+        (c, peer, person) => this.bridge!.send(c, 'guest', person, peer),
         () => {},
         () => {},
         (guests) => this.update({ guests }),
@@ -217,7 +242,7 @@ export class Controller {
         { get: () => this.view.profile, changed: (people) => this.update({ people }) },
         {
           layouts: (layouts) => this.update({ layouts }),
-          upload: (bytes, name, by) => this.bridge!.upload(bytes, name, by),
+          upload: (bytes, name, by, peer) => this.bridge!.upload(bytes, name, by, false, peer),
         },
       );
       this.update({ invite: inviteUrl(this.identity!), guests: [] });
@@ -229,8 +254,12 @@ export class Controller {
     const c = command(op, fields);
     if ((this.view.state.protocol ?? 1) < 2) c.v = 1;
     const previousPermissions = this.view.state.permissions;
-    if (op === 'permissions' && fields.permissions && this.view.mode === 'host')
+    let permissionAttempt = 0;
+    if (op === 'permissions' && fields.permissions && this.view.mode === 'host') {
+      permissionAttempt = ++this.permissionSequence;
+      this.pendingPermissions = { sequence: permissionAttempt, value: fields.permissions };
       this.update({ state: { ...this.view.state, permissions: fields.permissions } });
+    }
     try {
       if (this.view.mode === 'host') {
         if (!this.live) throw Error('Companion is disconnected.');
@@ -242,9 +271,16 @@ export class Controller {
         return await this.session!.sendCommand(c);
       else throw Error('Connect to the host first.');
     } catch (e) {
-      if (op === 'permissions')
-        this.update({ state: { ...this.view.state, permissions: previousPermissions } });
-      this.notify(e instanceof Error ? e.message : 'Command failed.');
+      if (permissionAttempt && this.pendingPermissions?.sequence === permissionAttempt) {
+        this.pendingPermissions = undefined;
+        this.update({
+          state: {
+            ...this.view.state,
+            permissions: this.canonicalPermissions ?? previousPermissions,
+          },
+        });
+      }
+      this.notify(e instanceof Error ? e.message : 'Command failed.', 'error');
       throw e;
     }
   }
@@ -255,18 +291,24 @@ export class Controller {
     try {
       if (!file.size || file.size > 16 * 1024 * 1024) throw Error('Choose audio up to 16 MiB.');
       const bytes = new Uint8Array(await file.arrayBuffer());
+      let result: unknown;
       if (this.view.mode === 'host' && this.live)
-        await this.bridge!.upload(
+        result = await this.bridge!.upload(
           bytes,
           file.name,
           this.view.profile.name === 'Guest' ? 'Host' : this.view.profile.name,
           true,
         );
-      else if (this.view.mode === 'guest') await this.session!.upload(bytes, file.name);
+      else if (this.view.mode === 'guest') result = await this.session!.upload(bytes, file.name);
       else throw Error('Connect first.');
-      this.notify('Added to temp for this session. Only the host can keep it permanently.');
+      this.notify(
+        (result as { state?: string })?.state === 'waiting-soundpad'
+          ? 'Audio prepared. Open Soundpad to finish its Temp entry.'
+          : 'Added to Temp for this session. Only the host can keep it permanently.',
+        'success',
+      );
     } catch (e) {
-      this.notify(e instanceof Error ? e.message : 'Upload failed.');
+      this.notify(e instanceof Error ? e.message : 'Upload failed.', 'error');
       throw e;
     }
   }
@@ -288,6 +330,7 @@ export class Controller {
     }
   }
   disconnect(peer: string) {
+    void this.run('revokePeer', { ownerId: peer }).catch(() => {});
     this.session?.disconnect(peer);
   }
   async leave() {

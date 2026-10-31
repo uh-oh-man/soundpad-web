@@ -2,7 +2,7 @@
 
 > **made by AI** - Review the verification notes and known limitations before use.
 
-**V2 is the current update.** Refresh the website and download the latest Windows companion to enable all V2 features. See [features, verification and upgrade instructions](docs/V2.md).
+**2.3 is the current update.** Refresh the website and download the latest Windows companion for the new controls and Temp system. See [features, migration and recovery instructions](docs/V2.3.md).
 
 A private browser remote for [Leppsoft Soundpad](https://www.leppsoft.com/soundpad/). Friends see your real categories, tap a sound, and your existing Soundpad plays it through its current audio setup.
 
@@ -21,21 +21,23 @@ Your friend opens the link in a modern browser. Playback starts on **your** PC, 
 
 **Verification:** automated tests use isolated Soundpad fixtures and never trigger real audio. Real Soundpad audio playback remains an acceptance check; see [verification](docs/VERIFICATION.md).
 
-## Latest update - 2.2.1
+## 2.3 update — UI polish and managed audio
 
-- Real waveforms fill iconless play buttons; click a precise position or use keyboard arrows (10 ms, Shift: 1 s) and Enter.
-- The bottom player has 1–32× zoom, panning and a millisecond seek input for long recordings.
-- The host analyzes each requested file once and streams progress/ready peaks to guests; guests reuse the same session cache.
-- New invitations use a 44-character token with pinned host authentication. Older invitations remain supported.
-- Spotify's dedicated sidebar player is visible to guests too; host opt-in and guest control permission apply.
-- Personal organization automatically becomes available to everyone as a named shared layout. Copy it explicitly into My Layout; remote edits do not overwrite your layout.
-- Add session audio from any participant, or **Reverse & play** an existing sound. Both use app-managed Soundpad entries in **temp** and the normal Soundpad mic playback route. Reversal automatically plays once its temporary copy is prepared.
-- Only the host can **Keep permanently**. Other managed entries/files are removed on End hosting or companion shutdown, with a journal for cleanup after a crash/reconnect. Existing user files are never deleted. Approved files remain in Soundpad's temp category and can be reorganized in Soundpad.
-- The `made by AI` credit remains small text at the bottom of the website.
+Version 2.3 is delivered through the normal GitHub Pages website and Windows release. Refresh the page and download the updated **SoundpadWeb.exe** using the links above. Close the previous companion normally when you are ready to switch; do not overwrite a running EXE. The new Temp features require the 2.3 companion.
 
-The 2.2.1 patch also completes startup recovery before opening the browser, preventing a host-session timing race.
+- Artwork/waveforms fill the main tile, with a separate slim **Play from start** strip. Waveform seeking commits on release. Five views remain available.
+- Zoom toward the cursor with the wheel, Shift-wheel or middle/Shift-drag to pan, horizontal trackpad pan, touch pinch, and **Fit**. The bottom player supports 1–128× zoom; cue/region tools live under **Edit**. Arrow keys select in 10 ms steps (Shift: 1 s), Enter commits, +/- zoom, Alt-arrows pan, 0 fits.
+- **Space** pauses/resumes known playback, like YouTube, or stops playback when precise control is unavailable. Text fields, dialogs and other controls retain normal keyboard behavior.
+- Desktop sidebar/main panels scroll independently under the fixed header and above the player. Phone/tablet layouts retain normal page scrolling.
+- Red & Blue is the default theme; Original Purple and Ocean apply immediately and persist per browser. Small top-corner notifications deduplicate and expire; important errors also remain inline.
+- The subdued `made by AI` credit shares the existing footer metadata.
+- **Temp** groups logical sources, uploaders, normal/reversed variants, permanent state and recovery issues. Reversing a reversed variant selects the normal source; verified variants are reused. Guests have separate upload and generation permissions.
+- **Keep permanently** requires host confirmation, with a local folder and permanent native category. The companion copies and verifies the durable file outside Temp, verifies its Soundpad entry, then retires the temporary version. Personal metadata and web statistics follow stable identities through promotion.
+- Uploads and generated variants use app-owned **Temp · Soundpad Web [unique ID]** entries and Soundpad's normal mic playback route. An existing category called `temp` is never claimed.
 
-Session uploads accept supported audio up to 16 MiB; decoded audio is limited to ten minutes / 64 MiB per file, with 32 temporary files / 256 MiB per session. Soundpad import/reverse/cleanup requires companion 2.2.0. Close the old companion normally, download the updated EXE, relaunch and refresh the site.
+**Native cleanup limitation:** Soundpad's selection-based API cannot guarantee that another app/user will not change selection between verification and deletion. The production adapter therefore preserves the native orphan and its file, and Temp reports the exact recovery action. Remove only the indicated app-generated entry in Soundpad **without deleting its file**, then Retry cleanup. Cleanup never stops current playback, removes user-owned categories/files, or deletes accepted permanent audio. Automated atomic-removal tests use a fixture-only capability that is disabled in production.
+
+Uploads accept up to 16 MiB, decoded audio up to ten minutes / eight channels / 64 MiB; managed temporary storage is bounded to 32 files / 256 MiB including staged inputs. At most two audio jobs are admitted. Version 2.3 is required for the rebuilt Temp UI. Earlier published changes and acceptance limits are recorded in [V2 history](docs/V2.md); the new lifecycle, migration and recovery details are in [2.3 notes](docs/V2.3.md).
 
 ## Features
 
@@ -56,17 +58,17 @@ Session uploads accept supported audio up to 16 MiB; decoded audio is limited to
 
 Treat an invitation as a password. Anyone with it can join and use the permissions you enable. **Session & access → Replace invite** revokes the previous invitation and disconnects existing guests. Disconnecting one peer alone does not invalidate a bearer invitation; that person could return with a new browser identity.
 
-Guests receive sound titles, category names/order/membership/icons, custom icons, playback status, counter and permissions. Host library audio is not sent to guests. Guest uploads travel directly to the host; local paths, native access tokens and host signing keys stay local. Shared organization and enabled Spotify metadata/artwork are visible to session participants. There are no analytics, third-party fonts, arbitrary file endpoints, shell commands, recording, or arbitrary Soundpad API access. Managed temp imports and cleanup are the only automatic Soundpad library edits. WebRTC exposes network connection information to peers; signaling relays see network metadata and encrypted session descriptions.
+Guests receive sound titles, category names/order/membership/icons, custom icons, playback status, counter and permissions. Host library audio is not sent to guests. Guest uploads travel directly to the host; local paths, native access tokens and host signing keys stay local. Shared organization and enabled Spotify metadata/artwork are visible to session participants. There are no analytics, third-party fonts, arbitrary file endpoints, shell commands, recording, or arbitrary Soundpad API access. Managed imports are the only production library mutations; native entry removal is deliberately deferred when atomic ownership cannot be established. WebRTC exposes network connection information to peers; signaling relays see network metadata and encrypted session descriptions.
 
 ## Screenshots
 
 Actual application UI connected to the isolated test companion with **schema-derived fixture sounds**, not a real Soundpad library:
 
-![Artwork buttons and cached mini waveforms, using fixture sounds](docs/screenshots/artwork-buttons.png)
+![Red and blue interface with artwork, cached waveforms and integrated Play strips, using fixture sounds](docs/screenshots/v23-red-blue.png)
 
-[Phone layout with fixture category](docs/screenshots/phone-fixture.png)
+[Phone](docs/screenshots/v23-phone.png) · [Original Purple](docs/screenshots/v23-purple.png) · [Temp manager](docs/screenshots/v23-temp.png)
 
-Counter, permissions, statistics, icon references and an opaque-identity key live in `%LOCALAPPDATA%\SoundpadWeb\state.json`. Icon images live beside it in `icons/`; waveform caches live in `waveforms/`. Managed uploads/reversed WAVs and their recovery journal live in `session-audio/`; do not manually remove approved files. Small settings are saved atomically; unreadable data stops startup instead of silently resetting your counter. Browser refresh retains the session within the same host tab. Restarting the EXE or ending the host tab starts a new invitation session. Other people's hosts have separate state and secrets.
+Counter, permissions, statistics, icon references and an opaque-identity key live in `%LOCALAPPDATA%\SoundpadWeb\state.json`. Icon images live beside it in `icons/`; waveform caches live in `waveforms/`. Managed uploads/reversed WAVs and the schema-3 recovery journal live in `managed-audio/`; permanent copies default to `library/` beside it. Legacy `session-audio/` records are backed up before migration. Previously accepted legacy files are preserved until the host confirms durable promotion; do not manually delete them. Small settings are saved atomically; unreadable data stops startup instead of silently resetting your counter. Browser refresh retains the session within the same host tab. Restarting the EXE or ending the host tab starts a new invitation session. Other people's hosts have separate state and secrets.
 
 ## Connection problems
 

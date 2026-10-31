@@ -1,11 +1,14 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Plus, Minus, RotateCcw, Flag, Scissors, Play, Trash2 } from 'lucide-react';
+import { Plus, RotateCcw, Flag, Scissors, Play, Trash2, HelpCircle } from 'lucide-react';
 import { useWaveformData, clearWaveforms } from '../waveform-cache';
 import { controller } from '../controller';
 import type { Snapshot, Sound, Waveform as WaveData } from '../protocol';
+import { useTimeline } from '../timeline';
 import type { Workspace } from '../workspace';
-export const formatTime = (ms: number | null | undefined) =>
-  ms == null ? '—' : `${Math.floor(ms / 60000)}:${((ms / 1000) % 60).toFixed(1).padStart(4, '0')}`;
+export const formatTime = (ms: number | null | undefined, precision = 1) =>
+  ms == null
+    ? '—'
+    : `${Math.floor(ms / 60000)}:${((ms / 1000) % 60).toFixed(precision).padStart(precision + 3, '0')}`;
 export function usePlayhead(playback: Snapshot['playback']) {
   const [position, setPosition] = useState(playback.positionMs ?? 0);
   const base = useRef({
@@ -113,9 +116,6 @@ export function Waveform({
 }: Props) {
   const root = useRef<HTMLDivElement>(null);
   const [visible, setVisible] = useState(compact),
-    [selected, setSelected] = useState(0),
-    [preview, setPreview] = useState<number | null>(null),
-    [offset, setOffset] = useState(0),
     [tools, setTools] = useState(false),
     [cueName, setCueName] = useState('Cue'),
     [regionName, setRegionName] = useState('Region'),
@@ -123,7 +123,6 @@ export function Waveform({
     [end, setEnd] = useState(1000),
     [repeat, setRepeat] = useState(false),
     [selectRegion, setSelectRegion] = useState(false);
-  const zoom = workspace?.zoom[sound.id] ?? 1;
   const active = state.playback.soundId === sound.id && state.playback.identitySource === 'web';
   const position = usePlayhead(
     active ? state.playback : { status: 'STOPPED', positionMs: 0, durationMs: null },
@@ -148,25 +147,38 @@ export function Waveform({
     sound.id,
     visible && (state.protocol ?? 1) >= 2,
   );
-  const duration = data?.durationMs ?? sound.durationMs ?? 0,
-    span = duration / zoom,
-    maxOffset = Math.max(0, duration - span),
-    viewOffset = Math.min(offset, maxOffset);
+  const metadataId = sound.workspaceId ?? sound.id;
+  const duration = data?.durationMs ?? sound.durationMs ?? 0;
+  const timeline = useTimeline({
+    identity: sound.id,
+    duration,
+    initialZoom: workspace?.zoom[metadataId] ?? 1,
+    disabled,
+    commit: (at) => {
+      void pick(at);
+    },
+    range: selectRegion
+      ? (a, b) => {
+          setStart(a);
+          setEnd(b);
+          setTools(true);
+        }
+      : undefined,
+    persistZoom: (zoom) => {
+      if (workspace && workspace.zoom[metadataId] !== zoom)
+        update((w) => ({ ...w, zoom: { ...w.zoom, [metadataId]: zoom } }));
+    },
+  });
+  const { zoom, offset: viewOffset, span, selected, setSelected, preview, timeAt } = timeline;
   const path = useMemo(
     () => (data ? wavePath(data, 800, zoom, viewOffset) : ''),
     [data, zoom, viewOffset],
   );
-  const cues = workspace?.cues[sound.id] ?? [],
-    regions = workspace?.regions[sound.id] ?? [];
-  const timeAt = (x: number) => {
-    const rect = root.current!.querySelector('.wave-surface')!.getBoundingClientRect();
-    return Math.round(
-      Math.max(0, Math.min(duration, viewOffset + ((x - rect.left) / rect.width) * span)),
-    );
-  };
+  const cues = workspace?.cues[metadataId] ?? [],
+    regions = workspace?.regions[metadataId] ?? [];
   async function pick(at: number) {
     setSelected(at);
-    if (workspace) update((w) => ({ ...w, lastCue: { soundId: sound.id, at } }));
+    if (workspace) update((w) => ({ ...w, lastCue: { soundId: metadataId, at } }));
     try {
       await choose(at);
     } catch {
@@ -186,46 +198,11 @@ export function Waveform({
             aria-valuemin={0}
             aria-valuemax={duration}
             aria-valuenow={Math.round(preview ?? (active ? position : selected))}
-            aria-valuetext={formatTime(preview ?? (active ? position : selected))}
+            aria-valuetext={formatTime(preview ?? (active ? position : selected), 3)}
             aria-disabled={disabled}
-            onPointerDown={(e) => {
-              if (disabled) return;
-              e.currentTarget.setPointerCapture(e.pointerId);
-              if (selectRegion) setStart(timeAt(e.clientX));
-              setPreview(timeAt(e.clientX));
-            }}
-            onPointerMove={(e) => {
-              if (e.currentTarget.hasPointerCapture(e.pointerId)) setPreview(timeAt(e.clientX));
-            }}
-            onPointerUp={(e) => {
-              if (disabled || !e.currentTarget.hasPointerCapture(e.pointerId)) return;
-              e.currentTarget.releasePointerCapture(e.pointerId);
-              const at = timeAt(e.clientX);
-              setPreview(null);
-              if (selectRegion) {
-                setStart(Math.min(start, at));
-                setEnd(Math.max(start, at));
-                setTools(true);
-                return;
-              }
-              void pick(at);
-            }}
-            onPointerCancel={() => setPreview(null)}
-            onKeyDown={(e) => {
-              if (disabled) return;
-              let at = selected;
-              if (e.key === 'ArrowRight') at += e.shiftKey ? 1000 : 100;
-              else if (e.key === 'ArrowLeft') at -= e.shiftKey ? 1000 : 100;
-              else if (e.key === 'Home') at = 0;
-              else if (e.key === 'End') at = duration - 1;
-              else if (e.key === 'Enter' || e.key === ' ') {
-                e.preventDefault();
-                void pick(selected);
-                return;
-              } else return;
-              e.preventDefault();
-              setSelected(Math.round(Math.max(0, Math.min(duration - 1, at))));
-            }}
+            ref={timeline.surface}
+            {...timeline.interactions}
+            title="Scroll to zoom · Shift-drag or middle-drag to pan · Pinch on touch · +/- zoom, Alt+arrows pan, 0 fit"
           >
             <svg viewBox="0 0 800 64" preserveAspectRatio="none" aria-hidden="true">
               <path d={path} />
@@ -268,7 +245,7 @@ export function Waveform({
                   onPointerMove={(e) => {
                     if (e.currentTarget.hasPointerCapture(e.pointerId)) {
                       e.stopPropagation();
-                      setPreview(timeAt(e.clientX));
+                      timeline.setPreview(timeAt(e.clientX));
                     }
                   }}
                   onPointerUp={(e) => {
@@ -279,12 +256,12 @@ export function Waveform({
                         ...w,
                         cues: {
                           ...w.cues,
-                          [sound.id]: (w.cues[sound.id] ?? []).map((x) =>
+                          [metadataId]: (w.cues[metadataId] ?? []).map((x) =>
                             x.id === c.id ? { ...x, at } : x,
                           ),
                         },
                       }));
-                      setPreview(null);
+                      timeline.setPreview(null);
                     } else void pick(c.at);
                     e.currentTarget.releasePointerCapture(e.pointerId);
                   }}
@@ -311,86 +288,42 @@ export function Waveform({
             </span>
             <span>{formatTime(viewOffset + span)}</span>
           </div>
-          {
-            <div className="wave-controls">
+          <div className="wave-navigation">
+            <span className="wave-gesture-hint">
+              <HelpCircle size={12} />
+              <span>Scroll to zoom · Shift-drag to pan</span>
+            </span>
+            {zoom > 1 && (
               <button
-                aria-label={`Zoom out ${sound.name}`}
-                disabled={zoom <= 1}
-                onClick={() =>
-                  update((w) => ({ ...w, zoom: { ...w.zoom, [sound.id]: Math.max(1, zoom / 2) } }))
-                }
+                className="wave-fit"
+                aria-label={`Fit waveform ${sound.name}`}
+                onClick={timeline.fit}
               >
-                <Minus size={14} />
+                <RotateCcw size={12} /> Fit <small>{zoom.toFixed(1)}×</small>
               </button>
-              <span>{zoom}×</span>
-              <button
-                aria-label={`Zoom in ${sound.name}`}
-                disabled={zoom >= 32}
-                onClick={() =>
-                  update((w) => ({ ...w, zoom: { ...w.zoom, [sound.id]: Math.min(32, zoom * 2) } }))
-                }
-              >
-                <Plus size={14} />
-              </button>
-              <button
-                onClick={() => {
-                  setOffset(0);
-                  update((w) => ({ ...w, zoom: { ...w.zoom, [sound.id]: 1 } }));
-                }}
-              >
-                <RotateCcw size={13} /> Fit
-              </button>
-              {!compact && (
-                <button onClick={() => setTools((t) => !t)} aria-expanded={tools}>
-                  <Flag size={13} /> Cues & regions
-                </button>
-              )}
-              {!compact && (
+            )}
+            <button
+              className="wave-advanced"
+              onClick={() => setTools((t) => !t)}
+              aria-expanded={tools}
+            >
+              <Flag size={12} /> {compact ? 'Edit' : 'Cues & regions'}
+            </button>
+          </div>
+          {tools && (
+            <div className="wave-tools">
+              <div className="wave-edit-actions">
                 <button
                   aria-pressed={selectRegion}
                   onClick={() => setSelectRegion((value) => !value)}
                 >
-                  Select region
+                  Select region by dragging
                 </button>
-              )}
-              {compact && (
-                <label className="precision-seek">
-                  Seek (s)
-                  <input
-                    aria-label={`Precise seek seconds ${sound.name}`}
-                    type="number"
-                    min={0}
-                    max={duration / 1000}
-                    step="0.001"
-                    value={selected / 1000}
-                    onChange={(e) =>
-                      setSelected(
-                        Math.round(Math.max(0, Math.min(duration - 1, +e.target.value * 1000))),
-                      )
-                    }
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter') void pick(selected);
-                    }}
-                  />
-                  <button disabled={disabled} onClick={() => void pick(selected)}>
-                    Go
-                  </button>
-                </label>
-              )}
-              {zoom > 1 && (
-                <input
-                  type="range"
-                  aria-label={`Waveform offset ${sound.name}`}
-                  min={0}
-                  max={maxOffset}
-                  value={viewOffset}
-                  onChange={(e) => setOffset(+e.target.value)}
-                />
-              )}
-            </div>
-          }
-          {tools && !compact && (
-            <div className="wave-tools">
+                <p className="muted">
+                  Arrow keys select 10 ms; Shift selects 1 s. Enter seeks. + / − zoom, Alt + arrows
+                  pan, 0 fits. Pinch to zoom on touch.
+                </p>
+              </div>
               <div className="cue-create">
                 <input
                   aria-label="New cue name"
@@ -405,11 +338,18 @@ export function Waveform({
                     aria-label="Cue time seconds"
                     min={0}
                     max={duration / 1000}
-                    step="0.1"
+                    step="0.001"
                     value={selected / 1000}
                     onChange={(e) => setSelected(Math.round(Math.max(0, +e.target.value * 1000)))}
                   />
                 </label>
+                <button
+                  disabled={disabled}
+                  aria-label={`Seek selected position ${sound.name}`}
+                  onClick={() => void pick(selected)}
+                >
+                  Seek here
+                </button>
                 <button
                   disabled={!workspace || cues.length >= 64}
                   onClick={() =>
@@ -417,8 +357,8 @@ export function Waveform({
                       ...w,
                       cues: {
                         ...w.cues,
-                        [sound.id]: [
-                          ...(w.cues[sound.id] ?? []),
+                        [metadataId]: [
+                          ...(w.cues[metadataId] ?? []),
                           {
                             id: crypto.randomUUID(),
                             name: cueName.trim() || 'Cue',
@@ -450,7 +390,7 @@ export function Waveform({
                         ...w,
                         cues: {
                           ...w.cues,
-                          [sound.id]: (w.cues[sound.id] ?? []).map((x) =>
+                          [metadataId]: (w.cues[metadataId] ?? []).map((x) =>
                             x.id === c.id ? { ...x, name: e.target.value.trim() || 'Cue' } : x,
                           ),
                         },
@@ -472,7 +412,7 @@ export function Waveform({
                         ...w,
                         cues: {
                           ...w.cues,
-                          [sound.id]: (w.cues[sound.id] ?? []).map((x) =>
+                          [metadataId]: (w.cues[metadataId] ?? []).map((x) =>
                             x.id === c.id ? { ...x, at } : x,
                           ),
                         },
@@ -486,7 +426,7 @@ export function Waveform({
                         ...w,
                         cues: {
                           ...w.cues,
-                          [sound.id]: (w.cues[sound.id] ?? []).filter((x) => x.id !== c.id),
+                          [metadataId]: (w.cues[metadataId] ?? []).filter((x) => x.id !== c.id),
                         },
                       }))
                     }
@@ -543,8 +483,8 @@ export function Waveform({
                       ...w,
                       regions: {
                         ...w.regions,
-                        [sound.id]: [
-                          ...(w.regions[sound.id] ?? []),
+                        [metadataId]: [
+                          ...(w.regions[metadataId] ?? []),
                           {
                             id: crypto.randomUUID(),
                             name: regionName.trim() || 'Region',
@@ -568,7 +508,7 @@ export function Waveform({
                     onClick={() => {
                       update((w) => ({
                         ...w,
-                        lastCue: { soundId: sound.id, at: r.start, end: r.end, repeat: r.repeat },
+                        lastCue: { soundId: metadataId, at: r.start, end: r.end, repeat: r.repeat },
                       }));
                       void controller
                         .run('region', {
@@ -592,7 +532,7 @@ export function Waveform({
                         ...w,
                         regions: {
                           ...w.regions,
-                          [sound.id]: (w.regions[sound.id] ?? []).map((x) =>
+                          [metadataId]: (w.regions[metadataId] ?? []).map((x) =>
                             x.id === r.id ? { ...x, name: e.target.value.trim() || 'Region' } : x,
                           ),
                         },
@@ -615,7 +555,7 @@ export function Waveform({
                         ...w,
                         regions: {
                           ...w.regions,
-                          [sound.id]: (w.regions[sound.id] ?? []).map((x) =>
+                          [metadataId]: (w.regions[metadataId] ?? []).map((x) =>
                             x.id === r.id ? { ...x, start: value } : x,
                           ),
                         },
@@ -638,7 +578,7 @@ export function Waveform({
                         ...w,
                         regions: {
                           ...w.regions,
-                          [sound.id]: (w.regions[sound.id] ?? []).map((x) =>
+                          [metadataId]: (w.regions[metadataId] ?? []).map((x) =>
                             x.id === r.id ? { ...x, end: value } : x,
                           ),
                         },
@@ -656,7 +596,7 @@ export function Waveform({
                           ...w,
                           regions: {
                             ...w.regions,
-                            [sound.id]: (w.regions[sound.id] ?? []).map((x) =>
+                            [metadataId]: (w.regions[metadataId] ?? []).map((x) =>
                               x.id === r.id ? { ...x, repeat } : x,
                             ),
                           },
@@ -672,7 +612,7 @@ export function Waveform({
                         ...w,
                         regions: {
                           ...w.regions,
-                          [sound.id]: (w.regions[sound.id] ?? []).filter((x) => x.id !== r.id),
+                          [metadataId]: (w.regions[metadataId] ?? []).filter((x) => x.id !== r.id),
                         },
                       }))
                     }

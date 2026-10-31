@@ -1,3 +1,31 @@
+# 2.3 development verification — 2026-10-30
+
+The completed pass uses isolated temporary data and named-pipe mocks. No real Soundpad library, audible playback, microphone/device settings, running companion, games or Steam were changed.
+
+| Check | Result |
+| --- | --- |
+| TypeScript, ESLint, production static build | Passed |
+| Frontend unit tests | 43 passed |
+| Native tests | 64 passed |
+| Chromium browser suite with LIVE_RELAY=1 | 25 passed; 1 deployed-site scenario intentionally skipped; final native-original Temp control regression also passed |
+| Windows WebKit targeted regression | 9 passed |
+| Portable win-x64 self-contained publish and isolated smoke | Passed |
+| npm production dependency audit | Zero reported vulnerabilities |
+| npm full audit at high severity | Passed threshold; 11 moderate advisories in the development lint dependency tree |
+| NuGet dependency audit | No vulnerable packages reported |
+
+The three live Nostr/WebRTC scenarios use actual public relay pairing and isolated native fixtures. They cover guest play/counter synchronization, invitation revocation, independent hosts, compact invites, guest upload acknowledgment, shared layouts and guest Spotify panel visibility. Local browser tests cover Space typing/dialog exclusions, artwork/Play-strip geometry, rapid seek waveform retention, full-tile precision, five views, cue/region metadata, name prompting, crop/persistence, all viewport sizes, separate panel scrolling, local theme persistence, notification expiry/deduplication and persistent inline upload errors. The 10,000-sound test also passed.
+
+Native tests cover exact stereo frame reversal, normal/reversed reuse, confirmed durable promotion, response-loss/import interruption recovery, partial copy resumption, conflict preservation, offline import/reconnect, user `temp` conflicts, legacy reverse chains and approvals, malformed/traversal journals, playing-file and lock protection, atomic ownership race rejection, production orphan fallback, pending-play cancellation by Stop, guest authority/path privacy, and metadata/icon/statistics identity through promotion. Production native deletion remains deliberately deferred because Soundpad does not expose the stronger atomic capability supplied only by the test adapter.
+
+Actual screenshots were inspected at desktop, narrow desktop, tablet and phone viewport sizes, in default and Purple themes, with normal/large artwork and waveform tiles, active playback, Temp and permanent confirmation. Screenshots show generated fixtures. WebKit on Windows and browser viewport emulation are not real Safari or physical-device acceptance.
+
+The release includes source, docs and screenshot evidence. CI uploads the Windows EXE, static build and browser artifacts. The owner approved normal publication after the development review; Pages and the tagged Windows release use the normal workflows. Actual Soundpad imports/audible mic playback, live Spotify transport and physical mobile devices remain unverified acceptance checks.
+
+See [2.3 lifecycle and recovery notes](V2.3.md). Earlier verification records below are historical.
+
+---
+
 # Verification — 2026-10-29
 
 Built and tested locally on Windows 11 Pro x64 (10.0.26200), Node.js 24.16.0 and .NET SDK 10.0.402. The companion is a real self-contained executable. **This is not a claim of public deployment or real Soundpad audio acceptance.**

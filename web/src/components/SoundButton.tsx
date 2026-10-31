@@ -1,15 +1,14 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Music2 } from 'lucide-react';
+import { Music2, Play, LoaderCircle } from 'lucide-react';
 import type { Sound, Snapshot } from '../protocol';
 import { useWaveformData } from '../waveform-cache';
-import { formatTime, wavePath } from './Waveform';
-
+import { formatTime, wavePath, usePlayhead } from './Waveform';
+import { useTimeline } from '../timeline';
 export function SoundButton({
   sound,
   state,
   canPlay,
   canSeek,
-  index,
   pending,
   active,
   play,
@@ -25,12 +24,27 @@ export function SoundButton({
   play: () => Promise<void>;
   choose: (at: number) => Promise<void>;
 }) {
-  const root = useRef<HTMLButtonElement>(null);
-  const [visible, setVisible] = useState(false),
-    [at, setAt] = useState<number | null>(null);
+  const root = useRef<HTMLDivElement>(null);
+  const [visible, setVisible] = useState(false);
   const { data } = useWaveformData(state.hostId, sound.id, visible && !sound.icon);
   const duration = data?.durationMs ?? sound.durationMs ?? 0;
-  const path = useMemo(() => (data ? wavePath(data, 800) : ''), [data]);
+  const timeline = useTimeline({
+    identity: sound.id,
+    duration,
+    disabled: !canPlay || !canSeek,
+    commit: (at) => {
+      void choose(at).catch(() => {});
+    },
+  });
+  const path = useMemo(
+    () => (data ? wavePath(data, 800, timeline.zoom, timeline.offset) : ''),
+    [data, timeline.zoom, timeline.offset],
+  );
+  const position = usePlayhead(
+    active ? state.playback : { status: 'STOPPED', positionMs: 0, durationMs: null },
+  );
+  const percentage = (value: number) =>
+    ((value - timeline.offset) / Math.max(1, timeline.span)) * 100;
   useEffect(() => {
     if (!root.current || visible || sound.icon) return;
     const observer = new IntersectionObserver(
@@ -45,78 +59,103 @@ export function SoundButton({
     observer.observe(root.current);
     return () => observer.disconnect();
   }, [visible, sound.icon]);
-  const scrubbable = !sound.icon && !!path && canSeek;
-  function position(clientX: number) {
-    const rect = root.current!.getBoundingClientRect();
-    return Math.round(
-      Math.max(0, Math.min(duration - 1, ((clientX - rect.left) / rect.width) * duration)),
-    );
-  }
-  return (
-    <button
-      ref={root}
-      className={`play-sound ${sound.icon ? 'has-art' : 'no-art'} ${path && !sound.icon ? 'full-wave-button' : ''}`}
-      disabled={!canPlay}
-      aria-label={`Play ${sound.name}`}
-      title={
-        scrubbable
-          ? `Choose where to play · ${formatTime(at ?? 0)} / ${formatTime(duration)}`
-          : sound.name
-      }
-      onPointerMove={(e) => {
-        if (scrubbable) setAt(position(e.clientX));
-      }}
-      onPointerLeave={() => setAt(null)}
-      onKeyDown={(e) => {
-        if (scrubbable && ['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(e.key)) {
-          e.preventDefault();
-          const delta = e.shiftKey ? 1000 : 10;
-          setAt(
-            e.key === 'Home'
-              ? 0
-              : e.key === 'End'
-                ? duration - 1
-                : Math.max(
-                    0,
-                    Math.min(duration - 1, (at ?? 0) + (e.key === 'ArrowRight' ? delta : -delta)),
-                  ),
-          );
-        }
-      }}
-      onClick={(e) =>
-        void (scrubbable ? choose(e.detail === 0 ? (at ?? 0) : position(e.clientX)) : play()).catch(
-          () => {},
-        )
-      }
-    >
-      <span className={`sound-icon tone-${index % 5}`} aria-hidden="true">
+  const content = (
+    <>
+      <span className="tile-visual" aria-hidden="true">
         {sound.icon ? (
-          <img src={sound.icon} alt="" />
+          <img src={sound.icon} draggable={false} alt="" />
         ) : path ? (
           <svg viewBox="0 0 800 64" preserveAspectRatio="none">
             <path d={path} />
           </svg>
         ) : (
-          <Music2 size={22} />
+          <Music2 size={25} />
         )}
       </span>
-      {scrubbable && at !== null && (
-        <span className="tile-playhead" style={{ left: `${(at / duration) * 100}%` }} />
-      )}
-      <span className="sound-label">
+      <span className="tile-shade" aria-hidden="true" />
+      <span className="tile-label">
         <span className="sound-name">{sound.name}</span>
         <span className="sound-hint">
           {pending
-            ? 'PREPARING…'
-            : at !== null && scrubbable
-              ? `${formatTime(at)} · PLAY HERE`
+            ? 'Preparing audio…'
+            : timeline.preview !== null
+              ? formatTime(timeline.preview, 3)
               : active
                 ? state.playback.status === 'PAUSED'
-                  ? 'PAUSED'
-                  : 'NOW PLAYING'
-                : 'PLAY SOUND'}
+                  ? 'Paused'
+                  : 'Now playing'
+                : sound.icon
+                  ? 'Soundpad audio'
+                  : data?.status === 'loading'
+                    ? 'Analyzing on host…'
+                    : path
+                      ? 'Click waveform to cue'
+                      : 'Loading waveform…'}
         </span>
       </span>
-    </button>
+    </>
+  );
+  return (
+    <div
+      ref={root}
+      className={`sound-button ${sound.icon ? 'has-art' : 'no-art'} ${active ? 'is-playing' : ''}`}
+      aria-busy={pending}
+    >
+      {sound.icon ? (
+        <button
+          className="tile-art-button"
+          disabled={!canPlay || pending}
+          aria-label={`Play artwork ${sound.name}`}
+          onClick={() => void play().catch(() => {})}
+        >
+          {content}
+        </button>
+      ) : (
+        <div
+          ref={timeline.surface}
+          className={`tile-wave-surface ${path ? 'has-wave' : ''}`}
+          role="slider"
+          tabIndex={canPlay && canSeek && path ? 0 : -1}
+          aria-label={`Cue ${sound.name} waveform`}
+          aria-disabled={!canPlay || !canSeek || !path}
+          aria-valuemin={0}
+          aria-valuemax={duration}
+          aria-valuenow={Math.round(timeline.preview ?? timeline.selected)}
+          aria-valuetext={formatTime(timeline.preview ?? timeline.selected, 3)}
+          title="Click or drag to cue · Scroll to zoom · Shift-drag to pan · 0 to fit"
+          {...(path ? timeline.interactions : {})}
+        >
+          {content}
+          {active && percentage(position) >= 0 && percentage(position) <= 100 && (
+            <span className="tile-playhead" style={{ left: `${percentage(position)}%` }} />
+          )}
+          {(timeline.preview !== null || timeline.selected > 0) && (
+            <span
+              className="tile-cue"
+              style={{
+                left: `${Math.max(0, Math.min(100, percentage(timeline.preview ?? timeline.selected)))}%`,
+              }}
+            />
+          )}
+          {timeline.zoom > 1 && (
+            <span className="tile-zoom">{timeline.zoom.toFixed(1)}× · 0 to fit</span>
+          )}
+        </div>
+      )}
+      <button
+        className="tile-play-strip"
+        aria-label={`Play ${sound.name}`}
+        disabled={!canPlay || pending}
+        onClick={() => void play().catch(() => {})}
+      >
+        {pending ? (
+          <LoaderCircle size={13} className="spinning" />
+        ) : (
+          <Play size={13} fill="currentColor" />
+        )}
+        <span>PLAY FROM START</span>
+        {active && <span className="playing-dot" aria-label="Currently playing" />}
+      </button>
+    </div>
   );
 }

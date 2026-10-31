@@ -30,7 +30,7 @@ public sealed class LocalServer(Bridge bridge, string origin) : IAsyncDisposable
             if (context.Request.Headers.Origin != origin || context.Request.Host.Host != "127.0.0.1") { context.Response.StatusCode = 403; return; }
             context.Response.Headers.AccessControlAllowOrigin = origin;
             context.Response.Headers.AccessControlAllowMethods = "POST, OPTIONS";
-            context.Response.Headers.AccessControlAllowHeaders = "Authorization, X-Audio-Name, X-Audio-By, X-Audio-Actor, Content-Type";
+            context.Response.Headers.AccessControlAllowHeaders = "Authorization, X-Audio-Name, X-Audio-By, X-Audio-Actor, X-Audio-Owner, X-Audio-Audience, Content-Type";
             if (context.Request.Method == "OPTIONS") { context.Response.StatusCode = 204; return; }
             var supplied = context.Request.Headers.Authorization.ToString();
             var expected = "Bearer " + Token;
@@ -41,7 +41,7 @@ public sealed class LocalServer(Bridge bridge, string origin) : IAsyncDisposable
             try { name = Uri.UnescapeDataString(context.Request.Headers["X-Audio-Name"].ToString()); by = Uri.UnescapeDataString(context.Request.Headers["X-Audio-By"].ToString()); }
             catch (UriFormatException) { context.Response.StatusCode = 400; return; }
             if (name.Length > 256 || by.Length > 80) { context.Response.StatusCode = 400; return; }
-            var result = await bridge.Upload(input.ToArray(), name, by, context.Request.Headers["X-Audio-Actor"] == "host");
+            var result = await bridge.Upload(input.ToArray(), name, by, context.Request.Headers["X-Audio-Actor"] == "host", context.Request.Headers["X-Audio-Owner"].ToString()[..Math.Min(128, context.Request.Headers["X-Audio-Owner"].ToString().Length)], context.Request.Headers["X-Audio-Audience"].ToString());
             context.Response.ContentType = "application/json";
             await context.Response.WriteAsync(Json.Write(result));
         });
@@ -102,13 +102,17 @@ public sealed class LocalServer(Bridge bridge, string origin) : IAsyncDisposable
                         if (bucket.Count >= 32) { await Send(new Reply("ack", command.Id, false, "Too many requests. Try again shortly.")); continue; }
                         bucket.Enqueue(now);
                         Participant? person = root.TryGetProperty("participant", out var p) ? p.Deserialize<Participant>(Json.Options) : null;
-                        if (command.Op is "waveform" or "spotify")
+                        string? requester = root.TryGetProperty("requester", out var requestPeer) ? requestPeer.GetString() : null;
+                        string? audience = root.TryGetProperty("audience", out var requestAudience) ? requestAudience.GetString() : null;
+                        if (requester?.Length > 128 || audience?.Length > 64) throw new InvalidDataException("Invalid request ownership.");
+                        if (command.Op is "waveform" or "spotify" or "audioAssets" or "play" or "startAt" or "region" or "reverse" or "audioPlay" or "keepAudio" or "removeAudio" or "retryAudio" or "retryCleanup" or "beginSession" or "endSession")
                         {
                             running.RemoveAll(t => t.IsCompleted);
                             if (!await queries.WaitAsync(0)) { await Send(new Reply("ack", command.Id, false, "Too many background requests.")); continue; }
-                            running.Add(Task.Run(async () => { try { await Send(await bridge.Execute(command, actor, person).WaitAsync(lifetime.Token)); } catch (Exception ex) when (ex is WebSocketException or OperationCanceledException or TimeoutException) { } finally { queries.Release(); } }));
+                            var operation = bridge.Execute(command, actor, person, requester, audience);
+                            running.Add(Task.Run(async () => { try { await Send(await operation.WaitAsync(lifetime.Token)); } catch (Exception ex) when (ex is WebSocketException or OperationCanceledException or TimeoutException) { } finally { queries.Release(); } }));
                         }
-                        else await Send(await bridge.Execute(command, actor, person));
+                        else await Send(await bridge.Execute(command, actor, person, requester, audience));
                     }
                 }
                 finally { bridge.Changed -= Changed; bridge.WaveformChanged -= WaveChanged; lifetime.Cancel(); try { await sender; await waveSender; await Task.WhenAll(running); } catch (Exception) { } }

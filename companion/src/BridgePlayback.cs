@@ -10,6 +10,7 @@ public sealed partial class Bridge
     {
         long now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
         if (c.V is not (1 or 2) || !Guid.TryParseExact(c.Id, "D", out _) || c.At < now - 30000 || c.At > now + 30000) return new("ack", c.Id, false, "Invalid or expired command.");
+        if (c.Op == "audioAssets") return new("ack", c.Id, true, Data: new { manager = Audio.Public, locations = actor == "host" ? Audio.HostLocations() : null });
         if (c.Op == "waveform")
         {
             var catalog = parsed; if (c.SoundId == null || !catalog.Paths.TryGetValue(c.SoundId, out var path)) return new("ack", c.Id, false, "Unknown sound.");
@@ -71,7 +72,8 @@ public sealed partial class Bridge
     private async Task StartPlayback(Command c, string actor, Participant? participant, int index)
     {
         if (c.Op != "play" && (c.PositionMs is null or < 0 or > 1800000 || (c.Op == "region" && (c.EndMs is null or > 1800000 || c.EndMs <= c.PositionMs)))) throw new InvalidDataException("Invalid cue or region boundaries.");
-        if (disk.Statistics.Count >= 50000 && !disk.Statistics.ContainsKey(c.SoundId!)) throw new InvalidDataException("Statistics storage limit reached.");
+        var statisticsId = managed?.Annotation(c.SoundId!)?.WorkspaceId ?? c.SoundId!;
+        if (disk.Statistics.Count >= 50000 && !disk.Statistics.ContainsKey(statisticsId)) throw new InvalidDataException("Statistics storage limit reached.");
         bool started = false;
         try
         {
@@ -87,10 +89,10 @@ public sealed partial class Bridge
                 await Success($"DoSeekMs({start})"); seekSettlesUntil = Environment.TickCount64 + 1500; playback = playback with { PositionMs = start, PositionRevision = playback.PositionRevision + 1, SampledAt = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(), RegionEndMs = c.Op == "region" ? Math.Min(c.EndMs!.Value, playback.DurationMs.Value) : null, Repeat = c.Op == "region" && c.Repeat };
                 sampledTick = Environment.TickCount64; regionStart = c.Op == "region" ? start : null;
             }
-            var stats = disk.Statistics.GetValueOrDefault(c.SoundId!) ?? new SoundStatistics(); stats.Total++; stats.LastPlayedAt = now;
+            var stats = disk.Statistics.GetValueOrDefault(statisticsId) ?? new SoundStatistics(); stats.Total++; stats.LastPlayedAt = now;
             var key = stats.Participants.Count < 32 || stats.Participants.ContainsKey(person.Id) ? person.Id : "other";
             stats.Participants[key] = new(key == "other" ? "Other participants" : person.Name, (stats.Participants.GetValueOrDefault(key)?.Count ?? 0) + 1);
-            disk.Statistics[c.SoundId!] = stats; disk.StatisticsVersion++;
+            disk.Statistics[statisticsId] = stats; disk.StatisticsVersion++;
             disk.Activity.Add(new(c.Id, c.SoundId!, now, person.Id, person.Name, actor == "host" ? "host" : "guest")); if (disk.Activity.Count > 100) disk.Activity.RemoveRange(0, disk.Activity.Count - 100);
         }
         catch { if (started) { try { await Success("DoStopSound()"); } catch (Exception) { } playback = new("STOPPED"); } throw; }
@@ -104,7 +106,23 @@ public sealed partial class Bridge
         else { if (c.PositionMs is null or < 0 || playback.DurationMs is not > 0) throw new InvalidDataException("Invalid seek target or unknown duration."); var target = Math.Min(c.PositionMs.Value, playback.DurationMs.Value - 1); await Success($"DoSeekMs({target})"); seekSettlesUntil = Environment.TickCount64 + 1500; playback = playback with { PositionMs = target, PositionRevision = playback.PositionRevision + 1, RegionEndMs = null, Repeat = false }; regionStart = null; }
         playback = playback with { SampledAt = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() }; sampledTick = Environment.TickCount64;
     }
+    private string[] StatisticsKeys(string soundId)
+    {
+        var annotation = managed?.Annotation(soundId);
+        return annotation == null ? [soundId] : annotation.Aliases.Append(annotation.WorkspaceId).Append(soundId).Distinct().ToArray();
+    }
+    private SoundStatistics CombinedStatistics(string soundId)
+    {
+        var result = new SoundStatistics();
+        foreach (var key in StatisticsKeys(soundId))
+        {
+            if (!disk.Statistics.TryGetValue(key, out var value)) continue;
+            result.Total += value.Total; result.LastPlayedAt = Math.Max(result.LastPlayedAt ?? 0, value.LastPlayedAt ?? 0);
+            foreach (var (id, person) in value.Participants) result.Participants[id] = new(person.Name, (result.Participants.GetValueOrDefault(id)?.Count ?? 0) + person.Count);
+        }
+        return result;
+    }
     private Reply StatisticsReply(Command c) => new("ack", c.Id, true, Data: c.SoundId == null
-        ? new { totals = disk.Statistics.ToDictionary(x => x.Key, x => new { x.Value.Total, x.Value.LastPlayedAt }), recent = disk.Activity.TakeLast(20).ToArray() }
-        : new { statistics = disk.Statistics.GetValueOrDefault(c.SoundId) ?? new SoundStatistics(), recent = disk.Activity.Where(a => a.SoundId == c.SoundId).TakeLast(20).ToArray() });
+        ? new { totals = disk.Statistics.Keys.Concat(parsed.Public.Sounds.Select(s=>s.Id)).Distinct().ToDictionary(id=>id, id=> { var stats=CombinedStatistics(id); return new {stats.Total,stats.LastPlayedAt}; }), recent = disk.Activity.TakeLast(20).ToArray() }
+        : new { statistics = CombinedStatistics(c.SoundId), recent = disk.Activity.Where(a => StatisticsKeys(c.SoundId).Contains(a.SoundId)).TakeLast(20).ToArray() });
 }

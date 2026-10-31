@@ -22,7 +22,7 @@ import {
   LogOut,
 } from 'lucide-react';
 import { controller } from './controller';
-import { flattenCategories, selectSounds, type Sound } from './protocol';
+import { flattenCategories, selectSounds, soundKeys, hasSound, type Sound } from './protocol';
 import { z } from 'zod';
 import { useWorkspace, viewModes, moveSound } from './workspace';
 import { SoundCollection, type Totals } from './components/SoundCollection';
@@ -31,13 +31,31 @@ import { IconEditor } from './components/IconEditor';
 import { PersonalLayout, OrganizeSound } from './components/PersonalLayout';
 import { Statistics } from './components/Statistics';
 import { SpotifyPanel } from './components/SpotifyPanel';
+import { Notifications } from './components/Notifications';
+import { TempManager } from './components/TempManager';
+import { SessionUpload } from './components/SessionUpload';
+import { useAppearance, themes, type Theme } from './appearance';
 import { GuestName } from './components/GuestName';
 import { organization } from './shared-layout';
 import { clearWaveforms } from './waveform-cache';
+import './tokens.css';
 import './styles.css';
 import './v2.css';
+import './polish.css';
 
+function ProjectFooter() {
+  return (
+    <small className="project-footer">
+      Soundpad Web · v2.3 ·{' '}
+      <a href="https://github.com/uh-oh-man/soundpad-web" target="_blank" rel="noreferrer">
+        GitHub
+      </a>{' '}
+      · <span>made by AI</span>
+    </small>
+  );
+}
 function App() {
+  const appearance = useAppearance();
   const view = useSyncExternalStore(controller.subscribe, controller.getSnapshot);
   const { state, mode, status } = view;
   const [category, setCategory] = useState('all');
@@ -55,6 +73,51 @@ function App() {
   function hostPermission() {
     return mode === 'host' || state.permissions.guestSeeking !== false;
   }
+  useEffect(() => {
+    function space(event: KeyboardEvent) {
+      if (
+        event.code !== 'Space' ||
+        event.defaultPrevented ||
+        event.ctrlKey ||
+        event.altKey ||
+        event.metaKey
+      )
+        return;
+      const target = event.target;
+      if (target instanceof HTMLElement) {
+        if (target.isContentEditable || target.closest('input,textarea,select,[role="dialog"]'))
+          return;
+        const media = target.closest(
+          '.tile-play-strip,.tile-art-button,.tile-wave-surface,.wave-surface',
+        );
+        if (target.closest('button,a,[role="slider"]') && !media) return;
+        const button = target.closest('button');
+        if (button && !button.matches('.tile-play-strip,.tile-art-button')) return;
+      }
+      const current = controller.getSnapshot();
+      if (
+        !current.state.available ||
+        !['Host ready', 'Connected'].includes(current.status) ||
+        (current.mode !== 'host' && !current.state.permissions.remotePlayback)
+      )
+        return;
+      const playback = current.state.playback;
+      if (!['PLAYING', 'PAUSED', 'SEEKING'].includes(playback.status)) return;
+      event.preventDefault();
+      if (event.repeat) return;
+      if (
+        playback.soundId &&
+        playback.epoch &&
+        (current.mode === 'host' || current.state.permissions.guestSeeking !== false)
+      )
+        void controller
+          .run('pause', { soundId: playback.soundId, epoch: playback.epoch })
+          .catch(() => {});
+      else if (playback.status !== 'PAUSED') void controller.run('stop').catch(() => {});
+    }
+    document.addEventListener('keydown', space, true);
+    return () => document.removeEventListener('keydown', space, true);
+  }, []);
   const [pending, setPending] = useState(0);
   const host = mode === 'host';
   const connected = status === (host ? 'Host ready' : 'Connected');
@@ -71,7 +134,7 @@ function App() {
     return () => clearTimeout(timer);
   }, [connected, organizationText]);
   const [nativeMajor, nativeMinor] = (state.companionVersion ?? '0.0').split('.').map(Number);
-  const needsCompanionUpdate = !(nativeMajor > 2 || (nativeMajor === 2 && nativeMinor >= 2));
+  const needsCompanionUpdate = !(nativeMajor > 2 || (nativeMajor === 2 && nativeMinor >= 3));
   const repositoryUrl = import.meta.env.VITE_REPOSITORY_URL as string | undefined;
   const categories = useMemo(
     () => flattenCategories(state.library.categories),
@@ -85,17 +148,26 @@ function App() {
         : myCategory === 'favorites'
           ? w.favorites
           : w.folders.find((f) => f.id === myCategory)?.soundIds;
-      const byId = new Map(state.library.sounds.map((s) => [s.id, s]));
+      const byId = new Map(
+        state.library.sounds
+          .filter((s) => !s.internalVariant)
+          .flatMap((s) => soundKeys(s).map((key) => [key, s] as const)),
+      );
       list = (
         ids ? ids.map((id) => byId.get(id)).filter((s): s is Sound => !!s) : state.library.sounds
       ).filter(
         (s) =>
-          !w.hidden.includes(s.id) &&
+          !s.internalVariant &&
+          !hasSound(w.hidden, s) &&
           (!search || s.name.toLocaleLowerCase().includes(search.toLocaleLowerCase())),
       );
       if (!ids && w.order.length) {
         const rank = new Map(w.order.map((id, i) => [id, i]));
-        list = [...list].sort((a, b) => (rank.get(a.id) ?? 1e9) - (rank.get(b.id) ?? 1e9));
+        list = [...list].sort(
+          (a, b) =>
+            Math.min(...soundKeys(a).map((id) => rank.get(id) ?? 1e9)) -
+            Math.min(...soundKeys(b).map((id) => rank.get(id) ?? 1e9)),
+        );
       }
     }
     if (w && w.sort !== 'original') {
@@ -110,7 +182,7 @@ function App() {
         return w.descending ? -value : value;
       });
     }
-    return list;
+    return [...new Map(list.map((s) => [s.id, s])).values()];
   }, [state.library, category, search, w, totals]);
   const title = search
     ? 'Search results'
@@ -231,7 +303,7 @@ function App() {
     </div>
   );
   return (
-    <div className="app-shell">
+    <div className={`app-shell ${mode === 'landing' ? 'is-landing' : 'is-connected'}`}>
       <header className="topbar">
         <a href={location.pathname} className="brand" aria-label="Soundpad Web home">
           <span className="brand-icon">
@@ -352,7 +424,7 @@ function App() {
             <aside className="sidebar">
               {(state.protocol ?? 1) >= 2 && <SpotifyPanel host={host} />}
               <div className="sidebar-heading">
-                LIBRARY <span>{state.library.sounds.length}</span>
+                LIBRARY <span>{state.library.sounds.filter((s) => !s.internalVariant).length}</span>
               </div>
               <button
                 className={`category ${category === 'all' ? 'selected' : ''}`}
@@ -364,7 +436,7 @@ function App() {
               >
                 <AudioLines size={18} />
                 <span>All sounds</span>
-                <small>{state.library.sounds.length}</small>
+                <small>{state.library.sounds.filter((s) => !s.internalVariant).length}</small>
               </button>
               <div className="sidebar-label">SOUNDPAD CATEGORIES</div>
               <nav aria-label="Sound categories">
@@ -464,7 +536,7 @@ function App() {
                     {host
                       ? (state.protocol ?? 1) < 2
                         ? 'Update your Windows companion for V2'
-                        : 'Update your Windows companion to 2.2'
+                        : 'Update your Windows companion to 2.3'
                       : 'Ask the host to update the Windows companion'}
                   </strong>
                   <p>
@@ -550,32 +622,16 @@ function App() {
                   ))}
                 </section>
               )}
-              <div className="session-upload">
-                <label className="upload-audio">
-                  Add session audio
-                  <input
-                    type="file"
-                    aria-label="Add session audio"
-                    accept="audio/*,.ogg,.flac"
-                    disabled={!canPlay || needsCompanionUpdate}
-                    onChange={(e) => {
-                      const file = e.target.files?.[0];
-                      if (file) {
-                        e.target.disabled = true;
-                        const input = e.target;
-                        void controller
-                          .upload(file)
-                          .catch(() => {})
-                          .finally(() => {
-                            input.value = '';
-                            input.disabled = false;
-                          });
-                      }
-                    }}
-                  />
-                </label>
-                <small>Uploads & reversed copies go in temp · host approval to keep</small>
-              </div>
+              <SessionUpload
+                disabled={
+                  !connected ||
+                  needsCompanionUpdate ||
+                  (mode !== 'host' && state.permissions.guestUploads === false)
+                }
+              />
+              {!needsCompanionUpdate && (
+                <TempManager state={state} host={mode === 'host'} connected={connected} />
+              )}
               <div className="toolbar">
                 <label className="search">
                   <Search size={18} />
@@ -771,6 +827,7 @@ function App() {
                     : 'Guest access'}
                 </span>
                 <span>Audio plays through the host’s Soundpad</span>
+                <ProjectFooter />
               </div>
             </main>
           </div>
@@ -804,22 +861,30 @@ function App() {
           </Player>
         </>
       )}
-      {view.notice && (
-        <div className="toast" role="status">
-          <span>{view.notice}</span>
-          <button
-            className="icon-button"
-            aria-label="Dismiss notification"
-            onClick={() => controller.notify('')}
-          >
-            <X size={17} />
-          </button>
-        </div>
-      )}
+      <Notifications />
       {settings &&
         modal(
           'Session & access',
           <>
+            <section className="appearance-setting" aria-label="Appearance">
+              <h3>Appearance</h3>
+              <label>
+                Theme
+                <select
+                  aria-label="Theme"
+                  value={appearance.theme}
+                  onChange={(event) => appearance.setTheme(event.target.value as Theme)}
+                >
+                  {themes.map((theme) => (
+                    <option key={theme.id} value={theme.id}>
+                      {theme.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <p>Only your browser's appearance changes.</p>
+              {appearance.error && <p className="inline-error">{appearance.error}</p>}
+            </section>
             <div className="settings-status">
               <Radio size={18} />
               <div>
@@ -901,6 +966,36 @@ function App() {
                     </div>
                   </>
                 )}
+                {(['guestUploads', 'guestTransforms'] as const).map((key) => (
+                  <div className="setting-row" key={key}>
+                    <div>
+                      <strong>
+                        {key === 'guestUploads'
+                          ? 'Guest session uploads'
+                          : 'Guest reverse generation'}
+                      </strong>
+                      <p>
+                        {key === 'guestUploads'
+                          ? 'Allow bounded audio uploads into Temp.'
+                          : 'Allow guests to prepare reversed variants.'}
+                      </p>
+                    </div>
+                    <input
+                      type="checkbox"
+                      aria-label={
+                        key === 'guestUploads'
+                          ? 'Allow guest uploads'
+                          : 'Allow guest reverse generation'
+                      }
+                      checked={state.permissions[key] !== false}
+                      onChange={(e) =>
+                        void run('permissions', {
+                          permissions: { ...state.permissions, [key]: e.target.checked },
+                        })
+                      }
+                    />
+                  </div>
+                ))}
                 <div className="invite-field">
                   <label htmlFor="invite">Invitation link · anyone with this link can join</label>
                   <input
@@ -979,7 +1074,7 @@ function App() {
           </>,
           () => setSettings(false),
         )}
-      <small className="ai-credit">made by AI</small>
+      {mode === 'landing' && <ProjectFooter />}
       {view.needsName && <GuestName initial={view.profile.name} />}
       {editing &&
         modal('Sound icon', <IconEditor sound={editing} close={() => setEditing(null)} />, () =>

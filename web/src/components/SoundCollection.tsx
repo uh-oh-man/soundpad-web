@@ -1,16 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import {
-  ImagePlus,
-  Star,
-  FolderPlus,
-  BarChart3,
-  ArrowUp,
-  ArrowDown,
-  Rewind,
-  Save,
-} from 'lucide-react';
+import { ImagePlus, Star, FolderPlus, BarChart3, ArrowUp, ArrowDown, Rewind } from 'lucide-react';
 import { controller } from '../controller';
-import { flattenCategories, type Snapshot, type Sound } from '../protocol';
+import { flattenCategories, soundKeys, hasSound, type Snapshot, type Sound } from '../protocol';
 import { moveSound, toggleFavorite, type Workspace } from '../workspace';
 import { Waveform, formatTime, usePlayhead } from './Waveform';
 import { SoundButton } from './SoundButton';
@@ -244,7 +235,11 @@ export function SoundCollection({
                   className="icon-button"
                   aria-label={`Reverse and play ${sound.name}`}
                   title="Reverse & play · temporary copy"
-                  disabled={!canPlay || pending === sound.id}
+                  disabled={
+                    !canPlay ||
+                    pending === sound.id ||
+                    (!host && state.permissions.guestTransforms === false)
+                  }
                   onClick={() => {
                     setPending(sound.id);
                     void controller
@@ -260,29 +255,21 @@ export function SoundCollection({
                     temp
                   </small>
                 )}
-                {host && sound.temporary && (
-                  <button
-                    className="icon-button"
-                    aria-label={`Keep ${sound.name} permanently`}
-                    title="Accept permanently"
-                    onClick={() =>
-                      void controller.run('keepAudio', { soundId: sound.id }).catch(() => {})
-                    }
-                  >
-                    <Save size={14} />
-                  </button>
-                )}
                 {w && (
                   <>
                     <button
                       className="icon-button"
                       aria-label={`Favorite ${sound.name}`}
-                      aria-pressed={w.favorites.includes(sound.id)}
-                      onClick={() => update((current) => toggleFavorite(current, sound.id))}
+                      aria-pressed={hasSound(w.favorites, sound)}
+                      onClick={() =>
+                        update((current) =>
+                          toggleFavorite(current, sound.workspaceId ?? sound.id, soundKeys(sound)),
+                        )
+                      }
                     >
                       <Star
                         size={14}
-                        fill={w.favorites.includes(sound.id) ? 'currentColor' : 'none'}
+                        fill={hasSound(w.favorites, sound) ? 'currentColor' : 'none'}
                       />
                     </button>
                     <button

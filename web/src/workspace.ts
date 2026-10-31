@@ -44,7 +44,7 @@ export const workspaceSchema = z
     order: z.array(soundId).max(50000),
     cues: z.record(soundId, z.array(cue).max(64)),
     regions: z.record(soundId, z.array(region).max(64)),
-    zoom: z.record(soundId, z.number().min(1).max(32)),
+    zoom: z.record(soundId, z.number().min(1).max(128)),
     lastCue: z
       .object({
         soundId,
@@ -170,11 +170,11 @@ export function moveSound(w: Workspace, id: string, folder: string | undefined, 
     ? { ...w, folders: w.folders.map((f) => (f.id === folder ? { ...f, soundIds: next } : f)) }
     : { ...w, order: next };
 }
-export function toggleFavorite(w: Workspace, id: string) {
+export function toggleFavorite(w: Workspace, id: string, aliases: string[] = [id]) {
   return {
     ...w,
-    favorites: w.favorites.includes(id)
-      ? w.favorites.filter((x) => x !== id)
+    favorites: aliases.some((key) => w.favorites.includes(key))
+      ? w.favorites.filter((x) => !aliases.includes(x))
       : [...w.favorites, id],
   };
 }

@@ -15,20 +15,36 @@ public sealed class MockSoundpad : IAsyncDisposable
     public string Status { get; private set; } = "STOPPED";
     private readonly CancellationTokenSource cancel = new();
     private readonly Task loop;
+    public bool ChangeLibraryBeforeOwnedRemoval { get; set; }
+    public bool StartPlaybackBeforeOwnedRemoval { get; set; }
+    public bool FailOwnedRemovalOnce { get; set; }
     private int selectedCategory = 1, selectedIndex;
-    private string CategoriesMetadata()
+    private string CategoriesMetadata(bool withSounds = false)
     {
         var doc = XDocument.Parse(CategoryXml);
         if (!doc.Descendants("Category").Any(e => (string?)e.Attribute("type") == "1")) doc.Root!.AddFirst(new XElement("Category", new XAttribute("index", 1), new XAttribute("type", 1), new XAttribute("name", "All sounds")));
+        if (withSounds) { var builtin = doc.Descendants("Category").Single(e => (string?)e.Attribute("type") == "1"); builtin.Elements("Sound").Remove(); builtin.Add(XDocument.Parse(AllXml).Root!.Elements("Sound").Select(e => new XElement(e))); }
         return doc.ToString();
     }
     private string Manage(string command)
     {
         var cats = XDocument.Parse(CategoryXml); var all = XDocument.Parse(AllXml);
-        if (command.StartsWith("DoAddCategory(")) { int id = cats.Descendants("Category").Select(e => (int)e.Attribute("index")!).DefaultIfEmpty(1).Max() + 1; cats.Root!.Add(new XElement("Category", new XAttribute("index", id), new XAttribute("name", "temp"))); }
+        if (command.StartsWith("FixtureRemoveOwnedEntry("))
+        {
+            if (ChangeLibraryBeforeOwnedRemoval) { ChangeLibraryBeforeOwnedRemoval = false; all.Root!.Elements("Sound").First().SetAttributeValue("title", "Changed by another application"); AllXml = all.ToString(); }
+            if (StartPlaybackBeforeOwnedRemoval) { StartPlaybackBeforeOwnedRemoval = false; BeginFixturePlayback(); }
+            if (FailOwnedRemovalOnce) { FailOwnedRemovalOnce = false; return "R-500"; }
+            using var proof = System.Text.Json.JsonDocument.Parse(Convert.FromBase64String(command[24..^1]));
+            var expected = proof.RootElement.GetProperty("fingerprint").GetString(); var path = proof.RootElement.GetProperty("path").GetString();
+            var fingerprint = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(Encoding.UTF8.GetBytes(AllXml))).ToLowerInvariant();
+            if (Status != "STOPPED" || expected != fingerprint) return "R-409";
+            var matches = all.Root!.Elements("Sound").Where(e => (string?)e.Attribute("url") == path).ToArray(); if (matches.Length != 1) return "R-409";
+            selectedCategory = 1; selectedIndex = (int)matches[0].Attribute("index")!; command = "DoRemoveSelectedEntries(false)";
+        }
+        if (command.StartsWith("DoAddCategory(")) { int id = cats.Descendants("Category").Select(e => (int)e.Attribute("index")!).DefaultIfEmpty(1).Max() + 1; cats.Root!.Add(new XElement("Category", new XAttribute("index", id), new XAttribute("name", Regex.Match(command, "\"([^\"]+)\"").Groups[1].Value))); }
         else if (command.StartsWith("DoAddSound("))
         {
-            var m = Regex.Match(command, "^DoAddSound\\(\"([^\"]+)\", (\\d+), -1\\)$");
+            var m = Regex.Match(command, "^DoAddSound\\(\"([^\"]+)\", (\\d+), (?:-1|1)\\)$");
             if (!m.Success) return "R-400";
             int id = all.Root!.Elements("Sound").Select(e => (int)e.Attribute("index")!).DefaultIfEmpty(0).Max() + 1;
             var sound = new XElement("Sound", new XAttribute("index", id), new XAttribute("url", m.Groups[1].Value), new XAttribute("title", "Uploaded audio")); all.Root.Add(sound); cats.Descendants("Category").Single(e => (int)e.Attribute("index")! == int.Parse(m.Groups[2].Value)).Add(new XElement(sound));
@@ -69,11 +85,11 @@ public sealed class MockSoundpad : IAsyncDisposable
                     byte[] buffer = new byte[4096]; int read = await server.ReadAsync(buffer, cancel.Token); if (read == 0) break;
                     var command = Encoding.UTF8.GetString(buffer, 0, read); lock (Commands) Commands.Add(command);
                     if (Status == "PLAYING" && Position >= DurationMs) Status = "STOPPED";
-                    string result = command switch { "GetSoundlist()" => AllXml, "GetCategories(true, true)" => CategoryXml, "GetCategories(false, false)" => CategoriesMetadata(), "GetPlayStatus()" => ReportStatus(), "GetPlaybackPositionInMs()" => ReportPosition().ToString(), "GetPlaybackDurationInMs()" => DurationMs.ToString(), "IsAlive()" => "R-200", _ => command.StartsWith("Do") ? "R-200" : "R-404" };
-                    if (command.StartsWith("DoAdd") || command.StartsWith("DoSelectCategory(") || command.StartsWith("DoSelectIndex(") || command.StartsWith("DoRemoveSelectedEntries(")) result = Manage(command);
+                    string result = command switch { "GetSoundlist()" => AllXml, "GetCategories(true, true)" => CategoryXml, "GetCategories(false, false)" => CategoriesMetadata(), "GetCategories(true, false)" => CategoriesMetadata(true), "GetPlayStatus()" => ReportStatus(), "GetPlaybackPositionInMs()" => ReportPosition().ToString(), "GetPlaybackDurationInMs()" => DurationMs.ToString(), "IsAlive()" => "R-200", _ => command.StartsWith("Do") ? "R-200" : "R-404" };
+                    if (command.StartsWith("FixtureRemoveOwnedEntry(") || command.StartsWith("DoAdd") || command.StartsWith("DoSelectCategory(") || command.StartsWith("DoSelectIndex(") || command.StartsWith("DoRemoveSelectedEntries(")) result = Manage(command);
                     if (command.StartsWith("DoPlaySound(")) { BeginFixturePlayback(); Console.WriteLine("TEST_PLAY " + command); }
                     if (command.StartsWith("DoSeekMs(")) { beforeSeek = Position; remainingLag = SeekLagSamples; remainingStops = TransientSeekStop ? 1 : 0; position = long.Parse(command[9..^1]); startedTick = Environment.TickCount64; Console.WriteLine("TEST_PLAY " + command); }
-                    if (command == "DoTogglePause()") { position = Position; Status = Status == "PLAYING" ? "PAUSED" : "PLAYING"; startedTick = Environment.TickCount64; }
+                    if (command == "DoTogglePause()") { Console.WriteLine("TEST_PLAY " + command); position = Position; Status = Status == "PLAYING" ? "PAUSED" : "PLAYING"; startedTick = Environment.TickCount64; }
                     if (command == "DoStopSound()") { Status = "STOPPED"; position = 0; }
                     await server.WriteAsync(Encoding.UTF8.GetBytes(result), cancel.Token);
                 }

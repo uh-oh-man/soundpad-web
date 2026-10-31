@@ -1,7 +1,7 @@
 import { useRef, useState } from 'react';
 import { ArrowUp, ArrowDown, FolderPlus, Download, Upload, Trash2, Star } from 'lucide-react';
 import { blankWorkspace, parseWorkspace, toggleFavorite, type Workspace } from '../workspace';
-import type { Sound } from '../protocol';
+import { soundKeys, hasSound, type Sound } from '../protocol';
 type Props = {
   workspace: Workspace;
   update: (fn: (w: Workspace) => Workspace) => void;
@@ -14,7 +14,7 @@ export function PersonalLayout({ workspace: w, update, replace, sounds, status }
     [parent, setParent] = useState(''),
     [error, setError] = useState('');
   const input = useRef<HTMLInputElement>(null);
-  const known = new Set(sounds.map((s) => s.id));
+  const known = new Set(sounds.flatMap(soundKeys));
   const missing = new Set(
     [...w.favorites, ...w.hidden, ...w.folders.flatMap((f) => f.soundIds)].filter(
       (id) => !known.has(id),
@@ -234,9 +234,15 @@ export function OrganizeSound({
   return (
     <div className="organize-sound">
       <p>{sound.name}</p>
-      <button onClick={() => update((current) => toggleFavorite(current, sound.id))}>
-        <Star size={15} fill={w.favorites.includes(sound.id) ? 'currentColor' : 'none'} />
-        {w.favorites.includes(sound.id) ? 'Remove favorite' : 'Add favorite'}
+      <button
+        onClick={() =>
+          update((current) =>
+            toggleFavorite(current, sound.workspaceId ?? sound.id, soundKeys(sound)),
+          )
+        }
+      >
+        <Star size={15} fill={hasSound(w.favorites, sound) ? 'currentColor' : 'none'} />
+        {hasSound(w.favorites, sound) ? 'Remove favorite' : 'Add favorite'}
       </button>
       <h3>Personal categories</h3>
       {w.folders.length ? (
@@ -244,7 +250,7 @@ export function OrganizeSound({
           <label className="folder-membership" key={f.id}>
             <input
               type="checkbox"
-              checked={f.soundIds.includes(sound.id)}
+              checked={hasSound(f.soundIds, sound)}
               onChange={(e) => {
                 const checked = e.target.checked;
                 update((current) => ({
@@ -254,8 +260,8 @@ export function OrganizeSound({
                       ? {
                           ...x,
                           soundIds: checked
-                            ? [...new Set([...x.soundIds, sound.id])]
-                            : x.soundIds.filter((id) => id !== sound.id),
+                            ? [...new Set([...x.soundIds, sound.workspaceId ?? sound.id])]
+                            : x.soundIds.filter((id) => !soundKeys(sound).includes(id)),
                         }
                       : x,
                   ),
@@ -272,13 +278,13 @@ export function OrganizeSound({
         onClick={() =>
           update((current) => ({
             ...current,
-            hidden: current.hidden.includes(sound.id)
-              ? current.hidden.filter((id) => id !== sound.id)
-              : [...current.hidden, sound.id],
+            hidden: hasSound(current.hidden, sound)
+              ? current.hidden.filter((id) => !soundKeys(sound).includes(id))
+              : [...current.hidden, sound.workspaceId ?? sound.id],
           }))
         }
       >
-        {w.hidden.includes(sound.id) ? 'Unhide in My Layout' : 'Hide in My Layout'}
+        {hasSound(w.hidden, sound) ? 'Unhide in My Layout' : 'Hide in My Layout'}
       </button>
       <p className="muted">
         A sound can be in several personal categories. This never edits Soundpad.
