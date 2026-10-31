@@ -11,7 +11,40 @@ public sealed partial class Bridge
         // Reuse the model Voice Replay Studio already downloaded, if this PC has one.
         Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Voice Replay Studio", "Models", "ggml-base.en.bin"),
         Path.Combine(store.DirectoryPath, "native", "whisper-1.9.1")));
-    private MimicState MimicSnapshot => new(mimicCapture.Running, mimicCapture.SourceName, mimicCapture.Status, MimicWindowMs, transcriber.Enabled, transcriber.ModelReady, transcriber.Status);
+    public const int HotkeySeconds = 10;
+    private IGlobalHotkey hotkey = new WindowsHotkey();
+    private volatile string hotkeyStatus = "Off";
+    private MimicState MimicSnapshot => new(mimicCapture.Running, mimicCapture.SourceName, mimicCapture.Status, MimicWindowMs, transcriber.Enabled, transcriber.ModelReady, transcriber.Status, hotkey.Active, hotkeyStatus);
+
+    /// <summary>Replaces the system-wide hotkey; tests use a fixture that can be "pressed" directly.</summary>
+    public void UseHotkey(IGlobalHotkey key) { hotkey.Dispose(); hotkey = key; }
+
+    private void StopMimic() { mimicCapture.Stop(); transcriber.Disable(); hotkey.Unregister(); hotkeyStatus = "Off"; }
+
+    /// <summary>The host pressed the hotkey: save the last <see cref="HotkeySeconds"/> seconds, like Voice Replay Studio's F6.</summary>
+    public async Task HotkeyPressed()
+    {
+        try
+        {
+            var ring = mimicCapture.Ring ?? throw new InvalidDataException($"{hotkey.Name} was pressed while Mimic was not listening.");
+            long stop = ring.Written, start = Math.Max(0, stop - (long)ring.Rate * HotkeySeconds);
+            var words = string.Join(" ", transcriber.Lines(ring, start, stop).Select(l => l.Text.Trim())).Trim();
+            var reply = await SaveMimic(ring, start, stop, words.Length > 0 ? words : null, "Host", true, "host", audioAudience);
+            hotkeyStatus = reply.Ok ? $"Saved the last {HotkeySeconds} s at {DateTime.Now:HH:mm:ss}" : reply.Error ?? "Could not save.";
+        }
+        catch (InvalidDataException ex) { hotkeyStatus = ex.Message; }
+        Publish(); CommandAccepted?.Invoke();
+    }
+
+    private async Task<Reply> SaveMimic(MimicRing ring, long start, long stop, string? name, string by, bool host, string owner, string? audience)
+    {
+        if (stop - start < (long)ring.Rate * MimicMinimumMs / 1000) throw new InvalidDataException("Mimic had not started listening yet at that moment.");
+        var samples = ring.Read(start, stop);
+        if (samples.All(s => Math.Abs(s) < 0.0005f)) throw new InvalidDataException("That selection is silent. Nothing was saved.");
+        name = string.IsNullOrWhiteSpace(name) ? "Mimic " + DateTime.Now.ToString("HH.mm.ss") : name.Trim();
+        if (name.Length > 100) name = name[..99].TrimEnd() + "…";
+        return await Upload(MimicRing.Wav(samples, ring.Rate), name + ".wav", by, host, owner, audience, mimic: true);
+    }
 
     /// <summary>Replaces the speech engine; tests use a deterministic fixture instead of Whisper.</summary>
     public void UseTranscriptEngine(ITranscriptEngine engine) { transcriber.Dispose(); transcriber = new(engine); }
@@ -19,7 +52,7 @@ public sealed partial class Bridge
     /// <summary>Replaces the capture backend; tests and the e2e harness use a deterministic fixture source.</summary>
     public void UseMimicCapture(IMimicCapture capture) { mimicCapture.Dispose(); mimicCapture = capture; }
 
-    private static bool IsMimic(string op) => op is "mimicSources" or "mimicStart" or "mimicStop" or "mimicPeek" or "mimicClip" or "mimicTranscribe";
+    private static bool IsMimic(string op) => op is "mimicSources" or "mimicStart" or "mimicStop" or "mimicPeek" or "mimicClip" or "mimicTranscribe" or "mimicHotkey";
 
     private bool GuestMimicAllowed(string? requester, string? audience) =>
         disk.Permissions.GuestMimic && (audioAudience == null || sessionAccepting && audience == audioAudience) && (requester == null || !revokedAudioPeers.ContainsKey(requester));
@@ -41,6 +74,12 @@ public sealed partial class Bridge
                     var source = mimicCapture.Sources().FirstOrDefault(s => s.Id == c.SourceId) ?? throw new InvalidDataException("That source is no longer available. Refresh the list.");
                     await mimicCapture.Start(source, MimicWindowMs / 1000 + MimicGraceSeconds);
                     Publish(); CommandAccepted?.Invoke();
+                    return new("ack", c.Id, true);
+                case "mimicHotkey":
+                    if (c.Action == "disable") { hotkey.Unregister(); hotkeyStatus = "Off"; }
+                    else if (c.Action == "enable") { hotkey.Register(() => _ = HotkeyPressed()); hotkeyStatus = $"Press {hotkey.Name} in any app to save the last {HotkeySeconds} s"; }
+                    else throw new InvalidDataException("Unsupported hotkey setting.");
+                    Publish();
                     return new("ack", c.Id, true);
                 case "mimicStop":
                     mimicCapture.Stop(); Publish();
@@ -65,12 +104,7 @@ public sealed partial class Bridge
                         long windowStart = end - (long)ring.Rate * MimicWindowMs / 1000;
                         // Time before capture started has no audio; trim it instead of treating it as expired.
                         long start = Math.Max(0, windowStart + from * ring.Rate / 1000), stop = windowStart + to * ring.Rate / 1000;
-                        if (stop - start < (long)ring.Rate * MimicMinimumMs / 1000) throw new InvalidDataException("Mimic had not started listening yet at that moment.");
-                        var samples = ring.Read(start, stop);
-                        if (samples.All(s => Math.Abs(s) < 0.0005f)) throw new InvalidDataException("That selection is silent. Nothing was saved.");
-                        var name = string.IsNullOrWhiteSpace(c.Name) ? "Mimic " + DateTime.Now.ToString("HH.mm.ss") : c.Name.Trim();
-                        var by = Person(actor, participant).Name;
-                        var result = await Upload(MimicRing.Wav(samples, ring.Rate), name[..Math.Min(name.Length, 100)] + ".wav", by, host, requester ?? participant?.Id ?? actor, audience, mimic: true);
+                        var result = await SaveMimic(ring, start, stop, c.Name, Person(actor, participant).Name, host, requester ?? participant?.Id ?? actor, audience);
                         return result with { Id = c.Id };
                     }
                 default: throw new InvalidDataException("Unsupported command.");

@@ -2,6 +2,20 @@
 
 Notable changes to Soundpad Web. Versions follow the website's `package.json`; the Windows companion is versioned separately and only needs updating when a release says so.
 
+## 2.7.0 — F6 anywhere
+
+**Update the Windows companion** for the hotkey; the website works with 2.6 companions.
+
+### Added
+
+- **F6 hotkey** (host, opt-in in the Mimic window): while Mimic is listening, F6 in any app on the host PC saves the last 10 seconds to Temp, named after its transcript when transcripts are on. This brings Voice Replay Studio's signature F6 into Soundpad Web. A website cannot register a system-wide key, but the companion is a native Windows program and can. Off by default; reports when another app already owns F6; released on End Hosting and exit; never available to guests.
+- `SoundpadWeb.Harness.exe --hotkey-probe` checks F6 without pressing anything. On the owner's PC F6 was free and was released cleanly.
+- Tests: hotkey C# test (taken key, host-only, not listening, 10 s clip named from the transcript, release on End Hosting) and e2e checks for the host toggle and its absence for guests.
+
+### Changed
+
+- The Mimic window's clip path and the hotkey share one save routine in the companion.
+
 ## 2.6.0 — Better live transcripts, selection handles
 
 **Update the Windows companion** for the transcript fix; the website works with 2.5 companions.

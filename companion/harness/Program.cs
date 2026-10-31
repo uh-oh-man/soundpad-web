@@ -52,6 +52,15 @@ if (args.FirstOrDefault() == "--mimic-stream-transcript" && args.Length == 2)
     Console.WriteLine($"Speech starts at {(end - 48000L * 30 < 48000 ? (48000 - (end - 48000L * 30)) / 48.0 : 0):0} ms into the window; streamed {audio.Length / 48000.0:0.0} s in {clock.Elapsed.TotalSeconds:0.0} s.");
     return;
 }
+if (args.FirstOrDefault() == "--hotkey-probe")
+{
+    // Registers and releases F6 with Windows; reports whether another app already owns it. Presses nothing.
+    using var key = new WindowsHotkey();
+    try { key.Register(() => { }); Console.WriteLine("F6 registered: " + key.Active); }
+    catch (InvalidDataException ex) { Console.WriteLine(ex.Message); }
+    key.Unregister(); Console.WriteLine("F6 released: " + !key.Active);
+    return;
+}
 if (args.FirstOrDefault() == "--analyze-file" && args.Length == 2)
 {
     var scratch = Path.Combine(Path.GetTempPath(), "soundpad-web-analysis-" + Guid.NewGuid().ToString("N"));
@@ -81,6 +90,7 @@ using var pipe = new SoundpadPipe(mock.Name, true);
 using var bridge = new Bridge(pipe, new StateStore(directory));
 bridge.UseMimicCapture(new MimicFixture());
 bridge.UseTranscriptEngine(new TranscriptFixture());
+bridge.UseHotkey(new HotkeyFixture());
 await bridge.Poll(true);
 await using var server = new LocalServer(bridge, args.FirstOrDefault() ?? "http://127.0.0.1:5173");
 await server.Start();

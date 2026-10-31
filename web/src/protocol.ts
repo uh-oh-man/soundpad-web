@@ -36,6 +36,7 @@ export const commandSchema = z
       'mimicPeek',
       'mimicClip',
       'mimicTranscribe',
+      'mimicHotkey',
     ]),
     assetId: z.uuid().optional(),
     variantId: z.uuid().optional(),
@@ -182,6 +183,8 @@ export const snapshotSchema = z.object({
       transcribing: z.boolean().optional(),
       transcriptModel: z.boolean().optional(),
       transcriptStatus: z.string().max(600).optional(),
+      hotkey: z.boolean().optional(),
+      hotkeyStatus: z.string().max(600).optional(),
     })
     .nullable()
     .optional(),

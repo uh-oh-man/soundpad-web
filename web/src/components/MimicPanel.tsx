@@ -1,5 +1,15 @@
 import { useCallback, useEffect, useRef, useState, type PointerEvent } from 'react';
-import { Captions, Download, Mic2, Play, RefreshCw, Scissors, Square, X } from 'lucide-react';
+import {
+  Captions,
+  Download,
+  Keyboard,
+  Mic2,
+  Play,
+  RefreshCw,
+  Scissors,
+  Square,
+  X,
+} from 'lucide-react';
 import { z } from 'zod';
 import { controller } from '../controller';
 import type { Snapshot } from '../protocol';
@@ -196,6 +206,10 @@ export function MimicPanel({
   }, [focusName, selection]);
   // The checkbox shows the requested state until the companion's snapshot confirms it.
   const [wantTranscript, setWantTranscript] = useState<boolean | null>(null);
+  const [wantHotkey, setWantHotkey] = useState<boolean | null>(null);
+  useEffect(() => {
+    if (wantHotkey !== null && wantHotkey === !!mimic?.hotkey) setWantHotkey(null);
+  }, [wantHotkey, mimic?.hotkey]);
   const transcribing = wantTranscript ?? !!mimic?.transcribing;
   useEffect(() => {
     if (wantTranscript !== null && wantTranscript === !!mimic?.transcribing)
@@ -408,6 +422,34 @@ export function MimicPanel({
             {mimic?.transcriptStatus && mimic.transcriptStatus !== 'Off'
               ? mimic.transcriptStatus
               : 'Speech is recognized on this PC; only the text is shared.'}
+          </small>
+        </div>
+      )}
+      {host && (
+        <div className="mimic-transcribe">
+          <Keyboard size={16} />
+          <label>
+            <input
+              type="checkbox"
+              aria-label="F6 saves the last 10 seconds"
+              checked={wantHotkey ?? !!mimic?.hotkey}
+              disabled={busy}
+              onChange={async (e) => {
+                const on = e.target.checked;
+                setWantHotkey(on);
+                setBusy(true);
+                await controller
+                  .run('mimicHotkey', { action: on ? 'enable' : 'disable' })
+                  .catch(() => setWantHotkey(null));
+                setBusy(false);
+              }}
+            />
+            F6 hotkey
+          </label>
+          <small>
+            {mimic?.hotkeyStatus && mimic.hotkeyStatus !== 'Off'
+              ? mimic.hotkeyStatus
+              : 'Press F6 in any app on this PC to save the last 10 seconds, like Voice Replay Studio.'}
           </small>
         </div>
       )}

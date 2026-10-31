@@ -149,7 +149,7 @@ public sealed partial class Bridge
     }
     public async Task CleanupSession()
     {
-        mimicCapture.Stop(); transcriber.Disable(); sessionAccepting = false; Interlocked.Increment(ref playRevision); await audioGate.WaitAsync();
+        StopMimic(); sessionAccepting = false; Interlocked.Increment(ref playRevision); await audioGate.WaitAsync();
         try { if (!Audio.Public.Blocked) { Audio.RetireSession(); await Audio.Cleanup(); } recoveryPending = false; }
         finally { audioGate.Release(); }
     }

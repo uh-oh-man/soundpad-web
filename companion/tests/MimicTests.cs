@@ -171,4 +171,35 @@ public sealed class MimicTests : IDisposable
         Assert.True(await transcriber.Step(ring, false, default)); // 15 s without a pause forces a cut
         Assert.Equal(2, engine.Calls);
     }
+
+    [Fact]
+    public async Task HotkeySavesTheLastTenSecondsNamedAfterTheTranscript()
+    {
+        await using var mock = new MockSoundpad(); using var pipe = new SoundpadPipe(mock.Name, true); using var bridge = new Bridge(pipe, new StateStore(folder));
+        var fixture = new MimicFixture(); bridge.UseMimicCapture(fixture); bridge.UseTranscriptEngine(new TranscriptFixture());
+        var key = new HotkeyFixture { Taken = true }; bridge.UseHotkey(key); await bridge.Poll(true);
+        Assert.True((await bridge.Execute(Cmd("beginSession"), "host")).Ok);
+        var taken = await bridge.Execute(Cmd("mimicHotkey") with { Action = "enable" }, "host");
+        Assert.False(taken.Ok); Assert.Contains("already used", taken.Error);
+        key.Taken = false;
+        Assert.False((await bridge.Execute(Cmd("mimicHotkey") with { Action = "enable" }, "guest")).Ok);
+        Assert.True((await bridge.Execute(Cmd("mimicHotkey") with { Action = "enable" }, "host")).Ok);
+        Assert.True(bridge.Snapshot.Mimic!.Hotkey);
+        await bridge.HotkeyPressed(); // not listening yet
+        Assert.Contains("not listening", bridge.Snapshot.Mimic!.HotkeyStatus);
+        Assert.True((await bridge.Execute(Cmd("mimicStart") with { SourceId = MimicFixture.Source.Id }, "host")).Ok);
+        Assert.True((await bridge.Execute(Cmd("mimicTranscribe") with { Action = "enable" }, "host")).Ok);
+        fixture.Advance(TimeSpan.FromSeconds(12));
+        // Wait for the transcriber to catch up, as a person would see lines before pressing F6.
+        for (int i = 0; i < 50 && (Data<MimicPeek>(await bridge.Execute(Cmd("mimicPeek"), "host")).Transcript?.Length ?? 0) == 0; i++) await Task.Delay(100);
+        await bridge.HotkeyPressed();
+        var sound = bridge.Snapshot.Library.Sounds.Single(s => s.Temporary);
+        Assert.StartsWith("Fixture tone", sound.Name);
+        Assert.StartsWith("Saved the last 10 s", bridge.Snapshot.Mimic!.HotkeyStatus);
+        var journal = JsonSerializer.Deserialize<AudioJournal>(File.ReadAllText(Path.Combine(folder, "managed-audio", "journal.json")), Json.Options)!;
+        using (var wave = new NAudio.Wave.WaveFileReader(journal.Assets.Single().Variants.Single().Path))
+            Assert.InRange(wave.TotalTime.TotalSeconds, 9.9, 10.1);
+        Assert.True((await bridge.Execute(Cmd("endSession"), "host")).Ok);
+        Assert.False(key.Active); Assert.False(bridge.Snapshot.Mimic!.Hotkey);
+    }
 }

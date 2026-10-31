@@ -19,7 +19,8 @@ The capture engine in the companion is a port of Voice Replay Studio's `CaptureS
 2. Under **Listen to**, choose an **Output** (everything that device plays) or an **App** (that program and its child processes, e.g. Discord).
 3. Click **Start listening**. A pulsing **Mimic on** badge appears in everyone's header.
 4. To let guests clip, turn on **Session & access → Guest Mimic**. It is off by default.
-5. **Stop listening**, **End hosting**, or closing the companion all stop capture and drop the buffer.
+5. Optional (2.7.0): turn on **F6 hotkey**. While Mimic is listening, pressing **F6 in any app** on the host PC saves the last 10 seconds to Temp, named after its transcript when transcripts are on, just like Voice Replay Studio's F6. It is off by default so it never takes F6 from a game; if another app already owns F6 (for example Voice Replay Studio itself), the window says so. End hosting and quitting release the key.
+6. **Stop listening**, **End hosting**, or closing the companion all stop capture and drop the buffer.
 
 **Anyone allowed**
 
@@ -41,7 +42,7 @@ Mimic can show what was said, line by line, under the waveform. Click a line to 
 - **English only**, using the same model and confidence filters as Voice Replay Studio. On the owner's PC the model transcribed 11 seconds of speech in 2.2 seconds.
 - Turning transcripts off, **Stop listening**, **End hosting** and quitting all discard the text. Nothing is saved except a clip's name.
 
-`SoundpadWeb.exe --transcribe-file <file.wav> [--download] [--verbose]` transcribes a local WAV with the same engine, which is useful to check the model and native libraries on a PC. `SoundpadWeb.Harness.exe --mimic-stream-transcript <file.wav>` streams a WAV into Mimic's buffer in real-time 10 ms packets with the real Whisper engine and prints the lines the Mimic window would show; no audio device is used. Streaming the JFK sample gives the same sentence, word for word, as transcribing the whole file.
+`SoundpadWeb.exe --transcribe-file <file.wav> [--download] [--verbose]` transcribes a local WAV with the same engine, which is useful to check the model and native libraries on a PC. `SoundpadWeb.Harness.exe --hotkey-probe` registers and releases F6 to check whether another app owns it (it presses nothing). `SoundpadWeb.Harness.exe --mimic-stream-transcript <file.wav>` streams a WAV into Mimic's buffer in real-time 10 ms packets with the real Whisper engine and prints the lines the Mimic window would show; no audio device is used. Streaming the JFK sample gives the same sentence, word for word, as transcribing the whole file.
 
 ## Privacy and safety rules
 
@@ -55,7 +56,7 @@ Mimic can show what was said, line by line, under the waveform. Click a line to 
 
 ## Protocol
 
-New command ops: `mimicSources`, `mimicStart`, `mimicStop`, `mimicTranscribe` (`action`: `enable`, `disable` or `download`; host only), `mimicPeek` and `mimicClip` (host, or guests with `guestMimic`). New fields: `sourceId`, `mimicEnd`, `name`. New permission: `guestMimic` (default `false`). Snapshots gain an optional `mimic` object (`active`, `source`, `status`, `windowMs`, and from 2.5.0 `transcribing`, `transcriptModel`, `transcriptStatus`). `mimicPeek` also returns `transcript`: lines with `startMs`/`endMs` relative to the window start.
+New command ops: `mimicSources`, `mimicStart`, `mimicStop`, `mimicTranscribe` (`action`: `enable`, `disable` or `download`), `mimicHotkey` (`enable` or `disable`; all host only), `mimicPeek` and `mimicClip` (host, or guests with `guestMimic`). New fields: `sourceId`, `mimicEnd`, `name`. New permission: `guestMimic` (default `false`). Snapshots gain an optional `mimic` object (`active`, `source`, `status`, `windowMs`, from 2.5.0 `transcribing`, `transcriptModel`, `transcriptStatus`, and from 2.7.0 `hotkey`, `hotkeyStatus`). `mimicPeek` also returns `transcript`: lines with `startMs`/`endMs` relative to the window start.
 
 `mimicPeek` returns `end`, an absolute frame counter for the right edge of the window. `mimicClip` sends that `end` back with `positionMs`/`endMs` offsets inside the window. The companion therefore cuts exactly the samples the person saw, even though capture kept running. If those samples have been overwritten, the clip is refused rather than shifted to newer audio, the same rule Voice Replay Studio used.
 
@@ -70,4 +71,4 @@ Requires companion 2.4. Older companions ignore the new permission, and the webs
 
 ## Not yet included
 
-Voice Replay Studio features that are not in the browser version yet: trimming a clip after it is saved (in the browser you set exact edges before clipping instead), and a system-wide hotkey (the Mimic window has in-window shortcuts instead). Saved Mimic clips are named after their transcript, so the normal sound search finds them by their words. They remain available in the desktop app under `mimic/`.
+Voice Replay Studio features that are not in the browser version yet: trimming a clip after it is saved (in the browser you set exact edges before clipping instead), That is the only one left; the system-wide F6 hotkey arrived in 2.7.0. Saved Mimic clips are named after their transcript, so the normal sound search finds them by their words. They remain available in the desktop app under `mimic/`.
