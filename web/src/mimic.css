@@ -289,12 +289,14 @@
 }
 .mimic-library li {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 8px;
 }
+/* At least 200px for the title; on a phone the buttons move under it instead of squeezing it. */
 .mimic-library-text {
   display: grid;
-  flex: 1;
+  flex: 1 1 200px;
   min-width: 0;
 }
 .mimic-library-text strong,
@@ -320,4 +322,9 @@
   display: flex;
   align-items: center;
   gap: 8px;
+}
+.mimic-library-actions {
+  display: flex;
+  gap: 6px;
+  flex: none;
 }

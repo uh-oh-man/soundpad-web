@@ -307,7 +307,7 @@ export function MimicPanel({
       )}
       {allowed && <MimicRecent state={state} host={host} canPlay={canPlay} />}
       {host && supports(state.companionVersion, 'voiceReplayLibrary') && (
-        <MimicLibrary connected={connected} />
+        <MimicLibrary connected={connected} canPlay={canPlay} />
       )}
     </div>
   );

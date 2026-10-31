@@ -2,6 +2,22 @@
 
 Notable changes to Soundpad Web. Versions follow the website's `package.json`; the Windows companion is versioned separately and only needs updating when a release says so.
 
+## 2.15.3 — Import & play, and a real-chain check
+
+Website only; works with any 2.15 companion, which reports 2.15.3 in this release.
+
+### Added
+
+- **Import & play** next to each clip in **From Voice Replay Studio**: it imports the clip and plays it through Soundpad at once, like **Mimic & play**. On a phone the two buttons now sit together under the clip's title, instead of squeezing it to a few letters.
+
+### Checked
+
+- The silent real-chain self-test (`SoundpadWeb.Harness.exe --mimic-silent-selftest jfk.wav`) still passes on the current companion. Real app-loopback capture at stream volume 0 came through (peak 783/1000), and real Whisper transcribed the JFK sample word for word. This confirms the companion changes since 2.12.3 left the actual capture path intact.
+
+### Tests
+
+- The Voice Replay Studio e2e test now also uses **Import & play** and checks that Soundpad was asked to play.
+
 ## 2.15.2 — Tell the host what a companion update adds
 
 Website only; the companion is unchanged apart from its version number (it reports 2.15.2).

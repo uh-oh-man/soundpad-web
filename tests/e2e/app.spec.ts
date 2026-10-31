@@ -1786,6 +1786,19 @@ test('Mimic: the host imports a clip from Voice Replay Studio into Temp', async 
   await expect(
     page.getByRole('button', { name: 'Play from start: Fixture hello there', exact: true }),
   ).toBeEnabled();
+  // Import & play adds the other clip and plays it through Soundpad at once, like Mimic & play.
+  const playsBefore = harness.plays.length;
+  await page.getByRole('button', { name: 'Mimic', exact: true }).click();
+  await dialog.getByText('From Voice Replay Studio').click();
+  await dialog
+    .getByRole('button', { name: 'Import & play Fixture see you later', exact: true })
+    .click();
+  await expect(
+    page.getByRole('button', { name: 'Play from start: Fixture see you later', exact: true }),
+  ).toBeEnabled();
+  await expect
+    .poll(() => harness.plays.slice(playsBefore).some((p) => p.startsWith('DoPlaySound(')))
+    .toBe(true);
 });
 
 test('an older companion: Settings names what an update adds, and those controls stay hidden', async ({

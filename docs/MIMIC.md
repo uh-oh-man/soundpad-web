@@ -50,7 +50,7 @@ Everyone gets a short notice when anyone makes a clip, F6 included. **Just mimic
 
 ### From Voice Replay Studio
 
-The two halves of the idea meet here. If Voice Replay Studio (the desktop app in `mimic/`) has saved clips on the host PC, the host can open **From Voice Replay Studio** at the bottom of the Mimic window (companion 2.15+). It lists them newest first, with title, length, date and transcript, and a search box when there are more than six. **Import** copies a clip into Temp, where it behaves like any Mimic clip and everyone in the session can play it.
+The two halves of the idea meet here. If Voice Replay Studio (the desktop app in `mimic/`) has saved clips on the host PC, the host can open **From Voice Replay Studio** at the bottom of the Mimic window (companion 2.15+). It lists them newest first, with title, length, date and transcript, and a search box when there are more than six. **Import** copies a clip into Temp, where it behaves like any Mimic clip and everyone in the session can play it. **Import & play** (2.15.3+, any 2.15 companion) also plays it through Soundpad straight away, like **Mimic & play**.
 
 - **Host only.** Guests never see the list or the clips' titles.
 - **Read-only.** The companion reads `%LOCALAPPDATA%\Voice Replay Studio\library.json` and the clip's WAV, and never writes, moves or locks them. Voice Replay Studio can stay open. A damaged library is reported and left as it is.

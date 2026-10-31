@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Download, Library, RefreshCw } from 'lucide-react';
+import { Download, Library, Play, RefreshCw } from 'lucide-react';
 import { z } from 'zod';
 import { controller } from '../../controller';
 import { formatTime } from '../Waveform';
@@ -24,7 +24,7 @@ type Clip = z.infer<typeof librarySchema>['clips'][number];
  * Host only: clips saved in Voice Replay Studio (the desktop app this window grew from) on this PC.
  * Importing copies one into Temp; Voice Replay Studio's own files are never changed.
  */
-export function MimicLibrary({ connected }: { connected: boolean }) {
+export function MimicLibrary({ connected, canPlay }: { connected: boolean; canPlay: boolean }) {
   const [open, setOpen] = useState(false);
   const [clips, setClips] = useState<Clip[] | null>(null);
   const [failed, setFailed] = useState(false);
@@ -45,12 +45,17 @@ export function MimicLibrary({ connected }: { connected: boolean }) {
   useEffect(() => {
     if (open && connected) void load();
   }, [open, connected]);
-  async function importClip(clip: Clip) {
+  async function importClip(clip: Clip, play = false) {
     if (importing) return;
     setImporting(clip.id);
     try {
-      await controller.run('mimicLibraryImport', { sourceId: clip.id });
+      const result = z
+        .object({ assetId: z.string().max(64) })
+        .safeParse(await controller.run('mimicLibraryImport', { sourceId: clip.id }));
       controller.notify(`Imported “${clip.title}” into Temp.`, 'success');
+      // Like "Mimic & play": play it through Soundpad straight away.
+      if (play && result.success)
+        await controller.run('audioPlay', { assetId: result.data.assetId, orientation: 'normal' });
     } catch {
       /* The controller shows the error. */
     } finally {
@@ -101,14 +106,25 @@ export function MimicLibrary({ connected }: { connected: boolean }) {
                     {clip.transcript && clip.transcript !== clip.title && ` · ${clip.transcript}`}
                   </small>
                 </span>
-                <button
-                  aria-label={`Import ${clip.title}`}
-                  aria-disabled={!!importing || undefined}
-                  aria-busy={importing === clip.id || undefined}
-                  onClick={() => void importClip(clip)}
-                >
-                  <Download size={14} aria-hidden="true" /> Import
-                </button>
+                <span className="mimic-library-actions">
+                  <button
+                    aria-label={`Import ${clip.title}`}
+                    aria-disabled={!!importing || undefined}
+                    aria-busy={importing === clip.id || undefined}
+                    onClick={() => void importClip(clip)}
+                  >
+                    <Download size={14} aria-hidden="true" /> Import
+                  </button>
+                  <button
+                    className="primary"
+                    aria-label={`Import & play ${clip.title}`}
+                    aria-disabled={!!importing || undefined}
+                    disabled={!canPlay}
+                    onClick={() => void importClip(clip, true)}
+                  >
+                    <Play size={14} aria-hidden="true" /> Import &amp; play
+                  </button>
+                </span>
               </li>
             ))}
           </ul>
