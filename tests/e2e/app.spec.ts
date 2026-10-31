@@ -1148,3 +1148,21 @@ test('polished tile and Temp review screenshots in both themes and mobile', asyn
   );
   await page.screenshot({ path: 'artifacts/screenshots/v23-phone.png' });
 });
+
+test('Temp keeps the native original distinct from its generated reverse', async ({
+  page,
+  harness,
+}) => {
+  await host(page, harness);
+  await page.getByRole('button', { name: 'Reverse and play Airhorn', exact: true }).click();
+  await expect(page.locator('.player-track')).toContainText('Airhorn (reversed)');
+  await page.getByRole('button', { name: 'Stop', exact: true }).click();
+  await page.locator('#temp-manager > summary').click();
+  await expect(page.getByRole('button', { name: 'Play normal', exact: true })).toBeEnabled();
+  await expect(
+    page.getByRole('button', { name: 'Keep normal permanently', exact: true }),
+  ).toHaveCount(0);
+  await expect(
+    page.getByRole('button', { name: 'Keep reversed permanently', exact: true }),
+  ).toBeEnabled();
+});

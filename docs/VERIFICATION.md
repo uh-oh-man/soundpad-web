@@ -7,7 +7,7 @@ The completed pass uses isolated temporary data and named-pipe mocks. No real So
 | TypeScript, ESLint, production static build | Passed |
 | Frontend unit tests | 43 passed |
 | Native tests | 64 passed |
-| Chromium browser suite with LIVE_RELAY=1 | 25 passed; 1 deployed-site scenario intentionally skipped |
+| Chromium browser suite with LIVE_RELAY=1 | 25 passed; 1 deployed-site scenario intentionally skipped; final native-original Temp control regression also passed |
 | Windows WebKit targeted regression | 9 passed |
 | Portable win-x64 self-contained publish and isolated smoke | Passed |
 | npm production dependency audit | Zero reported vulnerabilities |

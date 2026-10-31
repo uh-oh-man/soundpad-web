@@ -187,7 +187,7 @@ export function TempManager({
                             ? 'accepted — move to permanent storage'
                             : v.state}
                       </span>
-                      {host && !v.permanent && v.state === 'ready' && (
+                      {host && !v.permanent && v.state === 'ready' && v.nativeLabel && (
                         <button
                           disabled={!!pending}
                           onClick={() => {
