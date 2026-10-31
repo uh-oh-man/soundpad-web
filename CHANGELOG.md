@@ -2,6 +2,11 @@
 
 Notable changes to Soundpad Web. Versions follow the website's `package.json`; the Windows companion is versioned separately and only needs updating when a release says so.
 
+## Unreleased
+
+- **CI: GitHub Actions moved to their current major versions** (checkout v7, setup-node v7, setup-dotnet v6, upload-artifact v7, download-artifact v8, configure-pages v6, upload-pages-artifact v5). The v4 actions ran on the deprecated Node.js 20, and every run warned about it. Each release used is at least two weeks old.
+- **docs/ROLLBACK.md:** the 2.14.3 row now says which downloads to use instead. It has no release of its own; its companion is identical to 2.14.2's apart from the version number.
+
 ## 2.14.4 — Wheel zoom on waveforms that load late
 
 Website only; the companion is unchanged apart from its version number (it reports 2.14.4).
