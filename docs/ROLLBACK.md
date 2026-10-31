@@ -6,6 +6,7 @@ Every release stays on GitHub permanently, so any earlier version can be restore
 
 | Version | What it is | Git tag | Download |
 | --- | --- | --- | --- |
+| 2.9.2 | Dead CSS removed (no visible change) | `v2.9.2` | [Release](https://github.com/uh-oh-man/soundpad-web/releases/tag/v2.9.2) |
 | 2.9.1 | Lighter transcripts for gaming hosts | `v2.9.1` | [Release](https://github.com/uh-oh-man/soundpad-web/releases/tag/v2.9.1) |
 | 2.9.0 | Voice effects | `v2.9.0` | [Release](https://github.com/uh-oh-man/soundpad-web/releases/tag/v2.9.0) |
 | 2.8.1 | Keyboard waveform, layout fixes | `v2.8.1` | [Release](https://github.com/uh-oh-man/soundpad-web/releases/tag/v2.8.1) |

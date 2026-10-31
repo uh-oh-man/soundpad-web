@@ -9,7 +9,7 @@ Claude (Claude Code) is the main editor of this repository as of 2.3.1. The owne
 - Whisper's native DLLs are embedded resources written to `<data>\native\whisper-1.9.1\runtimes\win-x64\`. Whisper.net probes `<folder of RuntimeOptions.LibraryPath>\runtimes\win-x64`, so keep that layout. Check single-file loading with `SoundpadWeb.exe --transcribe-file <wav> --verbose` on a published EXE; the Whisper model is at `%LOCALAPPDATA%\SoundpadWeb\models\` on the owner's PC.
 - `mimic/`: Voice Replay Studio V1.1 desktop app (WPF, NAudio 2.2.1, Whisper.net), imported unchanged in 2.4.0. It shares no code with the companion; the companion's Mimic is a port onto NAudio 3.3.
 - `docs/MIMIC.md` describes Mimic; `docs/ROLLBACK.md` lists restore points and must gain a row for every release.
-- CSS is layered: `tokens.css` → `styles.css` → `v2.css` → `polish.css`. Later files override earlier ones, and about 36 selectors are defined in more than one file. Check every file before changing a selector.
+- CSS is layered: `tokens.css` → `styles.css` → `v2.css` → `polish.css`. Later files override earlier ones, and about 36 selectors are defined in more than one file. Check every file before changing a selector. For CSS-only cleanups, use a temporary Playwright spec with `toHaveScreenshot` (`maxDiffPixels: 0`, `animations: 'disabled'`): record a baseline with `--update-snapshots` on the unchanged code, confirm a second run passes, change the CSS, rerun, then delete the spec and snapshots. Exact-pixel snapshots are machine-specific, so don't commit them (2.9.2 used this method).
 
 ## Checks
 

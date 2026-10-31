@@ -371,55 +371,6 @@ p {
   border-color: var(--accent);
   background: color-mix(in srgb, var(--accent) 14%, transparent);
 }
-.play-sound {
-  border: 0;
-  border-radius: 0;
-  background: transparent;
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  text-align: left;
-  justify-content: flex-start;
-  padding: 20px 17px 17px;
-  width: 100%;
-  min-height: 157px;
-  gap: 0;
-}
-.play-sound:hover:not(:disabled) {
-  background: transparent;
-}
-.sound-icon {
-  display: grid;
-  place-items: center;
-  width: 42px;
-  height: 42px;
-  border-radius: 10px;
-  margin-bottom: 15px;
-  background: color-mix(in srgb, var(--accent) 9%, transparent);
-  color: var(--text-primary);
-}
-.sound-icon img {
-  width: 42px;
-  height: 42px;
-  border-radius: 10px;
-  object-fit: cover;
-}
-.tone-1 {
-  color: var(--text-muted);
-  background: color-mix(in srgb, var(--text-muted) 8%, transparent);
-}
-.tone-2 {
-  color: var(--warning);
-  background: color-mix(in srgb, var(--warning) 8%, transparent);
-}
-.tone-3 {
-  color: var(--accent);
-  background: color-mix(in srgb, var(--accent) 8%, transparent);
-}
-.tone-4 {
-  color: var(--danger);
-  background: color-mix(in srgb, var(--danger) 8%, transparent);
-}
 .sound-name {
   font-size: 13px;
   font-weight: 550;
@@ -438,20 +389,6 @@ p {
   letter-spacing: 1.1px;
   color: var(--text-dim);
   margin-top: 9px;
-}
-.edit-icon {
-  position: absolute;
-  top: 8px;
-  right: 7px;
-  padding: 7px;
-  border: 0;
-  background: transparent;
-  color: var(--text-dim);
-  opacity: 0;
-}
-.sound-tile:hover .edit-icon,
-.sound-tile:focus-within .edit-icon {
-  opacity: 1;
 }
 .board-footer {
   display: flex;
@@ -1045,15 +982,8 @@ p {
     grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 11px;
   }
-  .play-sound {
-    padding: 17px 14px;
-    min-height: 150px;
-  }
   .sound-name {
     font-size: 12px;
-  }
-  .edit-icon {
-    opacity: 1;
   }
   .board-footer {
     font-size: 9px;

@@ -21,8 +21,7 @@ button:hover:not(:disabled) {
   outline: 2px solid var(--accent);
   outline-offset: 3px;
 }
-.primary,
-.copy-invite {
+.primary {
   background: var(--accent);
   color: var(--surface-0);
   border-color: var(--accent);

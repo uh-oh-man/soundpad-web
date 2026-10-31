@@ -2,6 +2,15 @@
 
 Notable changes to Soundpad Web. Versions follow the website's `package.json`; the Windows companion is versioned separately and only needs updating when a release says so.
 
+## 2.9.2 — Dead CSS removed
+
+Website maintenance; nothing looks or behaves differently. The companion is rebuilt as 2.9.2 with no code changes.
+
+### Changed
+
+- Removed 386 lines of CSS (about 11%) for 14 class names nothing uses any more. These were left over from older Codex layouts: `play-sound`, `sound-icon`, `sound-label`, `edit-icon`, `mini-waveform`, `full-wave-button`, `wave-controls`, `precision-seek`, `spotify-panel`, `copy-invite`, `ai-credit` and `tone-1`…`tone-4`. The stylesheet shrank from 54.3 KB to 48.0 KB.
+- Verified with a temporary pixel-exact screenshot guard: 12 screens matched the pre-change baseline with zero differing pixels. They covered the landing page, all five view modes, Temp, Settings in all three themes, the Mimic window and phone width.
+
 ## 2.9.1 — Lighter transcripts for gaming hosts
 
 **Update the Windows companion** to get the lighter setting; nothing else changes.
