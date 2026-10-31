@@ -61,6 +61,35 @@ if (args.FirstOrDefault() == "--hotkey-probe")
     key.Unregister(); Console.WriteLine("F6 released: " + !key.Active);
     return;
 }
+if (args.FirstOrDefault() == "--mimic-silent-selftest" && args.Length == 2)
+{
+    // Full real-capture chain without sound: this process plays a WAV with its stream volume at 0 (set before
+    // Play) while Mimic's real app-loopback capture listens to this process, and the real Whisper engine
+    // transcribes the result. If Windows taps app audio after the stream volume, the capture is silent and the
+    // test reports that instead of passing.
+    var data = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "SoundpadWeb");
+    using var capture = new WasapiMimicCapture();
+    await capture.Start(new MimicSource("app:" + Environment.ProcessId, "App: this test", "app"), 45);
+    using var transcriber = new MimicTranscriber(new WhisperEngine(Path.Combine(data, "models", "ggml-base.en.bin"), null, Path.Combine(data, "native", "whisper-1.9.1")));
+    await transcriber.Enable(() => capture.Ring, false);
+    using var file = new NAudio.Wave.WaveFileReader(args[1]);
+#pragma warning disable CS0618 // WasapiOut's stream Volume is the simplest guaranteed-silent player for this diagnostic
+    using var output = new NAudio.Wave.WasapiOut(NAudio.CoreAudioApi.AudioClientShareMode.Shared, 100);
+#pragma warning restore CS0618
+    output.Init(file);
+    output.Volume = 0f;
+    if (output.Volume != 0f) { Console.WriteLine("Refusing to play: stream volume did not reach 0."); return; }
+    output.Play();
+    while (output.PlaybackState == NAudio.Wave.PlaybackState.Playing) await Task.Delay(100);
+    await Task.Delay(4000); // let the pause after the speech trigger a transcript chunk
+    var ring = capture.Ring!; long end = ring.Written;
+    var levels = ring.Levels(end, (long)ring.Rate * 20, 40);
+    Console.WriteLine($"Capture: {capture.Status}, {capture.Packets} packets, peak level {levels.Max()} / 1000");
+    var lines = transcriber.Lines(ring, end - (long)ring.Rate * 30, end);
+    foreach (var line in lines) Console.WriteLine($"[{line.StartMs / 1000.0:0.00} s - {line.EndMs / 1000.0:0.00} s] {line.Text}");
+    Console.WriteLine(lines.Length > 0 ? "RESULT: real capture + transcript chain works" : levels.Max() == 0 ? "RESULT: inconclusive (Windows captured the muted stream as silence)" : "RESULT: audio captured but no transcript");
+    return;
+}
 if (args.FirstOrDefault() == "--analyze-file" && args.Length == 2)
 {
     var scratch = Path.Combine(Path.GetTempPath(), "soundpad-web-analysis-" + Guid.NewGuid().ToString("N"));

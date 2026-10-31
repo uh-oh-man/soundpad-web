@@ -44,6 +44,8 @@ Mimic can show what was said, line by line, under the waveform. Click a line to 
 
 `SoundpadWeb.exe --transcribe-file <file.wav> [--download] [--verbose]` transcribes a local WAV with the same engine, which is useful to check the model and native libraries on a PC. `SoundpadWeb.Harness.exe --hotkey-probe` registers and releases F6 to check whether another app owns it (it presses nothing). `SoundpadWeb.Harness.exe --mimic-stream-transcript <file.wav>` streams a WAV into Mimic's buffer in real-time 10 ms packets with the real Whisper engine and prints the lines the Mimic window would show; no audio device is used. Streaming the JFK sample gives the same sentence, word for word, as transcribing the whole file.
 
+`SoundpadWeb.Harness.exe --mimic-silent-selftest <file.wav>` tests the **whole real chain without making a sound**: the harness plays the WAV with its stream volume at 0 (checked before playback starts) while Mimic's real app-loopback capture listens to the harness itself, and the real Whisper engine transcribes what was captured. Windows' per-app capture taps audio before the app's own stream volume, so the speech is captured even though nothing is audible. On the owner's PC: 1,507 capture packets, peak level 783/1000, and the JFK sentence transcribed exactly.
+
 ## Privacy and safety rules
 
 - **Off until the host starts it.** Capture never starts on launch and is never restored after a restart.
