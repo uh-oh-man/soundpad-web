@@ -2,6 +2,10 @@
 
 Notable changes to Soundpad Web. Versions follow the website's `package.json`; the Windows companion is versioned separately and only needs updating when a release says so.
 
+## Unreleased
+
+- **CLAUDE.md:** releases are now tagged only after `main` passes CI, so a failing build can't leave another version without a download.
+
 ## 2.15.5 — 2.15.4, released
 
 **Update the Windows companion** for 2.15.4's fixes. The app code is identical to 2.15.4 apart from the version number.
