@@ -169,8 +169,8 @@ if (args.FirstOrDefault() == "--capture-bench")
     using var capture = new WasapiMimicCapture();
     var sources = capture.Sources();
     var pick = args.Length > 1 ? sources.First(s => s.Name.Contains(args[1], StringComparison.OrdinalIgnoreCase)) : new MimicSource("app:" + Environment.ProcessId, "App: this bench", "app");
+#pragma warning disable CS0618 // WasapiOut with stream volume 0: a silent signal so packets keep flowing
     using var output = new NAudio.Wave.WasapiOut(NAudio.CoreAudioApi.AudioClientShareMode.Shared, 100);
-#pragma warning disable CS0618 // stream volume 0: a silent signal so packets keep flowing
     var tone = new NAudio.Wave.SampleProviders.SignalGenerator(48000, 2) { Frequency = 440, Gain = 0.3 };
     output.Init(new NAudio.Wave.SampleProviders.SampleToWaveProvider(tone)); output.Volume = 0f; if (args.Length == 1) output.Play();
 #pragma warning restore CS0618
