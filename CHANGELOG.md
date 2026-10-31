@@ -2,6 +2,10 @@
 
 Notable changes to Soundpad Web. Versions follow the website's `package.json`; the Windows companion is versioned separately and only needs updating when a release says so.
 
+## Unreleased
+
+- **README rewritten as a user guide.** It covers what Soundpad Web is, hosting, joining, Mimic, features, privacy, troubleshooting (now including the Temp cleanup note and tab sleep), going back to an older version, and a map of the repository. It no longer names a "current version", which had gone stale ("2.9 is the current update" through 2.12); it links the changelog instead. Developer material moved unchanged to the new [docs/DEVELOPERS.md](docs/DEVELOPERS.md): building, testing, publishing a fork, companion options, network notes, where data is kept, and technical limitations. The old "2.3 notes" section moved unchanged to [docs/V2.3.md](docs/V2.3.md). All relative links and anchors were checked.
+
 ## 2.12.2 — Everyone is told when Mimic listens
 
 Website update; works with any Mimic-capable companion. The companion is rebuilt as 2.12.2 with no code changes.
