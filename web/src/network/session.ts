@@ -9,6 +9,7 @@ import {
   type Snapshot,
   participantSchema,
   type Participant,
+  slowOps,
 } from '../protocol';
 import { parseOrganization, type SharedLayout, type Organization } from '../shared-layout';
 import { cleanName } from '../protocol';
@@ -489,19 +490,7 @@ export class Session {
           this.pending.delete(c.id);
           reject(Error('Host did not acknowledge the command.'));
         },
-        [
-          'reverse',
-          'audioPlay',
-          'keepAudio',
-          'removeAudio',
-          'retryAudio',
-          'retryCleanup',
-          'endSession',
-        ].includes(c.op)
-          ? 90000
-          : c.op === 'waveform'
-            ? 45000
-            : 12000,
+        slowOps.includes(c.op) ? 90000 : c.op === 'waveform' ? 45000 : 12000,
       );
       this.pending.set(c.id, { resolve, reject, timer });
       this.send(

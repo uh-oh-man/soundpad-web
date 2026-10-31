@@ -16,13 +16,19 @@ import {
   Headphones,
   ChevronRight,
   Radio,
+  Mic2,
 } from 'lucide-react';
 import { controller } from './controller';
 import { flattenCategories, type Sound } from './protocol';
 import { z } from 'zod';
 import { useWorkspace, viewModes, type Workspace } from './workspace';
 import { arrangeSounds, boardTitle, type Totals } from './arrange';
-import { APP_VERSION_LABEL, REQUIRED_COMPANION, companionAtLeast } from './version';
+import {
+  APP_VERSION_LABEL,
+  MIMIC_COMPANION,
+  REQUIRED_COMPANION,
+  companionAtLeast,
+} from './version';
 import { SoundCollection } from './components/SoundCollection';
 import { Player } from './components/Player';
 import { IconEditor } from './components/IconEditor';
@@ -34,6 +40,7 @@ import { SessionUpload } from './components/SessionUpload';
 import { Modal, dialogOpen } from './components/Modal';
 import { Sidebar } from './components/Sidebar';
 import { SettingsDialog } from './components/SettingsDialog';
+import { MimicPanel } from './components/MimicPanel';
 import { useAppearance } from './appearance';
 import { GuestName } from './components/GuestName';
 import { organization } from './shared-layout';
@@ -42,6 +49,7 @@ import './tokens.css';
 import './styles.css';
 import './v2.css';
 import './polish.css';
+import './mimic.css';
 
 const PROJECT_URL = 'https://github.com/uh-oh-man/soundpad-web';
 const viewLabels: Record<(typeof viewModes)[number], string> = {
@@ -231,6 +239,7 @@ function App() {
   const [myCategory, setMyCategory] = useState('all');
   const [search, setSearch] = useState('');
   const [settings, setSettings] = useState(false);
+  const [mimicOpen, setMimicOpen] = useState(false);
   const [managing, setManaging] = useState(false);
   const [editing, setEditing] = useState<Sound | null>(null);
   const [organizing, setOrganizing] = useState<Sound | null>(null);
@@ -257,6 +266,13 @@ function App() {
     REQUIRED_COMPANION.minor,
   );
   const repositoryUrl = import.meta.env.VITE_REPOSITORY_URL as string | undefined;
+  const mimicSupported = companionAtLeast(
+    state.companionVersion,
+    MIMIC_COMPANION.major,
+    MIMIC_COMPANION.minor,
+  );
+  const canMimic = connected && mimicSupported && (host || state.permissions.guestMimic === true);
+  const mimicListening = mode !== 'landing' && !!state.mimic?.active;
 
   const organizationText = w ? JSON.stringify(organization(w)) : '';
   useEffect(() => {
@@ -341,6 +357,16 @@ function App() {
             <i />
             {statusLabel(mode, connected, host, state.available, status)}
           </span>
+          {mimicListening && (
+            <button
+              className="mimic-badge"
+              title={`Mimic is keeping the last 30 seconds of ${state.mimic?.source ?? 'a source'} on the host's PC`}
+              disabled={!canMimic}
+              onClick={() => setMimicOpen(true)}
+            >
+              <i /> Mimic on
+            </button>
+          )}
           {mode !== 'landing' && (
             <input
               className="profile-name"
@@ -417,6 +443,11 @@ function App() {
                   </p>
                 </div>
                 <div className="board-actions">
+                  {canMimic && (
+                    <button onClick={() => setMimicOpen(true)}>
+                      <Mic2 size={17} /> Mimic
+                    </button>
+                  )}
                   {host && (
                     <>
                       <button
@@ -713,6 +744,11 @@ function App() {
             run={run}
             close={() => setSettings(false)}
           />
+        </Modal>
+      )}
+      {mimicOpen && mode !== 'landing' && (
+        <Modal label="Mimic" onClose={() => setMimicOpen(false)}>
+          <MimicPanel state={state} host={host} connected={connected} canPlay={canPlay} />
         </Modal>
       )}
       {mode === 'landing' && <ProjectFooter />}

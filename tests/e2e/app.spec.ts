@@ -1187,6 +1187,83 @@ test('polished tile and Temp review screenshots in both themes and mobile', asyn
   await page.screenshot({ path: 'artifacts/screenshots/v23-phone.png' });
 });
 
+test('Mimic: host listens, everyone sees it, and a selection becomes a playable Temp sound', async ({
+  page,
+  harness,
+}) => {
+  await host(page, harness);
+  await expect(page.locator('.mimic-badge')).toHaveCount(0);
+  const opener = page.getByRole('button', { name: 'Mimic', exact: true });
+  await opener.click();
+  const dialog = page.getByRole('dialog', { name: 'Mimic' });
+  await expect(dialog.getByLabel('Mimic source', { exact: true })).toHaveValue('fixture:tone');
+  await dialog.getByRole('button', { name: 'Start listening' }).click();
+  await expect(dialog.getByRole('status')).toContainText('Listening to Fixture: tone every 2 s');
+  await expect(page.getByRole('button', { name: 'Mimic on' })).toBeVisible();
+  await expect(dialog.getByRole('img', { name: /Mimic buffer/ })).toBeVisible();
+  // Let the fixture produce at least one tone burst, then grab it with a quick select.
+  await page.waitForTimeout(2600);
+  await dialog.getByRole('button', { name: 'Last 3 s' }).click();
+  await expect(dialog.locator('.mimic-range')).toContainText('3.0 s');
+  await dialog.getByLabel('Clip name').fill('Fixture mimic');
+  await dialog.getByRole('button', { name: 'Mimic & play' }).click();
+  const sound = page.getByRole('button', { name: 'Play Fixture mimic', exact: true });
+  await expect(sound).toBeEnabled();
+  await expect.poll(() => harness.plays).toContain('DoPlaySound(5)');
+  // Dragging selects an exact range; Clear returns to the live view.
+  const canvas = dialog.locator('.mimic-wave canvas');
+  const box = (await canvas.boundingBox())!;
+  await page.mouse.move(box.x + box.width * 0.8, box.y + box.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(box.x + box.width * 0.9, box.y + box.height / 2);
+  await page.mouse.up();
+  await expect(dialog.locator('.mimic-range')).toContainText('3.0 s');
+  await dialog.getByRole('button', { name: 'Clear' }).click();
+  await expect(dialog.locator('.mimic-range')).toHaveCount(0);
+  await dialog.getByRole('button', { name: 'Stop listening' }).click();
+  await expect(page.locator('.mimic-badge')).toHaveCount(0);
+  await page.keyboard.press('Escape');
+  await page.getByRole('button', { name: 'Access settings' }).click();
+  await expect(page.getByLabel('Allow guest Mimic')).not.toBeChecked();
+});
+
+test('live Nostr/WebRTC: guests see Mimic only when allowed and can clip from it', async ({
+  browser,
+  page,
+  harness,
+}) => {
+  test.skip(process.env.LIVE_RELAY !== '1', 'Optional public-relay integration test.');
+  test.setTimeout(150000);
+  await host(page, harness);
+  await page.getByRole('button', { name: 'Mimic', exact: true }).click();
+  await page.getByRole('button', { name: 'Start listening' }).click();
+  await page.keyboard.press('Escape');
+  const url = await invite(page);
+  const context = await browser.newContext();
+  try {
+    const guest = await context.newPage();
+    await guest.goto(url);
+    await finishGuestName(guest, 'Mimic Alice');
+    await expect(guest.getByRole('button', { name: 'Play Airhorn', exact: true })).toBeEnabled({
+      timeout: 60000,
+    });
+    await expect(guest.getByRole('button', { name: 'Mimic on' })).toBeDisabled();
+    await expect(guest.getByRole('button', { name: 'Mimic', exact: true })).toHaveCount(0);
+    await page.getByRole('button', { name: 'Access settings' }).click();
+    await page.getByLabel('Allow guest Mimic').check();
+    await page.keyboard.press('Escape');
+    await guest.getByRole('button', { name: 'Mimic', exact: true }).click();
+    const dialog = guest.getByRole('dialog', { name: 'Mimic' });
+    await expect(dialog.getByLabel('Mimic source', { exact: true })).toHaveCount(0);
+    await dialog.getByRole('button', { name: 'Last 3 s' }).click();
+    await dialog.getByLabel('Clip name').fill('Guest mimic');
+    await dialog.getByRole('button', { name: 'Mimic it' }).click();
+    await expect(page.getByRole('button', { name: 'Play Guest mimic', exact: true })).toBeEnabled();
+  } finally {
+    await context.close();
+  }
+});
+
 test('Temp keeps the native original distinct from its generated reverse', async ({
   page,
   harness,

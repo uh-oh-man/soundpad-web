@@ -90,6 +90,7 @@ export class Controller {
         'guestSpotify',
         'guestUploads',
         'guestTransforms',
+        'guestMimic',
       ] as const;
       if (keys.every((key) => (state.permissions[key] ?? true) === (desired[key] ?? true)))
         this.pendingPermissions = undefined;
@@ -263,15 +264,7 @@ export class Controller {
       this.update({ state: { ...this.view.state, permissions: fields.permissions } });
     }
     try {
-      if (this.view.mode === 'host') {
-        if (!this.live) throw Error('Companion is disconnected.');
-        return await this.bridge!.send(c, 'host', {
-          ...this.view.profile,
-          name: this.view.profile.name === 'Guest' ? 'Host' : this.view.profile.name,
-        });
-      } else if (this.view.mode === 'guest' && this.view.status === 'Connected')
-        return await this.session!.sendCommand(c);
-      else throw Error('Connect to the host first.');
+      return await this.dispatch(c);
     } catch (e) {
       if (permissionAttempt && this.pendingPermissions?.sequence === permissionAttempt) {
         this.pendingPermissions = undefined;
@@ -285,6 +278,21 @@ export class Controller {
       this.notify(errorMessage(e, 'Command failed.'), 'error');
       throw e;
     }
+  }
+  private dispatch(c: Command) {
+    if (this.view.mode === 'host') {
+      if (!this.live) return Promise.reject(Error('Companion is disconnected.'));
+      return this.bridge!.send(c, 'host', {
+        ...this.view.profile,
+        name: this.view.profile.name === 'Guest' ? 'Host' : this.view.profile.name,
+      });
+    } else if (this.view.mode === 'guest' && this.view.status === 'Connected')
+      return this.session!.sendCommand(c);
+    return Promise.reject(Error('Connect to the host first.'));
+  }
+  /** Mimic's live view polls; failures are retried by the caller, so they are not notified. */
+  peekMimic() {
+    return this.dispatch(command('mimicPeek'));
   }
   async publishLayout(organization: Organization) {
     await this.session?.publishLayout(organization);

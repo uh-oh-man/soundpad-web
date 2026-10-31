@@ -15,3 +15,6 @@ export function companionAtLeast(version: string | null | undefined, major: numb
 
 /** Oldest companion that supports every feature of this website. */
 export const REQUIRED_COMPANION = { major: 2, minor: 3, label: '2.3' } as const;
+
+/** Oldest companion with Mimic capture. */
+export const MIMIC_COMPANION = { major: 2, minor: 4, label: '2.4' } as const;

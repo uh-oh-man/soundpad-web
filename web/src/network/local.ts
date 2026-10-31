@@ -4,6 +4,7 @@ import {
   type Command,
   type Snapshot,
   type Participant,
+  slowOps,
 } from '../protocol';
 export type BridgeAddress = { port: number; token: string };
 export class LocalBridge {
@@ -103,19 +104,7 @@ export class LocalBridge {
           this.pending.delete(command.id);
           reject(Error('Command timed out. Playback is never retried automatically.'));
         },
-        [
-          'reverse',
-          'audioPlay',
-          'keepAudio',
-          'removeAudio',
-          'retryAudio',
-          'retryCleanup',
-          'endSession',
-        ].includes(command.op)
-          ? 90000
-          : command.op === 'waveform'
-            ? 45000
-            : 12000,
+        slowOps.includes(command.op) ? 90000 : command.op === 'waveform' ? 45000 : 12000,
       );
       this.pending.set(command.id, { resolve, reject, timer });
       this.socket.send(

@@ -48,7 +48,10 @@ public sealed partial class Bridge
                         var ring = mimicCapture.Ring ?? throw new InvalidDataException("Mimic is not listening.");
                         if (c.MimicEnd is not long end || c.PositionMs is not long from || c.EndMs is not long to || from < 0 || to > MimicWindowMs || to - from < MimicMinimumMs) throw new InvalidDataException($"Select between {MimicMinimumMs} ms and {MimicWindowMs / 1000} seconds of audio.");
                         long windowStart = end - (long)ring.Rate * MimicWindowMs / 1000;
-                        var samples = ring.Read(windowStart + from * ring.Rate / 1000, windowStart + to * ring.Rate / 1000);
+                        // Time before capture started has no audio; trim it instead of treating it as expired.
+                        long start = Math.Max(0, windowStart + from * ring.Rate / 1000), stop = windowStart + to * ring.Rate / 1000;
+                        if (stop - start < (long)ring.Rate * MimicMinimumMs / 1000) throw new InvalidDataException("Mimic had not started listening yet at that moment.");
+                        var samples = ring.Read(start, stop);
                         if (samples.All(s => Math.Abs(s) < 0.0005f)) throw new InvalidDataException("That selection is silent. Nothing was saved.");
                         var name = string.IsNullOrWhiteSpace(c.Name) ? "Mimic " + DateTime.Now.ToString("HH.mm.ss") : c.Name.Trim();
                         var by = Person(actor, participant).Name;

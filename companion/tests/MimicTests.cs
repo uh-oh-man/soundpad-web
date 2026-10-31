@@ -56,6 +56,21 @@ public sealed class MimicTests : IDisposable
     }
 
     [Fact]
+    public async Task SelectionsReachingBeforeCaptureStartedAreTrimmed()
+    {
+        await using var mock = new MockSoundpad(); using var pipe = new SoundpadPipe(mock.Name, true); using var bridge = new Bridge(pipe, new StateStore(folder));
+        var fixture = new MimicFixture(); bridge.UseMimicCapture(fixture); await bridge.Poll(true);
+        Assert.True((await bridge.Execute(Cmd("beginSession"), "host")).Ok);
+        Assert.True((await bridge.Execute(Cmd("mimicStart") with { SourceId = MimicFixture.Source.Id }, "host")).Ok);
+        fixture.Advance(TimeSpan.FromSeconds(2.2));
+        var peek = Data<MimicPeek>(await bridge.Execute(Cmd("mimicPeek"), "host"));
+        // "Last 5 s" after 2.2 s of listening: the first 2.8 s were never recorded.
+        var clip = await bridge.Execute(Cmd("mimicClip") with { MimicEnd = peek.End, PositionMs = 25000, EndMs = 30000 }, "host");
+        Assert.True(clip.Ok, clip.Error);
+        var tooEarly = await bridge.Execute(Cmd("mimicClip") with { MimicEnd = peek.End, PositionMs = 1000, EndMs = 3000 }, "host");
+        Assert.False(tooEarly.Ok); Assert.Contains("not started", tooEarly.Error);
+    }
+    [Fact]
     public async Task GuestClipBecomesATempSoundWithExactlyTheSelectedAudio()
     {
         await using var mock = new MockSoundpad(); using var pipe = new SoundpadPipe(mock.Name, true); using var bridge = new Bridge(pipe, new StateStore(folder));

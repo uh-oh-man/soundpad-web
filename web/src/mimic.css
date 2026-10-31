@@ -1,0 +1,132 @@
+/* Mimic window and the session-wide "listening" badge. */
+.mimic-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 10px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--danger) 55%, var(--line));
+  background: color-mix(in srgb, var(--danger) 14%, var(--surface-1));
+  color: var(--text-primary);
+  font-size: 12px;
+  font-weight: 600;
+}
+.mimic-badge:disabled {
+  opacity: 1;
+  cursor: default;
+}
+.mimic-badge i,
+.mimic-status i {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--danger);
+  animation: mimic-pulse 1.6s ease-in-out infinite;
+}
+@keyframes mimic-pulse {
+  50% {
+    opacity: 0.35;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .mimic-badge i,
+  .mimic-status i {
+    animation: none;
+  }
+}
+.dialog:has(.mimic-panel) {
+  max-width: 760px;
+}
+.mimic-panel {
+  display: grid;
+  gap: 14px;
+}
+.mimic-intro {
+  color: var(--text-muted);
+  margin: 0;
+}
+.mimic-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--text-muted);
+}
+.mimic-status i {
+  background: var(--text-dim);
+  animation: none;
+}
+.mimic-status.live {
+  color: var(--text-primary);
+}
+.mimic-status.live i {
+  background: var(--danger);
+  animation: mimic-pulse 1.6s ease-in-out infinite;
+}
+.mimic-source {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 8px;
+}
+.mimic-source label {
+  display: grid;
+  gap: 4px;
+  flex: 1 1 260px;
+  min-width: 0;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+.mimic-source select {
+  width: 100%;
+  min-width: 0;
+}
+.mimic-wave {
+  display: grid;
+  gap: 4px;
+}
+.mimic-wave canvas {
+  width: 100%;
+  height: 120px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface-0);
+  cursor: crosshair;
+  touch-action: none;
+}
+.mimic-axis {
+  display: flex;
+  justify-content: space-between;
+  font-size: 11px;
+  color: var(--text-dim);
+}
+.mimic-quick,
+.mimic-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.mimic-actions input {
+  flex: 1 1 160px;
+  min-width: 0;
+}
+.mimic-range {
+  font-variant-numeric: tabular-nums;
+  font-size: 13px;
+  color: var(--text-muted);
+}
+.mimic-panel :is(input, select) {
+  min-height: 38px;
+  padding: 8px 10px;
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  color: var(--text-primary);
+  font: inherit;
+  font-size: 12px;
+  color-scheme: dark;
+}
+.mimic-panel input::placeholder {
+  color: var(--text-dim);
+}

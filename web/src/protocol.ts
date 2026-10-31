@@ -30,6 +30,11 @@ export const commandSchema = z
       'retryAudio',
       'retryCleanup',
       'revokePeer',
+      'mimicSources',
+      'mimicStart',
+      'mimicStop',
+      'mimicPeek',
+      'mimicClip',
     ]),
     assetId: z.uuid().optional(),
     variantId: z.uuid().optional(),
@@ -40,6 +45,9 @@ export const commandSchema = z
     confirmed: z.boolean().optional(),
     audienceId: z.uuid().optional(),
     ownerId: z.string().max(128).optional(),
+    sourceId: z.string().max(512).optional(),
+    mimicEnd: z.number().int().nonnegative().safe().optional(),
+    name: z.string().max(100).optional(),
     soundId: z.string().max(64).optional(),
     libraryVersion: z.string().max(64).optional(),
     delta: z.union([z.literal(-1), z.literal(1)]).optional(),
@@ -57,6 +65,7 @@ export const commandSchema = z
         guestSpotify: z.boolean().optional(),
         guestUploads: z.boolean().optional(),
         guestTransforms: z.boolean().optional(),
+        guestMimic: z.boolean().optional(),
       })
       .strict()
       .optional(),
@@ -159,7 +168,17 @@ export const snapshotSchema = z.object({
     guestSpotify: z.boolean().optional(),
     guestUploads: z.boolean().optional(),
     guestTransforms: z.boolean().optional(),
+    guestMimic: z.boolean().optional(),
   }),
+  mimic: z
+    .object({
+      active: z.boolean(),
+      source: z.string().max(512).nullable(),
+      status: z.string().max(600),
+      windowMs: z.number().int().positive(),
+    })
+    .nullable()
+    .optional(),
 });
 export type Snapshot = z.infer<typeof snapshotSchema>;
 const lightSnapshotSchema = snapshotSchema.omit({ library: true });
@@ -187,7 +206,20 @@ export const EMPTY: Snapshot = {
 export function command(op: Command['op'], fields: Partial<Command> = {}): Command {
   return { ...fields, v: 2, id: crypto.randomUUID(), at: Date.now(), op };
 }
+/** Commands that may take a while on the companion (audio preparation, capture start). */
+export const slowOps: readonly Command['op'][] = [
+  'reverse',
+  'audioPlay',
+  'keepAudio',
+  'removeAudio',
+  'retryAudio',
+  'retryCleanup',
+  'endSession',
+  'mimicStart',
+  'mimicClip',
+];
 export function isGuestAllowed(c: Command, s: Snapshot) {
+  if (c.op === 'mimicPeek' || c.op === 'mimicClip') return s.permissions.guestMimic === true;
   if (c.op === 'spotify')
     return (
       c.action !== 'enable' &&

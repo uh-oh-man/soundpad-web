@@ -57,6 +57,13 @@ const permissionToggles: {
     description: 'Allow guests to prepare reversed variants.',
     label: 'Allow guest reverse generation',
   },
+  {
+    key: 'guestMimic',
+    title: 'Guest Mimic',
+    description: "Guests can see Mimic's live buffer and clip from it while you have it listening.",
+    label: 'Allow guest Mimic',
+    v2: true,
+  },
 ];
 
 export function SettingsDialog({
