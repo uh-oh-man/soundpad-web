@@ -1496,6 +1496,9 @@ test('live Nostr/WebRTC: guests see Mimic only when allowed and can clip from it
     ).toBeEnabled();
     // Everyone hears about a new clip, and can replay it from the shared list.
     await expect(page.getByText('Mimic Alice mimicked \u201cGuest mimic\u201d')).toBeVisible();
+    // Making a clip must not trip the host's per-guest rate limit (2.15.6: Temp refreshes once, not 9 times).
+    await guest.waitForTimeout(1500);
+    await expect(guest.getByText('Too many requests', { exact: false })).toHaveCount(0);
     await expect(
       dialog
         .getByRole('region', { name: 'Just mimicked' })
@@ -1849,6 +1852,11 @@ test('Mimic fits a phone: header keeps Settings on screen and long clip names do
   await page.getByRole('button', { name: 'Mimic', exact: true }).click();
   const dialog = page.getByRole('dialog', { name: 'Mimic' });
   await dialog.getByRole('button', { name: 'Start listening' }).click();
+  // The "Mimic is listening" notice must not cover the dialog's close button (the only way out on a phone).
+  await expect(page.locator('.notification-stack .toast').first()).toBeVisible();
+  const closeBox = (await dialog.getByRole('button', { name: 'Close dialog' }).boundingBox())!;
+  const noticeBox = (await page.locator('.notification-stack').boundingBox())!;
+  expect(noticeBox.y).toBeGreaterThan(closeBox.y + closeBox.height);
   await page.waitForTimeout(2600);
   await page.keyboard.press('5');
   await dialog

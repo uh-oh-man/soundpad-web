@@ -90,19 +90,24 @@ export function TempManager({
   useEffect(() => {
     if (!connected) return;
     let live = true;
-    void controller
-      .run('audioAssets')
-      .then((raw) => {
-        if (live) {
-          setData(response.parse(raw));
-          setError('');
-        }
-      })
-      .catch((e) => {
-        if (live) setError(String(e.message));
-      });
+    // Processing one clip bumps the version several times within a second; fetch once it settles, so a
+    // guest doesn't send a burst of requests (9 in 0.4 s were measured) and hit the host's rate limit.
+    const timer = setTimeout(() => {
+      void controller
+        .run('audioAssets')
+        .then((raw) => {
+          if (live) {
+            setData(response.parse(raw));
+            setError('');
+          }
+        })
+        .catch((e) => {
+          if (live) setError(String(e.message));
+        });
+    }, 300);
     return () => {
       live = false;
+      clearTimeout(timer);
     };
   }, [connected, state.managedAudioVersion, refresh]);
   async function run(

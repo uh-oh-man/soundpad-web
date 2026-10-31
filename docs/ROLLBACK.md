@@ -6,6 +6,7 @@ Every release stays on GitHub permanently, so any earlier version can be restore
 
 | Version | What it is | Git tag | Download |
 | --- | --- | --- | --- |
+| 2.15.6 | Guest phones: no false "Too many requests", notices out of the way | `v2.15.6` | [Release](https://github.com/uh-oh-man/soundpad-web/releases/tag/v2.15.6) |
 | 2.15.5 | 2.15.4, released (test fix only) | `v2.15.5` | [Release](https://github.com/uh-oh-man/soundpad-web/releases/tag/v2.15.5) |
 | 2.15.4 | Security review follow-ups | `v2.15.4` | [Source code (zip)](https://github.com/uh-oh-man/soundpad-web/archive/refs/tags/v2.15.4.zip) only: its own new test failed on CI. Its app is identical to [2.15.5](https://github.com/uh-oh-man/soundpad-web/releases/tag/v2.15.5) apart from the version number. |
 | 2.15.3 | Import & play from Voice Replay Studio | `v2.15.3` | [Release](https://github.com/uh-oh-man/soundpad-web/releases/tag/v2.15.3) |

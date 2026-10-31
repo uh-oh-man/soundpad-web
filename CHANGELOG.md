@@ -2,7 +2,20 @@
 
 Notable changes to Soundpad Web. Versions follow the website's `package.json`; the Windows companion is versioned separately and only needs updating when a release says so.
 
-## Unreleased
+## 2.15.6 — Guest phones: no false "Too many requests", notices out of the way
+
+Website only; the companion is unchanged apart from its version number (it reports 2.15.6). Found by screenshotting a guest on a phone over the real relays.
+
+### Fixed
+
+- **Guests no longer get "Too many requests" right after making a clip.** Processing a clip updates Temp several times within a second, and the Temp panel fetched its list on every update. Measured: 9 requests in 0.4 s, which with Mimic's polling went over the host's limit of 12 messages per guest per second. The panel now waits until updates settle (0.3 s) and fetches once. Measured afterwards: 1 request.
+- **On phones, notices no longer cover an open dialog's title and close button.** A dialog fills a phone screen, and the close button is the only way out without a keyboard. While a dialog is open on a narrow screen, notices appear at the bottom instead.
+
+### Tests
+
+- The weekly live-relay guest test now checks that the guest sees no "Too many requests" after making a clip.
+- The phone Mimic test checks that the "Mimic is listening" notice sits below the dialog's close button. It fails on 2.15.5.
+
 
 - **CLAUDE.md:** releases are now tagged only after `main` passes CI, so a failing build can't leave another version without a download.
 
