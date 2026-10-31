@@ -278,4 +278,43 @@ public sealed class MimicTests : IDisposable
         var later = Data<MimicPeek>(await bridge.Execute(Cmd("mimicPeek"), "host"));
         Assert.True(later.End >= first.End + MimicFixture.Rate);
     }
+
+    [Fact]
+    public async Task ReviewFixesForTrimClipsAndTranscripts()
+    {
+        await using var mock = new MockSoundpad(); using var pipe = new SoundpadPipe(mock.Name, true); using var bridge = new Bridge(pipe, new StateStore(folder));
+        var fixture = new MimicFixture(); bridge.UseMimicCapture(fixture); await bridge.Poll(true);
+        Assert.True((await bridge.Execute(Cmd("beginSession"), "host")).Ok);
+        // A slow-mo copy of a 15 MiB upload would be ~21 MiB: it is reduced (here to a lower rate) to fit 16 MiB.
+        var take = new float[48000 * 163];
+        for (int i = 0; i < take.Length; i++) take[i] = 0.3f * MathF.Sin(i * 0.05f);
+        Assert.True((await bridge.Upload(MimicRing.Wav(take, 48000), "Long take.wav", "Host", true)).Ok);
+        var journal = () => JsonSerializer.Deserialize<AudioJournal>(File.ReadAllText(Path.Combine(folder, "managed-audio", "journal.json")), Json.Options)!;
+        var source = journal().Assets.Single();
+        var slow = await bridge.Execute(Cmd("trimAudio") with { AssetId = source.Id, PositionMs = 0, EndMs = 163000, Action = "slowmo" }, "host");
+        Assert.True(slow.Ok, slow.Error);
+        var copy = journal().Assets.Single(a => a.Id != source.Id);
+        using (var wave = new NAudio.Wave.WaveFileReader(copy.Variants.Single().Path))
+            Assert.InRange(wave.TotalTime.TotalSeconds, 230, 235); // full slow-mo length kept
+        var (stereoFit, stereoRate, stereoChannels) = Bridge.FitForTemp(new float[10_000_000], 48000, 2);
+        Assert.Equal((5_000_000, 48000, 1), (stereoFit.Length, stereoRate, stereoChannels)); // mono is enough here
+        // A revoked guest is refused before any decoding, even with uploads allowed.
+        Assert.True((await bridge.Execute(Cmd("revokePeer") with { OwnerId = "peer-9" }, "host")).Ok);
+        var revoked = await bridge.Execute(Cmd("trimAudio") with { AssetId = source.Id, PositionMs = 0, EndMs = 1000 }, "guest", new("g", "Mallory"), "peer-9");
+        Assert.False(revoked.Ok); Assert.Contains("not allowed", revoked.Error);
+        // A clip from an old view (different capture) is refused instead of cutting the new source.
+        Assert.True((await bridge.Execute(Cmd("mimicStart") with { SourceId = MimicFixture.Source.Id }, "host")).Ok);
+        fixture.Advance(TimeSpan.FromSeconds(5));
+        var peek = Data<MimicPeek>(await bridge.Execute(Cmd("mimicPeek"), "host"));
+        Assert.NotNull(peek.RingId);
+        var stale = await bridge.Execute(Cmd("mimicClip") with { MimicEnd = peek.End, PositionMs = 25000, EndMs = 30000, SourceId = "an-older-capture" }, "host");
+        Assert.False(stale.Ok); Assert.Contains("restarted", stale.Error);
+        // A transcriber step from a replaced loop commits nothing.
+        using var transcriber = new MimicTranscriber(new TranscriptFixture());
+        var ring = new MimicRing(MimicFixture.Rate, 45);
+        ring.Write(Enumerable.Range(0, MimicFixture.Rate * 3).Select(i => MimicFixture.Sample(i)).ToArray());
+        ring.WriteSilence(MimicFixture.Rate);
+        Assert.False(await transcriber.Step(ring, false, default, generation: 999));
+        Assert.Empty(transcriber.Lines(ring, 0, ring.Written));
+    }
 }

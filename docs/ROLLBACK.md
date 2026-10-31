@@ -6,6 +6,7 @@ Every release stays on GitHub permanently, so any earlier version can be restore
 
 | Version | What it is | Git tag | Download |
 | --- | --- | --- | --- |
+| 2.10.1 | Fixes from an independent review | `v2.10.1` | [Release](https://github.com/uh-oh-man/soundpad-web/releases/tag/v2.10.1) |
 | 2.10.0 | Mimic clips are shared moments | `v2.10.0` | [Release](https://github.com/uh-oh-man/soundpad-web/releases/tag/v2.10.0) |
 | 2.9.5 | Mimic remembers your source | `v2.9.5` | [Release](https://github.com/uh-oh-man/soundpad-web/releases/tag/v2.9.5) |
 | 2.9.4 | Replay recent Mimic clips | `v2.9.4` | [Release](https://github.com/uh-oh-man/soundpad-web/releases/tag/v2.9.4) |
@@ -31,7 +32,7 @@ Every release stays on GitHub permanently, so any earlier version can be restore
 2. Download `SoundpadWeb.exe` from the release you want in the table above.
 3. Run it as usual.
 
-Your data in `%LOCALAPPDATA%\SoundpadWeb` keeps working:
+Your data in `%LOCALAPPDATA%\SoundpadWeb` keeps working (Temp's 16 MiB per-sound limit is never raised for this reason, see 2.10.1):
 
 - 2.4.0 adds one optional setting (`guestMimic`) to `state.json`. Older companions ignore it.
 - 2.5.0 adds `models\` (the Whisper model, if you downloaded it) and `native\` (Whisper's libraries). Older versions ignore both; delete them to free ~150 MB if you go back for good.

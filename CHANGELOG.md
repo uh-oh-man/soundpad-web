@@ -2,6 +2,28 @@
 
 Notable changes to Soundpad Web. Versions follow the website's `package.json`; the Windows companion is versioned separately and only needs updating when a release says so.
 
+## 2.10.1 — Fixes from an independent review of Mimic
+
+**Update the Windows companion.** A separate reviewer with no knowledge of how the code was written read all of Mimic and reported ten problems. Each was checked against the code; all ten were real and are fixed.
+
+### Fixed
+
+- **Edit copy failed on sounds longer than about 90 s.** Copies count against Temp's 16 MiB per-sound limit, and the form pre-fills the full length. Long copies are now mixed to mono and then lowered in sample rate (never below 16 kHz) to fit. Anything still too long is refused before decoding, with the longest length that would work. The limit was deliberately not raised: it is recorded in the audio journal, and older companions would reject a journal with larger entries, which would break rolling back.
+- **A guest could make the host decode large files with no permission check first.** This applied even to revoked guests or guests without upload permission. Edit copy now checks the session, the guest's permission, their audience and revocation before doing any work, and runs only one copy at a time.
+- **Viewing the waveform could punch silent holes into the capture.** Reading the buffer padded silence after just 25 ms without a packet, so a slightly late packet landed after a silence that never happened. Reads now leave the newest 100 ms unpadded, the same tolerance capture itself uses.
+- **Turning transcripts off and on during a transcription could duplicate lines or run Whisper twice at once.** Each transcription loop now has a generation, so a replaced loop can never commit. Whisper runs one recognition at a time, and racing Enable calls no longer leave a stray loop running.
+- **Closing the companion mid-transcription could free Whisper while it was running.** Shutdown now waits for a recognition in progress, up to 15 s, and skips freeing rather than crash.
+- **Low-severity fixes:**
+  - A failed start could stop a newer capture.
+  - Mimic kept saying "Listening" after the captured app closed; it now says so.
+  - A clip from a stale view could be cut from a newly started source. Clips now carry the capture's ID and are refused if it changed.
+  - About 8.6 MB of old buffer stayed alive after Stop.
+  - A thread-ID race in the F6 hotkey.
+
+### Verified
+
+- New C# test covering the long slow-mo copy (kept at full length within 16 MiB), revoked-guest refusal, stale-capture refusal and replaced-loop refusal (78 total). The silent real-capture self-test still transcribes the JFK sentence exactly. All 4 live-relay guest tests, 27 e2e and 59 unit tests pass.
+
 ## 2.10.0 — Mimic clips are shared moments
 
 **Update the Windows companion** for this; with a 2.9 companion the list stays empty and no notices appear.

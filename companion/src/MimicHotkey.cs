@@ -65,10 +65,10 @@ public sealed class WindowsHotkey(uint key = 0x75, string name = "F6") : IGlobal
 
     public void Unregister()
     {
-        Thread? old;
-        lock (gate) { old = thread; thread = null; }
+        Thread? old; uint id;
+        lock (gate) { old = thread; thread = null; id = threadId; }
         if (old == null) return;
-        PostThreadMessage(threadId, WmQuit, IntPtr.Zero, IntPtr.Zero);
+        PostThreadMessage(id, WmQuit, IntPtr.Zero, IntPtr.Zero);
         old.Join(TimeSpan.FromSeconds(2));
     }
     public void Dispose() => Unregister();

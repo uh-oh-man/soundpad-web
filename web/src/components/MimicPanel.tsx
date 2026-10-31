@@ -26,6 +26,7 @@ const peekSchema = z.object({
     )
     .max(500)
     .nullish(),
+  ringId: z.string().max(64).nullish(),
 });
 const sourcesSchema = z.object({
   sources: z
@@ -345,6 +346,7 @@ export function MimicPanel({
     try {
       const result = (await controller.run('mimicClip', {
         mimicEnd: peek.end,
+        ...(peek.ringId && { sourceId: peek.ringId }),
         positionMs: selection.from,
         endMs: selection.to,
         ...((name.trim() || suggestion) && { name: name.trim() || suggestion }),

@@ -22,7 +22,7 @@ public sealed partial class Bridge
     /// <summary>Replaces the system-wide hotkey; tests use a fixture that can be "pressed" directly.</summary>
     public void UseHotkey(IGlobalHotkey key) { hotkey.Dispose(); hotkey = key; }
 
-    private void StopMimic() { mimicCapture.Stop(); transcriber.Disable(); hotkey.Unregister(); hotkeyStatus = "Off"; lock (recentClips) recentClips.Clear(); }
+    private void StopMimic() { mimicCapture.Stop(); transcriber.Disable(); hotkey.Unregister(); hotkeyStatus = "Off"; lock (recentClips) recentClips.Clear(); lock (peekGate) lastPeek = null; }
 
     /// <summary>The host pressed the hotkey: save the last <see cref="HotkeySeconds"/> seconds, like Voice Replay Studio's F6.</summary>
     public async Task HotkeyPressed()
@@ -117,7 +117,7 @@ public sealed partial class Bridge
                     Publish();
                     return new("ack", c.Id, true);
                 case "mimicStop":
-                    mimicCapture.Stop(); Publish();
+                    mimicCapture.Stop(); lock (peekGate) lastPeek = null; Publish();
                     return new("ack", c.Id, true);
                 case "mimicTranscribe":
                     if (c.Action == "disable") transcriber.Disable();
@@ -131,11 +131,12 @@ public sealed partial class Bridge
                         var ring = mimicCapture.Ring ?? throw new InvalidDataException("Mimic is not listening.");
                         long frames = (long)ring.Rate * MimicWindowMs / 1000;
                         var (end, levels) = PeekLevels(ring, frames);
-                        return new("ack", c.Id, true, Data: new MimicPeek(end, ring.Rate, MimicWindowMs, levels, mimicCapture.Running, transcriber.Lines(ring, end - frames, end)));
+                        return new("ack", c.Id, true, Data: new MimicPeek(end, ring.Rate, MimicWindowMs, levels, mimicCapture.Running, transcriber.Lines(ring, end - frames, end), ring.Id));
                     }
                 case "mimicClip":
                     {
                         var ring = mimicCapture.Ring ?? throw new InvalidDataException("Mimic is not listening.");
+                        if (c.SourceId != null && c.SourceId != ring.Id) throw new InvalidDataException("Mimic restarted since you selected that. Select it again.");
                         if (c.MimicEnd is not long end || c.PositionMs is not long from || c.EndMs is not long to || from < 0 || to > MimicWindowMs || to - from < MimicMinimumMs) throw new InvalidDataException($"Select between {MimicMinimumMs} ms and {MimicWindowMs / 1000} seconds of audio.");
                         long windowStart = end - (long)ring.Rate * MimicWindowMs / 1000;
                         // Time before capture started has no audio; trim it instead of treating it as expired.

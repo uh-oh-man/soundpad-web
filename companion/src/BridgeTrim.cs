@@ -4,6 +4,33 @@ namespace SoundpadWeb;
 public sealed partial class Bridge
 {
     public const int TrimMinimumMs = 100;
+    // Temp's per-sound limit. It is also recorded in the audio journal, so raising it would make older
+    // companions reject that journal and break rolling back; long copies are reduced to fit instead.
+    private const int UploadLimit = 16777216, MinimumCopyRate = 16000;
+
+    /// <summary>Keeps a copy within Temp's 16 MiB: mono first, then a lower sample rate (never below 16 kHz).</summary>
+    public static (float[] Samples, int Rate, int Channels) FitForTemp(float[] interleaved, int rate, int channels)
+    {
+        long Bytes(long samples) => samples * 2 + 44;
+        if (Bytes(interleaved.Length) <= UploadLimit) return (interleaved, rate, channels);
+        var mono = interleaved;
+        if (channels > 1)
+        {
+            mono = new float[interleaved.Length / channels];
+            for (int i = 0; i < mono.Length; i++)
+            {
+                float sum = 0;
+                for (int c = 0; c < channels; c++) sum += interleaved[i * channels + c];
+                mono[i] = sum / channels;
+            }
+            if (Bytes(mono.Length) <= UploadLimit) return (mono, rate, 1);
+        }
+        int target = (int)Math.Max(MinimumCopyRate, Math.Floor((UploadLimit - 44) / 2.0 / mono.Length * rate));
+        var resampled = MimicTranscriber.Resample(mono, rate, target);
+        if (Bytes(resampled.Length) > UploadLimit) throw new InvalidDataException("That copy is too long for Temp.");
+        return (resampled, target, 1);
+    }
+    private int editing;
 
     /// <summary>
     /// Saves part of a Temp source, optionally with a voice effect (<c>action</c>), as a new Temp sound, as
@@ -18,6 +45,14 @@ public sealed partial class Bridge
             if (c.V is not (1 or 2) || !Guid.TryParseExact(c.Id, "D", out _) || Math.Abs(now - c.At) > 30000) throw new InvalidDataException("Invalid or expired command.");
             if (c.AssetId == null || c.PositionMs is not long from || c.EndMs is not long to || from < 0 || to - from < TrimMinimumMs)
                 throw new InvalidDataException($"Choose a start and end at least {TrimMinimumMs / 1000.0:0.0} s apart.");
+            // Check the guest before any decoding: this work is heavy and must not be free to trigger.
+            var owner = requester ?? participant?.Id ?? actor;
+            if (!sessionAccepting) throw new InvalidDataException("Hosting has ended.");
+            if (actor != "host" && (!disk.Permissions.GuestUploads || (audioAudience != null && audience != audioAudience) || revokedAudioPeers.ContainsKey(owner)))
+                throw new InvalidDataException("The host has not allowed guests to edit audio.");
+            if (Interlocked.Increment(ref editing) > 1) { Interlocked.Decrement(ref editing); throw new InvalidDataException("Another copy is being made. Try again in a moment."); }
+            try
+            {
             string? path; string original;
             await audioGate.WaitAsync();
             try
@@ -31,14 +66,17 @@ public sealed partial class Bridge
             if (path == null || !File.Exists(path)) throw new InvalidDataException("The original audio for that source is no longer available.");
             var effect = c.Action ?? "none";
             if (!AudioEffects.Names.ContainsKey(effect)) throw new InvalidDataException("Unknown effect.");
-            if (to - from > 10 * 60 * 1000) throw new InvalidDataException("Edit at most ten minutes at a time.");
             float[] cut; int rate, channels;
             using (var audio = new DecodedAudio(path))
             {
                 if (from >= audio.Duration.TotalMilliseconds) throw new InvalidDataException("The start is past the end of the sound.");
                 rate = audio.Rate; channels = audio.Channels;
                 long skip = from * rate / 1000 * channels, keep = (Math.Min(to, (long)audio.Duration.TotalMilliseconds) - from) * rate / 1000 * channels;
-                var samples = new List<float>((int)Math.Min(keep, int.MaxValue / 2));
+                // Even mono at the lowest quality must fit Temp's 16 MiB per-sound limit; say so before decoding.
+                double seconds = keep / (double)channels / rate * AudioEffects.Stretch(effect) + (effect == "echo" ? 0.5 : 0);
+                if (seconds * MinimumCopyRate * 2 + 44 > UploadLimit)
+                    throw new InvalidDataException($"That copy is too long for Temp. Choose at most {Math.Floor((UploadLimit - 44) / (2.0 * MinimumCopyRate) / AudioEffects.Stretch(effect))} s of this sound.");
+                var samples = new List<float>((int)keep);
                 var buffer = new float[channels * 4096];
                 int read;
                 while (keep > 0 && (read = audio.Read(buffer)) > 0)
@@ -52,6 +90,7 @@ public sealed partial class Bridge
                 cut = samples.ToArray();
             }
             var processed = AudioEffects.Apply(cut, channels, rate, effect);
+            (processed, rate, channels) = FitForTemp(processed, rate, channels);
             byte[] wav;
             using (var output = new MemoryStream())
             {
@@ -61,7 +100,9 @@ public sealed partial class Bridge
             }
             var name = string.IsNullOrWhiteSpace(c.Name) ? $"{original} ({(effect == "none" ? "trimmed" : AudioEffects.Names[effect])})" : c.Name.Trim();
             if (name.Length > 100) name = name[..99].TrimEnd() + "\u2026";
-            return (await Upload(wav, name + ".wav", Person(actor, participant).Name, actor == "host", requester ?? participant?.Id ?? actor, audience)) with { Id = c.Id };
+            return (await Upload(wav, name + ".wav", Person(actor, participant).Name, actor == "host", owner, audience)) with { Id = c.Id };
+            }
+            finally { Interlocked.Decrement(ref editing); }
         }
         catch (InvalidDataException ex) { return new("ack", c.Id, false, ex.Message); }
     }
@@ -74,6 +115,8 @@ public static class AudioEffects
     {
         ["none"] = "trimmed", ["chipmunk"] = "chipmunk", ["slowmo"] = "slow-mo", ["echo"] = "echo",
     };
+    /// <summary>How much longer the effect makes the audio (Slow-mo plays at 0.7x).</summary>
+    public static double Stretch(string effect) => effect switch { "slowmo" => 1 / 0.7, "chipmunk" => 1 / 1.5, _ => 1 };
     public static float[] Apply(float[] interleaved, int channels, int rate, string effect) => effect switch
     {
         "chipmunk" => Speed(interleaved, channels, 1.5),

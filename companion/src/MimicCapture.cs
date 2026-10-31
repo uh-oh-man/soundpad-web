@@ -11,7 +11,7 @@ public sealed record MimicSource(string Id, string Name, string Kind);
 /// <summary>A clip made with Mimic this session, shown to everyone so they can replay it.</summary>
 public sealed record MimicClipInfo(string AssetId, string Name, string By, long At);
 public sealed record MimicState(bool Active, string? Source, string Status, int WindowMs, bool Transcribing = false, bool TranscriptModel = false, string TranscriptStatus = "Off", bool Hotkey = false, string HotkeyStatus = "Off", MimicClipInfo[]? Recent = null);
-public sealed record MimicPeek(long End, int Rate, int WindowMs, int[] Levels, bool Active, TranscriptLine[]? Transcript = null);
+public sealed record MimicPeek(long End, int Rate, int WindowMs, int[] Levels, bool Active, TranscriptLine[]? Transcript = null, string? RingId = null);
 
 /// <summary>Mono rolling sample buffer addressed by an absolute frame counter.</summary>
 public sealed class MimicRing(int rate, int seconds)
@@ -20,6 +20,8 @@ public sealed class MimicRing(int rate, int seconds)
     private readonly object gate = new();
     private long written;
     public int Rate { get; } = rate;
+    /// <summary>Distinguishes captures: frame counters restart at 0 on every start.</summary>
+    public string Id { get; } = Guid.NewGuid().ToString("N")[..16];
     public long Written { get { lock (gate) return written; } }
     public long Oldest { get { lock (gate) return Math.Max(0, written - data.Length); } }
     public void Write(ReadOnlySpan<float> samples)
@@ -162,6 +164,8 @@ public sealed class WasapiMimicCapture : IMimicCapture
                     if (buffer.Flags.HasFlag(AudioClientBufferFlags.Silent)) Array.Clear(bytes);
                     Feed(session, bytes, bytes.Length, format);
                 }
+                // The stream ended without being stopped: the app closed or the device went away.
+                if (!stop.IsCancellationRequested) Fail(session, source.Kind == "app" ? "The app closed. Choose a source and start again." : "The output device went away. Choose a source and start again.");
             }
             catch (OperationCanceledException) { ready.TrySetResult(); }
             catch (Exception ex) when (ex is not OutOfMemoryException)
@@ -174,7 +178,12 @@ public sealed class WasapiMimicCapture : IMimicCapture
             finally { endpoint?.Dispose(); devices?.Dispose(); }
         });
         try { await ready.Task; }
-        catch (InvalidDataException) { Stop(); throw; }
+        catch (InvalidDataException)
+        {
+            // Only undo this attempt; a newer Start may already be running.
+            lock (gate) if (session == generation) { generation++; captureStop?.Cancel(); captureStop = null; ring = null; Running = false; SourceName = null; }
+            throw;
+        }
     }
 
     private void Feed(int session, byte[] bytes, int length, WaveFormat format)
@@ -204,15 +213,22 @@ public sealed class WasapiMimicCapture : IMimicCapture
         }
     }
 
-    /// <summary>Loopback delivers nothing while a source is silent; keep the timeline moving with silence.</summary>
+    private const double Jitter = 0.1;
+    /// <summary>
+    /// Loopback delivers nothing while a source is silent; keep the timeline moving with silence. Readers
+    /// (waveform, transcript) leave the newest <see cref="Jitter"/> unpadded, so a packet that is merely late
+    /// still lands where it belongs instead of after a silence that never happened.
+    /// </summary>
     private void PadSilence(double incomingSeconds)
     {
         if (ring == null || !Running) return;
         double gap = Stopwatch.GetElapsedTime(lastFrameTicks).TotalSeconds - incomingSeconds;
-        if (gap > (incomingSeconds == 0 ? .025 : .1))
+        double keep = incomingSeconds == 0 ? Jitter : 0;
+        if (gap > Jitter + keep)
         {
-            ring.WriteSilence((long)(Math.Min(gap, 120) * Rate));
-            lastFrameTicks = Stopwatch.GetTimestamp();
+            double fill = Math.Min(gap - keep, 120);
+            ring.WriteSilence((long)(fill * Rate));
+            lastFrameTicks += (long)(fill * Stopwatch.Frequency);
         }
     }
 

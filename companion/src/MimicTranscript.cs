@@ -85,7 +85,14 @@ public sealed class WhisperEngine(string modelPath, string? sharedModelPath = nu
         catch (Exception ex) when (ex is not OutOfMemoryException) { Status = "Speech model setup failed: " + ex.Message; throw new InvalidDataException(Status); }
         finally { if (File.Exists(temporary)) File.Delete(temporary); }
     }
+    private readonly SemaphoreSlim busy = new(1, 1);
     public async Task<IReadOnlyList<TranscribedSpan>> Transcribe(float[] samples16k, CancellationToken cancel)
+    {
+        await busy.WaitAsync(cancel);
+        try { return await TranscribeExclusive(samples16k, cancel); }
+        finally { busy.Release(); }
+    }
+    private async Task<IReadOnlyList<TranscribedSpan>> TranscribeExclusive(float[] samples16k, CancellationToken cancel)
     {
         if (factory == null) UseEmbeddedNativeLibraries();
         processor ??= (factory ??= WhisperFactory.FromPath(Model ?? throw new InvalidDataException("Download the speech model first.")))
@@ -96,7 +103,12 @@ public sealed class WhisperEngine(string modelPath, string? sharedModelPath = nu
                 result.Add(new(segment.Start, segment.End, text));
         return result;
     }
-    public void Dispose() { processor?.Dispose(); processor = null; factory?.Dispose(); factory = null; }
+    public void Dispose()
+    {
+        // Never free the native processor under a running recognition; if one is stuck, leaking beats crashing.
+        if (!busy.Wait(TimeSpan.FromSeconds(15))) return;
+        processor?.Dispose(); processor = null; factory?.Dispose(); factory = null;
+    }
 }
 
 /// <summary>Turns the rolling Mimic buffer into timed transcript lines, chunk by chunk, behind live audio.</summary>
@@ -138,15 +150,21 @@ public sealed class MimicTranscriber(ITranscriptEngine engine) : IDisposable
             if (!download) throw new InvalidDataException("Download the speech model (about 148 MB, once) to turn on transcripts.");
             await engine.Prepare(cancel);
         }
-        Disable();
         var stop = new CancellationTokenSource();
-        lock (gate) { loop = stop; Enabled = true; status = "Waiting for speech"; }
-        _ = Task.Run(() => Run(currentRing, stop.Token));
+        int generation;
+        lock (gate)
+        {
+            loop?.Cancel(); // a racing Enable (e.g. a finished download) must not leave a second loop running
+            generation = ++loopGeneration;
+            loop = stop; Enabled = true; ring = null; segments.Clear(); status = "Waiting for speech";
+        }
+        _ = Task.Run(() => Run(currentRing, generation, stop.Token));
     }
     public void Disable()
     {
-        lock (gate) { loop?.Cancel(); loop = null; Enabled = false; ring = null; segments.Clear(); status = "Off"; }
+        lock (gate) { loop?.Cancel(); loop = null; loopGeneration++; Enabled = false; ring = null; segments.Clear(); status = "Off"; }
     }
+    private int loopGeneration;
 
     /// <summary>Lines overlapping [start, end), in milliseconds relative to <paramref name="start"/>.</summary>
     public TranscriptLine[] Lines(MimicRing source, long start, long end)
@@ -160,8 +178,9 @@ public sealed class MimicTranscriber(ITranscriptEngine engine) : IDisposable
     }
 
     /// <summary>One step of the loop; public so tests can drive it deterministically.</summary>
-    public async Task<bool> Step(MimicRing? current, bool force, CancellationToken cancel)
+    public async Task<bool> Step(MimicRing? current, bool force, CancellationToken cancel, int? generation = null)
     {
+        lock (gate) if (generation != null && generation != loopGeneration) return false;
         if (current == null) { lock (gate) { ring = null; segments.Clear(); } return false; }
         long start, end;
         lock (gate)
@@ -193,7 +212,8 @@ public sealed class MimicTranscriber(ITranscriptEngine engine) : IDisposable
         }
         lock (gate)
         {
-            if (!ReferenceEquals(current, ring)) return false;
+            // A loop replaced while Whisper ran (turned off and on again) must not commit or rewind.
+            if (!ReferenceEquals(current, ring) || generation != null && generation != loopGeneration) return false;
             foreach (var s in accepted)
                 segments.Add(new(start + (long)(s.Start.TotalSeconds * rate), Math.Min(end, start + (long)(s.End.TotalSeconds * rate)), s.Text.Trim()));
             committed = next;
@@ -202,18 +222,18 @@ public sealed class MimicTranscriber(ITranscriptEngine engine) : IDisposable
         return true;
     }
 
-    private async Task Run(Func<MimicRing?> currentRing, CancellationToken cancel)
+    private async Task Run(Func<MimicRing?> currentRing, int generation, CancellationToken cancel)
     {
         try
         {
             while (!cancel.IsCancellationRequested)
             {
-                try { if (!await Step(currentRing(), false, cancel)) await Task.Delay(500, cancel); }
+                try { if (!await Step(currentRing(), false, cancel, generation)) await Task.Delay(500, cancel); }
                 catch (InvalidDataException) { /* The chunk scrolled out while waiting; the next step resyncs. */ }
             }
         }
         catch (OperationCanceledException) { }
-        catch (Exception ex) when (ex is not OutOfMemoryException) { lock (gate) { Enabled = false; status = "Transcripts stopped: " + ex.Message; } }
+        catch (Exception ex) when (ex is not OutOfMemoryException) { lock (gate) if (generation == loopGeneration) { Enabled = false; status = "Transcripts stopped: " + ex.Message; } }
     }
 
     private static bool Quiet(ReadOnlySpan<float> samples)
