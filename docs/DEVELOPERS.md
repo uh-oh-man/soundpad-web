@@ -26,7 +26,7 @@ For development, run `npm run dev`, then:
 .\artifacts\release\SoundpadWeb.exe --dev --site http://127.0.0.1:5173/
 ```
 
-This connects to real Soundpad if running. Routine browser tests instead launch a completely separate mock pipe via `companion/harness`; fixtures never ship in the EXE. Optional real Nostr/WebRTC browser integration tests: `$env:LIVE_RELAY='1'; npm run test:e2e -- --grep 'live Nostr'`. They still use a mock Soundpad, so no real audio plays. CI's default tests do not depend on public relay availability.
+This connects to real Soundpad if running. Routine browser tests instead launch a completely separate mock pipe via `companion/harness`; fixtures never ship in the EXE. Optional real Nostr/WebRTC browser integration tests: `$env:LIVE_RELAY='1'; npm run test:e2e -- --grep 'live Nostr'`. They still use a mock Soundpad, so no real audio plays. CI's default tests do not depend on public relay availability. The separate **Live relay guest tests** workflow runs them weekly (Mondays), on demand and when its file changes.
 
 Mimic checks (Windows):
 

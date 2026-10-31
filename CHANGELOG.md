@@ -2,6 +2,10 @@
 
 Notable changes to Soundpad Web. Versions follow the website's `package.json`; the Windows companion is versioned separately and only needs updating when a release says so.
 
+## Unreleased
+
+- **Weekly live-relay check.** New workflow `.github/workflows/live-relay.yml` runs the four real-guest tests over the public Nostr relays every Monday, on demand, and whenever the workflow changes. Those tests cover joining, playback, the counter, revoking invites, uploads, shared layouts, Spotify and Mimic. Normal CI deliberately never depends on public relays, so before this a relay or library change that broke joining would only have shown up in a real session.
+
 ## 2.12.3 — Lighter Mimic capture
 
 **Update the Windows companion** to get this; nothing looks different.
