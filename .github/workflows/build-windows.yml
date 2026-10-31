@@ -22,7 +22,7 @@ jobs:
       - run: npm test
       - run: npm audit --audit-level=high
       - run: npm run build
-      - run: dotnet test companion/tests/SoundpadWeb.Tests.csproj -c Release
+      - run: dotnet test companion/tests/SoundpadWeb.Tests.csproj -c Release --logger GitHubActions
       - run: dotnet build companion/harness/SoundpadWeb.Harness.csproj -c Release
       - name: Voice Replay Studio (mimic/) build and tests
         run: dotnet run --project mimic/tests/VoiceReplay.Tests -c Release

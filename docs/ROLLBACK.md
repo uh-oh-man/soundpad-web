@@ -6,6 +6,7 @@ Every release stays on GitHub permanently, so any earlier version can be restore
 
 | Version | What it is | Git tag | Download |
 | --- | --- | --- | --- |
+| 2.5.0 | Mimic transcripts | `v2.5.0` | [Release](https://github.com/uh-oh-man/soundpad-web/releases/tag/v2.5.0) |
 | 2.4.0 | Mimic merged in | `v2.4.0` | [Release](https://github.com/uh-oh-man/soundpad-web/releases/tag/v2.4.0) |
 | 2.3.1 | Last version **before Mimic** (first Claude-maintained release) | `v2.3.1`, `backup/pre-mimic` | [Release](https://github.com/uh-oh-man/soundpad-web/releases/tag/v2.3.1) |
 | 2.3.0 | Last version written by Codex | `v2.3.0` | [Release](https://github.com/uh-oh-man/soundpad-web/releases/tag/v2.3.0) |
@@ -21,6 +22,7 @@ Every release stays on GitHub permanently, so any earlier version can be restore
 Your data in `%LOCALAPPDATA%\SoundpadWeb` keeps working:
 
 - 2.4.0 adds one optional setting (`guestMimic`) to `state.json`. Older companions ignore it.
+- 2.5.0 adds `models\` (the Whisper model, if you downloaded it) and `native\` (Whisper's libraries). Older versions ignore both; delete them to free ~150 MB if you go back for good.
 - Mimic clips are ordinary Temp entries, so older companions manage, keep or clean them up like any upload.
 - The Mimic buffer is never written to disk, so there is nothing to remove.
 
