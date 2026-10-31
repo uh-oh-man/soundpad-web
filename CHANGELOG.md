@@ -4,7 +4,7 @@ Notable changes to Soundpad Web. Versions follow the website's `package.json`; t
 
 ## 2.12.4 — Accessibility in dialogs and player tools
 
-Website only; no companion update needed.
+Website only; no companion update needed. The companion in this release is unchanged and still reports itself as 2.12.3.
 
 ### Fixed
 
