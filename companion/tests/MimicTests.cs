@@ -182,9 +182,13 @@ public sealed class MimicTests : IDisposable
         bridge.UseHotkeys(name => keys[name] = new HotkeyFixture(name) { Taken = name == "F9" }); await bridge.Poll(true);
         Assert.True((await bridge.Execute(Cmd("beginSession"), "host")).Ok);
         Assert.Equal("F6", bridge.Snapshot.Mimic!.HotkeyKey);
-        // Changing the key while off just remembers it.
+        // Changing the key while off checks it is free, then leaves it off.
+        var takenWhileOff = await bridge.Execute(Cmd("mimicHotkey") with { Action = "key", Name = "F9" }, "host");
+        Assert.False(takenWhileOff.Ok); Assert.Contains("F9 is already used", takenWhileOff.Error);
+        Assert.Equal("F6", bridge.Snapshot.Mimic!.HotkeyKey);
         Assert.True((await bridge.Execute(Cmd("mimicHotkey") with { Action = "key", Name = "F8" }, "host")).Ok);
         Assert.Equal("F8", bridge.Snapshot.Mimic!.HotkeyKey);
+        Assert.False(keys["F8"].Active); Assert.False(bridge.Snapshot.Mimic!.Hotkey);
         Assert.True((await bridge.Execute(Cmd("mimicHotkey") with { Action = "enable" }, "host")).Ok);
         Assert.True(keys["F8"].Active); Assert.Contains("Press F8", bridge.Snapshot.Mimic!.HotkeyStatus);
         // Changing it while on moves the registration.

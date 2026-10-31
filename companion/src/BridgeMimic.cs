@@ -154,12 +154,12 @@ public sealed partial class Bridge
                         if (key != hotkey.Name)
                         {
                             var next = makeHotkey(key);
-                            if (hotkey.Active)
-                            {
-                                try { next.Register(() => _ = HotkeyPressed()); }
-                                catch { next.Dispose(); throw; }
-                                hotkeyStatus = $"Press {key} in any app to save the last {hotkeySeconds} s";
-                            }
+                            // While off, register and release at once: a key another app owns is reported
+                            // now, not later when the host turns the hotkey on.
+                            try { next.Register(() => _ = HotkeyPressed()); }
+                            catch { next.Dispose(); throw; }
+                            if (hotkey.Active) hotkeyStatus = $"Press {key} in any app to save the last {hotkeySeconds} s";
+                            else next.Unregister();
                             hotkey.Dispose(); hotkey = next;
                             Log($"Hotkey is now {key}");
                         }

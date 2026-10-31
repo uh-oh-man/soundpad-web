@@ -2,6 +2,19 @@
 
 Notable changes to Soundpad Web. Versions follow the website's `package.json`; the Windows companion is versioned separately and only needs updating when a release says so.
 
+## 2.14.2 — A taken hotkey key is reported straight away
+
+**Update the Windows companion** to get this; with 2.14.0–2.14.1 the hotkey works as before.
+
+### Fixed
+
+- **Choosing a key another app owns is refused while the hotkey is off too.** Before, the companion only checked the key when the hotkey was turned on. Picking F9 while it was off was accepted, and ticking **Hotkey** then failed and left it off on F9. Now the companion briefly registers the key with Windows when it is chosen and releases it again, so the window says straight away that the key is taken and keeps the previous one.
+
+### Tests
+
+- The C# hotkey test and the Mimic e2e test pick a taken key (F9) while the hotkey is off and check that it is refused and the key stays F6.
+- In one local run the "landing page" e2e test failed while the dev server compiled its first page; it passed 3 of 3 on rerun and in the next full run. CI retries once.
+
 ## 2.14.1 — The Mimic hotkey remembers your key
 
 Website only; the companion is unchanged apart from its version number (it reports 2.14.1).
