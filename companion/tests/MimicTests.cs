@@ -175,6 +175,36 @@ public sealed class MimicTests : IDisposable
     }
 
     [Fact]
+    public async Task HotkeyKeyCanBeChangedAndATakenKeyKeepsTheWorkingOne()
+    {
+        await using var mock = new MockSoundpad(); using var pipe = new SoundpadPipe(mock.Name, true); using var bridge = new Bridge(pipe, new StateStore(folder));
+        var keys = new Dictionary<string, HotkeyFixture>();
+        bridge.UseHotkeys(name => keys[name] = new HotkeyFixture(name) { Taken = name == "F9" }); await bridge.Poll(true);
+        Assert.True((await bridge.Execute(Cmd("beginSession"), "host")).Ok);
+        Assert.Equal("F6", bridge.Snapshot.Mimic!.HotkeyKey);
+        // Changing the key while off just remembers it.
+        Assert.True((await bridge.Execute(Cmd("mimicHotkey") with { Action = "key", Name = "F8" }, "host")).Ok);
+        Assert.Equal("F8", bridge.Snapshot.Mimic!.HotkeyKey);
+        Assert.True((await bridge.Execute(Cmd("mimicHotkey") with { Action = "enable" }, "host")).Ok);
+        Assert.True(keys["F8"].Active); Assert.Contains("Press F8", bridge.Snapshot.Mimic!.HotkeyStatus);
+        // Changing it while on moves the registration.
+        Assert.True((await bridge.Execute(Cmd("mimicHotkey") with { Action = "key", Name = "F10" }, "host")).Ok);
+        Assert.False(keys["F8"].Active); Assert.True(keys["F10"].Active);
+        Assert.Contains("Press F10", bridge.Snapshot.Mimic!.HotkeyStatus);
+        // A key another app owns is refused and the working key stays registered.
+        var taken = await bridge.Execute(Cmd("mimicHotkey") with { Action = "key", Name = "F9" }, "host");
+        Assert.False(taken.Ok); Assert.Contains("F9 is already used", taken.Error);
+        Assert.True(keys["F10"].Active); Assert.Equal("F10", bridge.Snapshot.Mimic!.HotkeyKey);
+        // Only the listed keys, and only the host.
+        Assert.False((await bridge.Execute(Cmd("mimicHotkey") with { Action = "key", Name = "F5" }, "host")).Ok);
+        Assert.False((await bridge.Execute(Cmd("mimicHotkey") with { Action = "key" }, "host")).Ok);
+        Assert.False((await bridge.Execute(Cmd("mimicHotkey") with { Action = "key", Name = "F7" }, "guest")).Ok);
+        Assert.Equal("F10", bridge.Snapshot.Mimic!.HotkeyKey);
+        Assert.True((await bridge.Execute(Cmd("endSession"), "host")).Ok);
+        Assert.False(keys["F10"].Active);
+    }
+
+    [Fact]
     public async Task HotkeySavesTheLastTenSecondsNamedAfterTheTranscript()
     {
         await using var mock = new MockSoundpad(); using var pipe = new SoundpadPipe(mock.Name, true); using var bridge = new Bridge(pipe, new StateStore(folder));

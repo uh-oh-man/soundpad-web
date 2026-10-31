@@ -10,7 +10,7 @@ namespace SoundpadWeb;
 public sealed record MimicSource(string Id, string Name, string Kind);
 /// <summary>A clip made with Mimic this session, shown to everyone so they can replay it.</summary>
 public sealed record MimicClipInfo(string AssetId, string Name, string By, long At);
-public sealed record MimicState(bool Active, string? Source, string Status, int WindowMs, bool Transcribing = false, bool TranscriptModel = false, string TranscriptStatus = "Off", bool Hotkey = false, string HotkeyStatus = "Off", MimicClipInfo[]? Recent = null, int HotkeySeconds = 10);
+public sealed record MimicState(bool Active, string? Source, string Status, int WindowMs, bool Transcribing = false, bool TranscriptModel = false, string TranscriptStatus = "Off", bool Hotkey = false, string HotkeyStatus = "Off", MimicClipInfo[]? Recent = null, int HotkeySeconds = 10, string HotkeyKey = "F6");
 public sealed record MimicPeek(long End, int Rate, int WindowMs, int[] Levels, bool Active, TranscriptLine[]? Transcript = null, string? RingId = null);
 
 /// <summary>Mono rolling sample buffer addressed by an absolute frame counter.</summary>

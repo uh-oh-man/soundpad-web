@@ -13,6 +13,9 @@ const sourcesSchema = z.object({
     .max(500),
 });
 
+/** Keys the companion accepts for the Mimic hotkey (2.14+); F6 is Voice Replay Studio's. */
+const HOTKEY_KEYS = ['F6', 'F7', 'F8', 'F9', 'F10'];
+
 function rememberedSource() {
   try {
     return localStorage.getItem(SOURCE_KEY);
@@ -41,6 +44,7 @@ export function MimicHostControls({ state, connected }: { state: Snapshot; conne
   const running = useRef(false);
   const [transcribing, setWantTranscript] = useOptimistic(!!mimic?.transcribing);
   const [hotkey, setWantHotkey] = useOptimistic(!!mimic?.hotkey);
+  const hotkeyKey = mimic?.hotkeyKey ?? 'F6';
 
   const loadSources = useCallback(async () => {
     try {
@@ -161,7 +165,7 @@ export function MimicHostControls({ state, connected }: { state: Snapshot; conne
                 disabled, and keyboard users would lose their place after every tick. */}
             <input
               type="checkbox"
-              aria-label="F6 hotkey"
+              aria-label={`${hotkeyKey} hotkey`}
               checked={hotkey}
               aria-disabled={busy || undefined}
               onChange={(e) => {
@@ -174,13 +178,31 @@ export function MimicHostControls({ state, connected }: { state: Snapshot; conne
                 );
               }}
             />
-            F6 hotkey
+            {/* With the key picker next to it, the label needn't repeat the key. */}
+            {supports(state.companionVersion, 'hotkeyKey') ? 'Hotkey' : `${hotkeyKey} hotkey`}
           </label>
+          {/* Another key when a game or app already uses F6. */}
+          {supports(state.companionVersion, 'hotkeyKey') && (
+            <select
+              aria-label="Hotkey key"
+              value={hotkeyKey}
+              aria-disabled={busy || undefined}
+              onChange={(e) => {
+                if (running.current) return;
+                const key = e.target.value;
+                void command(() => controller.run('mimicHotkey', { action: 'key', name: key }));
+              }}
+            >
+              {HOTKEY_KEYS.map((k) => (
+                <option key={k}>{k}</option>
+              ))}
+            </select>
+          )}
           {supports(state.companionVersion, 'hotkeyLength') && (
             <label>
               saves the last
               <select
-                aria-label="F6 saves the last"
+                aria-label={`${hotkeyKey} saves the last`}
                 value={mimic?.hotkeySeconds ?? 10}
                 aria-disabled={busy || undefined}
                 onChange={(e) =>
@@ -204,7 +226,7 @@ export function MimicHostControls({ state, connected }: { state: Snapshot; conne
           <small>
             {mimic?.hotkeyStatus && mimic.hotkeyStatus !== 'Off'
               ? mimic.hotkeyStatus
-              : `Press F6 in any app on this PC to save the last ${mimic?.hotkeySeconds ?? 10} seconds, like Voice Replay Studio.`}
+              : `Press ${hotkeyKey} in any app on this PC to save the last ${mimic?.hotkeySeconds ?? 10} seconds, like Voice Replay Studio.`}
           </small>
         </div>
       )}

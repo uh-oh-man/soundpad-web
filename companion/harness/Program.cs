@@ -54,11 +54,14 @@ if (args.FirstOrDefault() == "--mimic-stream-transcript" && args.Length == 2)
 }
 if (args.FirstOrDefault() == "--hotkey-probe")
 {
-    // Registers and releases F6 with Windows; reports whether another app already owns it. Presses nothing.
-    using var key = new WindowsHotkey();
-    try { key.Register(() => { }); Console.WriteLine("F6 registered: " + key.Active); }
-    catch (InvalidDataException ex) { Console.WriteLine(ex.Message); }
-    key.Unregister(); Console.WriteLine("F6 released: " + !key.Active);
+    // Registers and releases each hotkey the host can pick with Windows; reports any another app already owns. Presses nothing.
+    foreach (var name in Bridge.HotkeyKeys)
+    {
+        using var key = Bridge.WindowsKey(name);
+        try { key.Register(() => { }); Console.WriteLine($"{name} registered: " + key.Active); }
+        catch (InvalidDataException ex) { Console.WriteLine(ex.Message); }
+        key.Unregister(); Console.WriteLine($"{name} released: " + !key.Active);
+    }
     return;
 }
 if (args.FirstOrDefault() == "--mimic-silent-selftest" && args.Length == 2)
@@ -215,7 +218,7 @@ using var pipe = new SoundpadPipe(mock.Name, true);
 using var bridge = new Bridge(pipe, new StateStore(directory));
 bridge.UseMimicCapture(new MimicFixture());
 bridge.UseTranscriptEngine(new TranscriptFixture());
-bridge.UseHotkey(new HotkeyFixture());
+bridge.UseHotkeys(key => new HotkeyFixture(key) { Taken = key == "F9" }); // F9 plays a key another app owns
 await bridge.Poll(true);
 await using var server = new LocalServer(bridge, args.FirstOrDefault() ?? "http://127.0.0.1:5173");
 await server.Start();

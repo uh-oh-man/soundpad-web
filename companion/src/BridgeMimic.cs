@@ -14,15 +14,22 @@ public sealed partial class Bridge
     /// <summary>F6 lengths, as Voice Replay Studio offered them; 10 s is the default.</summary>
     public static readonly int[] HotkeyLengths = [3, 5, 10, 15, 30];
     private volatile int hotkeySeconds = 10;
+    /// <summary>Keys the host can pick for the hotkey; F6 (Voice Replay Studio's) is the default.</summary>
+    public static readonly string[] HotkeyKeys = ["F6", "F7", "F8", "F9", "F10"];
+    /// <summary>The real Windows hotkey for one of <see cref="HotkeyKeys"/> (virtual keys F6 = 0x75 … F10 = 0x79).</summary>
+    public static IGlobalHotkey WindowsKey(string key) => new WindowsHotkey((uint)(0x75 + Array.IndexOf(HotkeyKeys, key)), key);
+    private Func<string, IGlobalHotkey> makeHotkey = WindowsKey;
     private IGlobalHotkey hotkey = new WindowsHotkey();
     private volatile string hotkeyStatus = "Off";
     public const int RecentClips = 5;
     private readonly List<MimicClipInfo> recentClips = [];
     private MimicClipInfo[] RecentSnapshot { get { lock (recentClips) return [.. recentClips]; } }
-    private MimicState MimicSnapshot => new(mimicCapture.Running, mimicCapture.SourceName, mimicCapture.Status, MimicWindowMs, transcriber.Enabled, transcriber.ModelReady, transcriber.Status, hotkey.Active, hotkeyStatus, RecentSnapshot, hotkeySeconds);
+    private MimicState MimicSnapshot => new(mimicCapture.Running, mimicCapture.SourceName, mimicCapture.Status, MimicWindowMs, transcriber.Enabled, transcriber.ModelReady, transcriber.Status, hotkey.Active, hotkeyStatus, RecentSnapshot, hotkeySeconds, hotkey.Name);
 
     /// <summary>Replaces the system-wide hotkey; tests use a fixture that can be "pressed" directly.</summary>
     public void UseHotkey(IGlobalHotkey key) { hotkey.Dispose(); hotkey = key; }
+    /// <summary>Replaces how hotkeys are made, so tests can pick other keys without touching Windows.</summary>
+    public void UseHotkeys(Func<string, IGlobalHotkey> factory) { makeHotkey = factory; UseHotkey(factory(HotkeyKeys[0])); }
 
     /// <summary>One-line Mimic events for the companion console (its only interface on the host PC).</summary>
     public event Action<string>? MimicLog;
@@ -134,11 +141,29 @@ public sealed partial class Bridge
                 case "mimicHotkey":
                     if (c.PositionMs is long lengthMs)
                     {
-                        if (!HotkeyLengths.Contains((int)(lengthMs / 1000)) || lengthMs % 1000 != 0) throw new InvalidDataException("Choose 3, 5, 10, 15 or 30 seconds for F6.");
+                        if (!HotkeyLengths.Contains((int)(lengthMs / 1000)) || lengthMs % 1000 != 0) throw new InvalidDataException($"Choose 3, 5, 10, 15 or 30 seconds for {hotkey.Name}.");
                         hotkeySeconds = (int)(lengthMs / 1000);
                         if (hotkey.Active) hotkeyStatus = $"Press {hotkey.Name} in any app to save the last {hotkeySeconds} s";
                     }
                     if (c.Action == "length") { Log($"{hotkey.Name} saves the last {hotkeySeconds} s"); }
+                    else if (c.Action == "key")
+                    {
+                        // Register the new key before releasing the old one, so a key another app owns
+                        // leaves the working hotkey in place.
+                        if (c.Name is not { } key || !HotkeyKeys.Contains(key)) throw new InvalidDataException("Choose F6, F7, F8, F9 or F10 for the hotkey.");
+                        if (key != hotkey.Name)
+                        {
+                            var next = makeHotkey(key);
+                            if (hotkey.Active)
+                            {
+                                try { next.Register(() => _ = HotkeyPressed()); }
+                                catch { next.Dispose(); throw; }
+                                hotkeyStatus = $"Press {key} in any app to save the last {hotkeySeconds} s";
+                            }
+                            hotkey.Dispose(); hotkey = next;
+                            Log($"Hotkey is now {key}");
+                        }
+                    }
                     else if (c.Action == "disable") { hotkey.Unregister(); hotkeyStatus = "Off"; Log($"{hotkey.Name} hotkey off"); }
                     else if (c.Action == "enable") { hotkey.Register(() => _ = HotkeyPressed()); hotkeyStatus = $"Press {hotkey.Name} in any app to save the last {hotkeySeconds} s"; Log($"{hotkey.Name} hotkey on: press it in any app to save the last {hotkeySeconds} s"); }
                     else throw new InvalidDataException("Unsupported hotkey setting.");

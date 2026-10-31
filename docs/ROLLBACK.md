@@ -6,6 +6,7 @@ Every release stays on GitHub permanently, so any earlier version can be restore
 
 | Version | What it is | Git tag | Download |
 | --- | --- | --- | --- |
+| 2.14.0 | Choose the Mimic hotkey (F6–F10) | `v2.14.0` | [Release](https://github.com/uh-oh-man/soundpad-web/releases/tag/v2.14.0) |
 | 2.13.5 | Dependency check (System.Drawing.Common servicing patch) | `v2.13.5` | [Release](https://github.com/uh-oh-man/soundpad-web/releases/tag/v2.13.5) |
 | 2.13.4 | Review fixes for zoom and Temp | `v2.13.4` | [Release](https://github.com/uh-oh-man/soundpad-web/releases/tag/v2.13.4) |
 | 2.13.3 | Keyboard focus in Temp, Refresh library and the icon editor | `v2.13.3` | [Release](https://github.com/uh-oh-man/soundpad-web/releases/tag/v2.13.3) |

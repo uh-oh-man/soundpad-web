@@ -74,6 +74,7 @@ export const commandSchema = z
         'slowmo',
         'echo',
         'length',
+        'key',
       ])
       .optional(),
     permissions: z
@@ -201,6 +202,7 @@ export const snapshotSchema = z.object({
       hotkey: z.boolean().optional(),
       hotkeyStatus: z.string().max(600).optional(),
       hotkeySeconds: z.number().int().positive().max(60).optional(),
+      hotkeyKey: z.string().max(8).optional(),
       recent: z
         .array(
           z.object({

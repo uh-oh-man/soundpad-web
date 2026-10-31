@@ -1350,8 +1350,17 @@ test('Mimic: host listens, everyone sees it, and a selection becomes a playable 
   await expect(dialog.getByText('Press F6 in any app to save the last 10 s')).toBeVisible();
   await dialog.getByLabel('F6 saves the last').selectOption('5');
   await expect(dialog.getByText('Press F6 in any app to save the last 5 s')).toBeVisible();
-  await dialog.getByLabel('F6 hotkey').uncheck();
-  await expect(dialog.getByLabel('F6 hotkey')).not.toBeChecked();
+  // When a game already uses F6, the host picks another key; the hotkey moves while it stays on.
+  await dialog.getByLabel('Hotkey key', { exact: true }).selectOption('F8');
+  await expect(dialog.getByLabel('F8 hotkey')).toBeChecked();
+  await expect(dialog.getByText('Press F8 in any app to save the last 5 s')).toBeVisible();
+  // A key another app owns (the harness pretends F9 is) is refused, and F8 keeps working.
+  await dialog.getByLabel('Hotkey key', { exact: true }).selectOption('F9');
+  await expect(page.getByText('F9 is already used by another app', { exact: false })).toBeVisible();
+  await expect(dialog.getByLabel('Hotkey key', { exact: true })).toHaveValue('F8');
+  await expect(dialog.getByText('Press F8 in any app to save the last 5 s')).toBeVisible();
+  await dialog.getByLabel('F8 hotkey').uncheck();
+  await expect(dialog.getByLabel('F8 hotkey')).not.toBeChecked();
   await dialog.getByRole('button', { name: 'Stop listening' }).click();
   await expect(page.locator('.mimic-badge')).toHaveCount(0);
   await expect(page.getByText('Mimic stopped listening.')).toBeVisible();

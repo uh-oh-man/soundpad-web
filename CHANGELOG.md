@@ -2,6 +2,25 @@
 
 Notable changes to Soundpad Web. Versions follow the website's `package.json`; the Windows companion is versioned separately and only needs updating when a release says so.
 
+## 2.14.0 — Choose the Mimic hotkey
+
+**Update the Windows companion** to get this; with an older companion the window keeps F6, as before.
+
+### Added
+
+- **Pick the hotkey: F6, F7, F8, F9 or F10.** Before, if a game or another app (for example Voice Replay Studio) already used F6, the Mimic window could only say so. Now a list next to **Hotkey** offers F7–F10.
+  - Changing the key while the hotkey is on moves it straight away.
+  - The new key is registered before the old one is released, so if the new one is taken, the window says so and the old key keeps working.
+  - The choice lasts until the companion closes. Nothing is saved to disk, so rolling back is unaffected.
+  - Host only, like the rest of the hotkey settings.
+- Protocol: `mimicHotkey` accepts `action: "key"` with `name` `F6`–`F10`; the Mimic snapshot adds `hotkeyKey`. The website shows the list only for companions 2.14 and newer (`FEATURES.hotkeyKey`). Older websites ignore the new snapshot field, so mixed versions work in both directions.
+
+### Tests
+
+- A new C# test changes the key while off and while on, checks that a taken key leaves the working one registered, and checks that only listed keys and only the host are accepted (80 C# tests).
+- The Mimic e2e test switches to F8 and then tries F9, which the harness pretends another app owns.
+- `SoundpadWeb.Harness.exe --hotkey-probe` now registers and releases each of F6–F10 with Windows; on the owner's PC all five were free.
+
 ## 2.13.5 — Dependency check
 
 **Optional companion update:** it picks up a Microsoft servicing patch; nothing looks or behaves differently.

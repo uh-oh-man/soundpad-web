@@ -28,8 +28,8 @@ The companion's capture is a port of Voice Replay Studio's `CaptureService` onto
 3. Click **Start listening**. A pulsing **Mimic on** badge appears in everyone's header.
 4. To let guests clip, turn on **Session & access → Guest Mimic**. It is off by default.
 5. Optional: tick **Transcript**. The first time, **Get transcripts (148 MB, once)** downloads the speech model; see [Transcripts](#transcripts).
-6. Optional: tick **F6 hotkey** and choose how much it saves (3, 5, 10, 15 or 30 seconds; default 10). While Mimic is listening, **F6 in any app** saves that much to Temp, named after its transcript when transcripts are on, just like Voice Replay Studio's F6. It is off by default so it never takes F6 from a game. If another app already owns F6, for example Voice Replay Studio itself, the window says so.
-7. **Stop listening**, **End hosting** or closing the companion stops capture, discards the buffer and the transcript, and releases F6.
+6. Optional: tick **F6 hotkey** and choose how much it saves (3, 5, 10, 15 or 30 seconds; default 10). While Mimic is listening, **F6 in any app** saves that much to Temp, named after its transcript when transcripts are on, just like Voice Replay Studio's F6. It is off by default so it never takes F6 from a game. If a game or another app already uses F6 (Voice Replay Studio itself, for example), pick **F7**, **F8**, **F9** or **F10** in the list next to it (companion 2.14+). The window says when a key is taken, and the key that was working stays on. The choice lasts until the companion closes.
+7. **Stop listening**, **End hosting** or closing the companion stops capture, discards the buffer and the transcript, and releases the hotkey.
 
 The companion's console window logs these events with the time, including who made each clip and anything F6 saved.
 
@@ -94,6 +94,7 @@ The website always serves the newest version and hides anything the host's compa
 | Shared recent clips and notices | 2.10 |
 | F6 length choice | 2.11 |
 | Private preview (host) | 2.12 |
+| Hotkey key choice (F6–F10) | 2.14 |
 
 ## Protocol
 
@@ -102,7 +103,7 @@ The website always serves the newest version and hides anything the host's compa
   - `mimicStart` with `sourceId`;
   - `mimicStop`;
   - `mimicTranscribe` with `action` `enable`, `disable` or `download`;
-  - `mimicHotkey` with `enable`, `disable` or `length`, and `positionMs` set to the F6 length (3000–30000);
+  - `mimicHotkey` with `enable`, `disable` or `length` (with `positionMs` set to the hotkey's length, 3000–30000), or `key` with `name` set to `F6`–`F10` (2.14+);
   - `mimicPreview` with the same selection fields as `mimicClip`; returns the selection as base64 WAV to the host's own tab.
 - **Host, or guests with `guestMimic`:** `mimicPeek` and `mimicClip`. A clip sends `mimicEnd`, `positionMs`/`endMs`, an optional `name`, and the capture's `sourceId`.
 - **Host, or guests with uploads:** `trimAudio`, with `assetId`, `positionMs`/`endMs`, `action` (`none`, `chipmunk`, `slowmo` or `echo`) and an optional `name`.
@@ -110,7 +111,7 @@ The website always serves the newest version and hides anything the host's compa
 - **The `mimic` snapshot object:**
   - `active`, `source`, `status`, `windowMs`;
   - `transcribing`, `transcriptModel`, `transcriptStatus`;
-  - `hotkey`, `hotkeyStatus`, `hotkeySeconds`;
+  - `hotkey`, `hotkeyStatus`, `hotkeySeconds`, `hotkeyKey` (2.14+);
   - `recent`: the last 5 clips as `assetId`, `name`, `by` and `at`.
 - **`mimicPeek` returns:**
   - `end`, an absolute frame counter for the window's right edge;
@@ -140,7 +141,7 @@ On a real PC (the harness is `companion\harness\bin\Release\net10.0-windows10.0.
 - `SoundpadWeb.Harness.exe --mimic-silent-selftest <wav>`: tests the **whole real chain without sound**. It plays the WAV at stream volume 0 while Mimic's real app capture listens to the harness itself, and real Whisper transcribes the result. Windows' per-app capture taps audio before stream volume. On the owner's PC the JFK sample came through word for word.
 - `SoundpadWeb.Harness.exe --mimic-stream-transcript <wav>`: real-time streaming into the buffer with real Whisper, without any device.
 - `SoundpadWeb.Harness.exe --whisper-bench <wav>`, `--peek-bench` and `--capture-bench`: the CPU and memory measurements quoted in this guide and the changelog. Capture itself uses about 1–2% of one core.
-- `SoundpadWeb.Harness.exe --hotkey-probe`: checks whether F6 is free, without pressing anything.
+- `SoundpadWeb.Harness.exe --hotkey-probe`: checks whether each of F6–F10 is free, without pressing anything.
 - `SoundpadWeb.exe --transcribe-file <wav> [--download] [--verbose]`: checks the model and Whisper's native libraries in the real single-file EXE.
 - Rolling back: [docs/ROLLBACK.md](ROLLBACK.md).
 
