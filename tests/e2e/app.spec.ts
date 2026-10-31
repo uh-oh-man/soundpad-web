@@ -1202,7 +1202,7 @@ test('polished tile and Temp review screenshots in both themes and mobile', asyn
     .setInputFiles({ name: 'Session review.wav', mimeType: 'audio/wav', buffer: sessionWave() });
   await expect(
     page.getByRole('button', { name: 'Play from start: Session review', exact: true }),
-  ).toBeEnabled();
+  ).toBeEnabled({ timeout: 25000 }); // decoding an upload can be slow on CI
   await page.getByRole('button', { name: 'Reverse and play Session review', exact: true }).click();
   await expect(page.locator('.player-track')).toContainText('Session review (reversed)');
   await page.getByRole('button', { name: 'Stop', exact: true }).click();
@@ -1669,7 +1669,7 @@ test('accessibility: no serious or critical axe violations in the dialogs, views
     .setInputFiles({ name: 'Scan tone.wav', mimeType: 'audio/wav', buffer: sessionWave() });
   await expect(
     page.getByRole('button', { name: 'Play from start: Scan tone', exact: true }),
-  ).toBeEnabled();
+  ).toBeEnabled({ timeout: 25000 }); // decoding an upload can be slow on CI
   await page.locator('#temp-manager > summary').click();
   await page
     .locator('.temp-source', { hasText: 'Scan tone' })
@@ -1786,6 +1786,45 @@ test('Mimic: the host imports a clip from Voice Replay Studio into Temp', async 
   await expect(
     page.getByRole('button', { name: 'Play from start: Fixture hello there', exact: true }),
   ).toBeEnabled();
+});
+
+test('an older companion: Settings names what an update adds, and those controls stay hidden', async ({
+  page,
+  harness,
+}) => {
+  // Make the harness look like companion 2.13.0.
+  await page.routeWebSocket(/ws:\/\/127\.0\.0\.1:\d+\/bridge/, (socket) => {
+    const server = socket.connectToServer();
+    socket.onMessage((message) => server.send(message));
+    server.onMessage((message) => {
+      const frame = JSON.parse(String(message));
+      if (frame.state?.companionVersion) frame.state.companionVersion = '2.13.0';
+      socket.send(JSON.stringify(frame));
+    });
+  });
+  await host(page, harness);
+  await page.getByRole('button', { name: 'Access settings' }).click();
+  const note = page.getByRole('note');
+  await expect(note).toContainText('Your Windows companion is 2.13.0');
+  await expect(note).toContainText('the hotkey key choice (F6–F10)');
+  await expect(note).toContainText('importing from Voice Replay Studio');
+  await expect(note.getByRole('link', { name: 'Download the latest companion' })).toHaveAttribute(
+    'href',
+    /releases\/latest\/download\/SoundpadWeb\.exe$/,
+  );
+  await page.keyboard.press('Escape');
+  await page.getByRole('button', { name: 'Mimic', exact: true }).click();
+  const dialog = page.getByRole('dialog', { name: 'Mimic' });
+  await expect(dialog.getByLabel('F6 hotkey')).toBeVisible();
+  await expect(dialog.getByLabel('Hotkey key', { exact: true })).toHaveCount(0);
+  await expect(dialog.getByText('From Voice Replay Studio')).toHaveCount(0);
+});
+
+test('the current companion gets no update note', async ({ page, harness }) => {
+  await host(page, harness);
+  await page.getByRole('button', { name: 'Access settings' }).click();
+  await expect(page.getByRole('dialog', { name: 'Session & access' })).toBeVisible();
+  await expect(page.getByText('A newer one adds')).toHaveCount(0);
 });
 
 test('Mimic fits a phone: header keeps Settings on screen and long clip names do not widen the window', async ({

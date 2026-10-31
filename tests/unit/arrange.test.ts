@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { arrangeSounds, boardTitle, type BoardSelection } from '../../web/src/arrange';
-import { companionAtLeast, supports } from '../../web/src/version';
+import { companionAtLeast, missingFeatures, supports } from '../../web/src/version';
 import { blankWorkspace, type Workspace } from '../../web/src/workspace';
 import { EMPTY, type Snapshot, type Sound } from '../../web/src/protocol';
 const host = 'a'.repeat(64);
@@ -116,5 +116,11 @@ describe('feature gates for older companions', () => {
     expect(supports('2.14.0', 'hotkeyKey')).toBe(true);
     expect(supports('2.14.5', 'voiceReplayLibrary')).toBe(false);
     expect(supports('2.15.0', 'voiceReplayLibrary')).toBe(true);
+    expect(missingFeatures('2.13.0')).toEqual([
+      'the hotkey key choice (F6–F10)',
+      'importing from Voice Replay Studio',
+    ]);
+    expect(missingFeatures('2.15.1')).toEqual([]);
+    expect(missingFeatures(null)).toEqual([]);
   });
 });

@@ -2,8 +2,10 @@ import { Link, LogOut, Radio, RotateCcw, Trash2, Users } from 'lucide-react';
 import { controller } from '../controller';
 import { MAX_GUESTS } from '../network/session';
 import type { Snapshot } from '../protocol';
-import { supports } from '../version';
+import { missingFeatures, supports } from '../version';
 import { themes, type Theme, type useAppearance } from '../appearance';
+
+const COMPANION_DOWNLOAD = `${(import.meta.env.VITE_REPOSITORY_URL as string | undefined) || 'https://github.com/uh-oh-man/soundpad-web'}/releases/latest/download/SoundpadWeb.exe`;
 
 type View = ReturnType<typeof controller.getSnapshot>;
 type Run = (
@@ -118,6 +120,16 @@ export function SettingsDialog({
           </p>
         </div>
       </div>
+      {host && missingFeatures(state.companionVersion).length > 0 && (
+        // Features needing a newer companion are hidden, so say what an update would add.
+        <p className="companion-features" role="note">
+          Your Windows companion is {state.companionVersion}. A newer one adds{' '}
+          {missingFeatures(state.companionVersion).join(', ')}.{' '}
+          <a href={COMPANION_DOWNLOAD} target="_blank" rel="noreferrer">
+            Download the latest companion
+          </a>
+        </p>
+      )}
       {host && (
         <>
           {permissionToggles

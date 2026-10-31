@@ -34,3 +34,27 @@ export const FEATURES = {
 
 export const supports = (version: string | null | undefined, feature: keyof typeof FEATURES) =>
   companionAtLeast(version, FEATURES[feature][0], FEATURES[feature][1]);
+
+/** What each companion-dependent feature is called, for telling a host what an update would add. */
+const FEATURE_NAMES: Record<keyof typeof FEATURES, string> = {
+  mimic: 'the Mimic window',
+  transcripts: 'Mimic transcripts',
+  hotkey: 'the Mimic hotkey',
+  trim: 'Edit copy',
+  effects: 'voice effects',
+  hotkeyLength: 'the hotkey length choice',
+  preview: 'private preview',
+  hotkeyKey: 'the hotkey key choice (F6–F10)',
+  voiceReplayLibrary: 'importing from Voice Replay Studio',
+};
+
+/**
+ * Names of the features this companion version lacks, oldest first. Empty for an unknown version (the
+ * companion has not reported one yet) so nothing is claimed before it connects.
+ */
+export function missingFeatures(version: string | null | undefined) {
+  if (!version) return [];
+  return (Object.keys(FEATURES) as (keyof typeof FEATURES)[])
+    .filter((feature) => !supports(version, feature))
+    .map((feature) => FEATURE_NAMES[feature]);
+}

@@ -2,6 +2,22 @@
 
 Notable changes to Soundpad Web. Versions follow the website's `package.json`; the Windows companion is versioned separately and only needs updating when a release says so.
 
+## 2.15.2 — Tell the host what a companion update adds
+
+Website only; the companion is unchanged apart from its version number (it reports 2.15.2).
+
+### Added
+
+- **Settings tells the host what a newer companion would add.** Controls that need a newer companion are hidden on older ones, so a host who never updated had no way to know they existed. Now **Session & access** names them, for example "Your Windows companion is 2.13.0. A newer one adds the hotkey key choice (F6–F10), importing from Voice Replay Studio", with a download link. The note is host only, appears only in Settings, never on the board, and only once the companion has reported its version. It comes from the same `FEATURES` table that hides those controls, so the two always agree.
+
+### Tests
+
+- A unit test covers `missingFeatures()`.
+- New e2e tests:
+  - with the companion made to report 2.13.0, Settings names exactly those two features and links the download, and the Mimic window hides both controls;
+  - the current companion gets no note.
+- Two more upload waits allow 25 s for decoding on slow runners.
+
 ## 2.15.1 — Review fixes for the Voice Replay Studio import
 
 **Update the Windows companion** for the first and last two fixes. The rest are website fixes and apply at once.
