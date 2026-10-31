@@ -2,6 +2,18 @@
 
 Notable changes to Soundpad Web. Versions follow the website's `package.json`; the Windows companion is versioned separately and only needs updating when a release says so.
 
+## 2.13.1 — Mimic keeps keyboard focus on slow connections
+
+Website only; the companion is unchanged apart from its version number (it reports 2.13.1).
+
+### Fixed
+
+- **Ticking Transcript or F6 hotkey, or changing F6's length, no longer loses keyboard focus** while the companion answers. These controls used to be disabled during each command, and Chrome moves focus away from a control that becomes disabled. On a quick PC the command usually finished first, but on a busy PC or slow link keyboard users ended up back at the top of the page, and Mimic's number-key shortcuts stopped working. They are now marked busy (`aria-disabled`) and ignore input until the answer arrives, but keep focus. This was also the cause of an occasional failure in the Mimic keyboard e2e test.
+
+### Tests
+
+- New e2e test delays every companion message by 600 ms and checks that F6 stays focused through the command. It fails on 2.13.0 and passes now.
+
 ## 2.13.0 — Mimic waveform zoom
 
 Website only; the companion is unchanged apart from its version number (it reports 2.13.0).

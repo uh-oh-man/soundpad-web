@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Captions, Download, Keyboard, Mic2, RefreshCw, Square } from 'lucide-react';
 import { z } from 'zod';
 import { controller } from '../../controller';
@@ -37,6 +37,8 @@ export function MimicHostControls({ state, connected }: { state: Snapshot; conne
   const [sources, setSources] = useState<z.infer<typeof sourcesSchema>['sources']>([]);
   const [source, setSource] = useState('');
   const [busy, setBusy] = useState(false);
+  // Read synchronously so a second click during a slow command is ignored even before React re-renders.
+  const running = useRef(false);
   const [transcribing, setWantTranscript] = useOptimistic(!!mimic?.transcribing);
   const [hotkey, setWantHotkey] = useOptimistic(!!mimic?.hotkey);
 
@@ -54,8 +56,10 @@ export function MimicHostControls({ state, connected }: { state: Snapshot; conne
   }, [connected, loadSources]);
 
   async function command(run: () => Promise<unknown>, onError?: () => void) {
+    running.current = true;
     setBusy(true);
     await run().catch(() => onError?.());
+    running.current = false;
     setBusy(false);
   }
 
@@ -119,8 +123,9 @@ export function MimicHostControls({ state, connected }: { state: Snapshot; conne
                 type="checkbox"
                 aria-label="Transcribe Mimic audio"
                 checked={transcribing}
-                disabled={busy}
+                aria-disabled={busy || undefined}
                 onChange={(e) => {
+                  if (running.current) return;
                   const on = e.target.checked;
                   setWantTranscript(on);
                   void command(
@@ -152,12 +157,15 @@ export function MimicHostControls({ state, connected }: { state: Snapshot; conne
         <div className="mimic-transcribe">
           <Keyboard size={16} />
           <label>
+            {/* aria-disabled, not disabled, while busy: Chrome drops focus from a control that becomes
+                disabled, and keyboard users would lose their place after every tick. */}
             <input
               type="checkbox"
               aria-label="F6 hotkey"
               checked={hotkey}
-              disabled={busy}
+              aria-disabled={busy || undefined}
               onChange={(e) => {
+                if (running.current) return;
                 const on = e.target.checked;
                 setWantHotkey(on);
                 void command(
@@ -174,8 +182,9 @@ export function MimicHostControls({ state, connected }: { state: Snapshot; conne
               <select
                 aria-label="F6 saves the last"
                 value={mimic?.hotkeySeconds ?? 10}
-                disabled={busy}
+                aria-disabled={busy || undefined}
                 onChange={(e) =>
+                  !running.current &&
                   void controller
                     .run('mimicHotkey', {
                       action: 'length',

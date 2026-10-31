@@ -1584,6 +1584,31 @@ test('accessibility: no serious or critical axe violations in the dialogs, views
   expect(problems).toEqual([]);
 });
 
+test('Mimic keyboard on a slow connection: ticking F6 keeps focus while the companion answers', async ({
+  page,
+  harness,
+}) => {
+  // Delay every command by 600 ms, as a busy PC or slow link would.
+  await page.routeWebSocket(/.*/, (ws) => {
+    const server = ws.connectToServer();
+    ws.onMessage((message) => setTimeout(() => server.send(message), 600));
+    server.onMessage((message) => ws.send(message));
+  });
+  await host(page, harness);
+  await page.getByRole('button', { name: 'Mimic', exact: true }).click();
+  const dialog = page.getByRole('dialog', { name: 'Mimic' });
+  await dialog.getByRole('button', { name: 'Start listening' }).click();
+  await expect(dialog.getByRole('button', { name: 'Stop listening' })).toBeVisible();
+  const f6 = dialog.getByLabel('F6 hotkey');
+  await f6.focus();
+  await page.keyboard.press('Space');
+  await expect(f6).toHaveAttribute('aria-disabled', 'true');
+  await expect(f6).toBeFocused();
+  await expect(f6).not.toHaveAttribute('aria-disabled');
+  await expect(f6).toBeChecked();
+  await expect(f6).toBeFocused();
+});
+
 test('Mimic fits a phone: header keeps Settings on screen and long clip names do not widen the window', async ({
   page,
   harness,
