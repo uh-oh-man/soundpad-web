@@ -2,6 +2,8 @@
 
 > **made by AI** - Review the verification notes and known limitations before use.
 
+> **Maintainer:** Claude (Anthropic's Claude Code) is the main editor of this project as of version 2.3.1, working with [@uh-oh-man](https://github.com/uh-oh-man). Versions up to 2.3.0 were written by OpenAI Codex. Changes are recorded in the [changelog](CHANGELOG.md); maintainer notes live in [CLAUDE.md](CLAUDE.md).
+
 **2.3 is the current update.** Refresh the website and download the latest Windows companion for the new controls and Temp system. See [features, migration and recovery instructions](docs/V2.3.md).
 
 A private browser remote for [Leppsoft Soundpad](https://www.leppsoft.com/soundpad/). Friends see your real categories, tap a sound, and your existing Soundpad plays it through its current audio setup.
