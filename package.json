@@ -1,6 +1,6 @@
 {
   "name": "soundpad-web",
-  "version": "2.10.2",
+  "version": "2.10.3",
   "private": true,
   "type": "module",
   "license": "MIT",
@@ -23,6 +23,7 @@
     "zod": "^4.1.12"
   },
   "devDependencies": {
+    "@axe-core/playwright": "4.14.0",
     "@eslint/js": "^10.0.1",
     "@playwright/test": "^1.56.0",
     "@types/node": "^24.10.0",

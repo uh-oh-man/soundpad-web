@@ -1,4 +1,5 @@
 import { test as base, expect, type Page } from '@playwright/test';
+import AxeBuilder from '@axe-core/playwright';
 import { spawn } from 'node:child_process';
 import { resolve } from 'node:path';
 import { readFile, mkdir, writeFile } from 'node:fs/promises';
@@ -65,7 +66,9 @@ const test = base.extend<{ harness: Harness }>({
 });
 async function host(page: Page, harness: Harness) {
   await page.goto(harness.launch);
-  await expect(page.getByRole('button', { name: 'Play Airhorn', exact: true })).toBeEnabled();
+  await expect(
+    page.getByRole('button', { name: 'Play from start: Airhorn', exact: true }),
+  ).toBeEnabled();
 }
 async function invite(page: Page) {
   await page.getByRole('button', { name: 'Access settings' }).click();
@@ -95,7 +98,9 @@ test('real loopback bridge: nested library, search, correct play command, counte
   const errors: string[] = [];
   page.on('pageerror', (e) => errors.push(e.message));
   await host(page, harness);
-  await expect(page.getByRole('button', { name: 'Play Laugh', exact: true })).toHaveCount(2);
+  await expect(
+    page.getByRole('button', { name: 'Play from start: Laugh', exact: true }),
+  ).toHaveCount(2);
   const categories = page.getByRole('navigation', { name: 'Sound categories' }).getByRole('button');
   await expect(categories).toHaveText([
     'Reactions1',
@@ -106,8 +111,10 @@ test('real loopback bridge: nested library, search, correct play command, counte
   await page.getByRole('button', { name: /^Empty category/ }).click();
   await expect(page.getByRole('heading', { name: 'Nothing in this category yet' })).toBeVisible();
   await page.getByRole('textbox', { name: 'Search sounds' }).fill('Airhorn');
-  await expect(page.getByRole('button', { name: 'Play Airhorn', exact: true })).toHaveCount(1);
-  await page.getByRole('button', { name: 'Play Airhorn', exact: true }).click();
+  await expect(
+    page.getByRole('button', { name: 'Play from start: Airhorn', exact: true }),
+  ).toHaveCount(1);
+  await page.getByRole('button', { name: 'Play from start: Airhorn', exact: true }).click();
   await expect.poll(() => harness.plays).toContain('DoPlaySound(1)');
   await page.getByRole('button', { name: 'Stop', exact: true }).click();
   await page.getByRole('button', { name: 'Increase Kick counter' }).click();
@@ -151,7 +158,9 @@ for (const size of [
     await expect(page.getByRole('button', { name: 'Stop', exact: true })).toBeVisible();
     if (size.name === 'phone') {
       await page.getByLabel('Category', { exact: true }).selectOption('5');
-      await expect(page.getByRole('button', { name: 'Play Airhorn', exact: true })).toHaveCount(1);
+      await expect(
+        page.getByRole('button', { name: 'Play from start: Airhorn', exact: true }),
+      ).toHaveCount(1);
     }
     await page.screenshot({
       path: `artifacts/screenshots/${size.name}-fixture.png`,
@@ -219,10 +228,14 @@ test('live Nostr/WebRTC: two guests, playback, synchronized counter and invitati
   try {
     await Promise.all([g1.goto(url), g2.goto(url)]);
     await Promise.all([finishGuestName(g1, 'First Guest'), finishGuestName(g2, 'Second Guest')]);
-    await expect(g1.getByRole('button', { name: 'Play Airhorn', exact: true })).toBeEnabled({
+    await expect(
+      g1.getByRole('button', { name: 'Play from start: Airhorn', exact: true }),
+    ).toBeEnabled({
       timeout: 60000,
     });
-    await expect(g2.getByRole('button', { name: 'Play Airhorn', exact: true })).toBeEnabled({
+    await expect(
+      g2.getByRole('button', { name: 'Play from start: Airhorn', exact: true }),
+    ).toBeEnabled({
       timeout: 60000,
     });
     await g1.getByLabel('Your display name').fill('Relay Alice');
@@ -230,7 +243,7 @@ test('live Nostr/WebRTC: two guests, playback, synchronized counter and invitati
     await g1.getByLabel('Search sounds').fill('Airhorn');
     await g1.getByLabel('View mode').selectOption('waveforms');
     await expect(g1.getByRole('slider', { name: 'Seek Airhorn', exact: true })).toBeVisible();
-    await g1.getByRole('button', { name: 'Play Airhorn', exact: true }).click();
+    await g1.getByRole('button', { name: 'Play from start: Airhorn', exact: true }).click();
     await expect.poll(() => harness.plays).toContain('DoPlaySound(1)');
     await g1.getByRole('button', { name: 'Pause playback', exact: true }).click();
     await expect(g1.getByRole('button', { name: 'Resume playback', exact: true })).toBeEnabled();
@@ -308,16 +321,20 @@ test('live Nostr/WebRTC: independent hosts keep guests and counters isolated', a
     expect(url1).not.toBe(url2);
     await Promise.all([g1.goto(url1), g2.goto(url2)]);
     await Promise.all([finishGuestName(g1), finishGuestName(g2)]);
-    await expect(g1.getByRole('button', { name: 'Play Airhorn', exact: true })).toBeEnabled({
+    await expect(
+      g1.getByRole('button', { name: 'Play from start: Airhorn', exact: true }),
+    ).toBeEnabled({
       timeout: 60000,
     });
-    await expect(g2.getByRole('button', { name: 'Play Airhorn', exact: true })).toBeEnabled({
+    await expect(
+      g2.getByRole('button', { name: 'Play from start: Airhorn', exact: true }),
+    ).toBeEnabled({
       timeout: 60000,
     });
     await page.getByRole('button', { name: 'Increase Kick counter' }).click();
     await expect(g1.getByLabel('Kick count', { exact: true })).toHaveText('1');
     await expect(g2.getByLabel('Kick count', { exact: true })).toHaveText('0');
-    await g2.getByRole('button', { name: 'Play Airhorn', exact: true }).click();
+    await g2.getByRole('button', { name: 'Play from start: Airhorn', exact: true }).click();
     await expect.poll(() => second.plays).toContain('DoPlaySound(1)');
     expect(harness.plays).toHaveLength(0);
   } finally {
@@ -343,10 +360,12 @@ test('deployed Pages bundle connects to the authenticated Windows loopback compa
     const guest = await guestContext.newPage();
     await guest.goto(url);
     await finishGuestName(guest);
-    await expect(guest.getByRole('button', { name: 'Play Airhorn', exact: true })).toBeEnabled({
+    await expect(
+      guest.getByRole('button', { name: 'Play from start: Airhorn', exact: true }),
+    ).toBeEnabled({
       timeout: 60000,
     });
-    await guest.getByRole('button', { name: 'Play Airhorn', exact: true }).click();
+    await guest.getByRole('button', { name: 'Play from start: Airhorn', exact: true }).click();
     await expect.poll(() => harness.plays).toContain('DoPlaySound(1)');
     await page.getByRole('button', { name: 'Stop', exact: true }).click();
     await page.getByRole('button', { name: 'Increase Kick counter' }).click();
@@ -362,7 +381,9 @@ test('V2: all five views persist and remain usable at phone width', async ({ pag
   await host(page, harness);
   for (const mode of ['icons', 'large', 'list', 'details', 'waveforms']) {
     await page.getByLabel('View mode', { exact: true }).selectOption(mode);
-    await expect(page.getByRole('button', { name: 'Play Airhorn', exact: true })).toBeEnabled();
+    await expect(
+      page.getByRole('button', { name: 'Play from start: Airhorn', exact: true }),
+    ).toBeEnabled();
     if (mode === 'waveforms')
       await expect(page.getByRole('slider', { name: 'Seek Airhorn', exact: true })).toBeVisible();
     await page.setViewportSize({ width: 390, height: 844 });
@@ -391,7 +412,7 @@ test('V2: real waveform, pause, epoch seek, cue and region metadata, named stati
   await page.getByLabel('View mode').selectOption('waveforms');
   const wave = page
     .locator('.sound-entry')
-    .filter({ has: page.getByRole('button', { name: 'Play Airhorn', exact: true }) })
+    .filter({ has: page.getByRole('button', { name: 'Play from start: Airhorn', exact: true }) })
     .locator('.wave-block');
   await expect(wave.getByRole('slider', { name: 'Seek Airhorn', exact: true })).toBeVisible();
   await wave.getByRole('button', { name: 'Cues & regions', exact: true }).click();
@@ -456,13 +477,17 @@ test('V2: nested personal categories, multiple membership, export, end and resum
   await page.getByRole('button', { name: 'Close dialog' }).click();
   await page.getByRole('button', { name: 'My Layout', exact: true }).click();
   await page.getByRole('button', { name: /^Child\s*1$/ }).click();
-  await expect(page.getByRole('button', { name: 'Play Airhorn', exact: true })).toHaveCount(1);
+  await expect(
+    page.getByRole('button', { name: 'Play from start: Airhorn', exact: true }),
+  ).toHaveCount(1);
   const oldInvite = await invite(page);
   await page.getByRole('button', { name: 'Access settings' }).click();
   await page.getByRole('button', { name: 'End hosting', exact: true }).click();
   await expect(page.getByRole('button', { name: 'Resume hosting', exact: true })).toBeVisible();
   await page.getByRole('button', { name: 'Resume hosting', exact: true }).click();
-  await expect(page.getByRole('button', { name: 'Play Airhorn', exact: true })).toBeEnabled();
+  await expect(
+    page.getByRole('button', { name: 'Play from start: Airhorn', exact: true }),
+  ).toBeEnabled();
   expect(await invite(page)).not.toBe(oldInvite);
   await expect(page.getByRole('button', { name: /^Child\s*1$/ })).toBeVisible();
   await page.getByRole('button', { name: 'Manage layout', exact: true }).click();
@@ -475,7 +500,9 @@ test('V2: nested personal categories, multiple membership, export, end and resum
   await expect(page.getByText(/1 referenced sounds are unavailable/)).toBeVisible();
   await page.getByRole('button', { name: 'Close dialog' }).click();
   await page.getByRole('button', { name: 'Host Layout', exact: true }).click();
-  await expect(page.getByRole('button', { name: 'Play Airhorn', exact: true })).toBeVisible();
+  await expect(
+    page.getByRole('button', { name: 'Play from start: Airhorn', exact: true }),
+  ).toBeVisible();
 });
 
 test('V2: large-photo crop, cancel, failed save retention and remove', async ({
@@ -551,7 +578,7 @@ test('V2: 10000-sound library keeps rendering bounded and search responsive', as
     const search = performance.now();
     await page.getByLabel('Search sounds').fill('Benchmark fixture 10000');
     await expect(
-      page.getByRole('button', { name: 'Play Benchmark fixture 10000', exact: true }),
+      page.getByRole('button', { name: 'Play from start: Benchmark fixture 10000', exact: true }),
     ).toBeVisible();
     await expect(page.locator('.sound-entry')).toHaveCount(1);
     const searchMs = performance.now() - search;
@@ -664,7 +691,7 @@ test('normal update explains the companion upgrade while preserving legacy playb
     /releases\/latest\/download\/SoundpadWeb\.exe$/,
   );
   await expect(page.getByLabel('View mode')).toBeDisabled();
-  await page.getByRole('button', { name: 'Play Airhorn', exact: true }).click();
+  await page.getByRole('button', { name: 'Play from start: Airhorn', exact: true }).click();
   await expect.poll(() => harness.plays).toContain('DoPlaySound(1)');
 });
 
@@ -687,7 +714,7 @@ test('session waveforms stay mounted through rapid seeks, view changes and scrol
   await expect(page.locator('.tile-wave-surface svg[viewBox="0 0 800 64"]')).toHaveCount(4);
   await page.getByLabel('View mode').selectOption('waveforms');
   const before = requests.length;
-  await page.getByRole('button', { name: 'Play Airhorn', exact: true }).click();
+  await page.getByRole('button', { name: 'Play from start: Airhorn', exact: true }).click();
   await page.getByRole('button', { name: 'Pause playback', exact: true }).click();
   const wave = page.locator('.player-wave .wave-surface');
   await expect(wave).toBeVisible();
@@ -729,7 +756,7 @@ test('artwork fills the play button and iconless buttons have cached mini wavefo
     buffer: Buffer.from(png, 'base64'),
   });
   await page.getByRole('button', { name: 'Save icon', exact: true }).click();
-  const button = page.getByRole('button', { name: 'Play Airhorn', exact: true });
+  const button = page.getByRole('button', { name: 'Play from start: Airhorn', exact: true });
   const art = page.getByRole('button', { name: 'Play artwork Airhorn', exact: true });
   const image = art.locator('img');
   await expect(image).toBeVisible();
@@ -852,7 +879,7 @@ test('session uploads use temp, reverse immediately, and only approved files sur
   await page
     .getByLabel('Add session audio', { exact: true })
     .setInputFiles({ name: 'Session tone.wav', mimeType: 'audio/wav', buffer: sessionWave() });
-  const sound = page.getByRole('button', { name: 'Play Session tone', exact: true });
+  const sound = page.getByRole('button', { name: 'Play from start: Session tone', exact: true });
   await expect(sound).toBeEnabled();
   await expect(
     page
@@ -871,11 +898,15 @@ test('session uploads use temp, reverse immediately, and only approved files sur
   page.once('dialog', (d) => d.accept());
   await page.getByRole('button', { name: 'End hosting', exact: true }).click();
   await page.getByRole('button', { name: 'Resume hosting', exact: true }).click();
-  await expect(page.getByRole('button', { name: 'Play Session tone', exact: true })).toBeEnabled();
   await expect(
-    page.getByRole('button', { name: 'Play Session tone (reversed)', exact: true }),
+    page.getByRole('button', { name: 'Play from start: Session tone', exact: true }),
+  ).toBeEnabled();
+  await expect(
+    page.getByRole('button', { name: 'Play from start: Session tone (reversed)', exact: true }),
   ).toHaveCount(0);
-  await expect(page.getByRole('button', { name: 'Play Airhorn', exact: true })).toBeEnabled();
+  await expect(
+    page.getByRole('button', { name: 'Play from start: Airhorn', exact: true }),
+  ).toBeEnabled();
 });
 
 test('full tile scrubbing and bottom-player precision zoom work at desktop and phone widths', async ({
@@ -883,7 +914,7 @@ test('full tile scrubbing and bottom-player precision zoom work at desktop and p
   harness,
 }) => {
   await host(page, harness);
-  const button = page.getByRole('button', { name: 'Play Airhorn', exact: true });
+  const button = page.getByRole('button', { name: 'Play from start: Airhorn', exact: true });
   const cue = page.getByRole('slider', { name: 'Cue Airhorn waveform', exact: true });
   await expect(cue.locator('svg[viewBox="0 0 800 64"]')).toBeVisible();
   const geometry = await cue.evaluate((el) => {
@@ -942,7 +973,9 @@ test('live Nostr/WebRTC: compact invites, guest upload, shared organization and 
     await Promise.all([g1.goto(url), g2.goto(url)]);
     await Promise.all([finishGuestName(g1, 'Upload Alice'), finishGuestName(g2, 'Layout Bob')]);
     for (const guest of [g1, g2])
-      await expect(guest.getByRole('button', { name: 'Play Airhorn', exact: true })).toBeEnabled({
+      await expect(
+        guest.getByRole('button', { name: 'Play from start: Airhorn', exact: true }),
+      ).toBeEnabled({
         timeout: 60000,
       });
     await expect(g1.getByRole('region', { name: 'Spotify player' })).toBeVisible();
@@ -962,7 +995,7 @@ test('live Nostr/WebRTC: compact invites, guest upload, shared organization and 
     await expect(g1.getByLabel('Add session audio', { exact: true })).toBeEnabled();
     for (const participant of [page, g1, g2])
       await expect(
-        participant.getByRole('button', { name: 'Play Guest tone', exact: true }),
+        participant.getByRole('button', { name: 'Play from start: Guest tone', exact: true }),
       ).toBeEnabled();
     await expect(g1.getByRole('button', { name: 'Keep Guest tone permanently' })).toHaveCount(0);
     await g2.getByRole('button', { name: 'Reverse and play Guest tone', exact: true }).click();
@@ -975,7 +1008,9 @@ test('live Nostr/WebRTC: compact invites, guest upload, shared organization and 
     await expect(
       g1
         .locator('.sound-entry')
-        .filter({ has: g1.getByRole('button', { name: 'Play Guest tone', exact: true }) })
+        .filter({
+          has: g1.getByRole('button', { name: 'Play from start: Guest tone', exact: true }),
+        })
         .locator('.temp-badge'),
     ).toHaveCount(0);
   } finally {
@@ -989,7 +1024,7 @@ test('Space toggles playback from the media surface but leaves typing and dialog
   harness,
 }) => {
   await host(page, harness);
-  const play = page.getByRole('button', { name: 'Play Airhorn', exact: true });
+  const play = page.getByRole('button', { name: 'Play from start: Airhorn', exact: true });
   await play.click();
   await expect(page.getByRole('button', { name: 'Pause playback', exact: true })).toBeEnabled();
   await play.press('Space');
@@ -1149,7 +1184,7 @@ test('polished tile and Temp review screenshots in both themes and mobile', asyn
     buffer: Buffer.from(image, 'base64'),
   });
   await page.getByRole('button', { name: 'Save icon', exact: true }).click();
-  await page.getByRole('button', { name: 'Play Airhorn', exact: true }).click();
+  await page.getByRole('button', { name: 'Play from start: Airhorn', exact: true }).click();
   await expect(page.getByRole('slider', { name: 'Seek Airhorn', exact: true })).toBeVisible();
   await page.screenshot({ path: 'artifacts/screenshots/v23-red-blue.png' });
   await page.getByRole('combobox', { name: 'View mode' }).selectOption('large');
@@ -1159,7 +1194,7 @@ test('polished tile and Temp review screenshots in both themes and mobile', asyn
     .getByLabel('Add session audio', { exact: true })
     .setInputFiles({ name: 'Session review.wav', mimeType: 'audio/wav', buffer: sessionWave() });
   await expect(
-    page.getByRole('button', { name: 'Play Session review', exact: true }),
+    page.getByRole('button', { name: 'Play from start: Session review', exact: true }),
   ).toBeEnabled();
   await page.getByRole('button', { name: 'Reverse and play Session review', exact: true }).click();
   await expect(page.locator('.player-track')).toContainText('Session review (reversed)');
@@ -1207,7 +1242,7 @@ test('Mimic: host listens, everyone sees it, and a selection becomes a playable 
   await expect(dialog.locator('.mimic-range')).toContainText('3.0 s');
   await dialog.getByLabel('Clip name').fill('Fixture mimic');
   await dialog.getByRole('button', { name: 'Mimic & play' }).click();
-  const sound = page.getByRole('button', { name: 'Play Fixture mimic', exact: true });
+  const sound = page.getByRole('button', { name: 'Play from start: Fixture mimic', exact: true });
   await expect(sound).toBeEnabled();
   await expect.poll(() => harness.plays).toContain('DoPlaySound(5)');
   // The clip can be replayed from the window without hunting for it on the board.
@@ -1229,7 +1264,7 @@ test('Mimic: host listens, everyone sees it, and a selection becomes a playable 
   await expect(trim).toContainText(/1\.50 s of 2\.\d\d s/);
   await trim.getByRole('button', { name: 'Save copy' }).click();
   await expect(
-    page.getByRole('button', { name: 'Play Fixture mimic (trimmed)', exact: true }),
+    page.getByRole('button', { name: 'Play from start: Fixture mimic (trimmed)', exact: true }),
   ).toBeEnabled();
   // A voice effect on a copy: Chipmunk plays the same audio 1.5x faster and higher.
   await source.getByRole('button', { name: 'Edit copy', exact: true }).click();
@@ -1237,9 +1272,11 @@ test('Mimic: host listens, everyone sees it, and a selection becomes a playable 
   await expect(trim.getByLabel('Name')).toHaveAttribute('placeholder', 'Fixture mimic (chipmunk)');
   await trim.getByRole('button', { name: 'Save copy' }).click();
   await expect(
-    page.getByRole('button', { name: 'Play Fixture mimic (chipmunk)', exact: true }),
+    page.getByRole('button', { name: 'Play from start: Fixture mimic (chipmunk)', exact: true }),
   ).toBeEnabled();
-  await expect(page.getByRole('button', { name: 'Play Fixture mimic', exact: true })).toBeEnabled();
+  await expect(
+    page.getByRole('button', { name: 'Play from start: Fixture mimic', exact: true }),
+  ).toBeEnabled();
   await page.getByRole('button', { name: 'Mimic', exact: true }).click();
   // Dragging selects an exact range; Clear returns to the live view.
   const canvas = dialog.locator('.mimic-wave canvas');
@@ -1293,7 +1330,9 @@ test('Mimic transcript: lines appear, a click selects them, and they name the cl
   await expect(line).toHaveAttribute('aria-pressed', 'true');
   await expect(dialog.getByLabel('Clip name')).toHaveAttribute('placeholder', words);
   await dialog.getByRole('button', { name: 'Mimic it' }).click();
-  await expect(page.getByRole('button', { name: `Play ${words}`, exact: true })).toBeEnabled();
+  await expect(
+    page.getByRole('button', { name: `Play from start: ${words}`, exact: true }),
+  ).toBeEnabled();
   await dialog.getByLabel('Transcribe Mimic audio').uncheck();
   await expect(transcript).toHaveCount(0);
 });
@@ -1313,7 +1352,9 @@ test('Mimic keyboard: number keys grab recent audio, Enter mimics, Escape clears
   await expect(name).toBeFocused();
   await name.fill('Key mimic');
   await page.keyboard.press('Enter');
-  await expect(page.getByRole('button', { name: 'Play Key mimic', exact: true })).toBeEnabled();
+  await expect(
+    page.getByRole('button', { name: 'Play from start: Key mimic', exact: true }),
+  ).toBeEnabled();
   await expect(dialog.locator('.mimic-range')).toHaveCount(0);
   await page.keyboard.press('3');
   await expect(dialog.locator('.mimic-range')).toContainText('3.0 s');
@@ -1342,7 +1383,9 @@ test('live Nostr/WebRTC: guests see Mimic only when allowed and can clip from it
     const guest = await context.newPage();
     await guest.goto(url);
     await finishGuestName(guest, 'Mimic Alice');
-    await expect(guest.getByRole('button', { name: 'Play Airhorn', exact: true })).toBeEnabled({
+    await expect(
+      guest.getByRole('button', { name: 'Play from start: Airhorn', exact: true }),
+    ).toBeEnabled({
       timeout: 60000,
     });
     await expect(guest.getByRole('button', { name: 'Mimic on' })).toBeDisabled();
@@ -1365,7 +1408,9 @@ test('live Nostr/WebRTC: guests see Mimic only when allowed and can clip from it
     await dialog.getByRole('button', { name: 'Last 3 s' }).click();
     await dialog.getByLabel('Clip name').fill('Guest mimic');
     await dialog.getByRole('button', { name: 'Mimic it' }).click();
-    await expect(page.getByRole('button', { name: 'Play Guest mimic', exact: true })).toBeEnabled();
+    await expect(
+      page.getByRole('button', { name: 'Play from start: Guest mimic', exact: true }),
+    ).toBeEnabled();
     // Everyone hears about a new clip, and can replay it from the shared list.
     await expect(page.getByText('Mimic Alice mimicked \u201cGuest mimic\u201d')).toBeVisible();
     await expect(
@@ -1394,4 +1439,39 @@ test('Temp keeps the native original distinct from its generated reverse', async
   await expect(
     page.getByRole('button', { name: 'Keep reversed permanently', exact: true }),
   ).toBeEnabled();
+});
+
+test('accessibility: no serious or critical axe violations on the main screens', async ({
+  page,
+  harness,
+}) => {
+  const problems: string[] = [];
+  async function scan(target: Page, screen: string) {
+    const { violations } = await new AxeBuilder({ page: target }).analyze();
+    for (const v of violations)
+      if (v.impact === 'serious' || v.impact === 'critical')
+        problems.push(`${screen}: ${v.id} (${v.nodes.map((n) => n.target.join(' ')).join(', ')})`);
+  }
+  const landing = await page.context().newPage();
+  await landing.goto('/');
+  await scan(landing, 'landing');
+  await landing.close();
+  await host(page, harness);
+  await scan(page, 'board');
+  await page.locator('#temp-manager > summary').click();
+  await scan(page, 'temp');
+  await page.getByRole('button', { name: 'Access settings' }).click();
+  await scan(page, 'settings');
+  await page.keyboard.press('Escape');
+  await page.getByRole('button', { name: 'Mimic', exact: true }).click();
+  await page.getByRole('button', { name: 'Start listening' }).click();
+  await page.getByLabel('Transcribe Mimic audio').check();
+  await expect(
+    page.getByRole('list', { name: 'Transcript' }).getByRole('button').first(),
+  ).toBeVisible({ timeout: 15000 });
+  await scan(page, 'mimic');
+  await page.keyboard.press('Escape');
+  await page.setViewportSize({ width: 390, height: 844 });
+  await scan(page, 'phone');
+  expect(problems).toEqual([]);
 });

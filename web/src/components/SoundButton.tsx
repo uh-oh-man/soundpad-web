@@ -144,7 +144,8 @@ export function SoundButton({
       )}
       <button
         className="tile-play-strip"
-        aria-label={`Play ${sound.name}`}
+        // The name must contain the visible text so voice control ("click play from start") works.
+        aria-label={`Play from start: ${sound.name}`}
         disabled={!canPlay || pending}
         onClick={() => void play().catch(() => {})}
       >

@@ -71,13 +71,13 @@ const totalsSchema = z.object({
 
 function ProjectFooter() {
   return (
-    <small className="project-footer">
+    <footer className="project-footer">
       Soundpad Web · v{APP_VERSION_LABEL} ·{' '}
       <a href={PROJECT_URL} target="_blank" rel="noreferrer">
         GitHub
       </a>{' '}
       · <span>made by AI</span>
-    </small>
+    </footer>
   );
 }
 
@@ -347,14 +347,17 @@ function App() {
   return (
     <div className={`app-shell ${mode === 'landing' ? 'is-landing' : 'is-connected'}`}>
       <header className="topbar">
-        <a href={location.pathname} className="brand" aria-label="Soundpad Web home">
+        <a href={location.pathname} className="brand">
           <span className="brand-icon">
             <AudioLines size={23} />
           </span>
           <span>
             soundpad<span className="brand-light"> web</span>
-          </span>
+          </span>{' '}
+          {/* The space keeps "web" and the version apart in the link's text; flex layout ignores it. */}
           <span className="release-version">v{APP_VERSION_LABEL}</span>
+          {/* Named by its visible text (which changes with screen width) so voice control always matches. */}
+          <span className="sr-only">, home</span>
         </a>
         <span className="edition">BROWSER REMOTE</span>
         <div className="top-actions">

@@ -2,6 +2,23 @@
 
 Notable changes to Soundpad Web. Versions follow the website's `package.json`; the Windows companion is versioned separately and only needs updating when a release says so.
 
+## 2.10.3 — Accessibility audit
+
+Website update; the companion is rebuilt as 2.10.3 with no code changes.
+
+### Fixed
+
+An automated axe-core audit covered the landing page, board, Temp, Settings, the Mimic window with transcripts, and phone width. It found two serious issues and one moderate one; all are fixed, and the audit now reports nothing.
+
+- **Voice control could not use the tile play buttons.** They show "PLAY FROM START" but were named "Play Airhorn", so saying what you see did not match. They are now named "Play from start: Airhorn".
+- **The logo link's name did not match its text** ("Soundpad Web home" against "soundpad web v2.10", and "soundpad v2.10" on phones). It is now named by its visible text plus a screen-reader-only ", home", so it matches at every width.
+- **The landing page's footer was outside any landmark.** It is now a `<footer>`.
+- A pixel-exact screenshot check confirmed none of this changed how the site looks.
+
+### Added
+
+- Permanent e2e test that fails on any serious or critical axe violation on those six screens. It uses `@axe-core/playwright` 4.14.0, a development dependency only, pinned to a release over two weeks old; `npm audit` is unchanged.
+
 ## 2.10.2 — Safe with older companions
 
 Website update; the companion is rebuilt as 2.10.2 with no code changes.
