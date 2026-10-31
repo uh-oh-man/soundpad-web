@@ -28,5 +28,6 @@ npm run test:e2e                  # needs the prebuilt harness in companion/harn
 
 - Bump `package.json` (and the two matching `package-lock.json` entries) and `companion/SoundpadWeb.Companion.csproj` `<Version>` together for each release, tag `vX.Y.Z`, and add the release to `docs/ROLLBACK.md`. The header and footer read the version from there through the `__APP_VERSION__` define in `vite.config.ts`.
 - Bump `REQUIRED_COMPANION` in `web/src/version.ts` only when the website depends on a new companion feature.
+- Every new companion-dependent control must be gated with `supports(state.companionVersion, feature)`; add the feature and its first companion version to `FEATURES` in `web/src/version.ts`. The website is always newest, so hosts on older companions see it.
 - Never loosen validation of persisted data (`state.json`, the managed-audio journal, e.g. the 16 MiB staged-input check): older companions would reject the newer data and rolling back would break. After changing anything persisted, rerun the rollback test in `docs/ROLLBACK.md` (harness `--make-rollback-fixture`) against the v2.3.1 companion.
 - Work on a branch. When a requested feature is done and verified, merge it to `main` and push the release tag yourself (the owner asked for this); confirm the Pages and release runs succeed.

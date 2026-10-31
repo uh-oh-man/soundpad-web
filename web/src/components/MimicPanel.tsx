@@ -13,6 +13,7 @@ import {
 import { z } from 'zod';
 import { controller } from '../controller';
 import type { Snapshot } from '../protocol';
+import { supports } from '../version';
 
 const peekSchema = z.object({
   end: z.number().int().nonnegative(),
@@ -467,7 +468,7 @@ export function MimicPanel({
           )}
         </div>
       )}
-      {host && (
+      {host && supports(state.companionVersion, 'transcripts') && (
         <div className="mimic-transcribe">
           <Captions size={16} />
           {mimic?.transcriptModel ? (
@@ -508,7 +509,7 @@ export function MimicPanel({
           </small>
         </div>
       )}
-      {host && (
+      {host && supports(state.companionVersion, 'hotkey') && (
         <div className="mimic-transcribe">
           <Keyboard size={16} />
           <label>

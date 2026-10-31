@@ -6,6 +6,7 @@ Every release stays on GitHub permanently, so any earlier version can be restore
 
 | Version | What it is | Git tag | Download |
 | --- | --- | --- | --- |
+| 2.10.2 | Safe with older companions | `v2.10.2` | [Release](https://github.com/uh-oh-man/soundpad-web/releases/tag/v2.10.2) |
 | 2.10.1 | Fixes from an independent review | `v2.10.1` | [Release](https://github.com/uh-oh-man/soundpad-web/releases/tag/v2.10.1) |
 | 2.10.0 | Mimic clips are shared moments | `v2.10.0` | [Release](https://github.com/uh-oh-man/soundpad-web/releases/tag/v2.10.0) |
 | 2.9.5 | Mimic remembers your source | `v2.9.5` | [Release](https://github.com/uh-oh-man/soundpad-web/releases/tag/v2.9.5) |
@@ -52,6 +53,13 @@ companion\harness\bin\Release\net10.0-windows10.0.19041.0\win-x64\SoundpadWeb.Ha
 companion\harness\bin\Release\net10.0-windows10.0.19041.0\win-x64\SoundpadWeb.Harness.exe --mock-only   # prints TEST_PIPE <name>
 <older>\SoundpadWeb.exe --data-dir C:\temp\rollback-data --pipe <name> --no-browser --site https://example.invalid/
 ```
+
+### Mixed versions are tested too (2.10.2)
+
+Usually only one half is rolled back. Both pairings were run on the owner's PC with the v2.3.1 companion harness and website built from the tag:
+
+- **New website with an older companion:** everything the old companion supports works, and newer controls (Mimic, transcripts, F6, Edit copy, effects, Guest Mimic) are hidden instead of failing.
+- **Older website with the new companion:** works. Saving permissions from the old website turns Guest Mimic off, since it does not know that setting.
 
 ## Roll back the website
 

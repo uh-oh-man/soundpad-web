@@ -16,5 +16,17 @@ export function companionAtLeast(version: string | null | undefined, major: numb
 /** Oldest companion that supports every feature of this website. */
 export const REQUIRED_COMPANION = { major: 2, minor: 3, label: '2.3' } as const;
 
-/** Oldest companion with Mimic capture. */
-export const MIMIC_COMPANION = { major: 2, minor: 4, label: '2.4' } as const;
+/**
+ * The companion version each newer feature needs. The website always serves the newest version, so a host
+ * who rolled back only the Windows companion must not see controls their companion would reject.
+ */
+export const FEATURES = {
+  mimic: [2, 4],
+  transcripts: [2, 5],
+  hotkey: [2, 7],
+  trim: [2, 8],
+  effects: [2, 9],
+} as const satisfies Record<string, readonly [number, number]>;
+
+export const supports = (version: string | null | undefined, feature: keyof typeof FEATURES) =>
+  companionAtLeast(version, FEATURES[feature][0], FEATURES[feature][1]);

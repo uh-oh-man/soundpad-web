@@ -2,8 +2,26 @@
 
 Notable changes to Soundpad Web. Versions follow the website's `package.json`; the Windows companion is versioned separately and only needs updating when a release says so.
 
-## Unreleased
+## 2.10.2 — Safe with older companions
 
+Website update; the companion is rebuilt as 2.10.2 with no code changes.
+
+### Fixed
+
+- **The website showed controls an older companion cannot handle.** The website always serves the newest version, so a host who rolls back only the Windows companion runs new website code against an old companion. Each newer feature now appears only when the companion has it. The required versions are in one table (`FEATURES` in `web/src/version.ts`):
+  - the Mimic window and the Guest Mimic setting need 2.4;
+  - the transcript controls need 2.5;
+  - the F6 setting needs 2.7;
+  - Edit copy needs 2.8;
+  - effects need 2.9.
+
+  Before this, the Guest Mimic setting appeared even for a 2.3 companion. A 2.4 companion would have shown Get transcripts and F6. Edit copy would have appeared and failed with "Unsupported command" on a 2.3 companion with real Soundpad.
+
+### Verified: both mixed-version directions
+
+- **New website with the v2.3.1 companion**, built from its tag: playback and uploads work, no Mimic, Edit copy or Guest Mimic controls appear, and there are no page errors.
+- **v2.3.1 website with the new companion:** playback, permissions, the Kick counter and Temp work with no page errors. Saving permissions from the old website switches Guest Mimic off, because it does not know that setting; that is the safe direction.
+- Unit tests for the feature gates (60 total); full e2e 27/27.
 - **Rolling back is now tested.** The pre-Mimic v2.3.1 companion, built from its tag, starts cleanly on data written by the current version, both mid-session and after End Hosting, including Mimic clips and edited copies. The only side effect is that it drops the `guestMimic` setting, so Guest Mimic is off after a round trip. The new `SoundpadWeb.Harness.exe --make-rollback-fixture <folder> open|ended` writes such a data folder; the steps are in [docs/ROLLBACK.md](docs/ROLLBACK.md).
 
 ## 2.10.1 — Fixes from an independent review of Mimic

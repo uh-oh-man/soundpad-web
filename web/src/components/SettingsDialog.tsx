@@ -2,6 +2,7 @@ import { Link, LogOut, Radio, RotateCcw, Trash2, Users } from 'lucide-react';
 import { controller } from '../controller';
 import { MAX_GUESTS } from '../network/session';
 import type { Snapshot } from '../protocol';
+import { supports } from '../version';
 import { themes, type Theme, type useAppearance } from '../appearance';
 
 type View = ReturnType<typeof controller.getSnapshot>;
@@ -18,6 +19,8 @@ const permissionToggles: {
   label: string;
   /** Requires a protocol 2 companion. */
   v2?: boolean;
+  /** Requires this companion feature. */
+  feature?: Parameters<typeof supports>[1];
 }[] = [
   {
     key: 'remotePlayback',
@@ -63,6 +66,7 @@ const permissionToggles: {
     description: "Guests can see Mimic's live buffer and clip from it while you have it listening.",
     label: 'Allow guest Mimic',
     v2: true,
+    feature: 'mimic',
   },
 ];
 
@@ -117,7 +121,11 @@ export function SettingsDialog({
       {host && (
         <>
           {permissionToggles
-            .filter((toggle) => v2 || !toggle.v2)
+            .filter(
+              (toggle) =>
+                (v2 || !toggle.v2) &&
+                (!toggle.feature || supports(state.companionVersion, toggle.feature)),
+            )
             .map(({ key, title, description, label }) => (
               <div className="setting-row" key={key}>
                 <div>

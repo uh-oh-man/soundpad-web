@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { arrangeSounds, boardTitle, type BoardSelection } from '../../web/src/arrange';
-import { companionAtLeast } from '../../web/src/version';
+import { companionAtLeast, supports } from '../../web/src/version';
 import { blankWorkspace, type Workspace } from '../../web/src/workspace';
 import { EMPTY, type Snapshot, type Sound } from '../../web/src/protocol';
 const host = 'a'.repeat(64);
@@ -98,5 +98,17 @@ describe('companion version gate', () => {
     expect(companionAtLeast('2.2.9', 2, 3)).toBe(false);
     expect(companionAtLeast(null, 2, 3)).toBe(false);
     expect(companionAtLeast('dev', 2, 3)).toBe(false);
+  });
+});
+
+describe('feature gates for older companions', () => {
+  it('hides each feature until the companion that added it', () => {
+    expect(supports('2.3.1', 'mimic')).toBe(false);
+    expect(supports('2.4.0', 'mimic')).toBe(true);
+    expect(supports('2.4.0', 'transcripts')).toBe(false);
+    expect(supports('2.6.0', 'hotkey')).toBe(false);
+    expect(supports('2.8.1', 'trim')).toBe(true);
+    expect(supports('2.8.1', 'effects')).toBe(false);
+    expect(supports('2.10.1', 'effects')).toBe(true);
   });
 });

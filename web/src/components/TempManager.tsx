@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { z } from 'zod';
 import { controller } from '../controller';
+import { supports } from '../version';
 import { flattenCategories, type Snapshot } from '../protocol';
 const variant = z.object({
   id: z.string(),
@@ -199,7 +200,8 @@ export function TempManager({
                     </button>
                   ))}
                   {(host || state.permissions.guestUploads !== false) &&
-                    durationOf(a) !== undefined && (
+                    durationOf(a) !== undefined &&
+                    supports(state.companionVersion, 'trim') && (
                       <button
                         disabled={!!pending || !connected}
                         onClick={() =>
@@ -257,21 +259,23 @@ export function TempManager({
                         onChange={(e) => setTrimming({ ...trimming, to: Number(e.target.value) })}
                       />
                     </label>
-                    <label>
-                      Effect
-                      <select
-                        value={trimming.effect}
-                        onChange={(e) =>
-                          setTrimming({ ...trimming, effect: e.target.value as Effect })
-                        }
-                      >
-                        {Object.entries(effects).map(([value, label]) => (
-                          <option key={value} value={value}>
-                            {label}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
+                    {supports(state.companionVersion, 'effects') && (
+                      <label>
+                        Effect
+                        <select
+                          value={trimming.effect}
+                          onChange={(e) =>
+                            setTrimming({ ...trimming, effect: e.target.value as Effect })
+                          }
+                        >
+                          {Object.entries(effects).map(([value, label]) => (
+                            <option key={value} value={value}>
+                              {label}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                    )}
                     <label>
                       Name
                       <input

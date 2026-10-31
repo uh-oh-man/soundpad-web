@@ -23,12 +23,7 @@ import { flattenCategories, type Sound } from './protocol';
 import { z } from 'zod';
 import { useWorkspace, viewModes, type Workspace } from './workspace';
 import { arrangeSounds, boardTitle, type Totals } from './arrange';
-import {
-  APP_VERSION_LABEL,
-  MIMIC_COMPANION,
-  REQUIRED_COMPANION,
-  companionAtLeast,
-} from './version';
+import { APP_VERSION_LABEL, REQUIRED_COMPANION, companionAtLeast, supports } from './version';
 import { SoundCollection } from './components/SoundCollection';
 import { Player } from './components/Player';
 import { IconEditor } from './components/IconEditor';
@@ -266,11 +261,7 @@ function App() {
     REQUIRED_COMPANION.minor,
   );
   const repositoryUrl = import.meta.env.VITE_REPOSITORY_URL as string | undefined;
-  const mimicSupported = companionAtLeast(
-    state.companionVersion,
-    MIMIC_COMPANION.major,
-    MIMIC_COMPANION.minor,
-  );
+  const mimicSupported = supports(state.companionVersion, 'mimic');
   const canMimic = connected && mimicSupported && (host || state.permissions.guestMimic === true);
   const mimicListening = mode !== 'landing' && !!state.mimic?.active;
 
