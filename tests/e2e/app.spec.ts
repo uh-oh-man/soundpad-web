@@ -655,7 +655,7 @@ test('normal update explains the companion upgrade while preserving legacy playb
     });
   });
   await host(page, harness);
-  await expect(page.getByText('V2', { exact: true })).toBeVisible();
+  await expect(page.locator('.release-version')).toHaveText(/^v\d+\.\d+$/);
   await expect(
     page.getByText('Update your Windows companion for V2', { exact: true }),
   ).toBeVisible();
@@ -1006,6 +1006,44 @@ test('Space toggles playback from the media surface but leaves typing and dialog
   await page.getByRole('button', { name: 'Access settings' }).click();
   await page.getByRole('combobox', { name: 'Theme', exact: true }).press('Space');
   expect(count()).toBe(2);
+});
+
+test('dialogs trap focus, restore it on close and block the search shortcut', async ({
+  page,
+  harness,
+}) => {
+  await host(page, harness);
+  const opener = page.getByRole('button', { name: 'Access settings' });
+  await opener.click();
+  const dialog = page.getByRole('dialog', { name: 'Session & access' });
+  await expect(dialog.getByRole('button', { name: 'Close dialog' })).toBeFocused();
+  // Shift+Tab from the first control wraps to the last one inside the dialog.
+  await page.keyboard.press('Shift+Tab');
+  await expect(dialog.getByRole('button', { name: /End hosting/ })).toBeFocused();
+  await page.keyboard.press('Tab');
+  await expect(dialog.getByRole('button', { name: 'Close dialog' })).toBeFocused();
+  // "/" must not move focus behind an open dialog.
+  await page.keyboard.press('/');
+  await expect(page.getByRole('textbox', { name: 'Search sounds' })).not.toBeFocused();
+  await page.keyboard.press('Escape');
+  await expect(dialog).toHaveCount(0);
+  await expect(opener).toBeFocused();
+  // Dragging from inside the dialog onto the backdrop must not close it.
+  await opener.click();
+  const box = (await dialog.boundingBox())!;
+  await page.mouse.move(box.x + 20, box.y + 20);
+  await page.mouse.down();
+  await page.mouse.move(5, 5);
+  await page.mouse.up();
+  await expect(dialog).toBeVisible();
+  await page.mouse.click(5, 5);
+  await expect(dialog).toHaveCount(0);
+  await page.keyboard.press('/');
+  const search = page.getByRole('textbox', { name: 'Search sounds' });
+  await expect(search).toBeFocused();
+  await search.fill('Air');
+  await search.press('Escape');
+  await expect(search).toHaveValue('');
 });
 
 test('themes persist locally, notifications deduplicate and expire, upload errors remain inline', async ({

@@ -1,40 +1,40 @@
-import React, { useEffect, useMemo, useState, useSyncExternalStore } from 'react';
+import { useEffect, useMemo, useState, useSyncExternalStore } from 'react';
 import { createRoot } from 'react-dom/client';
 import {
   AudioLines,
   Search,
   Link,
   Settings2,
-  Folder,
   Music2,
   Plus,
   Minus,
   RefreshCw,
   Users,
   X,
-  Trash2,
   ArrowUpRight,
   ShieldCheck,
   Headphones,
   ChevronRight,
   Radio,
-  RotateCcw,
-  LogOut,
 } from 'lucide-react';
 import { controller } from './controller';
-import { flattenCategories, selectSounds, soundKeys, hasSound, type Sound } from './protocol';
+import { flattenCategories, type Sound } from './protocol';
 import { z } from 'zod';
-import { useWorkspace, viewModes, moveSound } from './workspace';
-import { SoundCollection, type Totals } from './components/SoundCollection';
+import { useWorkspace, viewModes, type Workspace } from './workspace';
+import { arrangeSounds, boardTitle, type Totals } from './arrange';
+import { APP_VERSION_LABEL, REQUIRED_COMPANION, companionAtLeast } from './version';
+import { SoundCollection } from './components/SoundCollection';
 import { Player } from './components/Player';
 import { IconEditor } from './components/IconEditor';
 import { PersonalLayout, OrganizeSound } from './components/PersonalLayout';
 import { Statistics } from './components/Statistics';
-import { SpotifyPanel } from './components/SpotifyPanel';
 import { Notifications } from './components/Notifications';
 import { TempManager } from './components/TempManager';
 import { SessionUpload } from './components/SessionUpload';
-import { useAppearance, themes, type Theme } from './appearance';
+import { Modal, dialogOpen } from './components/Modal';
+import { Sidebar } from './components/Sidebar';
+import { SettingsDialog } from './components/SettingsDialog';
+import { useAppearance } from './appearance';
 import { GuestName } from './components/GuestName';
 import { organization } from './shared-layout';
 import { clearWaveforms } from './waveform-cache';
@@ -43,36 +43,43 @@ import './styles.css';
 import './v2.css';
 import './polish.css';
 
+const PROJECT_URL = 'https://github.com/uh-oh-man/soundpad-web';
+const viewLabels: Record<(typeof viewModes)[number], string> = {
+  icons: 'Icons',
+  large: 'Large Icons',
+  list: 'List',
+  details: 'Details',
+  waveforms: 'Waveforms',
+};
+const sortLabels: [Workspace['sort'], string][] = [
+  ['original', 'Original order'],
+  ['name', 'Name'],
+  ['duration', 'Duration'],
+  ['native', 'Soundpad plays'],
+  ['web', 'Web plays'],
+  ['last', 'Last web played'],
+];
+const totalsSchema = z.object({
+  totals: z.record(
+    z.string(),
+    z.object({ total: z.number(), lastPlayedAt: z.number().nullable() }),
+  ),
+});
+
 function ProjectFooter() {
   return (
     <small className="project-footer">
-      Soundpad Web · v2.3 ·{' '}
-      <a href="https://github.com/uh-oh-man/soundpad-web" target="_blank" rel="noreferrer">
+      Soundpad Web · v{APP_VERSION_LABEL} ·{' '}
+      <a href={PROJECT_URL} target="_blank" rel="noreferrer">
         GitHub
       </a>{' '}
       · <span>made by AI</span>
     </small>
   );
 }
-function App() {
-  const appearance = useAppearance();
-  const view = useSyncExternalStore(controller.subscribe, controller.getSnapshot);
-  const { state, mode, status } = view;
-  const [category, setCategory] = useState('all');
-  const [search, setSearch] = useState('');
-  const [settings, setSettings] = useState(false);
-  const [editing, setEditing] = useState<Sound | null>(null);
-  const personal = useWorkspace(state.hostId);
-  const w = personal.workspace;
-  const [myCategory, setMyCategory] = useState('all');
-  const [managing, setManaging] = useState(false);
-  const [organizing, setOrganizing] = useState<Sound | null>(null);
-  const [statistics, setStatistics] = useState<Sound | null>(null);
-  const [totals, setTotals] = useState<Totals>({});
-  const canSeek = (state.protocol ?? 1) >= 2 && hostPermission();
-  function hostPermission() {
-    return mode === 'host' || state.permissions.guestSeeking !== false;
-  }
+
+/** Space pauses/resumes known playback (or stops it) unless focus is in something that uses Space. */
+function useSpaceToggle() {
   useEffect(() => {
     function space(event: KeyboardEvent) {
       if (
@@ -118,142 +125,190 @@ function App() {
     document.addEventListener('keydown', space, true);
     return () => document.removeEventListener('keydown', space, true);
   }, []);
+}
+
+/** "/" focuses search, except while typing or while a dialog is open. */
+function useSearchShortcut() {
+  useEffect(() => {
+    function key(e: KeyboardEvent) {
+      if (e.key !== '/' || e.ctrlKey || e.metaKey || e.altKey || dialogOpen()) return;
+      const target = e.target;
+      if (
+        target instanceof HTMLElement &&
+        (target.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName))
+      )
+        return;
+      e.preventDefault();
+      document.querySelector<HTMLInputElement>('input[aria-label="Search sounds"]')?.focus();
+    }
+    document.addEventListener('keydown', key);
+    return () => document.removeEventListener('keydown', key);
+  }, []);
+}
+
+function statusLabel(
+  mode: string,
+  connected: boolean,
+  host: boolean,
+  available: boolean,
+  status: string,
+) {
+  if (mode === 'landing') return 'Not connected';
+  if (!connected) return status.split('.')[0];
+  if (!available) return 'Soundpad unavailable';
+  return host ? 'Hosting' : 'Connected';
+}
+
+function Landing({ view }: { view: ReturnType<typeof controller.getSnapshot> }) {
+  const repositoryUrl = import.meta.env.VITE_REPOSITORY_URL as string | undefined;
+  return (
+    <main className="welcome">
+      <div className="eyebrow">
+        <Radio size={15} /> YOUR SOUNDPAD, A LINK AWAY
+      </div>
+      <h1>
+        A soundboard.
+        <br />
+        <span>For the whole party.</span>
+      </h1>
+      <p>
+        Share your Soundpad library with friends. They tap a sound, your Soundpad plays it. No
+        accounts. Session audio goes directly to your host.
+      </p>
+      {view.resumeAvailable && (
+        <button className="primary resume-host" onClick={() => controller.resume()}>
+          Resume hosting
+        </button>
+      )}
+      <div className="setup-card">
+        <div className="setup-icon">
+          <Headphones size={29} />
+        </div>
+        <div>
+          <h2>Hosting? Start on your PC.</h2>
+          <p>
+            Open Soundpad, then launch the portable companion. Your library appears here
+            automatically.
+          </p>
+        </div>
+      </div>
+      <div className="steps">
+        <span>
+          <b>1</b> Launch the companion
+        </span>
+        <ChevronRight size={16} />
+        <span>
+          <b>2</b> Copy Invite
+        </span>
+        <ChevronRight size={16} />
+        <span>
+          <b>3</b> Let friends play
+        </span>
+      </div>
+      <p className="join-note">Joining a friend? Open their invitation link to connect.</p>
+      {repositoryUrl && /^https:\/\/github\.com\/[\w.-]+\/[\w.-]+\/?$/.test(repositoryUrl) && (
+        <a className="text-link" href={repositoryUrl} target="_blank" rel="noreferrer">
+          Source & downloads <ArrowUpRight size={15} />
+        </a>
+      )}
+      {view.status === 'Connection failed' && (
+        <p role="alert" className="warning">
+          {view.notice}
+        </p>
+      )}
+      <div className="privacy">
+        <ShieldCheck size={16} /> Audio stays on the host. Only commands travel between browsers.
+      </div>
+    </main>
+  );
+}
+
+function App() {
+  const appearance = useAppearance();
+  const view = useSyncExternalStore(controller.subscribe, controller.getSnapshot);
+  const { state, mode, status } = view;
+  const [category, setCategory] = useState('all');
+  const [myCategory, setMyCategory] = useState('all');
+  const [search, setSearch] = useState('');
+  const [settings, setSettings] = useState(false);
+  const [managing, setManaging] = useState(false);
+  const [editing, setEditing] = useState<Sound | null>(null);
+  const [organizing, setOrganizing] = useState<Sound | null>(null);
+  const [statistics, setStatistics] = useState<Sound | null>(null);
+  const [totals, setTotals] = useState<Totals>({});
   const [pending, setPending] = useState(0);
+  const personal = useWorkspace(state.hostId);
+  const w = personal.workspace;
+  useSpaceToggle();
+  useSearchShortcut();
+  useEffect(() => {
+    void controller.start();
+  }, []);
+
   const host = mode === 'host';
+  const protocol = state.protocol ?? 1;
   const connected = status === (host ? 'Host ready' : 'Connected');
   const canPlay = connected && state.available && (host || state.permissions.remotePlayback);
   const canCount = connected && (host || state.permissions.guestCounter);
+  const canSeek = protocol >= 2 && (host || state.permissions.guestSeeking !== false);
+  const needsCompanionUpdate = !companionAtLeast(
+    state.companionVersion,
+    REQUIRED_COMPANION.major,
+    REQUIRED_COMPANION.minor,
+  );
+  const repositoryUrl = import.meta.env.VITE_REPOSITORY_URL as string | undefined;
+
   const organizationText = w ? JSON.stringify(organization(w)) : '';
   useEffect(() => {
     if (!connected || !organizationText) return;
     const timer = setTimeout(() => {
       void controller
         .publishLayout(JSON.parse(organizationText))
-        .catch((e) => controller.notify(String(e)));
+        .catch((e) => controller.notify(e instanceof Error ? e.message : String(e), 'error'));
     }, 700);
     return () => clearTimeout(timer);
   }, [connected, organizationText]);
-  const [nativeMajor, nativeMinor] = (state.companionVersion ?? '0.0').split('.').map(Number);
-  const needsCompanionUpdate = !(nativeMajor > 2 || (nativeMajor === 2 && nativeMinor >= 3));
-  const repositoryUrl = import.meta.env.VITE_REPOSITORY_URL as string | undefined;
-  const categories = useMemo(
-    () => flattenCategories(state.library.categories),
-    [state.library.categories],
-  );
-  const sounds = useMemo(() => {
-    let list = selectSounds(state, category, search);
-    if (w?.layout === 'mine') {
-      const ids = search
-        ? null
-        : myCategory === 'favorites'
-          ? w.favorites
-          : w.folders.find((f) => f.id === myCategory)?.soundIds;
-      const byId = new Map(
-        state.library.sounds
-          .filter((s) => !s.internalVariant)
-          .flatMap((s) => soundKeys(s).map((key) => [key, s] as const)),
-      );
-      list = (
-        ids ? ids.map((id) => byId.get(id)).filter((s): s is Sound => !!s) : state.library.sounds
-      ).filter(
-        (s) =>
-          !s.internalVariant &&
-          !hasSound(w.hidden, s) &&
-          (!search || s.name.toLocaleLowerCase().includes(search.toLocaleLowerCase())),
-      );
-      if (!ids && w.order.length) {
-        const rank = new Map(w.order.map((id, i) => [id, i]));
-        list = [...list].sort(
-          (a, b) =>
-            Math.min(...soundKeys(a).map((id) => rank.get(id) ?? 1e9)) -
-            Math.min(...soundKeys(b).map((id) => rank.get(id) ?? 1e9)),
-        );
-      }
-    }
-    if (w && w.sort !== 'original') {
-      list = [...list].sort((a, b) => {
-        let value = 0;
-        if (w.sort === 'name') value = a.name.localeCompare(b.name);
-        else if (w.sort === 'duration') value = (a.durationMs ?? -1) - (b.durationMs ?? -1);
-        else if (w.sort === 'native') value = (a.nativePlays ?? -1) - (b.nativePlays ?? -1);
-        else if (w.sort === 'web') value = (totals[a.id]?.total ?? 0) - (totals[b.id]?.total ?? 0);
-        else if (w.sort === 'last')
-          value = (totals[a.id]?.lastPlayedAt ?? 0) - (totals[b.id]?.lastPlayedAt ?? 0);
-        return w.descending ? -value : value;
-      });
-    }
-    return [...new Map(list.map((s) => [s.id, s])).values()];
-  }, [state.library, category, search, w, totals]);
-  const title = search
-    ? 'Search results'
-    : w?.layout === 'mine'
-      ? myCategory === 'all'
-        ? 'My sounds'
-        : myCategory === 'favorites'
-          ? 'Favorites'
-          : (w.folders.find((f) => f.id === myCategory)?.name ?? 'My sounds')
-      : category === 'all'
-        ? 'All sounds'
-        : (categories.find((c) => c.category.id === category)?.category.name ?? 'All sounds');
+
   useEffect(() => {
-    if ((state.protocol ?? 1) < 2 || !connected) return;
+    if (protocol < 2 || !connected) return;
     let live = true;
     void controller
       .run('statistics')
       .then((raw) => {
-        const parsed = z
-          .object({
-            totals: z.record(
-              z.string(),
-              z.object({ total: z.number(), lastPlayedAt: z.number().nullable() }),
-            ),
-          })
-          .parse(raw);
-        if (live) setTotals(parsed.totals);
+        if (live) setTotals(totalsSchema.parse(raw).totals);
       })
       .catch(() => {});
     return () => {
       live = false;
     };
-  }, [state.statisticsVersion, state.protocol, connected]);
-  useEffect(() => {
-    controller.start();
-  }, []);
-  useEffect(() => {
-    function key(e: KeyboardEvent) {
-      if (
-        e.key === '/' &&
-        !settings &&
-        !editing &&
-        !(
-          e.target instanceof HTMLElement &&
-          ['INPUT', 'TEXTAREA', 'SELECT'].includes(e.target.tagName)
-        )
-      ) {
-        e.preventDefault();
-        document.querySelector<HTMLInputElement>('input[aria-label="Search sounds"]')?.focus();
-      }
-    }
-    document.addEventListener('keydown', key);
-    return () => document.removeEventListener('keydown', key);
-  }, [settings, editing, managing, organizing, statistics]);
-  useEffect(() => {
-    if (settings || editing || managing || organizing || statistics) {
-      const el = document.querySelector<HTMLButtonElement>('.dialog button');
-      el?.focus();
-    }
-    function key(e: KeyboardEvent) {
-      if (e.key === 'Escape') {
-        setSettings(false);
-        setEditing(null);
-        setManaging(false);
-        setOrganizing(null);
-        setStatistics(null);
-      }
-    }
-    document.addEventListener('keydown', key);
-    return () => document.removeEventListener('keydown', key);
-  }, [settings, editing, managing, organizing, statistics]);
+  }, [state.statisticsVersion, protocol, connected]);
+
+  const categories = useMemo(
+    () => flattenCategories(state.library.categories),
+    [state.library.categories],
+  );
+  const librarySize = useMemo(
+    () => state.library.sounds.filter((s) => !s.internalVariant).length,
+    [state.library.sounds],
+  );
+  const selection = { category, myCategory, search };
+  const sounds = useMemo(
+    () => arrangeSounds(state, w, { category, myCategory, search }, totals),
+    // Only the library matters from state; playback updates must not re-sort the board.
+    [state.library, w, category, myCategory, search, totals],
+  );
+  const title = boardTitle(state, w, selection);
+
+  function selectHost(id: string) {
+    setCategory(id);
+    personal.update((current) => ({ ...current, layout: 'host' }));
+    setSearch('');
+  }
+  function selectMine(id: string) {
+    personal.update((current) => ({ ...current, layout: 'mine' }));
+    setMyCategory(id);
+    setSearch('');
+  }
   async function run(
     op: Parameters<typeof controller.run>[0],
     fields: Parameters<typeof controller.run>[1] = {},
@@ -267,41 +322,7 @@ function App() {
       setPending((p) => p - 1);
     }
   }
-  const modal = (label: string, body: React.ReactNode, close: () => void) => (
-    <div className="scrim" onClick={close}>
-      <section
-        role="dialog"
-        aria-modal="true"
-        aria-label={label}
-        className="dialog"
-        onClick={(e) => e.stopPropagation()}
-        onKeyDown={(e) => {
-          if (e.key === 'Tab') {
-            const nodes = e.currentTarget.querySelectorAll<HTMLElement>(
-              'button:not(:disabled),input:not(:disabled),a[href]',
-            );
-            const first = nodes[0],
-              last = nodes[nodes.length - 1];
-            if (e.shiftKey && document.activeElement === first) {
-              e.preventDefault();
-              last?.focus();
-            } else if (!e.shiftKey && document.activeElement === last) {
-              e.preventDefault();
-              first?.focus();
-            }
-          }
-        }}
-      >
-        <div className="dialog-title">
-          <h2>{label}</h2>
-          <button className="icon-button" aria-label="Close dialog" onClick={close}>
-            <X size={19} />
-          </button>
-        </div>
-        {body}
-      </section>
-    </div>
-  );
+
   return (
     <div className={`app-shell ${mode === 'landing' ? 'is-landing' : 'is-connected'}`}>
       <header className="topbar">
@@ -312,26 +333,13 @@ function App() {
           <span>
             soundpad<span className="brand-light"> web</span>
           </span>
-          <span className="release-version">V2</span>
+          <span className="release-version">v{APP_VERSION_LABEL}</span>
         </a>
         <span className="edition">BROWSER REMOTE</span>
         <div className="top-actions">
           <span className={`status ${connected && state.available ? 'online' : ''}`} title={status}>
             <i />
-            {mode === 'landing'
-              ? 'Not connected'
-              : connected
-                ? host
-                  ? state.available
-                    ? 'Hosting'
-                    : 'Soundpad unavailable'
-                  : state.available
-                    ? 'Connected'
-                    : 'Soundpad unavailable'
-                : status
-                    .split('.')[0]
-                    .replace('Companion disconnected', 'Companion disconnected')
-                    .replace('Host unavailable', 'Host unavailable')}
+            {statusLabel(mode, connected, host, state.available, status)}
           </span>
           {mode !== 'landing' && (
             <input
@@ -359,184 +367,30 @@ function App() {
         </div>
       </header>
       {mode === 'landing' ? (
-        <main className="welcome">
-          <div className="eyebrow">
-            <Radio size={15} /> YOUR SOUNDPAD, A LINK AWAY
-          </div>
-          <h1>
-            A soundboard.
-            <br />
-            <span>For the whole party.</span>
-          </h1>
-          <p>
-            Share your Soundpad library with friends. They tap a sound, your Soundpad plays it. No
-            accounts. Session audio goes directly to your host.
-          </p>
-          {view.resumeAvailable && (
-            <button className="primary resume-host" onClick={() => controller.resume()}>
-              Resume hosting
-            </button>
-          )}
-          <div className="setup-card">
-            <div className="setup-icon">
-              <Headphones size={29} />
-            </div>
-            <div>
-              <h2>Hosting? Start on your PC.</h2>
-              <p>
-                Open Soundpad, then launch the portable companion. Your library appears here
-                automatically.
-              </p>
-            </div>
-          </div>
-          <div className="steps">
-            <span>
-              <b>1</b> Launch the companion
-            </span>
-            <ChevronRight size={16} />
-            <span>
-              <b>2</b> Copy Invite
-            </span>
-            <ChevronRight size={16} />
-            <span>
-              <b>3</b> Let friends play
-            </span>
-          </div>
-          <p className="join-note">Joining a friend? Open their invitation link to connect.</p>
-          {repositoryUrl && /^https:\/\/github\.com\/[\w.-]+\/[\w.-]+\/?$/.test(repositoryUrl) && (
-            <a className="text-link" href={repositoryUrl} target="_blank" rel="noreferrer">
-              Source & downloads <ArrowUpRight size={15} />
-            </a>
-          )}
-          {status === 'Connection failed' && (
-            <p role="alert" className="warning">
-              {view.notice}
-            </p>
-          )}
-          <div className="privacy">
-            <ShieldCheck size={16} /> Audio stays on the host. Only commands travel between
-            browsers.
-          </div>
-        </main>
+        <Landing view={view} />
       ) : (
         <>
           <div className="workspace">
-            <aside className="sidebar">
-              {(state.protocol ?? 1) >= 2 && <SpotifyPanel host={host} />}
-              <div className="sidebar-heading">
-                LIBRARY <span>{state.library.sounds.filter((s) => !s.internalVariant).length}</span>
-              </div>
-              <button
-                className={`category ${category === 'all' ? 'selected' : ''}`}
-                onClick={() => {
-                  setCategory('all');
-                  personal.update((current) => ({ ...current, layout: 'host' }));
-                  setSearch('');
-                }}
-              >
-                <AudioLines size={18} />
-                <span>All sounds</span>
-                <small>{state.library.sounds.filter((s) => !s.internalVariant).length}</small>
-              </button>
-              <div className="sidebar-label">SOUNDPAD CATEGORIES</div>
-              <nav aria-label="Sound categories">
-                {categories.map(({ category: c, depth }) => (
-                  <button
-                    key={c.id}
-                    style={{ paddingLeft: 14 + depth * 16 }}
-                    className={`category ${category === c.id && !search ? 'selected' : ''}`}
-                    onClick={() => {
-                      setCategory(c.id);
-                      personal.update((current) => ({ ...current, layout: 'host' }));
-                      setSearch('');
-                    }}
-                  >
-                    {c.icon ? <img src={c.icon} alt="" /> : <Folder size={17} />}
-                    <span>{c.name || 'Unnamed category'}</span>
-                    <small>{c.soundIds.length}</small>
-                  </button>
-                ))}
-              </nav>
-              {categories.length === 0 && (
-                <p className="sidebar-empty">Your Soundpad categories will appear here.</p>
-              )}
-              {w && (
-                <>
-                  <div className="sidebar-label">MY WORKSPACE</div>
-                  <button
-                    className={`category ${w.layout === 'mine' && myCategory === 'all' ? 'selected' : ''}`}
-                    onClick={() => {
-                      personal.update((current) => ({ ...current, layout: 'mine' }));
-                      setMyCategory('all');
-                      setSearch('');
-                    }}
-                  >
-                    <Folder size={17} />
-                    <span>My sounds</span>
-                  </button>
-                  <button
-                    className={`category ${w.layout === 'mine' && myCategory === 'favorites' ? 'selected' : ''}`}
-                    onClick={() => {
-                      personal.update((current) => ({ ...current, layout: 'mine' }));
-                      setMyCategory('favorites');
-                      setSearch('');
-                    }}
-                  >
-                    <Music2 size={17} />
-                    <span>Favorites</span>
-                    <small>{w.favorites.length}</small>
-                  </button>
-                  {w.folders.map((f) => {
-                    let depth = 0,
-                      parent = f.parent;
-                    while (parent && depth < 16) {
-                      depth++;
-                      parent = w.folders.find((x) => x.id === parent)?.parent ?? null;
-                    }
-                    return (
-                      <button
-                        key={f.id}
-                        className={`category ${w.layout === 'mine' && myCategory === f.id ? 'selected' : ''}`}
-                        style={{ paddingLeft: 14 + depth * 16 }}
-                        onDragOver={(e) => e.preventDefault()}
-                        onDrop={(e) => {
-                          e.preventDefault();
-                          const id = e.dataTransfer.getData('application/x-soundpad-id');
-                          if (state.library.sounds.some((s) => s.id === id))
-                            personal.update((current) => moveSound(current, id, f.id));
-                        }}
-                        onClick={() => {
-                          personal.update((current) => ({ ...current, layout: 'mine' }));
-                          setMyCategory(f.id);
-                          setSearch('');
-                        }}
-                      >
-                        <Folder size={17} />
-                        <span>{f.name}</span>
-                        <small>{f.soundIds.length}</small>
-                      </button>
-                    );
-                  })}
-                  <button className="category" onClick={() => setManaging(true)}>
-                    Manage personal layout
-                  </button>
-                </>
-              )}
-              <div className="sidebar-bottom">
-                <span>
-                  <ShieldCheck size={15} /> Private session
-                </span>
-                <p>{host ? 'Keep this tab open to host.' : 'Connected directly to your host.'}</p>
-              </div>
-            </aside>
+            <Sidebar
+              state={state}
+              host={host}
+              categories={categories}
+              librarySize={librarySize}
+              workspace={w}
+              selection={selection}
+              selectHost={selectHost}
+              selectMine={selectMine}
+              update={personal.update}
+              manage={() => setManaging(true)}
+            />
             <main className="soundboard">
-              {connected && ((state.protocol ?? 1) < 2 || needsCompanionUpdate) && (
+              {connected && (protocol < 2 || needsCompanionUpdate) && (
                 <aside className="companion-update" role="status">
                   <strong>
                     {host
-                      ? (state.protocol ?? 1) < 2
+                      ? protocol < 2
                         ? 'Update your Windows companion for V2'
-                        : 'Update your Windows companion to 2.3'
+                        : `Update your Windows companion to ${REQUIRED_COMPANION.label}`
                       : 'Ask the host to update the Windows companion'}
                   </strong>
                   <p>
@@ -545,7 +399,7 @@ function App() {
                   </p>
                   {host && (
                     <a
-                      href={`${repositoryUrl || 'https://github.com/uh-oh-man/soundpad-web'}/releases/latest/download/SoundpadWeb.exe`}
+                      href={`${repositoryUrl || PROJECT_URL}/releases/latest/download/SoundpadWeb.exe`}
                     >
                       Download the updated companion
                     </a>
@@ -558,8 +412,8 @@ function App() {
                   <h1>{title}</h1>
                   <p>
                     {search
-                      ? `${sounds.length} matching sounds`
-                      : `${sounds.length} sounds · ${host ? 'Ready when your friends are' : 'Tap a sound to play on the host'}`}
+                      ? `${sounds.length} matching sound${sounds.length === 1 ? '' : 's'}`
+                      : `${sounds.length} sound${sounds.length === 1 ? '' : 's'} · ${host ? 'Ready when your friends are' : 'Tap a sound to play on the host'}`}
                   </p>
                 </div>
                 <div className="board-actions">
@@ -626,11 +480,11 @@ function App() {
                 disabled={
                   !connected ||
                   needsCompanionUpdate ||
-                  (mode !== 'host' && state.permissions.guestUploads === false)
+                  (!host && state.permissions.guestUploads === false)
                 }
               />
               {!needsCompanionUpdate && (
-                <TempManager state={state} host={mode === 'host'} connected={connected} />
+                <TempManager state={state} host={host} connected={connected} />
               )}
               <div className="toolbar">
                 <label className="search">
@@ -639,6 +493,12 @@ function App() {
                     aria-label="Search sounds"
                     value={search}
                     onChange={(e) => setSearch(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Escape' && search) {
+                        e.preventDefault();
+                        setSearch('');
+                      }
+                    }}
                     placeholder="Search all sounds…"
                   />
                   {search && (
@@ -654,14 +514,10 @@ function App() {
                     aria-label="Category"
                     value={w?.layout === 'mine' ? 'personal:' + myCategory : category}
                     onChange={(e) => {
-                      if (e.target.value.startsWith('personal:')) {
-                        personal.update((current) => ({ ...current, layout: 'mine' }));
-                        setMyCategory(e.target.value.slice(9));
-                      } else {
-                        personal.update((current) => ({ ...current, layout: 'host' }));
-                        setCategory(e.target.value);
-                      }
-                      setSearch('');
+                      const value = e.target.value;
+                      if (value.startsWith('personal:'))
+                        selectMine(value.slice('personal:'.length));
+                      else selectHost(value);
                     }}
                   >
                     <option value="all">All sounds</option>
@@ -678,7 +534,7 @@ function App() {
                     )}
                     {categories.map(({ category: c, depth }) => (
                       <option value={c.id} key={c.id}>
-                        {'　'.repeat(depth) + c.name}
+                        {'　'.repeat(depth) + (c.name || 'Unnamed category')}
                       </option>
                     ))}
                   </select>
@@ -692,7 +548,7 @@ function App() {
                 </span>
               </div>
               <div className="view-toolbar">
-                <div className="layout-switch" aria-label="Layout">
+                <div className="layout-switch" role="group" aria-label="Layout">
                   <button
                     aria-pressed={w?.layout !== 'mine'}
                     onClick={() => personal.update((current) => ({ ...current, layout: 'host' }))}
@@ -716,21 +572,13 @@ function App() {
                     onChange={(e) =>
                       personal.update((current) => ({
                         ...current,
-                        view: e.target.value as typeof current.view,
+                        view: e.target.value as Workspace['view'],
                       }))
                     }
                   >
                     {viewModes.map((mode) => (
                       <option key={mode} value={mode}>
-                        {
-                          {
-                            icons: 'Icons',
-                            large: 'Large Icons',
-                            list: 'List',
-                            details: 'Details',
-                            waveforms: 'Waveforms',
-                          }[mode]
-                        }
+                        {viewLabels[mode]}
                       </option>
                     ))}
                   </select>
@@ -744,18 +592,11 @@ function App() {
                     onChange={(e) =>
                       personal.update((current) => ({
                         ...current,
-                        sort: e.target.value as typeof current.sort,
+                        sort: e.target.value as Workspace['sort'],
                       }))
                     }
                   >
-                    {[
-                      ['original', 'Original order'],
-                      ['name', 'Name'],
-                      ['duration', 'Duration'],
-                      ['native', 'Soundpad plays'],
-                      ['web', 'Web plays'],
-                      ['last', 'Last web played'],
-                    ].map(([value, label]) => (
+                    {sortLabels.map(([value, label]) => (
                       <option key={value} value={value}>
                         {label}
                       </option>
@@ -764,7 +605,8 @@ function App() {
                 </label>
                 <button
                   disabled={!w || w.sort === 'original'}
-                  aria-label="Toggle sort direction"
+                  aria-label={`Sort ${w?.descending ? 'descending' : 'ascending'}; toggle direction`}
+                  title={w?.descending ? 'Descending' : 'Ascending'}
                   onClick={() =>
                     personal.update((current) => ({ ...current, descending: !current.descending }))
                   }
@@ -862,250 +704,45 @@ function App() {
         </>
       )}
       <Notifications />
-      {settings &&
-        modal(
-          'Session & access',
-          <>
-            <section className="appearance-setting" aria-label="Appearance">
-              <h3>Appearance</h3>
-              <label>
-                Theme
-                <select
-                  aria-label="Theme"
-                  value={appearance.theme}
-                  onChange={(event) => appearance.setTheme(event.target.value as Theme)}
-                >
-                  {themes.map((theme) => (
-                    <option key={theme.id} value={theme.id}>
-                      {theme.name}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <p>Only your browser's appearance changes.</p>
-              {appearance.error && <p className="inline-error">{appearance.error}</p>}
-            </section>
-            <div className="settings-status">
-              <Radio size={18} />
-              <div>
-                <strong>{status}</strong>
-                <p>
-                  {host
-                    ? 'The companion controls Soundpad. This tab connects your guests.'
-                    : 'Your host controls playback and permissions.'}
-                </p>
-              </div>
-            </div>
-            {host && (
-              <>
-                <div className="setting-row">
-                  <div>
-                    <strong>Remote playback</strong>
-                    <p>Guests can play and stop sounds.</p>
-                  </div>
-                  <input
-                    type="checkbox"
-                    aria-label="Allow remote playback"
-                    checked={state.permissions.remotePlayback}
-                    onChange={(e) =>
-                      void run('permissions', {
-                        permissions: { ...state.permissions, remotePlayback: e.target.checked },
-                      })
-                    }
-                  />
-                </div>
-                <div className="setting-row">
-                  <div>
-                    <strong>Guest Kick counter</strong>
-                    <p>Allow guests to add or subtract kicks.</p>
-                  </div>
-                  <input
-                    type="checkbox"
-                    aria-label="Allow guest counter changes"
-                    checked={state.permissions.guestCounter}
-                    onChange={(e) =>
-                      void run('permissions', {
-                        permissions: { ...state.permissions, guestCounter: e.target.checked },
-                      })
-                    }
-                  />
-                </div>
-                {(state.protocol ?? 1) >= 2 && (
-                  <>
-                    <div className="setting-row">
-                      <div>
-                        <strong>Guest Spotify controls</strong>
-                        <p>Guests can control the host's enabled Spotify player.</p>
-                      </div>
-                      <input
-                        type="checkbox"
-                        aria-label="Allow guest Spotify controls"
-                        checked={state.permissions.guestSpotify !== false}
-                        onChange={(e) =>
-                          void run('permissions', {
-                            permissions: { ...state.permissions, guestSpotify: e.target.checked },
-                          })
-                        }
-                      />
-                    </div>
-                    <div className="setting-row">
-                      <div>
-                        <strong>Guest seeking & pause</strong>
-                        <p>Allow waveform seeking, cues and regions.</p>
-                      </div>
-                      <input
-                        type="checkbox"
-                        aria-label="Allow guest seeking"
-                        checked={state.permissions.guestSeeking !== false}
-                        onChange={(e) =>
-                          void run('permissions', {
-                            permissions: { ...state.permissions, guestSeeking: e.target.checked },
-                          })
-                        }
-                      />
-                    </div>
-                  </>
-                )}
-                {(['guestUploads', 'guestTransforms'] as const).map((key) => (
-                  <div className="setting-row" key={key}>
-                    <div>
-                      <strong>
-                        {key === 'guestUploads'
-                          ? 'Guest session uploads'
-                          : 'Guest reverse generation'}
-                      </strong>
-                      <p>
-                        {key === 'guestUploads'
-                          ? 'Allow bounded audio uploads into Temp.'
-                          : 'Allow guests to prepare reversed variants.'}
-                      </p>
-                    </div>
-                    <input
-                      type="checkbox"
-                      aria-label={
-                        key === 'guestUploads'
-                          ? 'Allow guest uploads'
-                          : 'Allow guest reverse generation'
-                      }
-                      checked={state.permissions[key] !== false}
-                      onChange={(e) =>
-                        void run('permissions', {
-                          permissions: { ...state.permissions, [key]: e.target.checked },
-                        })
-                      }
-                    />
-                  </div>
-                ))}
-                <div className="invite-field">
-                  <label htmlFor="invite">Invitation link · anyone with this link can join</label>
-                  <input
-                    id="invite"
-                    value={view.invite}
-                    readOnly
-                    onFocus={(e) => e.target.select()}
-                  />
-                  <button onClick={() => void controller.copyInvite()}>
-                    <Link size={15} /> Copy Invite
-                  </button>
-                  <button
-                    onClick={() => {
-                      if (confirm('Revoke the current invite and disconnect all guests?'))
-                        void controller.rotate();
-                    }}
-                  >
-                    <RotateCcw size={15} /> Replace invite
-                  </button>
-                </div>
-                <p className="muted">
-                  Disconnect removes this connection only. Replace invite revokes the bearer link; a
-                  disconnected guest can otherwise rejoin.
-                </p>
-                <h3>
-                  Connected guests <small>{view.guests.length} / 12</small>
-                </h3>
-                {view.guests.length ? (
-                  view.guests.map((id, i) => (
-                    <div className="guest-row" key={id}>
-                      <span>
-                        <Users size={17} /> {view.people[id]?.name ?? `Guest ${i + 1}`}{' '}
-                        <small>{id.slice(0, 8)}</small>
-                      </span>
-                      <button onClick={() => controller.disconnect(id)}>Disconnect</button>
-                    </div>
-                  ))
-                ) : (
-                  <p className="muted">Share your invitation to bring friends in.</p>
-                )}
-                <button
-                  className="danger-link"
-                  disabled={!connected}
-                  onClick={() => {
-                    if (confirm('Reset the Kick counter to zero?')) void run('reset');
-                  }}
-                >
-                  <Trash2 size={15} /> Reset Kick counter
-                </button>
-              </>
-            )}
-            {host && (state.protocol ?? 1) >= 2 && (
-              <>
-                <button
-                  className="danger-link"
-                  onClick={() => {
-                    if (confirm('Clear web play statistics? The Kick counter is preserved.'))
-                      void run('clearStatistics');
-                  }}
-                >
-                  Clear web statistics
-                </button>
-              </>
-            )}
-            <div className="dialog-foot">
-              <span>Keep the host tab and companion open. Closing either ends guest control.</span>
-              <button
-                onClick={() => {
-                  setSettings(false);
-                  void controller.leave();
-                }}
-              >
-                <LogOut size={16} /> {host ? 'End hosting' : 'Leave session'}
-              </button>
-            </div>
-          </>,
-          () => setSettings(false),
-        )}
+      {settings && (
+        <Modal label="Session & access" onClose={() => setSettings(false)}>
+          <SettingsDialog
+            view={view}
+            connected={connected}
+            appearance={appearance}
+            run={run}
+            close={() => setSettings(false)}
+          />
+        </Modal>
+      )}
       {mode === 'landing' && <ProjectFooter />}
       {view.needsName && <GuestName initial={view.profile.name} />}
-      {editing &&
-        modal('Sound icon', <IconEditor sound={editing} close={() => setEditing(null)} />, () =>
-          setEditing(null),
-        )}
-      {statistics &&
-        modal(
-          'Sound statistics',
-          <Statistics sound={statistics} version={state.statisticsVersion ?? 0} />,
-          () => setStatistics(null),
-        )}
-      {managing &&
-        w &&
-        modal(
-          'My layout',
+      {editing && (
+        <Modal label="Sound icon" onClose={() => setEditing(null)}>
+          <IconEditor sound={editing} close={() => setEditing(null)} />
+        </Modal>
+      )}
+      {statistics && (
+        <Modal label="Sound statistics" onClose={() => setStatistics(null)}>
+          <Statistics sound={statistics} version={state.statisticsVersion ?? 0} />
+        </Modal>
+      )}
+      {managing && w && (
+        <Modal label="My layout" onClose={() => setManaging(false)}>
           <PersonalLayout
             workspace={w}
             update={personal.update}
             replace={personal.replace}
             sounds={state.library.sounds}
             status={personal.status}
-          />,
-          () => setManaging(false),
-        )}
-      {organizing &&
-        w &&
-        modal(
-          'Organize sound',
-          <OrganizeSound sound={organizing} workspace={w} update={personal.update} />,
-          () => setOrganizing(null),
-        )}
+          />
+        </Modal>
+      )}
+      {organizing && w && (
+        <Modal label="Organize sound" onClose={() => setOrganizing(null)}>
+          <OrganizeSound sound={organizing} workspace={w} update={personal.update} />
+        </Modal>
+      )}
     </div>
   );
 }

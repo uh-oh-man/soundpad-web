@@ -20,6 +20,7 @@ import {
   type Invite,
 } from './network/identity';
 import { notify, type NoticeKind } from './notifications';
+import { companionAtLeast } from './version';
 import type { SharedLayout, Organization } from './shared-layout';
 type View = {
   layouts: SharedLayout[];
@@ -34,6 +35,8 @@ type View = {
   resumeAvailable: boolean;
   needsName: boolean;
 };
+const errorMessage = (e: unknown, fallback = 'Something went wrong.') =>
+  e instanceof Error ? e.message : typeof e === 'string' && e ? e : fallback;
 function savedProfile(): Participant {
   try {
     const p = participantSchema.safeParse(
@@ -186,7 +189,7 @@ export class Controller {
         this.update({ state: this.visibleState(state), status: 'Host ready' });
         this.session?.broadcast();
         if (!this.session && !this.starting)
-          void this.hostSession(false).catch((e) => this.notify(String(e)));
+          void this.hostSession(false).catch((e) => this.notify(errorMessage(e), 'error'));
       },
       (status) => {
         this.live = false;
@@ -222,8 +225,7 @@ export class Controller {
       if (rotate) await this.session?.close(true);
       const audienceId = crypto.randomUUID();
       this.bridge!.setAudience(audienceId);
-      const [major, minor] = (this.view.state.companionVersion ?? '0.0').split('.').map(Number);
-      if (major > 2 || (major === 2 && minor >= 2))
+      if (companionAtLeast(this.view.state.companionVersion, 2, 2))
         await this.bridge!.send(command('beginSession', { audienceId }), 'host');
       const key = 'soundpad-identity-' + this.address!.token;
       const stored = rotate ? null : sessionStorage.getItem(key);
@@ -280,7 +282,7 @@ export class Controller {
           },
         });
       }
-      this.notify(e instanceof Error ? e.message : 'Command failed.', 'error');
+      this.notify(errorMessage(e, 'Command failed.'), 'error');
       throw e;
     }
   }
@@ -308,25 +310,28 @@ export class Controller {
         'success',
       );
     } catch (e) {
-      this.notify(e instanceof Error ? e.message : 'Upload failed.', 'error');
+      this.notify(errorMessage(e, 'Upload failed.'), 'error');
       throw e;
     }
   }
   async copyInvite() {
+    if (!this.view.invite) {
+      this.notify('Session is still starting. Try again in a moment.');
+      return;
+    }
     try {
-      if (!this.view.invite) throw Error('Session is still starting.');
       await navigator.clipboard.writeText(this.view.invite);
-      this.notify('Invitation copied. Anyone with this link can join.');
+      this.notify('Invitation copied. Anyone with this link can join.', 'success');
     } catch {
-      this.notify('Clipboard unavailable. Copy the invitation from Access settings.');
+      this.notify('Clipboard unavailable. Copy the invitation from Access settings.', 'error');
     }
   }
   async rotate() {
     try {
       await this.hostSession(true);
-      this.notify('Invitation replaced. Previous guests have been disconnected.');
+      this.notify('Invitation replaced. Previous guests have been disconnected.', 'success');
     } catch (e) {
-      this.notify(String(e));
+      this.notify(errorMessage(e), 'error');
     }
   }
   disconnect(peer: string) {

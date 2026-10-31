@@ -6,7 +6,7 @@ import { moveSound, toggleFavorite, type Workspace } from '../workspace';
 import { Waveform, formatTime, usePlayhead } from './Waveform';
 import { SoundButton } from './SoundButton';
 import { seekQueue } from '../seek';
-export type Totals = Record<string, { total: number; lastPlayedAt: number | null }>;
+import type { Totals } from '../arrange';
 const resumes = new Map<string, Promise<unknown>>();
 async function resumeAfterSeek(soundId: string, epoch: string) {
   const current = controller.getSnapshot().state.playback;

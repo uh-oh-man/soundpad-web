@@ -30,6 +30,8 @@ type Message = {
   hostNow?: number;
   publicKey?: string;
 };
+/** Most guests one host session admits at once. */
+export const MAX_GUESTS = 12;
 export class Session {
   private layoutAction?: RequestAction<string, string>;
   private layouts = new Map<string, SharedLayout>();
@@ -272,7 +274,8 @@ export class Session {
     }
     if (this.host) {
       if (m.type === 'hello' && typeof m.nonce === 'string' && m.nonce.length <= 64) {
-        if (this.accepted.size >= 12 && !this.accepted.has(peer)) throw Error('Session full');
+        if (this.accepted.size >= MAX_GUESTS && !this.accepted.has(peer))
+          throw Error('Session full');
         const signature = await sign(this.host, m.nonce, this.peerId, peer);
         if (this.denied.has(peer) || this.stopped) return;
         this.accepted.add(peer);
