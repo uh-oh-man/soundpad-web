@@ -1,0 +1,9 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/VoiceReplay.App/VoiceReplay.App.csproj" />
+    <Project Path="src/VoiceReplay.Core/VoiceReplay.Core.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/VoiceReplay.Tests/VoiceReplay.Tests.csproj" />
+  </Folder>
+</Solution>

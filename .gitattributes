@@ -3,3 +3,5 @@
 *.exe binary
 # Preserve upstream license text verbatim, including its original whitespace.
 docs/licenses/* -text -whitespace
+# Preserve upstream license text verbatim, including its original whitespace.
+mimic/Licenses/** -text -whitespace
