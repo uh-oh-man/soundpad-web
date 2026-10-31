@@ -20,9 +20,9 @@ public sealed partial class Bridge(ISoundpad pipe, StateStore store) : IDisposab
     public event Action<Snapshot>? Changed;
     public event Action<Waveform> WaveformChanged { add => waveformService.Changed += value; remove => waveformService.Changed -= value; }
     public event Action? CommandAccepted;
-    public void Dispose() => waveformService.Dispose();
+    public void Dispose() { waveformService.Dispose(); mimicCapture.Dispose(); }
     public Snapshot Snapshot => new(1, revision, available, error, parsed.Public, playback, disk.Counter, disk.Permissions, 2,
-        Convert.ToHexString(System.Security.Cryptography.HMACSHA256.HashData(Convert.FromBase64String(disk.IdentityKey), System.Text.Encoding.UTF8.GetBytes("workspace-host-v2"))).ToLowerInvariant(), disk.StatisticsVersion, typeof(Bridge).Assembly.GetName().Version?.ToString(3), managed?.Public.Revision ?? 0);
+        Convert.ToHexString(System.Security.Cryptography.HMACSHA256.HashData(Convert.FromBase64String(disk.IdentityKey), System.Text.Encoding.UTF8.GetBytes("workspace-host-v2"))).ToLowerInvariant(), disk.StatisticsVersion, typeof(Bridge).Assembly.GetName().Version?.ToString(3), managed?.Public.Revision ?? 0, MimicSnapshot);
     public string? Website => disk.Website;
     public void SetWebsite(string site) { disk.Website = site; store.Save(disk); }
     private void Publish() { Interlocked.Increment(ref revision); Changed?.Invoke(Snapshot); }
@@ -64,6 +64,8 @@ public sealed partial class Bridge(ISoundpad pipe, StateStore store) : IDisposab
     }
     public async Task<Reply> Execute(Command c, string actor, Participant? participant = null, string? requester = null, string? audience = null)
     {
+        if (IsMimic(c.Op)) return await ExecuteMimic(c, actor, participant, requester, audience);
+        if (c.Op == "endSession" && actor == "host") { mimicCapture.Stop(); Publish(); }
         var query = await Query(c, actor); if (query != null) return query;
         var intent = ReservePlaybackIntent(c, actor, requester, audience);
         if (c.Op is "reverse" or "audioPlay" or "keepAudio" or "removeAudio" or "retryAudio" or "retryCleanup" or "beginSession" or "endSession" || (c.Op is "play" or "startAt" or "region" && c.SoundId != null && managed?.Annotation(c.SoundId) is { Kind: not "native" })) return await ExecuteAudio(c, actor, participant, intent, requester, audience);

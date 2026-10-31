@@ -132,14 +132,14 @@ public sealed partial class Bridge
         disk.Receipts[c.Id]=c.At;store.Save(disk);
     }
     private Task<AudioAsset> FindAsset(string id) => Task.FromResult(Audio.AssetById(id));
-    public async Task<Reply> Upload(byte[] bytes, string name, string by, bool host = false, string owner = "anonymous", string? audience = null)
+    public async Task<Reply> Upload(byte[] bytes, string name, string by, bool host = false, string owner = "anonymous", string? audience = null, bool mimic = false)
     {
-        if (!sessionAccepting || (!host && (!disk.Permissions.GuestUploads || (audioAudience != null && audience != audioAudience) || revokedAudioPeers.ContainsKey(owner)))) return new("ack", "upload", false, "Guest uploads are disabled or this session ended.");
+        if (!sessionAccepting || (!host && (!(mimic ? disk.Permissions.GuestMimic : disk.Permissions.GuestUploads) || (audioAudience != null && audience != audioAudience) || revokedAudioPeers.ContainsKey(owner)))) return new("ack", "upload", false, "Guest uploads are disabled or this session ended.");
         if (Interlocked.Increment(ref audioWaiting) > 2) { Interlocked.Decrement(ref audioWaiting); return new("ack", "upload", false, "Audio processing is busy; retry shortly."); }
         await audioGate.WaitAsync();
         try
         {
-            if (!sessionAccepting || (!host && (!disk.Permissions.GuestUploads || (audioAudience != null && audience != audioAudience) || revokedAudioPeers.ContainsKey(owner)))) throw new InvalidDataException("Upload authorization changed.");
+            if (!sessionAccepting || (!host && (!(mimic ? disk.Permissions.GuestMimic : disk.Permissions.GuestUploads) || (audioAudience != null && audience != audioAudience) || revokedAudioPeers.ContainsKey(owner)))) throw new InvalidDataException("Upload authorization changed.");
             var asset = await Audio.Upload(bytes, name, by, owner, host);
             await gate.WaitAsync(); try { await RefreshInner(); Publish(); } finally { gate.Release(); }
             return new("ack", "upload", true, Data: new { assetId = asset.Id, state = asset.State });
@@ -149,7 +149,7 @@ public sealed partial class Bridge
     }
     public async Task CleanupSession()
     {
-        sessionAccepting = false; Interlocked.Increment(ref playRevision); await audioGate.WaitAsync();
+        mimicCapture.Stop(); sessionAccepting = false; Interlocked.Increment(ref playRevision); await audioGate.WaitAsync();
         try { if (!Audio.Public.Blocked) { Audio.RetireSession(); await Audio.Cleanup(); } recoveryPending = false; }
         finally { audioGate.Release(); }
     }

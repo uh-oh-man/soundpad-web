@@ -12,6 +12,18 @@ if (args.FirstOrDefault() == "--spotify-status")
     var status = await new SpotifyControl().Request("status");
     Console.WriteLine(Json.Write(new { status.Available, status.CanToggle, status.CanNext, status.CanPrevious, status.Error, status.SourceId, hasArtwork = status.Artwork != null })); return;
 }
+if (args.FirstOrDefault() == "--mimic-probe")
+{
+    // Real-device check: lists sources, then listens to one for two seconds and reports only levels. Nothing is saved.
+    using var capture = new WasapiMimicCapture();
+    var sources = capture.Sources();
+    foreach (var s in sources) Console.WriteLine(s.Kind + "	" + s.Name);
+    var pick = args.Length > 1 ? sources.First(s => s.Id == args[1] || s.Name.Contains(args[1], StringComparison.OrdinalIgnoreCase)) : sources.First(s => s.Kind == "output");
+    await capture.Start(pick, 5); await Task.Delay(2000);
+    var ring = capture.Ring!; var levels = ring.Levels(ring.Written, ring.Rate * 2L, 20);
+    Console.WriteLine(Json.Write(new { source = pick.Name, capture.Status, capture.Running, frames = ring.Written, rate = ring.Rate, peak = levels.Max() }));
+    return;
+}
 if (args.FirstOrDefault() == "--analyze-file" && args.Length == 2)
 {
     var scratch = Path.Combine(Path.GetTempPath(), "soundpad-web-analysis-" + Guid.NewGuid().ToString("N"));
@@ -39,6 +51,7 @@ foreach (var element in all.Descendants("Sound").Concat(categories.Descendants("
 mock.AllXml = all.ToString(); mock.CategoryXml = categories.ToString();
 using var pipe = new SoundpadPipe(mock.Name, true);
 using var bridge = new Bridge(pipe, new StateStore(directory));
+bridge.UseMimicCapture(new MimicFixture());
 await bridge.Poll(true);
 await using var server = new LocalServer(bridge, args.FirstOrDefault() ?? "http://127.0.0.1:5173");
 await server.Start();
