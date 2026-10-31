@@ -27,6 +27,8 @@ The capture engine in the companion is a port of Voice Replay Studio's `CaptureS
 2. Drag across the waveform, or use **Last 3 s / 5 s / 10 s**. A selection freezes the view so the moment stays put.
 3. Optionally name it, then **Mimic it** (adds it to Temp) or **Mimic & play** (adds it and plays it through Soundpad).
 
+Keyboard (2.5.1): **3**, **5** or **0** select the last 3, 5 or 10 seconds and move focus to the name field, **Enter** mimics, **Shift+Enter** mimics and plays, **Esc** clears the selection (press it again to close the window). This is the browser counterpart of Voice Replay Studio's F6 key; a website cannot register system-wide hotkeys.
+
 The clip becomes a normal Temp sound, so everything Temp already does applies: reverse, **Keep permanently** with host confirmation, and cleanup at End Hosting.
 
 ## Transcripts (2.5.0)
@@ -68,4 +70,4 @@ Requires companion 2.4. Older companions ignore the new permission, and the webs
 
 ## Not yet included
 
-Voice Replay Studio features that are not in the browser version yet: transcript search over saved clips, the clip trim editor, and the F6 global hotkey. They remain available in the desktop app under `mimic/`.
+Voice Replay Studio features that are not in the browser version yet: transcript search over saved clips, the clip trim editor, and a system-wide hotkey (the Mimic window has in-window shortcuts instead). They remain available in the desktop app under `mimic/`.

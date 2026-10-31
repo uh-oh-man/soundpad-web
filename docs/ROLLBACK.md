@@ -6,6 +6,7 @@ Every release stays on GitHub permanently, so any earlier version can be restore
 
 | Version | What it is | Git tag | Download |
 | --- | --- | --- | --- |
+| 2.5.1 | Mimic keyboard shortcuts | `v2.5.1` | [Release](https://github.com/uh-oh-man/soundpad-web/releases/tag/v2.5.1) |
 | 2.5.0 | Mimic transcripts | `v2.5.0` | [Release](https://github.com/uh-oh-man/soundpad-web/releases/tag/v2.5.0) |
 | 2.4.0 | Mimic merged in | `v2.4.0` | [Release](https://github.com/uh-oh-man/soundpad-web/releases/tag/v2.4.0) |
 | 2.3.1 | Last version **before Mimic** (first Claude-maintained release) | `v2.3.1`, `backup/pre-mimic` | [Release](https://github.com/uh-oh-man/soundpad-web/releases/tag/v2.3.1) |

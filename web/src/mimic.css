@@ -185,3 +185,11 @@
   min-width: 0;
   overflow-wrap: anywhere;
 }
+.mimic-panel kbd {
+  padding: 0 5px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: var(--surface-2);
+  font: inherit;
+  font-size: 11px;
+}

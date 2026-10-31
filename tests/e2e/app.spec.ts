@@ -1249,6 +1249,32 @@ test('Mimic transcript: lines appear, a click selects them, and they name the cl
   await expect(transcript).toHaveCount(0);
 });
 
+test('Mimic keyboard: number keys grab recent audio, Enter mimics, Escape clears before closing', async ({
+  page,
+  harness,
+}) => {
+  await host(page, harness);
+  await page.getByRole('button', { name: 'Mimic', exact: true }).click();
+  const dialog = page.getByRole('dialog', { name: 'Mimic' });
+  await dialog.getByRole('button', { name: 'Start listening' }).click();
+  await page.waitForTimeout(2600);
+  await page.keyboard.press('5');
+  await expect(dialog.locator('.mimic-range')).toContainText('5.0 s');
+  const name = dialog.getByLabel('Clip name');
+  await expect(name).toBeFocused();
+  await name.fill('Key mimic');
+  await page.keyboard.press('Enter');
+  await expect(page.getByRole('button', { name: 'Play Key mimic', exact: true })).toBeEnabled();
+  await expect(dialog.locator('.mimic-range')).toHaveCount(0);
+  await page.keyboard.press('3');
+  await expect(dialog.locator('.mimic-range')).toContainText('3.0 s');
+  await page.keyboard.press('Escape');
+  await expect(dialog.locator('.mimic-range')).toHaveCount(0);
+  await expect(dialog).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(dialog).toHaveCount(0);
+});
+
 test('live Nostr/WebRTC: guests see Mimic only when allowed and can clip from it', async ({
   browser,
   page,
@@ -1259,6 +1285,7 @@ test('live Nostr/WebRTC: guests see Mimic only when allowed and can clip from it
   await host(page, harness);
   await page.getByRole('button', { name: 'Mimic', exact: true }).click();
   await page.getByRole('button', { name: 'Start listening' }).click();
+  await page.getByLabel('Transcribe Mimic audio').check();
   await page.keyboard.press('Escape');
   const url = await invite(page);
   const context = await browser.newContext();
@@ -1277,6 +1304,14 @@ test('live Nostr/WebRTC: guests see Mimic only when allowed and can clip from it
     await guest.getByRole('button', { name: 'Mimic', exact: true }).click();
     const dialog = guest.getByRole('dialog', { name: 'Mimic' });
     await expect(dialog.getByLabel('Mimic source', { exact: true })).toHaveCount(0);
+    await expect(dialog.getByLabel('Transcribe Mimic audio')).toHaveCount(0);
+    // The host's transcript reaches the guest as text; clicking a line selects that audio.
+    await expect(
+      dialog
+        .getByRole('list', { name: 'Transcript' })
+        .getByRole('button', { name: /Fixture tone/ })
+        .first(),
+    ).toBeVisible({ timeout: 20000 });
     await dialog.getByRole('button', { name: 'Last 3 s' }).click();
     await dialog.getByLabel('Clip name').fill('Guest mimic');
     await dialog.getByRole('button', { name: 'Mimic it' }).click();

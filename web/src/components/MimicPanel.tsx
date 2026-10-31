@@ -48,6 +48,8 @@ export function transcriptFor(lines: TranscriptLine[], selection: Selection) {
 const POLL_MS = 500;
 const MIN_MS = 150;
 const QUICK_SECONDS = [3, 5, 10];
+/** Keys that select the last N seconds, like Voice Replay Studio's F6 "save the last few seconds". */
+export const QUICK_KEYS: Record<string, number> = { '3': 3, '5': 5, '0': 10 };
 
 /** Seconds before "now" for a position in the window, e.g. "−4.2 s". */
 export const ago = (ms: number, windowMs: number) =>
@@ -165,6 +167,14 @@ export function MimicPanel({
   const [selection, setSelection] = useState<Selection | null>(null);
   const [name, setName] = useState('');
   const [busy, setBusy] = useState(false);
+  const nameField = useRef<HTMLInputElement>(null);
+  const [focusName, setFocusName] = useState(false);
+  useEffect(() => {
+    if (focusName && selection) {
+      nameField.current?.focus();
+      setFocusName(false);
+    }
+  }, [focusName, selection]);
   // The checkbox shows the requested state until the companion's snapshot confirms it.
   const [wantTranscript, setWantTranscript] = useState<boolean | null>(null);
   const transcribing = wantTranscript ?? !!mimic?.transcribing;
@@ -241,6 +251,42 @@ export function MimicPanel({
       setBusy(false);
     }
   }
+
+  // Shortcuts work anywhere while the window is open: focus often leaves it when buttons swap
+  // (Start/Stop listening). Capture phase runs before the dialog's own Escape handler.
+  const shortcut = useRef<(e: KeyboardEvent) => void>(() => {});
+  useEffect(() => {
+    shortcut.current = (e: KeyboardEvent) => {
+      if (!peek || e.ctrlKey || e.metaKey || e.altKey || e.defaultPrevented) return;
+      const typing = e.target instanceof HTMLElement && e.target.matches('input, select, textarea');
+      if (e.key === 'Escape' && selection) {
+        e.preventDefault(); // clear the selection first; the next Escape closes the window
+        e.stopPropagation();
+        setSelection(null);
+      } else if (
+        e.key === 'Enter' &&
+        selection &&
+        !busy &&
+        !(e.target instanceof HTMLButtonElement) &&
+        (!typing || (e.target instanceof HTMLInputElement && e.target.type === 'text'))
+      ) {
+        e.preventDefault();
+        if (!e.shiftKey || canPlay) void clip(e.shiftKey);
+      } else if (!typing && QUICK_KEYS[e.key]) {
+        e.preventDefault();
+        setFocusName(true);
+        setSelection({
+          from: Math.max(0, peek.windowMs - QUICK_KEYS[e.key] * 1000),
+          to: peek.windowMs,
+        });
+      }
+    };
+  });
+  useEffect(() => {
+    const listener = (e: KeyboardEvent) => shortcut.current(e);
+    document.addEventListener('keydown', listener, true);
+    return () => document.removeEventListener('keydown', listener, true);
+  }, []);
 
   return (
     <div className="mimic-panel">
@@ -406,6 +452,7 @@ export function MimicPanel({
                 {((selection.to - selection.from) / 1000).toFixed(1)} s
               </span>
               <input
+                ref={nameField}
                 aria-label="Clip name"
                 placeholder={suggestion || 'Name (optional)'}
                 maxLength={100}
@@ -424,7 +471,11 @@ export function MimicPanel({
               </button>
             </div>
           ) : (
-            <p className="muted">Drag across the waveform, or use a quick select.</p>
+            <p className="muted">
+              Drag across the waveform, click a transcript line, or press <kbd>3</kbd> <kbd>5</kbd>{' '}
+              <kbd>0</kbd> for the last 3, 5 or 10 seconds. Then <kbd>Enter</kbd> mimics,{' '}
+              <kbd>Shift</kbd>+<kbd>Enter</kbd> mimics and plays, <kbd>Esc</kbd> clears.
+            </p>
           )}
         </>
       ) : (
