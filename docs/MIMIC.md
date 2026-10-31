@@ -139,7 +139,7 @@ On a real PC (the harness is `companion\harness\bin\Release\net10.0-windows10.0.
 - `SoundpadWeb.Harness.exe --mimic-probe [source]`: listens to a device or app for 2 s and prints packet counts and the peak level. Nothing is saved.
 - `SoundpadWeb.Harness.exe --mimic-silent-selftest <wav>`: tests the **whole real chain without sound**. It plays the WAV at stream volume 0 while Mimic's real app capture listens to the harness itself, and real Whisper transcribes the result. Windows' per-app capture taps audio before stream volume. On the owner's PC the JFK sample came through word for word.
 - `SoundpadWeb.Harness.exe --mimic-stream-transcript <wav>`: real-time streaming into the buffer with real Whisper, without any device.
-- `SoundpadWeb.Harness.exe --whisper-bench <wav>` and `--peek-bench`: the CPU measurements quoted above.
+- `SoundpadWeb.Harness.exe --whisper-bench <wav>`, `--peek-bench` and `--capture-bench`: the CPU and memory measurements quoted in this guide and the changelog. Capture itself uses about 1–2% of one core.
 - `SoundpadWeb.Harness.exe --hotkey-probe`: checks whether F6 is free, without pressing anything.
 - `SoundpadWeb.exe --transcribe-file <wav> [--download] [--verbose]`: checks the model and Whisper's native libraries in the real single-file EXE.
 - Rolling back: [docs/ROLLBACK.md](ROLLBACK.md).

@@ -2,7 +2,18 @@
 
 Notable changes to Soundpad Web. Versions follow the website's `package.json`; the Windows companion is versioned separately and only needs updating when a release says so.
 
-## Unreleased
+## 2.12.3 — Lighter Mimic capture
+
+**Update the Windows companion** to get this; nothing looks different.
+
+### Changed
+
+- Mimic capture now mixes the usual Windows format (32-bit float, 48 kHz) straight from each 10 ms packet into one reused buffer, instead of building stream objects and lists for every packet. Other formats keep the old path. Measured with the new `SoundpadWeb.Harness.exe --capture-bench`, 20 s of real app-loopback capture, three runs each:
+  - allocations fell from 54.4 MiB to 7.8 MiB (−86%), and gen-0 garbage collections from 4 to 0, in every run;
+  - CPU stayed about 1–2% of one core in both versions, including the bench's own silent tone generator, and the difference was within run-to-run noise (old 0.7 / 2.0 / 1.6%, new 2.0 / 2.1 / 2.1%). So this is a memory improvement, not a CPU one.
+- The silent real-capture self-test still transcribes the JFK sample exactly; 79 C# tests and the Mimic e2e tests pass.
+
+### Documentation
 
 - **README rewritten as a user guide.** It covers what Soundpad Web is, hosting, joining, Mimic, features, privacy, troubleshooting (now including the Temp cleanup note and tab sleep), going back to an older version, and a map of the repository. It no longer names a "current version", which had gone stale ("2.9 is the current update" through 2.12); it links the changelog instead. Developer material moved unchanged to the new [docs/DEVELOPERS.md](docs/DEVELOPERS.md): building, testing, publishing a fork, companion options, network notes, where data is kept, and technical limitations. The old "2.3 notes" section moved unchanged to [docs/V2.3.md](docs/V2.3.md). All relative links and anchors were checked.
 

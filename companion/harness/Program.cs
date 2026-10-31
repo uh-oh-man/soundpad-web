@@ -162,6 +162,30 @@ if (args.FirstOrDefault() == "--make-rollback-fixture" && args.Length == 3)
     Console.WriteLine("journal assets: " + System.Text.Json.JsonSerializer.Deserialize<AudioJournal>(File.ReadAllText(journalPath), Json.Options)!.Assets.Count);
     return;
 }
+if (args.FirstOrDefault() == "--capture-bench")
+{
+    // CPU cost of Mimic capture on a real source: listen for 20 s and report process CPU time and allocations.
+    // It captures this harness's own (silent) process, or a named source, so no sound is made.
+    using var capture = new WasapiMimicCapture();
+    var sources = capture.Sources();
+    var pick = args.Length > 1 ? sources.First(s => s.Name.Contains(args[1], StringComparison.OrdinalIgnoreCase)) : new MimicSource("app:" + Environment.ProcessId, "App: this bench", "app");
+    using var output = new NAudio.Wave.WasapiOut(NAudio.CoreAudioApi.AudioClientShareMode.Shared, 100);
+#pragma warning disable CS0618 // stream volume 0: a silent signal so packets keep flowing
+    var tone = new NAudio.Wave.SampleProviders.SignalGenerator(48000, 2) { Frequency = 440, Gain = 0.3 };
+    output.Init(new NAudio.Wave.SampleProviders.SampleToWaveProvider(tone)); output.Volume = 0f; if (args.Length == 1) output.Play();
+#pragma warning restore CS0618
+    await capture.Start(pick, 45);
+    await Task.Delay(2000);
+    var proc = System.Diagnostics.Process.GetCurrentProcess();
+    var cpu0 = proc.TotalProcessorTime; var alloc0 = GC.GetTotalAllocatedBytes(); var gen0 = GC.CollectionCount(0);
+    var packets0 = capture.Packets; var clock = System.Diagnostics.Stopwatch.StartNew();
+    await Task.Delay(20000);
+    proc.Refresh();
+    double cpu = (proc.TotalProcessorTime - cpu0).TotalMilliseconds, wall = clock.Elapsed.TotalMilliseconds;
+    Console.WriteLine($"{pick.Name}: {capture.Packets - packets0} packets in {wall / 1000:0} s, CPU {cpu:0} ms = {cpu / wall * 100:0.00}% of one core, allocated {(GC.GetTotalAllocatedBytes() - alloc0) / 1048576.0:0.0} MiB, gen0 GCs {GC.CollectionCount(0) - gen0}");
+    output.Stop();
+    return;
+}
 if (args.FirstOrDefault() == "--analyze-file" && args.Length == 2)
 {
     var scratch = Path.Combine(Path.GetTempPath(), "soundpad-web-analysis-" + Guid.NewGuid().ToString("N"));

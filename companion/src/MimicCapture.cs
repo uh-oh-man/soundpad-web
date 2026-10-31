@@ -155,14 +155,41 @@ public sealed class WasapiMimicCapture : IMimicCapture
                 }
                 await using var recorder = await builder.BuildAsync();
                 var format = recorder.WaveFormat;
+                // Windows nearly always delivers 32-bit float at 48 kHz: mix those packets straight from the
+                // buffer into one reused array instead of building stream objects for every 10 ms packet.
+                bool direct = format.Encoding == WaveFormatEncoding.IeeeFloat && format.BitsPerSample == 32 && format.SampleRate == Rate;
+                float[] scratch = [];
                 lock (gate) if (session == generation) { Running = true; Status = "Listening"; }
                 ready.TrySetResult();
                 await foreach (var buffer in recorder.CaptureAsync(stop.Token))
                 {
                     Interlocked.Increment(ref packets);
-                    var bytes = buffer.Data.ToArray();
-                    if (buffer.Flags.HasFlag(AudioClientBufferFlags.Silent)) Array.Clear(bytes);
-                    Feed(session, bytes, bytes.Length, format);
+                    bool silent = buffer.Flags.HasFlag(AudioClientBufferFlags.Silent);
+                    if (direct)
+                    {
+                        ReadOnlySpan<byte> data = buffer.Data.Span;
+                        int frames = data.Length / format.BlockAlign, channels = format.Channels;
+                        if (scratch.Length < frames) scratch = new float[Math.Max(frames, 4800)];
+                        var mono = scratch.AsSpan(0, frames);
+                        if (silent) mono.Clear();
+                        else
+                        {
+                            var samples = System.Runtime.InteropServices.MemoryMarshal.Cast<byte, float>(data[..(frames * format.BlockAlign)]);
+                            for (int f = 0; f < frames; f++)
+                            {
+                                float sum = 0;
+                                for (int c = 0; c < channels; c++) sum += samples[f * channels + c];
+                                mono[f] = sum / channels;
+                            }
+                        }
+                        Append(session, mono);
+                    }
+                    else
+                    {
+                        var bytes = buffer.Data.ToArray();
+                        if (silent) Array.Clear(bytes);
+                        Feed(session, bytes, bytes.Length, format);
+                    }
                 }
                 // The stream ended without being stopped: the app closed or the device went away.
                 if (!stop.IsCancellationRequested) Fail(session, source.Kind == "app" ? "The app closed. Choose a source and start again." : "The output device went away. Choose a source and start again.");
@@ -202,11 +229,17 @@ public sealed class WasapiMimicCapture : IMimicCapture
                 for (int c = 0; c < channels; c++) sum += frame[i + c];
                 mono.Add(sum / channels);
             }
+        // Resample by nearest frame when a device runs at a different rate; Mimic clips are speech-sized.
+        var samples = format.SampleRate == Rate ? mono.ToArray() : Enumerable.Range(0, (int)((long)mono.Count * Rate / format.SampleRate)).Select(i => mono[(int)((long)i * format.SampleRate / Rate)]).ToArray();
+        Append(session, samples);
+    }
+
+    /// <summary>Adds 48 kHz mono samples to the buffer, padding any silence that came first.</summary>
+    private void Append(int session, ReadOnlySpan<float> samples)
+    {
         lock (gate)
         {
             if (session != generation || ring == null) return;
-            // Resample by nearest frame when a device runs at a different rate; Mimic clips are speech-sized.
-            var samples = format.SampleRate == Rate ? mono.ToArray() : Enumerable.Range(0, (int)((long)mono.Count * Rate / format.SampleRate)).Select(i => mono[(int)((long)i * format.SampleRate / Rate)]).ToArray();
             PadSilence(samples.Length / (double)Rate);
             ring.Write(samples);
             lastFrameTicks = Stopwatch.GetTimestamp();
