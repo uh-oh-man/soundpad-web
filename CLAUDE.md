@@ -1,6 +1,6 @@
 # Maintainer notes
 
-Claude (Claude Code) is the main editor of this repository as of 2.3.1. The owner is @uh-oh-man. Versions up to 2.3.0 were written by OpenAI Codex. Record every user-visible change in `CHANGELOG.md`, and keep the maintainer note at the top of `README.md` accurate.
+Claude (Claude Code) is the main editor of this repository as of 2.3.1. The owner is @uh-oh-man. Versions up to 2.3.0 were written by OpenAI Codex. Record every user-visible change in `CHANGELOG.md`, and keep the maintainer note at the top of `README.md` accurate. The README is the user guide: don't name a "current version" in it (it went stale before); link the changelog. Developer material belongs in `docs/DEVELOPERS.md`.
 
 ## Layout
 
