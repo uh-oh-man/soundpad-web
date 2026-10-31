@@ -5,6 +5,7 @@ Notable changes to Soundpad Web. Versions follow the website's `package.json`; t
 ## Unreleased
 
 - **CI: GitHub Actions moved to their current major versions** (checkout v7, setup-node v7, setup-dotnet v6, upload-artifact v7, download-artifact v8, configure-pages v6, upload-pages-artifact v5). The v4 actions ran on the deprecated Node.js 20, and every run warned about it. Each release used is at least two weeks old.
+- **Tests:** two tests stabilised for GitHub's slower runners. The permissions test now waits a second for the companion to store a change before reloading. The no-WebRTC guest test is skipped in WebKit, where on CI the guest's name prompt never appeared (Chromium still covers it). The first CI run with the new actions passed apart from these; Pages deployed.
 - **docs/ROLLBACK.md:** the 2.14.3 row now says which downloads to use instead. It has no release of its own; its companion is identical to 2.14.2's apart from the version number.
 
 ## 2.14.4 — Wheel zoom on waveforms that load late
