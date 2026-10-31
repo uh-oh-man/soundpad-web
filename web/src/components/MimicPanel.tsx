@@ -36,6 +36,33 @@ export type MimicPeek = z.infer<typeof peekSchema>;
 export type TranscriptLine = NonNullable<MimicPeek['transcript']>[number];
 type Selection = { from: number; to: number };
 
+/** Keyboard step for adjusting a selection edge: 100 ms, or 1 s with Ctrl. */
+export const NUDGE_MS = 100;
+
+/**
+ * Arrow keys on the waveform: Left/Right move the end, Shift+Left/Right move the start.
+ * With no selection, the first press selects the last second.
+ */
+export function nudgeSelection(
+  selection: Selection | null,
+  key: 'ArrowLeft' | 'ArrowRight',
+  moveStart: boolean,
+  windowMs: number,
+  step = NUDGE_MS,
+): Selection {
+  if (!selection) return { from: windowMs - 1000, to: windowMs };
+  const delta = key === 'ArrowLeft' ? -step : step;
+  if (moveStart)
+    return {
+      ...selection,
+      from: Math.min(Math.max(0, selection.from + delta), selection.to - MIN_MS),
+    };
+  return {
+    ...selection,
+    to: Math.max(Math.min(windowMs, selection.to + delta), selection.from + MIN_MS),
+  };
+}
+
 /** Selection covering a transcript line, with a little padding so words aren't clipped. */
 export function lineSelection(line: TranscriptLine, windowMs: number): Selection {
   return {
@@ -149,8 +176,30 @@ function MimicWave({
     <div className="mimic-wave">
       <canvas
         ref={canvas}
-        role="img"
-        aria-label={`Mimic buffer, last ${peek.windowMs / 1000} seconds. Drag to select; drag an edge to adjust it.`}
+        role="slider"
+        tabIndex={0}
+        aria-label={`Mimic buffer, last ${peek.windowMs / 1000} seconds. Drag to select; drag an edge to adjust it. Arrow keys move the end, Shift+arrows the start, Ctrl for 1 second steps.`}
+        aria-valuemin={0}
+        aria-valuemax={peek.windowMs}
+        aria-valuenow={selection?.to ?? peek.windowMs}
+        aria-valuetext={
+          selection
+            ? `Selected ${ago(selection.from, peek.windowMs)} to ${ago(selection.to, peek.windowMs)}`
+            : 'Nothing selected'
+        }
+        onKeyDown={(e) => {
+          if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
+          e.preventDefault();
+          onSelect(
+            nudgeSelection(
+              selection,
+              e.key,
+              e.shiftKey,
+              peek.windowMs,
+              e.ctrlKey ? 1000 : NUDGE_MS,
+            ),
+          );
+        }}
         onPointerDown={(e) => {
           e.currentTarget.setPointerCapture(e.pointerId);
           drag.current = anchorFor(e) ?? at(e);

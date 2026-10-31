@@ -2,6 +2,20 @@
 
 Notable changes to Soundpad Web. Versions follow the website's `package.json`; the Windows companion is versioned separately and only needs updating when a release says so.
 
+## 2.8.1 — Keyboard waveform, layout fixes, README map
+
+Website update; the companion is rebuilt as 2.8.1 with no code changes.
+
+### Added
+
+- The Mimic waveform is keyboard-operable: focus it, then **Left/Right** move the end of the selection, **Shift+Left/Right** move the start, and **Ctrl** makes 1 s steps. The first press selects the last second. Screen readers hear it as a slider that announces the selected range.
+- README: a "What's in this repository" map of the merged project, Mimic privacy notes, Mimic check commands, and a screenshot of the Mimic window.
+
+### Fixed
+
+- Transcript lines in the Mimic window were centered, which pushed their times away from their words; they are now left-aligned.
+- The Transcript and F6 checkboxes picked up the text-field styling (38 px tall with padding), leaving uneven gaps between those rows.
+
 ## 2.8.0 — Trim
 
 **Update the Windows companion** for Trim; the website hides nothing for older companions, but the Trim button only works with 2.8.

@@ -12,6 +12,19 @@ Static React website + one portable Windows companion. No accounts, hosted appli
 
 [Open Soundpad Web](https://uh-oh-man.github.io/soundpad-web/) · [Download the Windows companion](https://github.com/uh-oh-man/soundpad-web/releases/latest/download/SoundpadWeb.exe)
 
+## What's in this repository
+
+Soundpad Web began as a browser remote for Soundpad. In 2.4.0 it merged with **Voice Replay Studio** ("Mimic"), a desktop instant-replay recorder, so friends can also turn something that was *just said* into a sound.
+
+| Part | Where | What it does |
+| --- | --- | --- |
+| Website | `web/` | The static React site on GitHub Pages: soundboard, Temp, Mimic window, host settings. Guests only ever need this. |
+| Windows companion | `companion/` | One portable `SoundpadWeb.exe` on the host PC. It talks to Soundpad, manages Temp audio, and runs Mimic: rolling capture, the local Whisper transcript, the F6 hotkey and Trim. |
+| Voice Replay Studio | `mimic/` | The original Mimic desktop app (V1.1), kept intact with its own README, tests and licenses. |
+| Docs | `docs/` | [Mimic](docs/MIMIC.md), [rolling back](docs/ROLLBACK.md), API research, protocol and verification notes. |
+
+![Mimic window with a live transcript; the selected line becomes the clip's name. Fixture audio, not a real session.](docs/screenshots/v28-mimic.png)
+
 ## Start a session
 
 1. Download **SoundpadWeb.exe** from this repository's Releases. Before a tagged release exists, download the **SoundpadWeb-win-x64** artifact from a successful Windows Actions run and unzip it.
@@ -23,7 +36,9 @@ Your friend opens the link in a modern browser. Playback starts on **your** PC, 
 
 **Verification:** automated tests use isolated Soundpad fixtures and never trigger real audio. Real Soundpad audio playback remains an acceptance check; see [verification](docs/VERIFICATION.md).
 
-## 2.3 update — UI polish and managed audio
+## 2.3 notes — UI polish and managed audio
+
+*Kept for reference. Later releases are listed in the [changelog](CHANGELOG.md).*
 
 Version 2.3 is delivered through the normal GitHub Pages website and Windows release. Refresh the page and download the updated **SoundpadWeb.exe** using the links above. Close the previous companion normally when you are ready to switch; do not overwrite a running EXE. The new Temp features require the 2.3 companion.
 
@@ -58,6 +73,8 @@ Uploads accept up to 16 MiB, decoded audio up to ten minutes / eight channels / 
 - Desktop sidebar, mobile category selector, keyboard focus, responsive sound grid and incremental rendering for large libraries.
 
 ## Access and privacy
+
+**Mimic** is off until the host starts it, never records a microphone, and shows a **Mimic on** badge to everyone while it listens. Its audio stays on the host PC: guests allowed to use Mimic receive waveform levels and, if the host turns transcripts on, the transcript text. Speech recognition runs locally. Guest Mimic is off by default. See [docs/MIMIC.md](docs/MIMIC.md#privacy-and-safety-rules).
 
 Treat an invitation as a password. Anyone with it can join and use the permissions you enable. **Session & access → Replace invite** revokes the previous invitation and disconnects existing guests. Disconnecting one peer alone does not invalidate a bearer invitation; that person could return with a new browser identity.
 
@@ -117,6 +134,14 @@ For development, run `npm run dev`, then:
 ```
 
 This connects to real Soundpad if running. Routine browser tests instead launch a completely separate mock pipe via `companion/harness`; fixtures never ship in the EXE. Optional real Nostr/WebRTC browser integration tests: `$env:LIVE_RELAY='1'; npm run test:e2e -- --grep 'live Nostr'`. They still use a mock Soundpad, so no real audio plays. CI's default tests do not depend on public relay availability.
+
+Mimic checks (Windows):
+
+```powershell
+dotnet run --project mimic/tests/VoiceReplay.Tests -c Release   # Voice Replay Studio's own tests
+.\artifacts\release\SoundpadWeb.exe --transcribe-file sample.wav  # local Whisper check (add --download the first time)
+companion\harness\bin\Release\net10.0-windows10.0.19041.0\win-x64\SoundpadWeb.Harness.exe --mimic-probe   # real capture levels, nothing saved
+```
 
 Advanced companion options: `--site <HTTPS URL>`, `--no-browser`, `--data-dir <local directory>`, `--pipe <test pipe name>`. `--dev` permits HTTP only for a loopback website. Close the companion with Ctrl+C. No LAN listener, firewall changes or system service is installed.
 

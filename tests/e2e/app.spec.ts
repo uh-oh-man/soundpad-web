@@ -1200,7 +1200,7 @@ test('Mimic: host listens, everyone sees it, and a selection becomes a playable 
   await dialog.getByRole('button', { name: 'Start listening' }).click();
   await expect(dialog.getByRole('status')).toContainText('Listening to Fixture: tone every 2 s');
   await expect(page.getByRole('button', { name: 'Mimic on' })).toBeVisible();
-  await expect(dialog.getByRole('img', { name: /Mimic buffer/ })).toBeVisible();
+  await expect(dialog.getByRole('slider', { name: /Mimic buffer/ })).toBeVisible();
   // Let the fixture produce at least one tone burst, then grab it with a quick select.
   await page.waitForTimeout(2600);
   await dialog.getByRole('button', { name: 'Last 3 s' }).click();
@@ -1241,6 +1241,13 @@ test('Mimic: host listens, everyone sees it, and a selection becomes a playable 
   await page.mouse.move(box.x + box.width * 0.95, box.y + box.height / 2);
   await page.mouse.up();
   await expect(dialog.locator('.mimic-range')).toContainText('· 4.5 s');
+  // The waveform is keyboard-operable: arrows move the end, Shift+arrows the start.
+  await canvas.focus();
+  await page.keyboard.press('ArrowLeft');
+  await page.keyboard.press('Shift+ArrowLeft');
+  await expect(dialog.locator('.mimic-range')).toContainText('· 4.5 s');
+  await page.keyboard.press('Control+ArrowRight');
+  await expect(dialog.locator('.mimic-range')).toContainText('· 5.5 s');
   await dialog.getByRole('button', { name: 'Clear' }).click();
   await expect(dialog.locator('.mimic-range')).toHaveCount(0);
   // The F6 hotkey is host-only and reports its state (the harness uses a fixture key, never real F6).

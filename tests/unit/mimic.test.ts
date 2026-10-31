@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   ago,
   lineSelection,
+  nudgeSelection,
   normalizeSelection,
   transcriptFor,
 } from '../../web/src/components/MimicPanel';
@@ -71,5 +72,30 @@ describe('Mimic transcript', () => {
     expect(transcriptFor(lines, { from: 0, to: 1000 })).toBe('');
     const long = [{ startMs: 0, endMs: 1000, text: 'word '.repeat(40) }];
     expect(transcriptFor(long, { from: 0, to: 1000 })).toHaveLength(100);
+  });
+});
+
+describe('Mimic keyboard selection', () => {
+  it('starts with the last second, then moves the end or (with Shift) the start', () => {
+    const first = nudgeSelection(null, 'ArrowLeft', false, 30000);
+    expect(first).toEqual({ from: 29000, to: 30000 });
+    expect(nudgeSelection(first, 'ArrowLeft', false, 30000)).toEqual({ from: 29000, to: 29900 });
+    expect(nudgeSelection(first, 'ArrowLeft', true, 30000)).toEqual({ from: 28900, to: 30000 });
+    expect(nudgeSelection(first, 'ArrowLeft', true, 30000, 1000)).toEqual({
+      from: 28000,
+      to: 30000,
+    });
+  });
+  it('stays inside the window and never collapses below the minimum length', () => {
+    expect(nudgeSelection({ from: 0, to: 30000 }, 'ArrowRight', false, 30000).to).toBe(30000);
+    expect(nudgeSelection({ from: 0, to: 30000 }, 'ArrowLeft', true, 30000).from).toBe(0);
+    expect(nudgeSelection({ from: 1000, to: 1200 }, 'ArrowLeft', false, 30000)).toEqual({
+      from: 1000,
+      to: 1150,
+    });
+    expect(nudgeSelection({ from: 1000, to: 1200 }, 'ArrowRight', true, 30000)).toEqual({
+      from: 1050,
+      to: 1200,
+    });
   });
 });

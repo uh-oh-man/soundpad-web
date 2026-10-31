@@ -118,7 +118,7 @@
   font-size: 13px;
   color: var(--text-muted);
 }
-.mimic-panel :is(input, select) {
+.mimic-panel :is(input:not([type='checkbox']), select) {
   min-height: 38px;
   padding: 8px 10px;
   background: var(--surface-2);
@@ -161,6 +161,7 @@
 }
 .mimic-transcript button {
   display: flex;
+  justify-content: flex-start;
   gap: 10px;
   width: 100%;
   padding: 6px 8px;
