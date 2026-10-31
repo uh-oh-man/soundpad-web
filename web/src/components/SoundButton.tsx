@@ -104,9 +104,10 @@ export function SoundButton({
       {sound.icon ? (
         <button
           className="tile-art-button"
-          disabled={!canPlay || pending}
+          disabled={!canPlay}
+          aria-disabled={pending || undefined}
           aria-label={`Play artwork ${sound.name}`}
-          onClick={() => void play().catch(() => {})}
+          onClick={() => !pending && void play().catch(() => {})}
         >
           {content}
         </button>
@@ -146,8 +147,10 @@ export function SoundButton({
         className="tile-play-strip"
         // The name must contain the visible text so voice control ("click play from start") works.
         aria-label={`Play from start: ${sound.name}`}
-        disabled={!canPlay || pending}
-        onClick={() => void play().catch(() => {})}
+        // Busy is aria-disabled, not disabled: Chrome drops focus from a button that becomes disabled.
+        disabled={!canPlay}
+        aria-disabled={pending || undefined}
+        onClick={() => !pending && void play().catch(() => {})}
       >
         {pending ? (
           <LoaderCircle size={13} className="spinning" />

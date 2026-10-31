@@ -742,16 +742,19 @@ function App() {
               </div>
               <button
                 aria-label="Decrease Kick counter"
-                disabled={!canCount || pending > 0 || state.counter === 0}
-                onClick={() => void run('counter', { delta: -1 })}
+                // Busy is aria-disabled so keyboard focus stays on the button while the count updates.
+                disabled={!canCount || state.counter === 0}
+                aria-disabled={pending > 0 || undefined}
+                onClick={() => pending === 0 && void run('counter', { delta: -1 })}
               >
                 <Minus size={16} />
               </button>
               <output aria-label="Kick count">{state.counter}</output>
               <button
                 aria-label="Increase Kick counter"
-                disabled={!canCount || pending > 0}
-                onClick={() => void run('counter', { delta: 1 })}
+                disabled={!canCount}
+                aria-disabled={pending > 0 || undefined}
+                onClick={() => pending === 0 && void run('counter', { delta: 1 })}
               >
                 <Plus size={16} />
               </button>

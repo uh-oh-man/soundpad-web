@@ -2,6 +2,18 @@
 
 Notable changes to Soundpad Web. Versions follow the website's `package.json`; the Windows companion is versioned separately and only needs updating when a release says so.
 
+## 2.13.2 — Keyboard focus stays on Play, Reverse and the Kick counter
+
+Website only; the companion is unchanged apart from its version number (it reports 2.13.2).
+
+### Fixed
+
+- **Pressing Play from start (or the artwork), Reverse and play, or the Kick counter buttons with the keyboard no longer throws focus back to the top of the page.** It is the same problem 2.13.1 fixed in Mimic, found by checking the rest of the app: each button disabled itself while its command was running, and Chrome takes focus away from a disabled control. On a slow link, a keyboard user who pressed Play landed on the page body and had to tab all the way back. These buttons now look busy (dimmed, with a progress cursor) and ignore repeat presses until the answer arrives, but keep focus. **Mimic it** and **Mimic & play** got the same treatment.
+
+### Tests
+
+- The slow-connection e2e test (every companion message delayed 600 ms) now also presses Play from start, the Kick counter and Reverse and play from the keyboard and checks focus through each command. It fails on 2.13.1.
+
 ## 2.13.1 — Mimic keeps keyboard focus on slow connections
 
 Website only; the companion is unchanged apart from its version number (it reports 2.13.1).

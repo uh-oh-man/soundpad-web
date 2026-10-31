@@ -142,7 +142,7 @@ export function MimicPanel({
 
   async function clip(play: boolean) {
     const fields = selected();
-    if (!fields) return;
+    if (!fields || busy) return;
     setBusy(true);
     try {
       const result = (await controller.run('mimicClip', {
@@ -275,13 +275,14 @@ export function MimicPanel({
                   <Headphones size={15} /> {previewing ? 'Stop preview' : 'Preview'}
                 </button>
               )}
-              <button disabled={busy} onClick={() => void clip(false)}>
+              <button aria-disabled={busy || undefined} onClick={() => !busy && void clip(false)}>
                 <Scissors size={15} /> Mimic it
               </button>
               <button
                 className="primary"
-                disabled={busy || !canPlay}
-                onClick={() => void clip(true)}
+                disabled={!canPlay}
+                aria-disabled={busy || undefined}
+                onClick={() => !busy && void clip(true)}
               >
                 <Play size={15} /> Mimic &amp; play
               </button>

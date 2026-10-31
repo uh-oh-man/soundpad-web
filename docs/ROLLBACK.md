@@ -6,6 +6,7 @@ Every release stays on GitHub permanently, so any earlier version can be restore
 
 | Version | What it is | Git tag | Download |
 | --- | --- | --- | --- |
+| 2.13.2 | Keyboard focus stays on Play, Reverse and the Kick counter | `v2.13.2` | [Release](https://github.com/uh-oh-man/soundpad-web/releases/tag/v2.13.2) |
 | 2.13.1 | Mimic keeps keyboard focus on slow connections | `v2.13.1` | [Release](https://github.com/uh-oh-man/soundpad-web/releases/tag/v2.13.1) |
 | 2.13.0 | Mimic waveform zoom | `v2.13.0` | [Release](https://github.com/uh-oh-man/soundpad-web/releases/tag/v2.13.0) |
 | 2.12.5 | Guest accessibility | `v2.12.5` | [Release](https://github.com/uh-oh-man/soundpad-web/releases/tag/v2.12.5) |

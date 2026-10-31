@@ -51,6 +51,11 @@ button:disabled {
   opacity: 0.4;
   cursor: not-allowed;
 }
+/* Busy: looks disabled but keeps keyboard focus (see SoundButton). */
+button[aria-disabled='true'] {
+  opacity: 0.4;
+  cursor: progress;
+}
 button:focus-visible,
 a:focus-visible,
 input:focus-visible,

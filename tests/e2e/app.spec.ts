@@ -1584,17 +1584,32 @@ test('accessibility: no serious or critical axe violations in the dialogs, views
   expect(problems).toEqual([]);
 });
 
-test('Mimic keyboard on a slow connection: ticking F6 keeps focus while the companion answers', async ({
+test('slow connection: busy buttons and Mimic toggles keep keyboard focus while the companion answers', async ({
   page,
   harness,
 }) => {
-  // Delay every command by 600 ms, as a busy PC or slow link would.
+  // Delay every command by 600 ms, as a busy PC or slow link would. Chrome drops focus from a control
+  // that becomes disabled, so busy controls must use aria-disabled instead.
   await page.routeWebSocket(/.*/, (ws) => {
     const server = ws.connectToServer();
     ws.onMessage((message) => setTimeout(() => server.send(message), 600));
     server.onMessage((message) => ws.send(message));
   });
   await host(page, harness);
+  for (const name of [
+    'Play from start: Airhorn',
+    'Increase Kick counter',
+    'Reverse and play Airhorn',
+  ]) {
+    const button = page.getByRole('button', { name, exact: true }).first();
+    await button.focus();
+    await page.keyboard.press('Enter');
+    await expect(button).toHaveAttribute('aria-disabled', 'true');
+    await expect(button).toBeFocused();
+    await expect(button).not.toHaveAttribute('aria-disabled');
+    await expect(button).toBeFocused();
+  }
+  await expect(page.getByLabel('Kick count', { exact: true })).toHaveText('1');
   await page.getByRole('button', { name: 'Mimic', exact: true }).click();
   const dialog = page.getByRole('dialog', { name: 'Mimic' });
   await dialog.getByRole('button', { name: 'Start listening' }).click();

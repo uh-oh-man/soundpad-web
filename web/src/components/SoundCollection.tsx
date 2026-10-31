@@ -238,12 +238,10 @@ export function SoundCollection({
                   className="icon-button"
                   aria-label={`Reverse and play ${sound.name}`}
                   title="Reverse & play · temporary copy"
-                  disabled={
-                    !canPlay ||
-                    pending === sound.id ||
-                    (!host && state.permissions.guestTransforms === false)
-                  }
+                  disabled={!canPlay || (!host && state.permissions.guestTransforms === false)}
+                  aria-disabled={pending === sound.id || undefined}
                   onClick={() => {
+                    if (pending === sound.id) return;
                     setPending(sound.id);
                     void controller
                       .run('reverse', { soundId: sound.id, libraryVersion: state.library.version })
