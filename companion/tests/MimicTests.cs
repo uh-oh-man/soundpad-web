@@ -187,12 +187,14 @@ public sealed class MimicTests : IDisposable
         // A library as Voice Replay Studio writes it: one clip with audio, one whose file is gone, one MP3.
         string wav = Path.Combine(vrs, "Clips", "HELLO.wav"); File.WriteAllBytes(wav, MimicRing.Wav(Enumerable.Range(0, 57600).Select(i => 0.3f * MathF.Sin(i * 2 * MathF.PI * 440 / 48000)).ToArray(), 48000));
         string mp3 = Path.Combine(vrs, "Clips", "SONG.mp3"); File.WriteAllBytes(mp3, [1, 2, 3]);
-        Guid hello = Guid.NewGuid(), gone = Guid.NewGuid(), song = Guid.NewGuid();
+        string bandWav = Path.Combine(vrs, "Clips", "BAND.wav"); File.WriteAllBytes(bandWav, MimicRing.Wav(Enumerable.Range(0, 48000).Select(i => 0.3f * MathF.Sin(i * 2 * MathF.PI * 660 / 48000)).ToArray(), 48000));
+        Guid hello = Guid.NewGuid(), gone = Guid.NewGuid(), song = Guid.NewGuid(), band = Guid.NewGuid();
         var library = JsonSerializer.Serialize(new object[]
         {
             new { Id = hello, AudioPath = wav, Title = "Hello there", Transcript = "hello there friend", CapturedAt = DateTimeOffset.Now, Duration = 1.2, Summary = "x" },
             new { Id = gone, AudioPath = Path.Combine(vrs, "Clips", "GONE.wav"), Title = "Gone", Transcript = "", CapturedAt = DateTimeOffset.Now.AddMinutes(-1), Duration = 2.0 },
             new { Id = song, AudioPath = mp3, Title = "Song", Transcript = "", CapturedAt = DateTimeOffset.Now.AddMinutes(-2), Duration = 3.0 },
+            new { Id = band, AudioPath = bandWav, Title = "AC/DC", Transcript = "", CapturedAt = DateTimeOffset.Now.AddMinutes(-3), Duration = 1.2 },
         });
         File.WriteAllText(Path.Combine(vrs, "library.json"), library);
         var stamp = File.GetLastWriteTimeUtc(Path.Combine(vrs, "library.json"));
@@ -206,6 +208,9 @@ public sealed class MimicTests : IDisposable
         Assert.True((await bridge.Execute(Cmd("mimicLibraryImport") with { SourceId = hello.ToString() }, "host")).Ok);
         Assert.Contains(bridge.Snapshot.Library.Sounds, s => s.Temporary && s.Name == "Hello there");
         Assert.True(File.Exists(wav)); // the original stays in Voice Replay Studio
+        // A slash in a title doesn't cut the sound's name short.
+        Assert.True((await bridge.Execute(Cmd("mimicLibraryImport") with { SourceId = band.ToString() }, "host")).Ok);
+        Assert.Contains(bridge.Snapshot.Library.Sounds, s => s.Temporary && s.Name == "AC-DC");
         // Missing files, non-WAV files and unknown ids are refused with a reason.
         Assert.Contains("missing", (await bridge.Execute(Cmd("mimicLibraryImport") with { SourceId = gone.ToString() }, "host")).Error);
         Assert.Contains("WAV", (await bridge.Execute(Cmd("mimicLibraryImport") with { SourceId = song.ToString() }, "host")).Error);

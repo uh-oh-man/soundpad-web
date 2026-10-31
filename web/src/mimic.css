@@ -316,3 +316,8 @@
   font-size: 12px;
   flex: none;
 }
+.mimic-library-note {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}

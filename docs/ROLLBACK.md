@@ -6,6 +6,7 @@ Every release stays on GitHub permanently, so any earlier version can be restore
 
 | Version | What it is | Git tag | Download |
 | --- | --- | --- | --- |
+| 2.15.1 | Review fixes for the Voice Replay Studio import | `v2.15.1` | [Release](https://github.com/uh-oh-man/soundpad-web/releases/tag/v2.15.1) |
 | 2.15.0 | Import clips from Voice Replay Studio | `v2.15.0` | [Release](https://github.com/uh-oh-man/soundpad-web/releases/tag/v2.15.0) |
 | 2.14.5 | CI upkeep (no app changes) | `v2.14.5` | [Release](https://github.com/uh-oh-man/soundpad-web/releases/tag/v2.14.5) |
 | 2.14.4 | Wheel zoom on waveforms that load late | `v2.14.4` | [Release](https://github.com/uh-oh-man/soundpad-web/releases/tag/v2.14.4) |

@@ -1777,6 +1777,9 @@ test('Mimic: the host imports a clip from Voice Replay Studio into Temp', async 
   expect(
     violations.filter((v) => v.impact === 'serious' || v.impact === 'critical').map((v) => v.id),
   ).toEqual([]);
+  // Refresh reloads the list (clips saved meanwhile appear); nothing in it changes here.
+  await dialog.getByRole('button', { name: 'Refresh', exact: true }).click();
+  await expect(list.getByRole('listitem')).toHaveCount(2);
   await list.getByRole('button', { name: 'Import Fixture hello there' }).click();
   await expect(page.getByText('Imported “Fixture hello there” into Temp.')).toBeVisible();
   await page.keyboard.press('Escape');

@@ -210,7 +210,8 @@ public sealed partial class Bridge
                 case "mimicLibraryImport":
                     {
                         var (wav, title) = voiceReplay.Read(c.SourceId ?? "");
-                        var reply = await Upload(wav, title + ".wav", "Host", true, "host", audioAudience);
+                        // The name becomes a file name first: keep path separators from cutting the title short ("AC/DC").
+                        var reply = await Upload(wav, title.Replace('/', '-').Replace('\\', '-') + ".wav", "Host", true, "host", audioAudience);
                         if (reply.Ok) Log($"Imported \"{title}\" from Voice Replay Studio into Temp");
                         return reply with { Id = c.Id };
                     }

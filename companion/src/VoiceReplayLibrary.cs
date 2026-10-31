@@ -31,10 +31,7 @@ public sealed class VoiceReplayLibrary(string? root = null)
         if (clip.AudioPath is not { } path || !File.Exists(path)) throw new InvalidDataException("That clip's audio file is missing.");
         if (!string.Equals(Path.GetExtension(path), ".wav", StringComparison.OrdinalIgnoreCase)) throw new InvalidDataException("Only WAV clips can be imported.");
         if (new FileInfo(path).Length > MaxBytes) throw new InvalidDataException("That clip is larger than Temp's 16 MiB limit.");
-        using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
-        using var copy = new MemoryStream();
-        stream.CopyTo(copy);
-        return (copy.ToArray(), Clip(clip.Title, 100, "Recording"));
+        return (ReadAtMost(path, MaxBytes, "That clip is larger than Temp's 16 MiB limit."), Clip(clip.Title, 100, "Recording"));
     }
 
     private List<Stored> Load()
@@ -43,13 +40,31 @@ public sealed class VoiceReplayLibrary(string? root = null)
         if (!File.Exists(path)) return [];
         try
         {
-            using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+            using var stream = new MemoryStream(ReadAtMost(path, MaxLibraryBytes, "Voice Replay Studio's library is unexpectedly large. It was left untouched."));
             return JsonSerializer.Deserialize<List<Stored>>(stream) ?? [];
         }
         catch (Exception ex) when (ex is JsonException or IOException or UnauthorizedAccessException)
         {
             throw new InvalidDataException("Voice Replay Studio's library could not be read. It was left untouched.");
         }
+    }
+
+    /// <summary>Generous for thousands of clips; a library.json bigger than this isn't one Voice Replay Studio wrote.</summary>
+    private const long MaxLibraryBytes = 32L * 1024 * 1024;
+
+    /// <summary>Reads a file without locking it, stopping at <paramref name="max"/> bytes even if it grows meanwhile.</summary>
+    private static byte[] ReadAtMost(string path, long max, string tooLarge)
+    {
+        using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+        using var copy = new MemoryStream();
+        var chunk = new byte[81920];
+        int n;
+        while ((n = stream.Read(chunk, 0, chunk.Length)) > 0)
+        {
+            if (copy.Length + n > max) throw new InvalidDataException(tooLarge);
+            copy.Write(chunk, 0, n);
+        }
+        return copy.ToArray();
     }
 
     private static string Clip(string? text, int max, string fallback)

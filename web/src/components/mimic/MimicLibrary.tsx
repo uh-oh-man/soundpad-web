@@ -1,5 +1,5 @@
-import { useState } from 'react';
-import { Download, Library } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import { Download, Library, RefreshCw } from 'lucide-react';
 import { z } from 'zod';
 import { controller } from '../../controller';
 import { formatTime } from '../Waveform';
@@ -25,19 +25,26 @@ type Clip = z.infer<typeof librarySchema>['clips'][number];
  * Importing copies one into Temp; Voice Replay Studio's own files are never changed.
  */
 export function MimicLibrary({ connected }: { connected: boolean }) {
+  const [open, setOpen] = useState(false);
   const [clips, setClips] = useState<Clip[] | null>(null);
+  const [failed, setFailed] = useState(false);
   const [available, setAvailable] = useState(true);
   const [filter, setFilter] = useState('');
   const [importing, setImporting] = useState('');
   async function load() {
+    setFailed(false);
     try {
       const result = librarySchema.parse(await controller.run('mimicLibrary'));
       setAvailable(result.available);
       setClips(result.clips);
     } catch {
-      setClips([]); // the controller shows why
+      setFailed(true); // the controller's notice says why
     }
   }
+  // Load when opened, and again if the companion reconnects while the section is open.
+  useEffect(() => {
+    if (open && connected) void load();
+  }, [open, connected]);
   async function importClip(clip: Clip) {
     if (importing) return;
     setImporting(clip.id);
@@ -55,17 +62,17 @@ export function MimicLibrary({ connected }: { connected: boolean }) {
     (c) => !words || `${c.title} ${c.transcript}`.toLowerCase().includes(words),
   );
   return (
-    <details
-      className="mimic-library"
-      onToggle={(e) => {
-        if (e.currentTarget.open && connected) void load();
-      }}
-    >
+    <details className="mimic-library" onToggle={(e) => setOpen(e.currentTarget.open)}>
       <summary>
         <Library size={15} aria-hidden="true" /> From Voice Replay Studio
       </summary>
-      {clips === null ? (
-        <p className="muted">Loading…</p>
+      {failed ? (
+        <p className="muted">
+          Voice Replay Studio's library couldn't be read.{' '}
+          <button onClick={() => void load()}>Try again</button>
+        </p>
+      ) : clips === null ? (
+        <p className="muted">{connected ? 'Loading…' : 'Waiting for the companion…'}</p>
       ) : !available ? (
         <p className="muted">
           Voice Replay Studio has no library on this PC. Clips saved there (with its F6) appear
@@ -97,6 +104,7 @@ export function MimicLibrary({ connected }: { connected: boolean }) {
                 <button
                   aria-label={`Import ${clip.title}`}
                   aria-disabled={!!importing || undefined}
+                  aria-busy={importing === clip.id || undefined}
                   onClick={() => void importClip(clip)}
                 >
                   <Download size={14} aria-hidden="true" /> Import
@@ -104,9 +112,12 @@ export function MimicLibrary({ connected }: { connected: boolean }) {
               </li>
             ))}
           </ul>
-          <p className="muted">
+          <p className="muted mimic-library-note">
             Importing copies a clip into Temp, like a Mimic clip. Voice Replay Studio keeps its own
             copy unchanged.
+            <button title="Show clips saved since this list opened" onClick={() => void load()}>
+              <RefreshCw size={13} aria-hidden="true" /> Refresh
+            </button>
           </p>
         </>
       )}

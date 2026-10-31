@@ -2,6 +2,25 @@
 
 Notable changes to Soundpad Web. Versions follow the website's `package.json`; the Windows companion is versioned separately and only needs updating when a release says so.
 
+## 2.15.1 — Review fixes for the Voice Replay Studio import
+
+**Update the Windows companion** for the first and last two fixes. The rest are website fixes and apply at once.
+
+An independent review of 2.15.0 found no way for a guest to list or import clips, and no write to Voice Replay Studio's folder. It did find these problems:
+
+### Fixed
+
+- **Importing a clip no longer holds up the host's other commands.** The import ran on the host's command connection, so Stop, Play or Seek waited until a large clip was decoded. Listing and importing now run in the background, like Mimic clips.
+- **The list loads after a reconnect.** Opening the section while the companion was disconnected left "Loading…" on screen for good. It now says it is waiting, and loads when the companion connects.
+- **A library that can't be read says so** ("couldn't be read", with **Try again**) instead of claiming it has no clips. The notice still gives the reason.
+- **Refresh** shows clips Voice Replay Studio saved while the list was open. The clip being imported is marked busy for screen readers.
+- **A slash in a clip's title no longer cuts the sound's name short.** "AC/DC" used to arrive in Temp as "DC"; it is now "AC-DC".
+- **Both files are read with a size cap**, even if one grows while it's read: clips at 16 MiB, `library.json` at 32 MiB.
+
+### Tests
+
+- The C# Voice Replay Studio test imports an "AC/DC" clip and expects "AC-DC". The e2e test uses Refresh.
+
 ## 2.15.0 — Import clips from Voice Replay Studio
 
 **Update the Windows companion** to get this; older companions don't show the new section.
