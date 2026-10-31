@@ -886,7 +886,8 @@ test('session uploads use temp, reverse immediately, and only approved files sur
     .getByLabel('Add session audio', { exact: true })
     .setInputFiles({ name: 'Session tone.wav', mimeType: 'audio/wav', buffer: sessionWave() });
   const sound = page.getByRole('button', { name: 'Play from start: Session tone', exact: true });
-  await expect(sound).toBeEnabled();
+  // Decoding the upload in the browser can take over 10 s on a slow CI runner (seen in WebKit).
+  await expect(sound).toBeEnabled({ timeout: 25000 });
   await expect(
     page
       .getByRole('navigation', { name: 'Sound categories' })
@@ -1288,7 +1289,7 @@ test('Mimic: host listens, everyone sees it, and a selection becomes a playable 
   await expect(trim.getByLabel('End (s)')).toHaveValue(/^(2\.\d+|3)$/);
   await trim.getByLabel('Start (s)').fill('0.5');
   await trim.getByLabel('End (s)').fill('2');
-  await expect(trim).toContainText(/1\.50 s of 2\.\d\d s/);
+  await expect(trim).toContainText(/1\.50 s of (2\.\d\d|3\.00) s/); // clip length as above
   await trim.getByRole('button', { name: 'Save copy' }).click();
   await expect(
     page.getByRole('button', { name: 'Play from start: Fixture mimic (trimmed)', exact: true }),

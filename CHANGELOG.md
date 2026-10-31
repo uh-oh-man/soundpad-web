@@ -2,6 +2,10 @@
 
 Notable changes to Soundpad Web. Versions follow the website's `package.json`; the Windows companion is versioned separately and only needs updating when a release says so.
 
+## Unreleased
+
+- **Tests:** two more timing assumptions fixed after GitHub's WebKit runner needed retries. The Mimic Edit copy check now also accepts a 3.00 s clip, and the session-upload test allows 25 s for decoding the upload.
+
 ## 2.14.5 — CI upkeep
 
 Nothing changes in the website or companion; the companion reports 2.14.5. This release exists so the new CI actions publish a release once.
