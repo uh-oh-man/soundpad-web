@@ -2,6 +2,20 @@
 
 Notable changes to Soundpad Web. Versions follow the website's `package.json`; the Windows companion is versioned separately and only needs updating when a release says so.
 
+## 2.13.5 — Dependency check
+
+**Optional companion update:** it picks up a Microsoft servicing patch; nothing looks or behaves differently.
+
+### Changed
+
+- Companion: `System.Drawing.Common` 10.0.0 → 10.0.13, Microsoft's monthly servicing release from 2026-10-13. It is used to read and resize sound icons. The newer 10.0.14 is under two weeks old, so it was left for later. 79 C# tests and all e2e tests pass, including the icon tests.
+- Checked and deliberately not updated:
+  - ESLint 10.14.0 is a day old.
+  - lucide-react 1.x and TypeScript 7 are major versions with no benefit here.
+  - NuGet test-tool major versions.
+  - `minimatch` 11, which fixes the dev-only advisory, is 4 days old and ESLint doesn't use it yet.
+  - `npm audit --omit=dev` reports 0 vulnerabilities in what the website ships.
+
 ## 2.13.4 — Review fixes for zoom and Temp
 
 Website only; the companion is unchanged apart from its version number (it reports 2.13.4). An independent review of every change since 2.12.3 found these two problems; nothing else.
