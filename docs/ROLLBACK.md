@@ -39,6 +39,20 @@ Your data in `%LOCALAPPDATA%\SoundpadWeb` keeps working (Temp's 16 MiB per-sound
 - Mimic clips are ordinary Temp entries, so older companions manage, keep or clean them up like any upload.
 - The Mimic buffer is never written to disk, so there is nothing to remove.
 
+### Tested, not just argued (2.10.1)
+
+On the owner's PC, the **pre-Mimic v2.3.1 companion**, built from its tag, was started on data folders written by 2.10.1. One was left mid-session and one after End Hosting. Both held Mimic clips, a trimmed copy, an echo copy and the `guestMimic` setting. The old companion started normally, loaded all three Temp sounds without any "invalid data" error, and shut down cleanly, the same as the current version on the same data.
+
+One expected side effect: v2.3.1 does not know `guestMimic`, so it drops that setting when it saves `state.json`. If you go back and later upgrade again, **Guest Mimic** is simply off, which is also the default. Turn it back on in Session & access.
+
+To repeat the test for any older version:
+
+```powershell
+companion\harness\bin\Release\net10.0-windows10.0.19041.0\win-x64\SoundpadWeb.Harness.exe --make-rollback-fixture C:\temp\rollback-data open
+companion\harness\bin\Release\net10.0-windows10.0.19041.0\win-x64\SoundpadWeb.Harness.exe --mock-only   # prints TEST_PIPE <name>
+<older>\SoundpadWeb.exe --data-dir C:\temp\rollback-data --pipe <name> --no-browser --site https://example.invalid/
+```
+
 ## Roll back the website
 
 The live site always serves `main`. To publish an older version from your fork:

@@ -2,6 +2,10 @@
 
 Notable changes to Soundpad Web. Versions follow the website's `package.json`; the Windows companion is versioned separately and only needs updating when a release says so.
 
+## Unreleased
+
+- **Rolling back is now tested.** The pre-Mimic v2.3.1 companion, built from its tag, starts cleanly on data written by the current version, both mid-session and after End Hosting, including Mimic clips and edited copies. The only side effect is that it drops the `guestMimic` setting, so Guest Mimic is off after a round trip. The new `SoundpadWeb.Harness.exe --make-rollback-fixture <folder> open|ended` writes such a data folder; the steps are in [docs/ROLLBACK.md](docs/ROLLBACK.md).
+
 ## 2.10.1 — Fixes from an independent review of Mimic
 
 **Update the Windows companion.** A separate reviewer with no knowledge of how the code was written read all of Mimic and reported ten problems. Each was checked against the code; all ten were real and are fixed.

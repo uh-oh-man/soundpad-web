@@ -127,6 +127,41 @@ if (args.FirstOrDefault() == "--peek-bench")
     Console.WriteLine($"With the shared 100 ms result: at most {each * 10 / 10:0.00}% of a core, however many guests.");
     return;
 }
+if (args.FirstOrDefault() == "--make-rollback-fixture" && args.Length == 3)
+{
+    // Writes a real data folder with every kind of data newer versions create (Mimic clips, a trimmed and an
+    // effect copy, the guestMimic permission, a mid-session journal), so an older companion can be started on
+    // it to prove rolling back works. args[1] = data folder, args[2] = "open" (leave the session open) or "ended".
+    var dir = args[1];
+    Directory.CreateDirectory(dir);
+    await using var soundpad = new MockSoundpad();
+    var all2 = System.Xml.Linq.XDocument.Parse(MockSoundpad.Sounds);
+    foreach (var element in all2.Descendants("Sound")) { var original = (string?)element.Attribute("url"); if (original == null) continue; var path = Path.Combine(dir, "fixture-" + Path.GetFileName(original)); if (!File.Exists(path)) AudioFixtures.Wave(path); element.SetAttributeValue("url", path); }
+    soundpad.AllXml = all2.ToString();
+    using var fixturePipe = new SoundpadPipe(soundpad.Name, true);
+    using var b = new Bridge(fixturePipe, new StateStore(dir));
+    var capture = new MimicFixture(); b.UseMimicCapture(capture); b.UseTranscriptEngine(new TranscriptFixture()); b.UseHotkey(new HotkeyFixture());
+    await b.Poll(true);
+    Command C(string op) => new(2, Guid.NewGuid().ToString(), DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(), op);
+    async Task Must(Task<Reply> reply, string what) { var r = await reply; if (!r.Ok) throw new InvalidOperationException(what + ": " + r.Error); }
+    await Must(b.Execute(C("beginSession") with { AudienceId = Guid.NewGuid().ToString() }, "host"), "begin");
+    await Must(b.Execute(C("permissions") with { Permissions = new(GuestMimic: true) }, "host"), "permissions");
+    await Must(b.Execute(C("mimicStart") with { SourceId = MimicFixture.Source.Id }, "host"), "start");
+    capture.Advance(TimeSpan.FromSeconds(8));
+    var peekReply = await b.Execute(C("mimicPeek"), "host");
+    var peek = System.Text.Json.JsonSerializer.Deserialize<MimicPeek>(System.Text.Json.JsonSerializer.Serialize(peekReply.Data, Json.Options), Json.Options)!;
+    await Must(b.Execute(C("mimicClip") with { MimicEnd = peek.End, PositionMs = 22000, EndMs = 30000, Name = "Rollback clip", SourceId = peek.RingId }, "host"), "clip");
+    var journalPath = Path.Combine(dir, "managed-audio", "journal.json");
+    var asset = System.Text.Json.JsonSerializer.Deserialize<AudioJournal>(File.ReadAllText(journalPath), Json.Options)!.Assets.Single();
+    await Must(b.Execute(C("trimAudio") with { AssetId = asset.Id, PositionMs = 500, EndMs = 4000 }, "host"), "trim");
+    await Must(b.Execute(C("trimAudio") with { AssetId = asset.Id, PositionMs = 0, EndMs = 8000, Action = "echo" }, "host"), "effect");
+    if (args[2] == "ended") await Must(b.Execute(C("endSession"), "host"), "end");
+    else b.Dispose();
+    Console.WriteLine($"FIXTURE_READY {dir} pipe={soundpad.Name}");
+    Console.WriteLine(File.ReadAllText(Path.Combine(dir, "state.json")).Contains("guestMimic") ? "state.json has guestMimic" : "state.json lacks guestMimic");
+    Console.WriteLine("journal assets: " + System.Text.Json.JsonSerializer.Deserialize<AudioJournal>(File.ReadAllText(journalPath), Json.Options)!.Assets.Count);
+    return;
+}
 if (args.FirstOrDefault() == "--analyze-file" && args.Length == 2)
 {
     var scratch = Path.Combine(Path.GetTempPath(), "soundpad-web-analysis-" + Guid.NewGuid().ToString("N"));
