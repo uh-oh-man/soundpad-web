@@ -745,3 +745,34 @@ body,
   outline: 2px solid var(--accent);
   outline-offset: 2px;
 }
+.temp-trim {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 8px;
+  margin-top: 8px;
+}
+.temp-trim label {
+  display: grid;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+.temp-trim input {
+  width: 110px;
+  min-height: 34px;
+  padding: 6px 8px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--surface-2);
+  color: var(--text-primary);
+  color-scheme: dark;
+}
+.temp-trim label:nth-of-type(3) input {
+  width: 200px;
+  max-width: 100%;
+}
+.temp-trim .muted {
+  flex: 1 1 100%;
+  font-size: 12px;
+}

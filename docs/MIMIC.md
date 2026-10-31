@@ -30,7 +30,7 @@ The capture engine in the companion is a port of Voice Replay Studio's `CaptureS
 
 Keyboard (2.5.1): **3**, **5** or **0** select the last 3, 5 or 10 seconds and move focus to the name field, **Enter** mimics, **Shift+Enter** mimics and plays, **Esc** clears the selection (press it again to close the window). This is the browser counterpart of Voice Replay Studio's F6 key; a website cannot register system-wide hotkeys.
 
-The clip becomes a normal Temp sound, so everything Temp already does applies: reverse, **Keep permanently** with host confirmation, and cleanup at End Hosting.
+The clip becomes a normal Temp sound, so everything Temp already does applies: reverse, **Keep permanently** with host confirmation, cleanup at End Hosting, and (2.8.0) **Trim**. Trim works on any Temp source, not only Mimic clips: open **Temp**, press **Trim**, set the start and end in seconds, and **Save trimmed copy**. Like Voice Replay Studio's trim, it saves a new version and leaves the original untouched. Guests can trim when the host allows uploads.
 
 ## Transcripts (2.5.0)
 
@@ -71,4 +71,4 @@ Requires companion 2.4. Older companions ignore the new permission, and the webs
 
 ## Not yet included
 
-Voice Replay Studio features that are not in the browser version yet: trimming a clip after it is saved (in the browser you set exact edges before clipping instead), That is the only one left; the system-wide F6 hotkey arrived in 2.7.0. Saved Mimic clips are named after their transcript, so the normal sound search finds them by their words. They remain available in the desktop app under `mimic/`.
+Every Voice Replay Studio feature that fits a shared soundboard is now in the browser version: rolling capture, live transcript, F6 hotkey, selection handles and trim. What stays desktop-only is its personal clip library with retranscription, since Soundpad Web keeps clips in Soundpad's Temp and permanent categories instead. Saved Mimic clips are named after their transcript, so the normal sound search finds them by their words. They remain available in the desktop app under `mimic/`.

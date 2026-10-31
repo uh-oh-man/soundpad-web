@@ -68,6 +68,12 @@ export function TempManager({
   const [saving, setSaving] = useState<{ asset: Asset; variant: Variant }>(),
     [directory, setDirectory] = useState(''),
     [category, setCategory] = useState('');
+  const [trimming, setTrimming] = useState<{
+    id: string;
+    from: number;
+    to: number;
+    name: string;
+  }>();
   const [refresh, setRefresh] = useState(0);
   useEffect(() => {
     if (!connected) return;
@@ -88,7 +94,7 @@ export function TempManager({
     };
   }, [connected, state.managedAudioVersion, refresh]);
   async function run(
-    op: 'audioPlay' | 'keepAudio' | 'removeAudio' | 'retryAudio' | 'retryCleanup',
+    op: 'audioPlay' | 'keepAudio' | 'removeAudio' | 'retryAudio' | 'retryCleanup' | 'trimAudio',
     fields: Parameters<typeof controller.run>[1] = {},
   ) {
     setPending(fields.assetId ?? 'manager');
@@ -99,6 +105,10 @@ export function TempManager({
         setSaving(undefined);
         controller.notify('Permanent file and Soundpad entry verified.', 'success');
       }
+      if (op === 'trimAudio') {
+        setTrimming(undefined);
+        controller.notify('Trimmed copy added to Temp. The original is unchanged.', 'success');
+      }
       setRefresh((n) => n + 1);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Temp action failed.');
@@ -106,6 +116,9 @@ export function TempManager({
       setPending('');
     }
   }
+  /** Length of a source's normal variant, from the native library entry Soundpad reports. */
+  const durationOf = (a: { normal?: { soundId?: string | null } | null }) =>
+    state.library.sounds.find((s) => s.id === a.normal?.soundId)?.durationMs ?? undefined;
   const categories = flattenCategories(state.library.categories).filter(
     (c) => c.category.id !== undefined,
   );
@@ -174,7 +187,79 @@ export function TempManager({
                       Play {orientation}
                     </button>
                   ))}
+                  {(host || state.permissions.guestUploads !== false) &&
+                    durationOf(a) !== undefined && (
+                      <button
+                        disabled={!!pending || !connected}
+                        onClick={() =>
+                          setTrimming({ id: a.id, from: 0, to: durationOf(a)! / 1000, name: '' })
+                        }
+                      >
+                        Trim
+                      </button>
+                    )}
                 </div>
+                {trimming?.id === a.id && (
+                  <form
+                    className="temp-trim"
+                    aria-label={`Trim ${a.name}`}
+                    onSubmit={(e) => {
+                      e.preventDefault();
+                      void run('trimAudio', {
+                        assetId: a.id,
+                        positionMs: Math.round(trimming.from * 1000),
+                        endMs: Math.round(trimming.to * 1000),
+                        ...(trimming.name.trim() && { name: trimming.name.trim() }),
+                      });
+                    }}
+                  >
+                    <label>
+                      Start (s)
+                      <input
+                        type="number"
+                        min={0}
+                        max={durationOf(a)! / 1000}
+                        step={0.05}
+                        value={trimming.from}
+                        onChange={(e) => setTrimming({ ...trimming, from: Number(e.target.value) })}
+                      />
+                    </label>
+                    <label>
+                      End (s)
+                      <input
+                        type="number"
+                        min={0}
+                        max={durationOf(a)! / 1000}
+                        step={0.05}
+                        value={trimming.to}
+                        onChange={(e) => setTrimming({ ...trimming, to: Number(e.target.value) })}
+                      />
+                    </label>
+                    <label>
+                      Name
+                      <input
+                        maxLength={100}
+                        placeholder={`${a.name} (trimmed)`}
+                        value={trimming.name}
+                        onChange={(e) => setTrimming({ ...trimming, name: e.target.value })}
+                      />
+                    </label>
+                    <span className="muted">
+                      {Math.max(0, trimming.to - trimming.from).toFixed(2)} s of{' '}
+                      {(durationOf(a)! / 1000).toFixed(2)} s · saved as a new Temp sound
+                    </span>
+                    <button
+                      className="primary"
+                      type="submit"
+                      disabled={!!pending || trimming.to - trimming.from < 0.1 || trimming.from < 0}
+                    >
+                      Save trimmed copy
+                    </button>
+                    <button type="button" onClick={() => setTrimming(undefined)}>
+                      Cancel
+                    </button>
+                  </form>
+                )}
                 {a.variants
                   .filter((v) => v.current || v.legacyApproval)
                   .map((v) => (

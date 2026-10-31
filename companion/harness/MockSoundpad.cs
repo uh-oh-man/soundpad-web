@@ -47,7 +47,7 @@ public sealed class MockSoundpad : IAsyncDisposable
             var m = Regex.Match(command, "^DoAddSound\\(\"([^\"]+)\", (\\d+), (?:-1|1)\\)$");
             if (!m.Success) return "R-400";
             int id = all.Root!.Elements("Sound").Select(e => (int)e.Attribute("index")!).DefaultIfEmpty(0).Max() + 1;
-            var sound = new XElement("Sound", new XAttribute("index", id), new XAttribute("url", m.Groups[1].Value), new XAttribute("title", "Uploaded audio")); all.Root.Add(sound); cats.Descendants("Category").Single(e => (int)e.Attribute("index")! == int.Parse(m.Groups[2].Value)).Add(new XElement(sound));
+            var sound = new XElement("Sound", new XAttribute("index", id), new XAttribute("url", m.Groups[1].Value), new XAttribute("title", "Uploaded audio")); try { using var wave = new NAudio.Wave.WaveFileReader(m.Groups[1].Value); sound.SetAttributeValue("duration", wave.TotalTime.ToString(@"mm\:ss\.fff")); } catch (Exception) { /* like Soundpad, length is optional */ } all.Root.Add(sound); cats.Descendants("Category").Single(e => (int)e.Attribute("index")! == int.Parse(m.Groups[2].Value)).Add(new XElement(sound));
         }
         else if (command.StartsWith("DoSelectCategory(")) selectedCategory = int.Parse(command[17..^1]);
         else if (command.StartsWith("DoSelectIndex(")) selectedIndex = int.Parse(command[14..^1]);

@@ -2,6 +2,19 @@
 
 Notable changes to Soundpad Web. Versions follow the website's `package.json`; the Windows companion is versioned separately and only needs updating when a release says so.
 
+## 2.8.0 — Trim
+
+**Update the Windows companion** for Trim; the website hides nothing for older companions, but the Trim button only works with 2.8.
+
+### Added
+
+- **Trim** for any Temp source (Mimic clips, uploads, native sounds prepared in Temp): set start and end in seconds and save a trimmed copy as a new Temp sound. The original is never changed, matching Voice Replay Studio. The host can always trim; guests can when uploads are allowed. Native sources in any format Soundpad Web can decode (WAV, OGG, MP3 and others) can be trimmed.
+- Tests: C# trim test (exact 1.00 s copy from a 2 s source, original intact, guest permission, bad ranges), e2e trim of a Mimic clip.
+
+### Changed
+
+- The test harness's mock Soundpad now reports the length of sounds added during a session, like real Soundpad does.
+
 ## 2.7.0 — F6 anywhere
 
 **Update the Windows companion** for the hotkey; the website works with 2.6 companions.

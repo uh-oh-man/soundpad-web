@@ -37,6 +37,7 @@ export const commandSchema = z
       'mimicClip',
       'mimicTranscribe',
       'mimicHotkey',
+      'trimAudio',
     ]),
     assetId: z.uuid().optional(),
     variantId: z.uuid().optional(),
@@ -226,9 +227,11 @@ export const slowOps: readonly Command['op'][] = [
   'endSession',
   'mimicStart',
   'mimicClip',
+  'trimAudio',
 ];
 export function isGuestAllowed(c: Command, s: Snapshot) {
   if (c.op === 'mimicPeek' || c.op === 'mimicClip') return s.permissions.guestMimic === true;
+  if (c.op === 'trimAudio') return s.permissions.guestUploads !== false;
   if (c.op === 'spotify')
     return (
       c.action !== 'enable' &&

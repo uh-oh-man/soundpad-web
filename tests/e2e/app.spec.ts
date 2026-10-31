@@ -1210,6 +1210,23 @@ test('Mimic: host listens, everyone sees it, and a selection becomes a playable 
   const sound = page.getByRole('button', { name: 'Play Fixture mimic', exact: true });
   await expect(sound).toBeEnabled();
   await expect.poll(() => harness.plays).toContain('DoPlaySound(5)');
+  // Trim saves an exact copy as a new Temp sound and keeps the original.
+  await page.keyboard.press('Escape');
+  await page.locator('#temp-manager > summary').click();
+  const source = page.locator('.temp-source', { hasText: 'Fixture mimic' });
+  await source.getByRole('button', { name: 'Trim', exact: true }).click();
+  const trim = page.getByRole('form', { name: 'Trim Fixture mimic' });
+  // Starts as the whole clip (just under 3 s: Mimic started listening 2.6 s before this clip).
+  await expect(trim.getByLabel('End (s)')).toHaveValue(/^2\.\d+$/);
+  await trim.getByLabel('Start (s)').fill('0.5');
+  await trim.getByLabel('End (s)').fill('2');
+  await expect(trim).toContainText(/1\.50 s of 2\.\d\d s/);
+  await trim.getByRole('button', { name: 'Save trimmed copy' }).click();
+  await expect(
+    page.getByRole('button', { name: 'Play Fixture mimic (trimmed)', exact: true }),
+  ).toBeEnabled();
+  await expect(page.getByRole('button', { name: 'Play Fixture mimic', exact: true })).toBeEnabled();
+  await page.getByRole('button', { name: 'Mimic', exact: true }).click();
   // Dragging selects an exact range; Clear returns to the live view.
   const canvas = dialog.locator('.mimic-wave canvas');
   const box = (await canvas.boundingBox())!;

@@ -202,4 +202,27 @@ public sealed class MimicTests : IDisposable
         Assert.True((await bridge.Execute(Cmd("endSession"), "host")).Ok);
         Assert.False(key.Active); Assert.False(bridge.Snapshot.Mimic!.Hotkey);
     }
+
+    [Fact]
+    public async Task TrimSavesAnExactCopyAndKeepsTheOriginal()
+    {
+        await using var mock = new MockSoundpad(); using var pipe = new SoundpadPipe(mock.Name, true); using var bridge = new Bridge(pipe, new StateStore(folder)); await bridge.Poll(true);
+        Assert.True((await bridge.Execute(Cmd("beginSession"), "host")).Ok);
+        var tone = Enumerable.Range(0, 32000).Select(i => 0.3f * MathF.Sin(i * 0.2f)).ToArray(); // 2 s at 16 kHz
+        Assert.True((await bridge.Upload(MimicRing.Wav(tone, 16000), "Long take.wav", "Alice")).Ok);
+        var journal = () => JsonSerializer.Deserialize<AudioJournal>(File.ReadAllText(Path.Combine(folder, "managed-audio", "journal.json")), Json.Options)!;
+        var original = journal().Assets.Single();
+        Assert.False((await bridge.Execute(Cmd("trimAudio") with { AssetId = original.Id, PositionMs = 500, EndMs = 550 }, "host")).Ok);
+        var trimmed = await bridge.Execute(Cmd("trimAudio") with { AssetId = original.Id, PositionMs = 500, EndMs = 1500 }, "host");
+        Assert.True(trimmed.Ok, trimmed.Error);
+        var assets = journal().Assets;
+        Assert.Equal(2, assets.Count);
+        var copy = assets.Single(a => a.Id != original.Id);
+        Assert.Equal("Long take (trimmed)", copy.Name);
+        using (var wave = new NAudio.Wave.WaveFileReader(copy.Variants.Single().Path)) Assert.InRange(wave.TotalTime.TotalMilliseconds, 990, 1010);
+        using (var wave = new NAudio.Wave.WaveFileReader(original.Variants.Single().Path)) Assert.InRange(wave.TotalTime.TotalMilliseconds, 1990, 2010);
+        Assert.True((await bridge.Execute(Cmd("permissions") with { Permissions = new(GuestUploads: false) }, "host")).Ok);
+        Assert.False((await bridge.Execute(Cmd("trimAudio") with { AssetId = original.Id, PositionMs = 0, EndMs = 1000 }, "guest")).Ok);
+        Assert.False((await bridge.Execute(Cmd("trimAudio") with { AssetId = Guid.NewGuid().ToString(), PositionMs = 0, EndMs = 1000 }, "host")).Ok);
+    }
 }
