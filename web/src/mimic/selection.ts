@@ -12,6 +12,18 @@ export const QUICK_SECONDS = [3, 5, 10];
 /** Keys that select the last N seconds, like Voice Replay Studio's F6 "save the last few seconds". */
 export const QUICK_KEYS: Record<string, number> = { '3': 3, '5': 5, '0': 10 };
 
+/** Zoom choices for the waveform, like Voice Replay Studio's 5/10/30 s Live Buffer views. */
+export const VIEW_SECONDS = [30, 10, 5];
+
+/**
+ * The part of the window the waveform shows: the last `viewMs`, widened to the whole window when the
+ * selection starts earlier, so a selection (say, from an older transcript line) is never off-screen.
+ */
+export function visibleRange(windowMs: number, viewMs: number, selection: Selection | null) {
+  const start = Math.max(0, windowMs - viewMs);
+  return { start: selection && selection.from < start ? 0 : start, end: windowMs };
+}
+
 /** Seconds before "now" for a position in the window, e.g. "−4.2 s". */
 export const ago = (ms: number, windowMs: number) =>
   windowMs - ms < 50 ? 'now' : `−${((windowMs - ms) / 1000).toFixed(1)} s`;

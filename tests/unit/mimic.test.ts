@@ -7,6 +7,7 @@ import {
   preferredSource,
   sourceKey,
   transcriptFor,
+  visibleRange,
 } from '../../web/src/mimic/selection';
 import {
   command,
@@ -17,6 +18,18 @@ import {
 } from '../../web/src/protocol';
 
 describe('Mimic selection', () => {
+  it('zooms to the last seconds but widens to show an older selection', () => {
+    expect(visibleRange(30000, 10000, null)).toEqual({ start: 20000, end: 30000 });
+    expect(visibleRange(30000, 10000, { from: 25000, to: 28000 })).toEqual({
+      start: 20000,
+      end: 30000,
+    });
+    expect(visibleRange(30000, 10000, { from: 12000, to: 28000 })).toEqual({
+      start: 0,
+      end: 30000,
+    });
+    expect(visibleRange(4000, 10000, null)).toEqual({ start: 0, end: 4000 });
+  });
   it('orders, clamps and rejects too-short ranges', () => {
     expect(normalizeSelection(9000.4, 2000.6, 30000)).toEqual({ from: 2001, to: 9000 });
     expect(normalizeSelection(-50, 40000, 30000)).toEqual({ from: 0, to: 30000 });

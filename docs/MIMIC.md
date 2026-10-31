@@ -42,7 +42,7 @@ The companion's console window logs these events with the time, including who ma
    - use **Last 3 s / 5 s / 10 s**;
    - or use the keyboard: **3**, **5** or **0** select the last 3, 5 or 10 seconds and focus the name field. On the focused waveform, **Left/Right** move the end, **Shift+Left/Right** the start, and **Ctrl** makes 1-second steps.
 
-   A selection freezes the view so the moment stays put.
+   A selection freezes the view so the moment stays put. The **30 s / 10 s / 5 s** buttons under the waveform zoom in on the most recent seconds, like Voice Replay Studio's Live Buffer views, which makes short moments easier to pick, especially on a phone. Your browser remembers the zoom. A selection that starts earlier than the zoomed view shows the whole buffer, so it is never off-screen.
 3. The host can press **Preview** to hear the selection on their own PC only. It plays in the host's browser tab, never through Soundpad or to guests, and saves nothing.
 4. Optionally type a name; otherwise the transcript's words, or the time, are used. Then press **Mimic it** (or **Enter**) to add the clip to Temp, or **Mimic & play** (**Shift+Enter**) to also play it through Soundpad. **Esc** clears the selection; press it again to close the window.
 

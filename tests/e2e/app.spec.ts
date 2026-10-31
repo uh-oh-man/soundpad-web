@@ -1317,6 +1317,27 @@ test('Mimic: host listens, everyone sees it, and a selection becomes a playable 
   await expect(dialog.locator('.mimic-range')).toContainText('· 5.5 s');
   await dialog.getByRole('button', { name: 'Clear' }).click();
   await expect(dialog.locator('.mimic-range')).toHaveCount(0);
+  // Zoomed to the last 10 s, the same drag covers a third of the time, ending at the same point.
+  const zoom = dialog.getByRole('group', { name: 'Waveform zoom' });
+  await zoom.getByRole('button', { name: '10 s', exact: true }).click();
+  await expect(zoom.getByRole('button', { name: '10 s', exact: true })).toHaveAttribute(
+    'aria-pressed',
+    'true',
+  );
+  await page.mouse.move(box.x + box.width * 0.6, box.y + box.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(box.x + box.width * 0.9, box.y + box.height / 2);
+  await page.mouse.up();
+  await expect(dialog.locator('.mimic-range')).toContainText('−4.0 s → −1.0 s · 3.0 s');
+  await dialog.getByRole('button', { name: 'Clear' }).click();
+  // A selection that starts before the zoomed view widens it to the full buffer.
+  await dialog.getByRole('button', { name: 'Last 10 s', exact: true }).click();
+  await expect(canvas).toHaveAccessibleName(/showing the last 10 seconds/);
+  await canvas.focus();
+  await page.keyboard.press('Shift+ArrowLeft');
+  await expect(canvas).toHaveAccessibleName(/showing the last 30 seconds/);
+  await dialog.getByRole('button', { name: 'Clear' }).click();
+  await zoom.getByRole('button', { name: '30 s', exact: true }).click();
   // The F6 hotkey is host-only and reports its state (the harness uses a fixture key, never real F6).
   await dialog.getByLabel('F6 hotkey').check();
   await expect(dialog.getByText('Press F6 in any app to save the last 10 s')).toBeVisible();

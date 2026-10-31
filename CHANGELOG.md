@@ -2,6 +2,18 @@
 
 Notable changes to Soundpad Web. Versions follow the website's `package.json`; the Windows companion is versioned separately and only needs updating when a release says so.
 
+## 2.13.0 — Mimic waveform zoom
+
+Website only; the companion is unchanged apart from its version number (it reports 2.13.0).
+
+### Added
+
+- **Zoom the Mimic waveform.** Buttons under the waveform show the last **30 s**, **10 s** or **5 s**, like Voice Replay Studio's Live Buffer views. Zoomed in, the same drag covers less time, so a short moment is easier to pick, especially on a phone. Ticks mark every second when zoomed in. Each browser remembers its zoom, and a selection that starts before the zoomed view (an older transcript line, or a start nudged back) shows the whole buffer so it is never off-screen. Nothing changes for the companion or guests' permissions: the waveform still uses the same 300 shared levels.
+
+### Tests
+
+- Unit test for the visible-range rule; the Mimic e2e test drags on the 10 s view (−4.0 s → −1.0 s) and checks that a selection reaching past it widens the view.
+
 ## 2.12.5 — Guest accessibility
 
 Website fixes; the companion is unchanged apart from its version number, which is back in step with the website (it reports 2.12.5).

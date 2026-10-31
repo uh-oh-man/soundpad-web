@@ -101,8 +101,24 @@
 .mimic-axis {
   display: flex;
   justify-content: space-between;
+  align-items: center;
   font-size: 11px;
   color: var(--text-dim);
+}
+/* Zoom: show the last 30, 10 or 5 seconds of the buffer. */
+.mimic-zoom {
+  display: inline-flex;
+  gap: 2px;
+}
+.mimic-zoom button {
+  font-size: 11px;
+  padding: 2px 8px;
+  min-height: 24px;
+}
+.mimic-zoom button[aria-pressed='true'] {
+  color: var(--text-primary);
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 15%, transparent);
 }
 .mimic-quick,
 .mimic-actions {
