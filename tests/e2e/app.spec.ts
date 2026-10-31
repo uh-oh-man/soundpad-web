@@ -1280,8 +1280,9 @@ test('Mimic: host listens, everyone sees it, and a selection becomes a playable 
     .filter({ has: page.getByText('Fixture mimic', { exact: true }) });
   await source.getByRole('button', { name: 'Edit copy', exact: true }).click();
   const trim = page.getByRole('form', { name: 'Edit a copy of Fixture mimic' });
-  // Starts as the whole clip (just under 3 s: Mimic started listening 2.6 s before this clip).
-  await expect(trim.getByLabel('End (s)')).toHaveValue(/^2\.\d+$/);
+  // Starts as the whole clip: the last 3 s, or a little less if listening began under 3 s earlier
+  // (a slow machine takes longer to get here).
+  await expect(trim.getByLabel('End (s)')).toHaveValue(/^(2\.\d+|3)$/);
   await trim.getByLabel('Start (s)').fill('0.5');
   await trim.getByLabel('End (s)').fill('2');
   await expect(trim).toContainText(/1\.50 s of 2\.\d\d s/);
@@ -1522,6 +1523,10 @@ test('a guest whose browser has no WebRTC is told why at once', async ({
     });
     const guest = await context.newPage();
     await guest.goto(url);
+    // A fresh browser context loads the whole app; give a slow CI runner time before the name prompt.
+    await expect(guest.getByRole('dialog', { name: /gamer name/i })).toBeVisible({
+      timeout: 30000,
+    });
     await finishGuestName(guest, 'No RTC');
     await expect(guest.getByText('WebRTC is turned off or not supported')).toBeVisible({
       timeout: 3000,
@@ -1530,6 +1535,33 @@ test('a guest whose browser has no WebRTC is told why at once', async ({
   } finally {
     await context.close();
   }
+});
+
+test('wheel zoom works when the waveform data arrives late', async ({ page, harness }) => {
+  // Hold back waveform requests, as a busy PC would, so the waveform surface mounts after the zoom
+  // logic first ran. Before 2.14.4 the wheel listener was never attached in that case.
+  await page.routeWebSocket(/.*/, (ws) => {
+    const server = ws.connectToServer();
+    ws.onMessage((message) => {
+      if (String(message).includes('"waveform"')) setTimeout(() => server.send(message), 1500);
+      else server.send(message);
+    });
+    server.onMessage((message) => ws.send(message));
+  });
+  await host(page, harness);
+  await page.getByLabel('Search sounds').fill('Airhorn');
+  await page.getByLabel('View mode').selectOption('waveforms');
+  const wave = page
+    .locator('.sound-entry')
+    .filter({ has: page.getByRole('button', { name: 'Play from start: Airhorn', exact: true }) })
+    .locator('.wave-block');
+  const surface = wave.getByRole('slider', { name: 'Seek Airhorn', exact: true });
+  await expect(surface).toBeVisible();
+  await surface.hover();
+  await page.mouse.wheel(0, -240);
+  await expect(
+    wave.getByRole('button', { name: 'Fit waveform Airhorn', exact: true }),
+  ).toBeVisible();
 });
 
 test('Temp keeps the native original distinct from its generated reverse', async ({

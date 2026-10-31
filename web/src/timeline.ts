@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type HTMLAttributes } from 'react';
+import { useCallback, useEffect, useRef, useState, type HTMLAttributes } from 'react';
 export const MAX_ZOOM = 128;
 export type Viewport = { zoom: number; offset: number };
 export function boundedView(total: number, zoom: number, offset: number): Viewport {
@@ -43,7 +43,14 @@ export function useTimeline({
   range?: (start: number, end: number) => void;
   persistZoom?: (zoom: number) => void;
 }) {
-  const surface = useRef<HTMLDivElement>(null);
+  // A callback ref: the surface can mount after this hook first runs (the waveform appears once its data
+  // arrives), and the wheel listener below must follow whichever element is actually there.
+  const surfaceNode = useRef<HTMLDivElement | null>(null);
+  const [node, setNode] = useState<HTMLDivElement | null>(null);
+  const surface = useCallback((element: HTMLDivElement | null) => {
+    surfaceNode.current = element;
+    setNode(element);
+  }, []);
   const [view, setView] = useState<Viewport>(() => boundedView(duration, initialZoom, 0));
   const [selected, setSelected] = useState(0),
     [preview, setPreview] = useState<number | null>(null);
@@ -68,7 +75,7 @@ export function useTimeline({
   const effective = boundedView(duration, view.zoom, view.offset),
     span = duration / effective.zoom;
   function fraction(x: number) {
-    const rect = surface.current?.getBoundingClientRect();
+    const rect = surfaceNode.current?.getBoundingClientRect();
     return rect?.width ? Math.max(0, Math.min(1, (x - rect.left) / rect.width)) : 0;
   }
   function timeAt(x: number) {
@@ -81,7 +88,6 @@ export function useTimeline({
     setPreview(null);
   }
   useEffect(() => {
-    const node = surface.current;
     if (!node || !duration) return;
     const wheel = (event: WheelEvent) => {
       event.preventDefault();
@@ -104,7 +110,7 @@ export function useTimeline({
     };
     node.addEventListener('wheel', wheel, { passive: false });
     return () => node.removeEventListener('wheel', wheel);
-  }, [duration, identity]);
+  }, [node, duration, identity]);
   const interactions: HTMLAttributes<HTMLDivElement> = {
     onPointerDown(event) {
       if (event.button !== 0 && event.button !== 1) return;
@@ -145,7 +151,7 @@ export function useTimeline({
       points.current.set(event.pointerId, { x: event.clientX, y: event.clientY });
       const current = gesture.current;
       if (!current) return;
-      const width = Math.max(1, surface.current!.getBoundingClientRect().width);
+      const width = Math.max(1, surfaceNode.current!.getBoundingClientRect().width);
       if (current.kind === 'pinch' && points.current.size >= 2) {
         const [a, b] = [...points.current.values()],
           center = (a.x + b.x) / 2;

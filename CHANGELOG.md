@@ -2,6 +2,21 @@
 
 Notable changes to Soundpad Web. Versions follow the website's `package.json`; the Windows companion is versioned separately and only needs updating when a release says so.
 
+## 2.14.4 — Wheel zoom on waveforms that load late
+
+Website only; the companion is unchanged apart from its version number (it reports 2.14.4).
+
+### Fixed
+
+- **Scrolling to zoom a waveform now always works.** The zoom logic attached its wheel listener when a sound first appeared. If the waveform data arrived afterwards (likely on a busy PC or slow link) and reported the same length the library already knew, the waveform surface mounted without a listener. Scrolling then did nothing, both in the Waveforms view and on the small waveforms of tiles without artwork. The listener now follows whichever surface is mounted. The new WebKit step in CI found this on GitHub's slower runner; it was not a Safari issue.
+
+### Tests and CI
+
+- New e2e test: waveform requests are held back 1.5 s, then wheel zoom must show "Fit waveform". It fails on 2.14.3.
+- The Mimic e2e test accepted only clips just under 3 s; on a slower machine the clip is exactly 3 s, so both are now accepted.
+- The no-WebRTC guest test waits up to 30 s for the name prompt in its fresh browser context.
+- **2.14.3 has no GitHub release.** Its CI run failed on these points, so no EXE was published, but its website changes went live. 2.14.4 contains everything from 2.14.3.
+
 ## 2.14.3 — Safari checks and a clear message when WebRTC is blocked
 
 Website only; the companion is unchanged apart from its version number (it reports 2.14.3).
