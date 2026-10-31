@@ -132,3 +132,56 @@
 .mimic-panel input::placeholder {
   color: var(--text-dim);
 }
+.mimic-transcribe {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-muted);
+}
+.mimic-transcribe label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-primary);
+}
+.mimic-transcribe small {
+  flex: 1 1 200px;
+  min-width: 0;
+  font-size: 12px;
+}
+.mimic-transcript {
+  display: grid;
+  gap: 2px;
+  max-height: 168px;
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  list-style: none;
+}
+.mimic-transcript button {
+  display: flex;
+  gap: 10px;
+  width: 100%;
+  padding: 6px 8px;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--text-primary);
+  font-size: 13px;
+  text-align: left;
+}
+.mimic-transcript button[aria-pressed='true'] {
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--line));
+  background: color-mix(in srgb, var(--accent) 14%, var(--surface-1));
+}
+.mimic-transcript time {
+  flex: none;
+  width: 52px;
+  color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
+}
+.mimic-transcript span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}

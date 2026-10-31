@@ -8,6 +8,28 @@ if (args.Contains("--licenses"))
     foreach (var resource in assembly.GetManifestResourceNames().Where(n => n.Contains("Licenses"))) { using var stream = assembly.GetManifestResourceStream(resource)!; using var reader = new StreamReader(stream); Console.WriteLine(reader.ReadToEnd()); }
     return;
 }
+if (args.FirstOrDefault() == "--transcribe-file" && args.Length >= 2)
+{
+    // Diagnostic: transcribe a local audio file with Mimic's engine. --download fetches the model first if missing.
+    if (args.Contains("--verbose")) Whisper.net.Logger.LogProvider.AddConsoleLogging(Whisper.net.Logger.WhisperLogLevel.Debug);
+    var models = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "SoundpadWeb", "models");
+    using var engine = new WhisperEngine(Path.Combine(models, "ggml-base.en.bin"), null, Path.Combine(Path.GetDirectoryName(models)!, "native", "whisper-1.9.1"));
+    try
+    {
+        if (!engine.Available && args.Contains("--download")) { Console.WriteLine("Downloading the speech model…"); await engine.Prepare(default); }
+        using var file = new NAudio.Wave.WaveFileReader(args[1]);
+        var reader = NAudio.Wave.WaveExtensionMethods.ToSampleProvider(file);
+        var all = new List<float>(); var frame = new float[reader.WaveFormat.Channels * 4096]; int read;
+        while ((read = reader.Read(frame)) > 0)
+            for (int i = 0; i + reader.WaveFormat.Channels <= read; i += reader.WaveFormat.Channels) all.Add(frame.AsSpan(i, reader.WaveFormat.Channels).ToArray().Average());
+        var clock = Stopwatch.StartNew();
+        foreach (var span in await engine.Transcribe(MimicTranscriber.Resample(all.ToArray(), reader.WaveFormat.SampleRate, MimicTranscriber.SpeechRate), default))
+            Console.WriteLine($"[{span.Start.TotalSeconds:0.0} s - {span.End.TotalSeconds:0.0} s] {span.Text.Trim()}");
+        Console.WriteLine($"Transcribed {all.Count / (double)reader.WaveFormat.SampleRate:0.0} s of audio in {clock.Elapsed.TotalSeconds:0.0} s.");
+    }
+    catch (Exception ex) when (ex is not OutOfMemoryException) { Console.Error.WriteLine("Transcription failed: " + ex.Message); Environment.ExitCode = 1; }
+    return;
+}
 try
 {
     string? Arg(string key) { int i = Array.IndexOf(args, key); return i >= 0 && i + 1 < args.Length ? args[i + 1] : null; }

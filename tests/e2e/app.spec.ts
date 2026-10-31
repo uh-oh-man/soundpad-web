@@ -1227,6 +1227,28 @@ test('Mimic: host listens, everyone sees it, and a selection becomes a playable 
   await expect(page.getByLabel('Allow guest Mimic')).not.toBeChecked();
 });
 
+test('Mimic transcript: lines appear, a click selects them, and they name the clip', async ({
+  page,
+  harness,
+}) => {
+  await host(page, harness);
+  await page.getByRole('button', { name: 'Mimic', exact: true }).click();
+  const dialog = page.getByRole('dialog', { name: 'Mimic' });
+  await dialog.getByRole('button', { name: 'Start listening' }).click();
+  await dialog.getByLabel('Transcribe Mimic audio').check();
+  const transcript = dialog.getByRole('list', { name: 'Transcript' });
+  const line = transcript.getByRole('button', { name: /Fixture tone \d+/ }).first();
+  await expect(line).toBeVisible({ timeout: 15000 });
+  const words = (await line.locator('span').innerText()).trim();
+  await line.click();
+  await expect(line).toHaveAttribute('aria-pressed', 'true');
+  await expect(dialog.getByLabel('Clip name')).toHaveAttribute('placeholder', words);
+  await dialog.getByRole('button', { name: 'Mimic it' }).click();
+  await expect(page.getByRole('button', { name: `Play ${words}`, exact: true })).toBeEnabled();
+  await dialog.getByLabel('Transcribe Mimic audio').uncheck();
+  await expect(transcript).toHaveCount(0);
+});
+
 test('live Nostr/WebRTC: guests see Mimic only when allowed and can clip from it', async ({
   browser,
   page,

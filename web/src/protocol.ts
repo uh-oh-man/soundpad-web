@@ -35,6 +35,7 @@ export const commandSchema = z
       'mimicStop',
       'mimicPeek',
       'mimicClip',
+      'mimicTranscribe',
     ]),
     assetId: z.uuid().optional(),
     variantId: z.uuid().optional(),
@@ -56,7 +57,9 @@ export const commandSchema = z
     endMs: z.number().int().min(0).max(1800000).optional(),
     epoch: z.uuid().optional(),
     repeat: z.boolean().optional(),
-    action: z.enum(['status', 'enable', 'disable', 'toggle', 'next', 'previous']).optional(),
+    action: z
+      .enum(['status', 'enable', 'disable', 'toggle', 'next', 'previous', 'download'])
+      .optional(),
     permissions: z
       .object({
         remotePlayback: z.boolean(),
@@ -176,6 +179,9 @@ export const snapshotSchema = z.object({
       source: z.string().max(512).nullable(),
       status: z.string().max(600),
       windowMs: z.number().int().positive(),
+      transcribing: z.boolean().optional(),
+      transcriptModel: z.boolean().optional(),
+      transcriptStatus: z.string().max(600).optional(),
     })
     .nullable()
     .optional(),

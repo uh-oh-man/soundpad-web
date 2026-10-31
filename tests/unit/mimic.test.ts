@@ -1,5 +1,10 @@
 import { describe, it, expect } from 'vitest';
-import { ago, normalizeSelection } from '../../web/src/components/MimicPanel';
+import {
+  ago,
+  lineSelection,
+  normalizeSelection,
+  transcriptFor,
+} from '../../web/src/components/MimicPanel';
 import {
   command,
   commandSchema,
@@ -46,5 +51,25 @@ describe('Mimic protocol', () => {
       windowMs: 30000,
     };
     expect(snapshotSchema.parse({ ...EMPTY, mimic }).mimic).toEqual(mimic);
+  });
+});
+
+describe('Mimic transcript', () => {
+  const lines = [
+    { startMs: 20000, endMs: 22000, text: ' ask not what your country ' },
+    { startMs: 22100, endMs: 24000, text: 'can do for you' },
+    { startMs: 29900, endMs: 30400, text: 'still talking' },
+  ];
+  it('selects a line with padding, clamped to the window', () => {
+    expect(lineSelection(lines[0], 30000)).toEqual({ from: 19850, to: 22150 });
+    expect(lineSelection(lines[2], 30000)).toEqual({ from: 29750, to: 30000 });
+  });
+  it('names a clip after the words inside the selection', () => {
+    expect(transcriptFor(lines, { from: 19000, to: 25000 })).toBe(
+      'ask not what your country can do for you',
+    );
+    expect(transcriptFor(lines, { from: 0, to: 1000 })).toBe('');
+    const long = [{ startMs: 0, endMs: 1000, text: 'word '.repeat(40) }];
+    expect(transcriptFor(long, { from: 0, to: 1000 })).toHaveLength(100);
   });
 });

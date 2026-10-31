@@ -8,8 +8,8 @@ namespace SoundpadWeb;
 // Capture never starts on its own, never records microphones, and audio never leaves this PC.
 
 public sealed record MimicSource(string Id, string Name, string Kind);
-public sealed record MimicState(bool Active, string? Source, string Status, int WindowMs);
-public sealed record MimicPeek(long End, int Rate, int WindowMs, int[] Levels, bool Active);
+public sealed record MimicState(bool Active, string? Source, string Status, int WindowMs, bool Transcribing = false, bool TranscriptModel = false, string TranscriptStatus = "Off");
+public sealed record MimicPeek(long End, int Rate, int WindowMs, int[] Levels, bool Active, TranscriptLine[]? Transcript = null);
 
 /// <summary>Mono rolling sample buffer addressed by an absolute frame counter.</summary>
 public sealed class MimicRing(int rate, int seconds)

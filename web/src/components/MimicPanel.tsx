@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type PointerEvent } from 'react';
-import { Mic2, Play, RefreshCw, Scissors, Square, X } from 'lucide-react';
+import { Captions, Download, Mic2, Play, RefreshCw, Scissors, Square, X } from 'lucide-react';
 import { z } from 'zod';
 import { controller } from '../controller';
 import type { Snapshot } from '../protocol';
@@ -10,6 +10,12 @@ const peekSchema = z.object({
   windowMs: z.number().int().positive(),
   levels: z.array(z.number().int().min(0).max(1000)).max(2000),
   active: z.boolean(),
+  transcript: z
+    .array(
+      z.object({ startMs: z.number().int(), endMs: z.number().int(), text: z.string().max(2000) }),
+    )
+    .max(500)
+    .nullish(),
 });
 const sourcesSchema = z.object({
   sources: z
@@ -17,7 +23,27 @@ const sourcesSchema = z.object({
     .max(500),
 });
 export type MimicPeek = z.infer<typeof peekSchema>;
+export type TranscriptLine = NonNullable<MimicPeek['transcript']>[number];
 type Selection = { from: number; to: number };
+
+/** Selection covering a transcript line, with a little padding so words aren't clipped. */
+export function lineSelection(line: TranscriptLine, windowMs: number): Selection {
+  return {
+    from: Math.max(0, line.startMs - 150),
+    to: Math.min(windowMs, Math.max(line.endMs + 150, line.startMs + MIN_MS)),
+  };
+}
+
+/** Words spoken inside a selection, usable as the clip's default name. */
+export function transcriptFor(lines: TranscriptLine[], selection: Selection) {
+  const text = lines
+    .filter((l) => Math.min(l.endMs, selection.to) - Math.max(l.startMs, selection.from) > 0)
+    .map((l) => l.text.trim())
+    .join(' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return text.length > 100 ? text.slice(0, 99).trimEnd() + '…' : text;
+}
 
 const POLL_MS = 500;
 const MIN_MS = 150;
@@ -139,7 +165,16 @@ export function MimicPanel({
   const [selection, setSelection] = useState<Selection | null>(null);
   const [name, setName] = useState('');
   const [busy, setBusy] = useState(false);
+  // The checkbox shows the requested state until the companion's snapshot confirms it.
+  const [wantTranscript, setWantTranscript] = useState<boolean | null>(null);
+  const transcribing = wantTranscript ?? !!mimic?.transcribing;
+  useEffect(() => {
+    if (wantTranscript !== null && wantTranscript === !!mimic?.transcribing)
+      setWantTranscript(null);
+  }, [wantTranscript, mimic?.transcribing]);
   const allowed = host || state.permissions.guestMimic === true;
+  const lines = (peek?.transcript ?? []).filter((l) => l.endMs > 0);
+  const suggestion = peek && selection ? transcriptFor(lines, selection) : '';
 
   const loadSources = useCallback(async () => {
     try {
@@ -193,7 +228,7 @@ export function MimicPanel({
         mimicEnd: peek.end,
         positionMs: selection.from,
         endMs: selection.to,
-        ...(name.trim() ? { name: name.trim() } : {}),
+        ...((name.trim() || suggestion) && { name: name.trim() || suggestion }),
       })) as { assetId?: string } | undefined;
       controller.notify('Mimicked! The clip is in Temp for this session.', 'success');
       setSelection(null);
@@ -270,6 +305,47 @@ export function MimicPanel({
           )}
         </div>
       )}
+      {host && (
+        <div className="mimic-transcribe">
+          <Captions size={16} />
+          {mimic?.transcriptModel ? (
+            <label>
+              <input
+                type="checkbox"
+                aria-label="Transcribe Mimic audio"
+                checked={transcribing}
+                disabled={busy}
+                onChange={async (e) => {
+                  const on = e.target.checked;
+                  setWantTranscript(on);
+                  setBusy(true);
+                  await controller
+                    .run('mimicTranscribe', { action: on ? 'enable' : 'disable' })
+                    .catch(() => setWantTranscript(null));
+                  setBusy(false);
+                }}
+              />
+              Transcript
+            </label>
+          ) : (
+            <button
+              disabled={busy || mimic?.transcriptStatus?.startsWith('Downloading')}
+              onClick={async () => {
+                setBusy(true);
+                await controller.run('mimicTranscribe', { action: 'download' }).catch(() => {});
+                setBusy(false);
+              }}
+            >
+              <Download size={15} /> Get transcripts (148 MB, once)
+            </button>
+          )}
+          <small>
+            {mimic?.transcriptStatus && mimic.transcriptStatus !== 'Off'
+              ? mimic.transcriptStatus
+              : 'Speech is recognized on this PC; only the text is shared.'}
+          </small>
+        </div>
+      )}
       {!allowed ? (
         <p className="muted">The host has not enabled Mimic for guests.</p>
       ) : !active ? (
@@ -279,6 +355,33 @@ export function MimicPanel({
       ) : peek ? (
         <>
           <MimicWave peek={peek} selection={selection} onSelect={setSelection} />
+          {transcribing && (
+            <ol className="mimic-transcript" aria-label="Transcript">
+              {lines.length ? (
+                lines.map((line) => {
+                  const chosen =
+                    !!selection &&
+                    Math.min(line.endMs, selection.to) - Math.max(line.startMs, selection.from) > 0;
+                  return (
+                    <li key={`${line.startMs}-${line.text}`}>
+                      <button
+                        aria-pressed={chosen}
+                        onClick={() => {
+                          setSelection(lineSelection(line, peek.windowMs));
+                          setName('');
+                        }}
+                      >
+                        <time>{ago(Math.max(0, line.startMs), peek.windowMs)}</time>
+                        <span>{line.text}</span>
+                      </button>
+                    </li>
+                  );
+                })
+              ) : (
+                <li className="muted">Words will appear here a few seconds after they are said.</li>
+              )}
+            </ol>
+          )}
           <div className="mimic-quick" role="group" aria-label="Quick select">
             {QUICK_SECONDS.map((s) => (
               <button
@@ -304,7 +407,7 @@ export function MimicPanel({
               </span>
               <input
                 aria-label="Clip name"
-                placeholder="Name (optional)"
+                placeholder={suggestion || 'Name (optional)'}
                 maxLength={100}
                 value={name}
                 onChange={(e) => setName(e.target.value)}

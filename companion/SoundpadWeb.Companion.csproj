@@ -1,7 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <OutputType>Exe</OutputType><TargetFramework>net10.0-windows10.0.19041.0</TargetFramework><Nullable>enable</Nullable><ImplicitUsings>enable</ImplicitUsings>
-    <AssemblyName>SoundpadWeb</AssemblyName><Version>2.4.0</Version><RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <AssemblyName>SoundpadWeb</AssemblyName><Version>2.5.0</Version><RuntimeIdentifier>win-x64</RuntimeIdentifier>
     <PublishSingleFile>true</PublishSingleFile><SelfContained>true</SelfContained><IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
     <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile><DebugType>embedded</DebugType>
   </PropertyGroup>
@@ -10,4 +10,6 @@
   <ItemGroup><EmbeddedResource Include="../docs/licenses/*.rtf" Link="Licenses/%(Filename)%(Extension)"/></ItemGroup>
   <ItemGroup><AssemblyMetadata Include="WebsiteUrl" Value="$(WebsiteUrl)" Condition="'$(WebsiteUrl)' != ''"/></ItemGroup>
   <ItemGroup><FrameworkReference Update="Microsoft.NETCore.App" RuntimeFrameworkVersion="10.0.13"/><FrameworkReference Update="Microsoft.AspNetCore.App" RuntimeFrameworkVersion="10.0.13"/></ItemGroup>
-<ItemGroup><PackageReference Include="NAudio.Wasapi" Version="3.3.0"/><PackageReference Include="NVorbis" Version="0.10.5"/></ItemGroup></Project>
+<ItemGroup><PackageReference Include="NAudio.Wasapi" Version="3.3.0"/><PackageReference Include="NVorbis" Version="0.10.5"/><PackageReference Include="Whisper.net" Version="1.9.1"/><PackageReference Include="Whisper.net.Runtime" Version="1.9.1" GeneratePathProperty="true"/></ItemGroup>
+  <!-- Whisper's native DLLs are embedded and written to the data folder on first use, so the companion stays one EXE. -->
+  <ItemGroup><EmbeddedResource Include="$(PkgWhisper_net_Runtime)/build/win-x64/*.dll" LogicalName="WhisperNative.%(Filename)%(Extension)" Visible="false"/></ItemGroup></Project>

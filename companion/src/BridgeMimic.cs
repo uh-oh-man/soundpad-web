@@ -6,12 +6,20 @@ public sealed partial class Bridge
     /// <summary>Audio kept beyond the visible window, so a selection survives the round trip from a guest.</summary>
     public const int MimicGraceSeconds = 15;
     private IMimicCapture mimicCapture = new WasapiMimicCapture();
-    private MimicState MimicSnapshot => new(mimicCapture.Running, mimicCapture.SourceName, mimicCapture.Status, MimicWindowMs);
+    private MimicTranscriber transcriber = new(new WhisperEngine(
+        Path.Combine(store.DirectoryPath, "models", "ggml-base.en.bin"),
+        // Reuse the model Voice Replay Studio already downloaded, if this PC has one.
+        Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Voice Replay Studio", "Models", "ggml-base.en.bin"),
+        Path.Combine(store.DirectoryPath, "native", "whisper-1.9.1")));
+    private MimicState MimicSnapshot => new(mimicCapture.Running, mimicCapture.SourceName, mimicCapture.Status, MimicWindowMs, transcriber.Enabled, transcriber.ModelReady, transcriber.Status);
+
+    /// <summary>Replaces the speech engine; tests use a deterministic fixture instead of Whisper.</summary>
+    public void UseTranscriptEngine(ITranscriptEngine engine) { transcriber.Dispose(); transcriber = new(engine); }
 
     /// <summary>Replaces the capture backend; tests and the e2e harness use a deterministic fixture source.</summary>
     public void UseMimicCapture(IMimicCapture capture) { mimicCapture.Dispose(); mimicCapture = capture; }
 
-    private static bool IsMimic(string op) => op is "mimicSources" or "mimicStart" or "mimicStop" or "mimicPeek" or "mimicClip";
+    private static bool IsMimic(string op) => op is "mimicSources" or "mimicStart" or "mimicStop" or "mimicPeek" or "mimicClip" or "mimicTranscribe";
 
     private bool GuestMimicAllowed(string? requester, string? audience) =>
         disk.Permissions.GuestMimic && (audioAudience == null || sessionAccepting && audience == audioAudience) && (requester == null || !revokedAudioPeers.ContainsKey(requester));
@@ -37,11 +45,18 @@ public sealed partial class Bridge
                 case "mimicStop":
                     mimicCapture.Stop(); Publish();
                     return new("ack", c.Id, true);
+                case "mimicTranscribe":
+                    if (c.Action == "disable") transcriber.Disable();
+                    else if (c.Action == "enable") await transcriber.Enable(() => mimicCapture.Ring, false);
+                    else if (c.Action == "download") { if (transcriber.ModelReady) await transcriber.Enable(() => mimicCapture.Ring, false); else transcriber.BeginDownload(() => mimicCapture.Ring, Publish); }
+                    else throw new InvalidDataException("Unsupported transcript setting.");
+                    Publish();
+                    return new("ack", c.Id, true);
                 case "mimicPeek":
                     {
                         var ring = mimicCapture.Ring ?? throw new InvalidDataException("Mimic is not listening.");
-                        long end = ring.Written;
-                        return new("ack", c.Id, true, Data: new MimicPeek(end, ring.Rate, MimicWindowMs, ring.Levels(end, (long)ring.Rate * MimicWindowMs / 1000, MimicBuckets), mimicCapture.Running));
+                        long end = ring.Written, frames = (long)ring.Rate * MimicWindowMs / 1000;
+                        return new("ack", c.Id, true, Data: new MimicPeek(end, ring.Rate, MimicWindowMs, ring.Levels(end, frames, MimicBuckets), mimicCapture.Running, transcriber.Lines(ring, end - frames, end)));
                     }
                 case "mimicClip":
                     {
@@ -61,6 +76,6 @@ public sealed partial class Bridge
                 default: throw new InvalidDataException("Unsupported command.");
             }
         }
-        catch (InvalidDataException ex) { return new("ack", c.Id, false, ex.Message); }
+        catch (InvalidDataException ex) { Publish(); return new("ack", c.Id, false, ex.Message); }
     }
 }

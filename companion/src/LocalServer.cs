@@ -105,7 +105,7 @@ public sealed class LocalServer(Bridge bridge, string origin) : IAsyncDisposable
                         string? requester = root.TryGetProperty("requester", out var requestPeer) ? requestPeer.GetString() : null;
                         string? audience = root.TryGetProperty("audience", out var requestAudience) ? requestAudience.GetString() : null;
                         if (requester?.Length > 128 || audience?.Length > 64) throw new InvalidDataException("Invalid request ownership.");
-                        if (command.Op is "mimicSources" or "mimicStart" or "mimicClip" or "waveform" or "spotify" or "audioAssets" or "play" or "startAt" or "region" or "reverse" or "audioPlay" or "keepAudio" or "removeAudio" or "retryAudio" or "retryCleanup" or "beginSession" or "endSession")
+                        if (command.Op is "mimicSources" or "mimicStart" or "mimicClip" or "mimicTranscribe" or "waveform" or "spotify" or "audioAssets" or "play" or "startAt" or "region" or "reverse" or "audioPlay" or "keepAudio" or "removeAudio" or "retryAudio" or "retryCleanup" or "beginSession" or "endSession")
                         {
                             running.RemoveAll(t => t.IsCompleted);
                             if (!await queries.WaitAsync(0)) { await Send(new Reply("ack", command.Id, false, "Too many background requests.")); continue; }

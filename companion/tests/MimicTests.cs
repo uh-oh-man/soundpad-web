@@ -100,4 +100,56 @@ public sealed class MimicTests : IDisposable
         Assert.True((await bridge.Execute(Cmd("permissions") with { Permissions = new(GuestMimic: false) }, "host")).Ok);
         Assert.False((await bridge.Execute(Cmd("mimicClip") with { MimicEnd = peek.End, PositionMs = 0, EndMs = 500 }, "guest")).Ok);
     }
+
+    [Fact]
+    public async Task TranscriptLinesLineUpWithTheBufferAndSilenceIsSkipped()
+    {
+        var engine = new TranscriptFixture();
+        using var transcriber = new MimicTranscriber(engine);
+        var ring = new MimicRing(MimicFixture.Rate, 45);
+        Assert.False(await transcriber.Step(ring, false, default));
+        // 1 s of silence, 0.5 s of tone, 2.5 s of silence: one line at 1.0-1.5 s.
+        ring.WriteSilence(MimicFixture.Rate);
+        ring.Write(Enumerable.Range(0, MimicFixture.Rate / 2).Select(i => MimicFixture.Sample(i)).ToArray());
+        ring.WriteSilence(MimicFixture.Rate * 5 / 2);
+        Assert.True(await transcriber.Step(ring, false, default));
+        var line = Assert.Single(transcriber.Lines(ring, 0, ring.Written));
+        Assert.Equal("Fixture tone 1", line.Text);
+        Assert.InRange(line.StartMs, 990, 1010); Assert.InRange(line.EndMs, 1490, 1520);
+        // Relative to a later window start, times shift accordingly.
+        Assert.InRange(Assert.Single(transcriber.Lines(ring, MimicFixture.Rate, ring.Written)).StartMs, -10, 10);
+        int calls = engine.Calls;
+        ring.WriteSilence(MimicFixture.Rate * 5);
+        Assert.True(await transcriber.Step(ring, false, default));
+        Assert.Equal(calls, engine.Calls); // silent chunks never reach the recognizer
+        Assert.Empty(transcriber.Lines(new MimicRing(MimicFixture.Rate, 45), 0, 1));
+    }
+
+    [Fact]
+    public async Task TranscriptsNeedTheModelAndOnlyTheHostControlsThem()
+    {
+        await using var mock = new MockSoundpad(); using var pipe = new SoundpadPipe(mock.Name, true); using var bridge = new Bridge(pipe, new StateStore(folder));
+        var fixture = new MimicFixture(); bridge.UseMimicCapture(fixture);
+        var engine = new TranscriptFixture { Available = false }; bridge.UseTranscriptEngine(engine); await bridge.Poll(true);
+        Assert.True((await bridge.Execute(Cmd("permissions") with { Permissions = new(GuestMimic: true) }, "host")).Ok);
+        Assert.False((await bridge.Execute(Cmd("mimicTranscribe") with { Action = "download" }, "guest")).Ok);
+        var missing = await bridge.Execute(Cmd("mimicTranscribe") with { Action = "enable" }, "host");
+        Assert.False(missing.Ok); Assert.Contains("Download the speech model", missing.Error);
+        Assert.False(bridge.Snapshot.Mimic!.TranscriptModel);
+        Assert.True((await bridge.Execute(Cmd("mimicTranscribe") with { Action = "download" }, "host")).Ok);
+        for (int i = 0; i < 50 && !bridge.Snapshot.Mimic!.Transcribing; i++) await Task.Delay(20);
+        Assert.True(bridge.Snapshot.Mimic!.Transcribing); Assert.True(bridge.Snapshot.Mimic.TranscriptModel);
+        Assert.True((await bridge.Execute(Cmd("mimicStart") with { SourceId = MimicFixture.Source.Id }, "host")).Ok);
+        fixture.Advance(TimeSpan.FromSeconds(6));
+        MimicPeek? peek = null;
+        for (int i = 0; i < 40 && (peek?.Transcript?.Length ?? 0) == 0; i++)
+        {
+            await Task.Delay(100);
+            peek = Data<MimicPeek>(await bridge.Execute(Cmd("mimicPeek"), "guest"));
+        }
+        Assert.NotEmpty(peek!.Transcript!);
+        Assert.All(peek.Transcript!, l => Assert.StartsWith("Fixture tone", l.Text));
+        Assert.True((await bridge.Execute(Cmd("endSession"), "host")).Ok);
+        Assert.False(bridge.Snapshot.Mimic!.Transcribing);
+    }
 }

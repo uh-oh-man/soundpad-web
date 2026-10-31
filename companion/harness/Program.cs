@@ -52,6 +52,7 @@ mock.AllXml = all.ToString(); mock.CategoryXml = categories.ToString();
 using var pipe = new SoundpadPipe(mock.Name, true);
 using var bridge = new Bridge(pipe, new StateStore(directory));
 bridge.UseMimicCapture(new MimicFixture());
+bridge.UseTranscriptEngine(new TranscriptFixture());
 await bridge.Poll(true);
 await using var server = new LocalServer(bridge, args.FirstOrDefault() ?? "http://127.0.0.1:5173");
 await server.Start();
