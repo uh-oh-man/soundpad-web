@@ -2,7 +2,7 @@
 
 > **made by AI** - Review the verification notes and known limitations before use.
 
-**V2 is the current update.** Refresh the website and download the latest Windows companion to enable all V2 features. See [features, verification and upgrade instructions](docs/V2.md).
+**2.3 is the current update.** Refresh the website and download the latest Windows companion for the new controls and Temp system. See [features, migration and recovery instructions](docs/V2.3.md).
 
 A private browser remote for [Leppsoft Soundpad](https://www.leppsoft.com/soundpad/). Friends see your real categories, tap a sound, and your existing Soundpad plays it through its current audio setup.
 
@@ -23,7 +23,7 @@ Your friend opens the link in a modern browser. Playback starts on **your** PC, 
 
 ## 2.3 update — UI polish and managed audio
 
-The development branch prepares the portable EXE and static website together. The public site/release stay on 2.2.1 until publication is approved. Download review builds from the branch's successful Windows Actions run. Use a separate test browser tab and the new EXE when reviewing 2.3; do not replace a running companion.
+Version 2.3 is delivered through the normal GitHub Pages website and Windows release. Refresh the page and download the updated **SoundpadWeb.exe** using the links above. Close the previous companion normally when you are ready to switch; do not overwrite a running EXE. The new Temp features require the 2.3 companion.
 
 - Artwork/waveforms fill the main tile, with a separate slim **Play from start** strip. Waveform seeking commits on release. Five views remain available.
 - Zoom toward the cursor with the wheel, Shift-wheel or middle/Shift-drag to pan, horizontal trackpad pan, touch pinch, and **Fit**. The bottom player supports 1–128× zoom; cue/region tools live under **Edit**. Arrow keys select in 10 ms steps (Shift: 1 s), Enter commits, +/- zoom, Alt-arrows pan, 0 fits.

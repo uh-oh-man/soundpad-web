@@ -20,7 +20,7 @@ Native tests cover exact stereo frame reversal, normal/reversed reuse, confirmed
 
 Actual screenshots were inspected at desktop, narrow desktop, tablet and phone viewport sizes, in default and Purple themes, with normal/large artwork and waveform tiles, active playback, Temp and permanent confirmation. Screenshots show generated fixtures. WebKit on Windows and browser viewport emulation are not real Safari or physical-device acceptance.
 
-The branch includes source, docs and screenshot evidence. CI uploads the Windows EXE, static build and browser artifacts. Pages/public EXE replacement remains a separate owner-approved release step. Actual Soundpad imports/audible mic playback, live Spotify transport and physical mobile devices remain unverified acceptance checks.
+The release includes source, docs and screenshot evidence. CI uploads the Windows EXE, static build and browser artifacts. The owner approved normal publication after the development review; Pages and the tagged Windows release use the normal workflows. Actual Soundpad imports/audible mic playback, live Spotify transport and physical mobile devices remain unverified acceptance checks.
 
 See [2.3 lifecycle and recovery notes](V2.3.md). Earlier verification records below are historical.
 
