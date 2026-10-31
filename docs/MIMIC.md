@@ -44,7 +44,7 @@ The companion's console window logs these events with the time, including who ma
    A selection freezes the view so the moment stays put.
 3. Optionally type a name; otherwise the transcript's words, or the time, are used. Then press **Mimic it** (or **Enter**) to add the clip to Temp, or **Mimic & play** (**Shift+Enter**) to also play it through Soundpad. **Esc** clears the selection; press it again to close the window.
 
-Everyone gets a short notice when anyone makes a clip, F6 included. **Just mimicked** lists the session's last 5 clips, with who made them and a **Replay** button each.
+Everyone gets a short notice when anyone makes a clip, F6 included. **Just mimicked** lists the session's last 5 clips, with who made them, a **Replay** button and a **Reverse** button to hear it backwards.
 
 ### Afterwards: Temp and Edit copy
 

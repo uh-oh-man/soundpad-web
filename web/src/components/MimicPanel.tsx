@@ -6,6 +6,7 @@ import {
   Mic2,
   Play,
   RefreshCw,
+  Rewind,
   Scissors,
   Square,
   X,
@@ -659,19 +660,34 @@ export function MimicPanel({
         <section className="mimic-recent" aria-label="Just mimicked">
           <small>Just mimicked</small>
           {recent.map((clip) => (
-            <button
-              key={clip.assetId}
-              disabled={!canPlay}
-              aria-label={`Replay ${clip.name}`}
-              onClick={() =>
-                void controller
-                  .run('audioPlay', { assetId: clip.assetId, orientation: 'normal' })
-                  .catch(() => {})
-              }
-            >
-              <Play size={13} /> <span className="mimic-recent-name">{clip.name}</span>{' '}
-              <small>· {clip.by}</small>
-            </button>
+            <div className="mimic-recent-item" key={clip.assetId}>
+              <button
+                disabled={!canPlay}
+                aria-label={`Replay ${clip.name}`}
+                onClick={() =>
+                  void controller
+                    .run('audioPlay', { assetId: clip.assetId, orientation: 'normal' })
+                    .catch(() => {})
+                }
+              >
+                <Play size={13} /> <span className="mimic-recent-name">{clip.name}</span>{' '}
+                <small>· {clip.by}</small>
+              </button>
+              {/* Hear it backwards: the same reverse Temp offers, under the same guest permissions. */}
+              <button
+                className="icon-button"
+                disabled={!canPlay || (!host && state.permissions.guestTransforms === false)}
+                aria-label={`Play ${clip.name} reversed`}
+                title="Play reversed"
+                onClick={() =>
+                  void controller
+                    .run('audioPlay', { assetId: clip.assetId, orientation: 'reversed' })
+                    .catch(() => {})
+                }
+              >
+                <Rewind size={14} />
+              </button>
+            </div>
           ))}
         </section>
       )}

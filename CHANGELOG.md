@@ -2,6 +2,18 @@
 
 Notable changes to Soundpad Web. Versions follow the website's `package.json`; the Windows companion is versioned separately and only needs updating when a release says so.
 
+## 2.11.2 — Hear it backwards
+
+Website update; the companion is rebuilt as 2.11.2 with no code changes.
+
+### Added
+
+- **Reverse** next to each clip in **Just mimicked**: hear what someone just said backwards in one click. It uses Temp's existing reverse, under the same permissions: guests need playback, plus reverse generation unless a reversed version already exists. Covered by the host e2e test, which also checks that the reversed clip plays. The phone-fit and accessibility tests pass with the new button.
+
+### Dependencies (reviewed, deliberately unchanged)
+
+- `npm audit` reports 11 moderate advisories, all from one issue: `minimatch` < 11.0.1 ([GHSA-g3hv-75wg-m249](https://github.com/advisories/GHSA-g3hv-75wg-m249), a denial of service through crafted glob patterns) inside ESLint and typescript-eslint. These are development-only and never shipped. The fix was published on 2026-10-27, and no ESLint or typescript-eslint release accepts it yet; both require `minimatch` ^10. Forcing it would be a major-version override under tools not built for it, using a package younger than this project's two-week rule, to address a DoS that needs untrusted glob patterns. Revisit when ESLint depends on `minimatch` 11 and that release is at least two weeks old. The other outdated packages are major upgrades (TypeScript 7, `@types/node` 26, lucide-react 1.x) or a one-day-old ESLint patch.
+
 ## 2.11.1 — Mimic on phones
 
 Website update; the companion is rebuilt as 2.11.1 with no code changes.

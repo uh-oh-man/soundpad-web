@@ -1249,6 +1249,13 @@ test('Mimic: host listens, everyone sees it, and a selection becomes a playable 
   const recent = dialog.getByRole('region', { name: 'Just mimicked' });
   await recent.getByRole('button', { name: 'Replay Fixture mimic' }).click();
   await expect.poll(() => harness.plays.filter((p) => p === 'DoPlaySound(5)').length).toBe(2);
+  // ...or heard backwards: a reversed variant is prepared and played.
+  const before = harness.plays.length;
+  await recent.getByRole('button', { name: 'Play Fixture mimic reversed' }).click();
+  await expect
+    .poll(() => harness.plays.slice(before).some((p) => /^DoPlaySound\((?!5\))\d+\)$/.test(p)))
+    .toBe(true);
+  await expect(page.locator('.player-track')).toContainText('Fixture mimic (reversed)');
   // Trim saves an exact copy as a new Temp sound and keeps the original.
   await page.keyboard.press('Escape');
   await page.locator('#temp-manager > summary').click();

@@ -235,3 +235,17 @@
     font-size: 0;
   }
 }
+
+.mimic-recent-item {
+  display: flex;
+  gap: 4px;
+  max-width: 100%;
+  min-width: 0;
+}
+.mimic-recent-item > button:first-child {
+  flex: 0 1 auto;
+}
+.mimic-recent-item .icon-button {
+  flex: none;
+  padding: 6px 8px;
+}
