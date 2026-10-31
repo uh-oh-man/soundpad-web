@@ -1,80 +1,144 @@
 # Mimic
 
-Mimic turns something that was *just said* into a sound. The host's companion keeps the last 30 seconds of one app or output device in memory. Anyone allowed to use Mimic can open the **Mimic** window, see that audio as a live waveform, select a moment, and play it back through Soundpad.
+Mimic turns something that was *just said* into a sound. The host's companion keeps the last 30 seconds of one app or output device in memory. Anyone allowed to use Mimic can open the **Mimic** window, see that audio as a live waveform with an optional transcript, select a moment, and play it back through Soundpad.
 
-Mimic came from a separate desktop project, **Voice Replay Studio** (a rolling "instant replay" recorder with a clip editor, Whisper transcription and Soundpad import). As of 2.4.0 both projects live in this repository:
+Mimic came from a separate desktop project, **Voice Replay Studio**: a rolling "instant replay" recorder with a clip editor, Whisper transcription and Soundpad import. Since 2.4.0 both live in this repository.
 
-| Part | Where | What it is |
-| --- | --- | --- |
-| Mimic in Soundpad Web | `companion/src/MimicCapture.cs`, `companion/src/BridgeMimic.cs`, `web/src/components/MimicPanel.tsx` | The browser feature: host chooses a source, guests clip from it. |
-| Voice Replay Studio | `mimic/` | The original Windows desktop app (V1.1), unchanged, with its own README and tests. |
+| Part | Where |
+| --- | --- |
+| Capture and the rolling buffer | `companion/src/MimicCapture.cs` |
+| Live transcript (Whisper) | `companion/src/MimicTranscript.cs` |
+| F6 hotkey | `companion/src/MimicHotkey.cs` |
+| Commands, permissions, clips, recent list | `companion/src/BridgeMimic.cs` |
+| Edit copy (trim and voice effects) | `companion/src/BridgeTrim.cs` |
+| The Mimic window | `web/src/components/MimicPanel.tsx` |
+| Edit copy form | `web/src/components/TempManager.tsx` |
+| Test stand-ins (tone source, speech, hotkey) | `companion/harness/MimicFixture.cs`, `TranscriptFixture.cs`, `HotkeyFixture.cs` |
+| Voice Replay Studio V1.1 desktop app | `mimic/`, imported unchanged apart from a pointer at the top of its README |
 
-The capture engine in the companion is a port of Voice Replay Studio's `CaptureService`, rewritten for the companion's NAudio 3.3. NAudio 3.3 includes process-loopback activation, so the hand-written COM interop is no longer needed. The desktop app keeps its own copy on NAudio 2.2.1 and Whisper.net.
+The companion's capture is a port of Voice Replay Studio's `CaptureService` onto NAudio 3.3 (`WasapiRecorder`, with built-in process loopback). The transcript uses the same Whisper `base.en` model and filters. The desktop app keeps its own code on NAudio 2.2.1 and Whisper.net.
 
 ## Using it
 
-**Host**
+### Host
 
 1. Click **Mimic** above the soundboard.
-2. Under **Listen to**, choose an **Output** (everything that device plays) or an **App** (that program and its child processes, e.g. Discord, whose voice runs in a child process). The window remembers your last choice by name and otherwise preselects Discord if it is running (2.9.5).
+2. Under **Listen to**, choose an **App**, meaning that program and its child processes. For Discord this includes the child process that plays voice. You can also choose an **Output**: everything that device plays. The window remembers your last choice by name and otherwise preselects Discord if it is running.
 3. Click **Start listening**. A pulsing **Mimic on** badge appears in everyone's header.
 4. To let guests clip, turn on **Session & access → Guest Mimic**. It is off by default.
-5. Optional (2.7.0): turn on **F6 hotkey**. While Mimic is listening, pressing **F6 in any app** on the host PC saves the last 10 seconds to Temp, named after its transcript when transcripts are on, just like Voice Replay Studio's F6. It is off by default so it never takes F6 from a game; if another app already owns F6 (for example Voice Replay Studio itself), the window says so. End hosting and quitting release the key.
-6. **Stop listening**, **End hosting**, or closing the companion all stop capture and drop the buffer.
+5. Optional: tick **Transcript**. The first time, **Get transcripts (148 MB, once)** downloads the speech model; see [Transcripts](#transcripts).
+6. Optional: tick **F6 hotkey**. While Mimic is listening, **F6 in any app** saves the last 10 seconds to Temp, named after its transcript when transcripts are on, just like Voice Replay Studio's F6. It is off by default so it never takes F6 from a game. If another app already owns F6, for example Voice Replay Studio itself, the window says so.
+7. **Stop listening**, **End hosting** or closing the companion stops capture, discards the buffer and the transcript, and releases F6.
 
-The companion's console window logs each of these events with the time (2.10.4), including who made each clip and anything F6 saved.
+The companion's console window logs these events with the time, including who made each clip and anything F6 saved.
 
-**Anyone allowed**
+### Anyone allowed
 
-1. Open **Mimic** (or click the **Mimic on** badge).
-2. Drag across the waveform, or use **Last 3 s / 5 s / 10 s**. A selection freezes the view so the moment stays put. Drag either edge handle of a selection to adjust just that end (2.6.0). From the keyboard (2.8.1), focus the waveform: Left/Right move the end, Shift+Left/Right the start, Ctrl for 1-second steps.
-3. Optionally name it, then **Mimic it** (adds it to Temp) or **Mimic & play** (adds it and plays it through Soundpad). The session's last 5 clips, from anyone and including F6, appear under **Just mimicked** with who made them and a **Replay** button each. Everyone gets a short notice when a new one is made (2.10.0).
+1. Open **Mimic**, or click the **Mimic on** badge.
+2. Select a moment:
+   - drag across the waveform, then drag either edge handle to adjust that end;
+   - click a transcript line, which selects exactly that audio with a little padding;
+   - use **Last 3 s / 5 s / 10 s**;
+   - or use the keyboard: **3**, **5** or **0** select the last 3, 5 or 10 seconds and focus the name field. On the focused waveform, **Left/Right** move the end, **Shift+Left/Right** the start, and **Ctrl** makes 1-second steps.
 
-Keyboard (2.5.1): **3**, **5** or **0** select the last 3, 5 or 10 seconds and move focus to the name field, **Enter** mimics, **Shift+Enter** mimics and plays, **Esc** clears the selection (press it again to close the window). This is the browser counterpart of Voice Replay Studio's F6 key; a website cannot register system-wide hotkeys.
+   A selection freezes the view so the moment stays put.
+3. Optionally type a name; otherwise the transcript's words, or the time, are used. Then press **Mimic it** (or **Enter**) to add the clip to Temp, or **Mimic & play** (**Shift+Enter**) to also play it through Soundpad. **Esc** clears the selection; press it again to close the window.
 
-The clip becomes a normal Temp sound, so everything Temp already does applies: reverse, **Keep permanently** with host confirmation, cleanup at End Hosting, and (2.8.0) **Trim**. Trim works on any Temp source, not only Mimic clips: open **Temp**, press **Edit copy**, set the start and end in seconds, optionally pick an **Effect** (2.9.0: Chipmunk, Slow-mo or Echo), and **Save copy**. Like Voice Replay Studio's trim, it saves a new version and leaves the original untouched. Guests can trim when the host allows uploads.
+Everyone gets a short notice when anyone makes a clip, F6 included. **Just mimicked** lists the session's last 5 clips, with who made them and a **Replay** button each.
 
-## Transcripts (2.5.0)
+### Afterwards: Temp and Edit copy
 
-Mimic can show what was said, line by line, under the waveform. Click a line to select exactly that audio, slightly padded so no word is clipped. The words become the clip's name unless you type one.
+A clip is a normal Temp sound, so reverse, **Keep permanently** (with host confirmation) and cleanup at End Hosting all apply.
 
-- **Host turns it on** in the Mimic window. The first time, **Get transcripts (148 MB, once)** downloads Whisper's English `base.en` model to `%LOCALAPPDATA%\SoundpadWeb\models\`. If Voice Replay Studio already downloaded it on this PC, that copy is reused and nothing is downloaded.
+**Edit copy** works on any Temp source, not only Mimic clips:
+1. Open **Temp**.
+2. Press **Edit copy** and set the start and end in seconds.
+3. Optionally pick an **Effect**: Chipmunk (1.5× faster and higher), Slow-mo (0.7×, deeper) or Echo.
+4. Press **Save copy**.
+
+Like Voice Replay Studio's trim, it saves a new Temp sound and never changes the original. Guests can edit copies when the host allows uploads. Temp holds at most 16 MiB per sound, so long copies are made mono and then given a lower sample rate (never below 16 kHz) to fit. Anything still too long is refused before any work is done, with the longest length that would fit.
+
+## Transcripts
+
+- **Off until the host turns it on.** The first time, **Get transcripts** downloads Whisper's English `base.en` model (~148 MB) to `%LOCALAPPDATA%\SoundpadWeb\models\` in the background, with progress shown. If Voice Replay Studio already downloaded the model on this PC, that copy is reused.
 - **Recognition runs on the host PC.** Audio is never uploaded. People allowed to use Mimic receive only the text of the last 30 seconds, with timings.
-- **Appears when the speaker pauses.** The companion waits for a pause of at least 0.4 seconds before transcribing what was said (2.6.0). Cutting mid-sentence made Whisper guess the missing words. After 15 seconds of unbroken speech it cuts anyway, holding back the unfinished sentence for the next chunk. Silent chunks are skipped, which saves CPU and stops Whisper inventing words from silence.
-- **English only**, using the same model and confidence filters as Voice Replay Studio.
-- **Light on a gaming PC** (2.9.1). Recognition uses 2 CPU threads on PCs with 8 or more cores, otherwise 1. On the owner's PC, `SoundpadWeb.Harness.exe --whisper-bench <wav>` measured 11 s of speech at 4.7 s with 1 thread, 2.7 s with 2 and 1.6 s with 4, with the same transcript each time. 4 threads keeps four cores busy and uses about 25% more CPU in total, so 2 is the default: still four times faster than real time.
-- Turning transcripts off, **Stop listening**, **End hosting** and quitting all discard the text. Nothing is saved except a clip's name.
+- **Lines appear when the speaker pauses** (0.4 s), so no sentence is split; splitting made Whisper guess missing words. After 15 s of unbroken speech it cuts anyway and holds back the unfinished sentence. Silent stretches are skipped, which saves CPU and avoids words invented from silence.
+- **Light on a gaming PC.** It uses 2 CPU threads on PCs with 8+ cores, otherwise 1. On the owner's PC, 11 s of speech took 2.7 s with 2 threads (4× faster than real time), with the same transcript as with 4 threads.
+- **English only**, with the same confidence filters as Voice Replay Studio.
+- Turning transcripts off, stopping, ending hosting and quitting all discard the text. Only a clip's name is kept.
 
-`SoundpadWeb.exe --transcribe-file <file.wav> [--download] [--verbose]` transcribes a local WAV with the same engine, which is useful to check the model and native libraries on a PC. `SoundpadWeb.Harness.exe --hotkey-probe` registers and releases F6 to check whether another app owns it (it presses nothing). `SoundpadWeb.Harness.exe --mimic-stream-transcript <file.wav>` streams a WAV into Mimic's buffer in real-time 10 ms packets with the real Whisper engine and prints the lines the Mimic window would show; no audio device is used. Streaming the JFK sample gives the same sentence, word for word, as transcribing the whole file.
-
-`SoundpadWeb.Harness.exe --mimic-silent-selftest <file.wav>` tests the **whole real chain without making a sound**: the harness plays the WAV with its stream volume at 0 (checked before playback starts) while Mimic's real app-loopback capture listens to the harness itself, and the real Whisper engine transcribes what was captured. Windows' per-app capture taps audio before the app's own stream volume, so the speech is captured even though nothing is audible. On the owner's PC: 1,507 capture packets, peak level 783/1000, and the JFK sentence transcribed exactly.
-
-## Privacy and safety rules
+## Privacy and safety
 
 - **Off until the host starts it.** Capture never starts on launch and is never restored after a restart.
-- **No microphones.** Only output devices and app loopback are offered. Mimic cannot listen to the host's room.
-- **Everyone can see it.** While capture runs, every participant's header shows **Mimic on** with the source name.
-- **Audio stays on the host PC.** Guests receive only 300 peak levels for the waveform, plus transcript text when the host turns transcripts on. A clip is cut on the companion and imported locally, like any Temp upload.
-- **Light on the host, however many guests.** The live waveform is computed at most every 100 ms and shared by every viewer (2.9.3), so 12 guests cost the same as one: at most about 3% of a CPU core on the owner's PC.
-- **Memory only, bounded.** The buffer holds 45 seconds (the 30 s window plus 15 s of grace so a selection survives the round trip from a guest). Nothing is written to disk unless someone clips, and clips follow the existing Temp limits.
-- **Separate permission.** Guest clipping needs **Guest Mimic**; playing the result also needs **Remote playback**. Only the host can choose or change the source.
+- **No microphones.** Only output devices and app loopback are offered, so Mimic cannot listen to the host's room.
+- **Everyone can see it.** While capture runs, every participant's header shows **Mimic on** with the source name, and every new clip is announced.
+- **Audio stays on the host PC.** Guests receive 300 peak levels for the waveform and, if the host enables it, the transcript text. Clips are cut and imported on the host.
+- **Separate permissions.** Clipping needs **Guest Mimic**, playing needs **Remote playback**, and Edit copy needs uploads. Only the host chooses the source, transcripts and F6.
+- **Bounded.** The buffer is 45 s in memory: the 30 s window plus 15 s so a guest's selection survives the round trip. Each guest can add at most 6 new files per minute, the same limit as uploads, within Temp's 32 files / 256 MiB. Edit copies run one at a time, and the guest's permissions are checked before any decoding.
+- **Light on the host, however many guests.** The waveform is computed at most every 100 ms and shared by everyone: at most about 3% of a CPU core on the owner's PC.
 - **Be fair to the people you record.** Mimic captures other people's voices. Tell your session it is on; the badge exists for that reason.
+
+## Companion versions
+
+The website always serves the newest version and hides anything the host's companion cannot do (`FEATURES` in `web/src/version.ts`):
+
+| Feature | Companion |
+| --- | --- |
+| Mimic window, Guest Mimic | 2.4 |
+| Transcripts | 2.5 |
+| F6 hotkey | 2.7 |
+| Edit copy (trim) | 2.8 |
+| Voice effects | 2.9 |
+| Shared recent clips and notices | 2.10 |
 
 ## Protocol
 
-New command ops: `mimicSources`, `mimicStart`, `mimicStop`, `mimicTranscribe` (`action`: `enable`, `disable` or `download`), `mimicHotkey` (`enable` or `disable`; all host only), `mimicPeek` and `mimicClip` (host, or guests with `guestMimic`). New fields: `sourceId`, `mimicEnd`, `name`. New permission: `guestMimic` (default `false`). Snapshots gain an optional `mimic` object (`active`, `source`, `status`, `windowMs`, from 2.5.0 `transcribing`, `transcriptModel`, `transcriptStatus`, and from 2.7.0 `hotkey`, `hotkeyStatus`, and from 2.10.0 `recent`: the session's last 5 clips as `assetId`, `name`, `by` and `at`). `mimicPeek` also returns `transcript`: lines with `startMs`/`endMs` relative to the window start.
+- **Host-only ops:**
+  - `mimicSources`;
+  - `mimicStart` with `sourceId`;
+  - `mimicStop`;
+  - `mimicTranscribe` with `action` `enable`, `disable` or `download`;
+  - `mimicHotkey` with `enable` or `disable`.
+- **Host, or guests with `guestMimic`:** `mimicPeek` and `mimicClip`. A clip sends `mimicEnd`, `positionMs`/`endMs`, an optional `name`, and the capture's `sourceId`.
+- **Host, or guests with uploads:** `trimAudio`, with `assetId`, `positionMs`/`endMs`, `action` (`none`, `chipmunk`, `slowmo` or `echo`) and an optional `name`.
+- **New permission:** `guestMimic`, default `false`.
+- **The `mimic` snapshot object:**
+  - `active`, `source`, `status`, `windowMs`;
+  - `transcribing`, `transcriptModel`, `transcriptStatus`;
+  - `hotkey`, `hotkeyStatus`;
+  - `recent`: the last 5 clips as `assetId`, `name`, `by` and `at`.
+- **`mimicPeek` returns:**
+  - `end`, an absolute frame counter for the window's right edge;
+  - `levels`, `rate` and `windowMs`;
+  - `transcript`, as lines with `startMs`/`endMs` relative to the window start;
+  - `ringId`, which identifies the capture.
 
-`mimicPeek` returns `end`, an absolute frame counter for the right edge of the window. `mimicClip` sends that `end` back with `positionMs`/`endMs` offsets inside the window. The companion therefore cuts exactly the samples the person saw, even though capture kept running. If those samples have been overwritten, the clip is refused rather than shifted to newer audio, the same rule Voice Replay Studio used.
+A clip sends `end` and `ringId` back with offsets inside the window, so the companion cuts exactly the samples the person saw even though capture kept running. If those samples were overwritten, or Mimic was restarted since, the clip is refused rather than shifted to other audio. Voice Replay Studio used the same rule.
 
-Requires companion 2.4. Older companions ignore the new permission, and the website hides Mimic for them.
+## Testing and checking a PC
 
-## Testing
+Automated:
+- **C#** (`companion/tests/MimicTests.cs`):
+  - the ring buffer;
+  - permissions;
+  - exact clip lengths;
+  - transcript timing and chunking;
+  - F6;
+  - Edit copy and effects;
+  - review fixes.
+- **Unit** (`tests/unit/mimic.test.ts`): selection math, the source choice and protocol validation.
+- **e2e** (`tests/e2e/app.spec.ts`, "Mimic…" tests): the full host flow, transcripts, keyboard, Edit copy and accessibility, against test stand-ins.
+- **Live relay** (opt-in `LIVE_RELAY=1`): a real guest browser over public relays.
 
-- `companion/tests/MimicTests.cs`: ring buffer addressing and expiry, permissions, exact clip length, silence and pre-start trimming.
-- `tests/unit/mimic.test.ts`: selection math and protocol validation.
-- `tests/e2e/app.spec.ts` ("Mimic: …"): the full host flow against `MimicFixture`, a test-only source that plays a tone every 2 seconds. An opt-in `LIVE_RELAY=1` test covers a real guest.
-- `SoundpadWeb.Harness.exe --mimic-probe [source]` listens to a real device or app for 2 seconds and prints only frame counts and the peak level, to check capture on a given PC.
+On a real PC (the harness is `companion\harness\bin\Release\net10.0-windows10.0.19041.0\win-x64\SoundpadWeb.Harness.exe`):
+- `SoundpadWeb.Harness.exe --mimic-probe [source]`: listens to a device or app for 2 s and prints packet counts and the peak level. Nothing is saved.
+- `SoundpadWeb.Harness.exe --mimic-silent-selftest <wav>`: tests the **whole real chain without sound**. It plays the WAV at stream volume 0 while Mimic's real app capture listens to the harness itself, and real Whisper transcribes the result. Windows' per-app capture taps audio before stream volume. On the owner's PC the JFK sample came through word for word.
+- `SoundpadWeb.Harness.exe --mimic-stream-transcript <wav>`: real-time streaming into the buffer with real Whisper, without any device.
+- `SoundpadWeb.Harness.exe --whisper-bench <wav>` and `--peek-bench`: the CPU measurements quoted above.
+- `SoundpadWeb.Harness.exe --hotkey-probe`: checks whether F6 is free, without pressing anything.
+- `SoundpadWeb.exe --transcribe-file <wav> [--download] [--verbose]`: checks the model and Whisper's native libraries in the real single-file EXE.
+- Rolling back: [docs/ROLLBACK.md](ROLLBACK.md).
 
-## Not yet included
+## What stays in the desktop app
 
-Every Voice Replay Studio feature that fits a shared soundboard is now in the browser version: rolling capture, live transcript, F6 hotkey, selection handles and trim. What stays desktop-only is its personal clip library with retranscription, since Soundpad Web keeps clips in Soundpad's Temp and permanent categories instead. Saved Mimic clips are named after their transcript, so the normal sound search finds them by their words. They remain available in the desktop app under `mimic/`.
+Every Voice Replay Studio feature that fits a shared soundboard is in the browser version: rolling capture, the live transcript, F6, selection handles, trim and more. Only its personal clip library with re-transcription stays desktop-only (`mimic/`). Soundpad Web keeps clips in Soundpad's Temp and permanent categories instead, and because clips are named after their transcript, the normal sound search finds them by their words.

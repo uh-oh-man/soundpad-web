@@ -2,6 +2,10 @@
 
 Notable changes to Soundpad Web. Versions follow the website's `package.json`; the Windows companion is versioned separately and only needs updating when a release says so.
 
+## Unreleased
+
+- **docs/MIMIC.md rewritten** into one current guide after about fifteen incremental edits since 2.4. It adds a complete file map, the Edit copy rules (including how long copies are fitted into Temp), the guest rate limits, a companion-version table, the full protocol (`trimAudio`, capture `ringId`), and all PC checks in one place. The README's privacy link now points at the renamed section.
+
 ## 2.10.4 — Mimic in the companion window
 
 **Update the Windows companion** to get this; the website is unchanged.

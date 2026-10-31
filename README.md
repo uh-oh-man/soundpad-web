@@ -74,7 +74,7 @@ Uploads accept up to 16 MiB, decoded audio up to ten minutes / eight channels / 
 
 ## Access and privacy
 
-**Mimic** is off until the host starts it, never records a microphone, and shows a **Mimic on** badge to everyone while it listens. Its audio stays on the host PC: guests allowed to use Mimic receive waveform levels and, if the host turns transcripts on, the transcript text. Speech recognition runs locally. Guest Mimic is off by default. See [docs/MIMIC.md](docs/MIMIC.md#privacy-and-safety-rules).
+**Mimic** is off until the host starts it, never records a microphone, and shows a **Mimic on** badge to everyone while it listens. Its audio stays on the host PC: guests allowed to use Mimic receive waveform levels and, if the host turns transcripts on, the transcript text. Speech recognition runs locally. Guest Mimic is off by default. See [docs/MIMIC.md](docs/MIMIC.md#privacy-and-safety).
 
 Treat an invitation as a password. Anyone with it can join and use the permissions you enable. **Session & access → Replace invite** revokes the previous invitation and disconnects existing guests. Disconnecting one peer alone does not invalidate a bearer invitation; that person could return with a new browser identity.
 
