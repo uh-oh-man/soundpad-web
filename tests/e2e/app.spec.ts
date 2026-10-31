@@ -1366,6 +1366,13 @@ test('live Nostr/WebRTC: guests see Mimic only when allowed and can clip from it
     await dialog.getByLabel('Clip name').fill('Guest mimic');
     await dialog.getByRole('button', { name: 'Mimic it' }).click();
     await expect(page.getByRole('button', { name: 'Play Guest mimic', exact: true })).toBeEnabled();
+    // Everyone hears about a new clip, and can replay it from the shared list.
+    await expect(page.getByText('Mimic Alice mimicked \u201cGuest mimic\u201d')).toBeVisible();
+    await expect(
+      dialog
+        .getByRole('region', { name: 'Just mimicked' })
+        .getByRole('button', { name: 'Replay Guest mimic' }),
+    ).toBeVisible();
   } finally {
     await context.close();
   }

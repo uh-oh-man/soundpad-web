@@ -14,12 +14,15 @@ public sealed partial class Bridge
     public const int HotkeySeconds = 10;
     private IGlobalHotkey hotkey = new WindowsHotkey();
     private volatile string hotkeyStatus = "Off";
-    private MimicState MimicSnapshot => new(mimicCapture.Running, mimicCapture.SourceName, mimicCapture.Status, MimicWindowMs, transcriber.Enabled, transcriber.ModelReady, transcriber.Status, hotkey.Active, hotkeyStatus);
+    public const int RecentClips = 5;
+    private readonly List<MimicClipInfo> recentClips = [];
+    private MimicClipInfo[] RecentSnapshot { get { lock (recentClips) return [.. recentClips]; } }
+    private MimicState MimicSnapshot => new(mimicCapture.Running, mimicCapture.SourceName, mimicCapture.Status, MimicWindowMs, transcriber.Enabled, transcriber.ModelReady, transcriber.Status, hotkey.Active, hotkeyStatus, RecentSnapshot);
 
     /// <summary>Replaces the system-wide hotkey; tests use a fixture that can be "pressed" directly.</summary>
     public void UseHotkey(IGlobalHotkey key) { hotkey.Dispose(); hotkey = key; }
 
-    private void StopMimic() { mimicCapture.Stop(); transcriber.Disable(); hotkey.Unregister(); hotkeyStatus = "Off"; }
+    private void StopMimic() { mimicCapture.Stop(); transcriber.Disable(); hotkey.Unregister(); hotkeyStatus = "Off"; lock (recentClips) recentClips.Clear(); }
 
     /// <summary>The host pressed the hotkey: save the last <see cref="HotkeySeconds"/> seconds, like Voice Replay Studio's F6.</summary>
     public async Task HotkeyPressed()
@@ -43,7 +46,18 @@ public sealed partial class Bridge
         if (samples.All(s => Math.Abs(s) < 0.0005f)) throw new InvalidDataException("That selection is silent. Nothing was saved.");
         name = string.IsNullOrWhiteSpace(name) ? "Mimic " + DateTime.Now.ToString("HH.mm.ss") : name.Trim();
         if (name.Length > 100) name = name[..99].TrimEnd() + "…";
-        return await Upload(MimicRing.Wav(samples, ring.Rate), name + ".wav", by, host, owner, audience, mimic: true);
+        var reply = await Upload(MimicRing.Wav(samples, ring.Rate), name + ".wav", by, host, owner, audience, mimic: true);
+        if (reply.Ok && reply.Data?.GetType().GetProperty("assetId")?.GetValue(reply.Data) is string assetId)
+        {
+            lock (recentClips)
+            {
+                recentClips.RemoveAll(c => c.AssetId == assetId);
+                recentClips.Insert(0, new(assetId, name, by, DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()));
+                if (recentClips.Count > RecentClips) recentClips.RemoveRange(RecentClips, recentClips.Count - RecentClips);
+            }
+            Publish();
+        }
+        return reply;
     }
 
     /// <summary>Replaces the speech engine; tests use a deterministic fixture instead of Whisper.</summary>

@@ -26,7 +26,7 @@ The capture engine in the companion is a port of Voice Replay Studio's `CaptureS
 
 1. Open **Mimic** (or click the **Mimic on** badge).
 2. Drag across the waveform, or use **Last 3 s / 5 s / 10 s**. A selection freezes the view so the moment stays put. Drag either edge handle of a selection to adjust just that end (2.6.0). From the keyboard (2.8.1), focus the waveform: Left/Right move the end, Shift+Left/Right the start, Ctrl for 1-second steps.
-3. Optionally name it, then **Mimic it** (adds it to Temp) or **Mimic & play** (adds it and plays it through Soundpad). Your last 5 clips appear under **Just mimicked** with a **Replay** button each (2.9.4).
+3. Optionally name it, then **Mimic it** (adds it to Temp) or **Mimic & play** (adds it and plays it through Soundpad). The session's last 5 clips, from anyone and including F6, appear under **Just mimicked** with who made them and a **Replay** button each. Everyone gets a short notice when a new one is made (2.10.0).
 
 Keyboard (2.5.1): **3**, **5** or **0** select the last 3, 5 or 10 seconds and move focus to the name field, **Enter** mimics, **Shift+Enter** mimics and plays, **Esc** clears the selection (press it again to close the window). This is the browser counterpart of Voice Replay Studio's F6 key; a website cannot register system-wide hotkeys.
 
@@ -60,7 +60,7 @@ Mimic can show what was said, line by line, under the waveform. Click a line to 
 
 ## Protocol
 
-New command ops: `mimicSources`, `mimicStart`, `mimicStop`, `mimicTranscribe` (`action`: `enable`, `disable` or `download`), `mimicHotkey` (`enable` or `disable`; all host only), `mimicPeek` and `mimicClip` (host, or guests with `guestMimic`). New fields: `sourceId`, `mimicEnd`, `name`. New permission: `guestMimic` (default `false`). Snapshots gain an optional `mimic` object (`active`, `source`, `status`, `windowMs`, from 2.5.0 `transcribing`, `transcriptModel`, `transcriptStatus`, and from 2.7.0 `hotkey`, `hotkeyStatus`). `mimicPeek` also returns `transcript`: lines with `startMs`/`endMs` relative to the window start.
+New command ops: `mimicSources`, `mimicStart`, `mimicStop`, `mimicTranscribe` (`action`: `enable`, `disable` or `download`), `mimicHotkey` (`enable` or `disable`; all host only), `mimicPeek` and `mimicClip` (host, or guests with `guestMimic`). New fields: `sourceId`, `mimicEnd`, `name`. New permission: `guestMimic` (default `false`). Snapshots gain an optional `mimic` object (`active`, `source`, `status`, `windowMs`, from 2.5.0 `transcribing`, `transcriptModel`, `transcriptStatus`, and from 2.7.0 `hotkey`, `hotkeyStatus`, and from 2.10.0 `recent`: the session's last 5 clips as `assetId`, `name`, `by` and `at`). `mimicPeek` also returns `transcript`: lines with `startMs`/`endMs` relative to the window start.
 
 `mimicPeek` returns `end`, an absolute frame counter for the right edge of the window. `mimicClip` sends that `end` back with `positionMs`/`endMs` offsets inside the window. The companion therefore cuts exactly the samples the person saw, even though capture kept running. If those samples have been overwritten, the clip is refused rather than shifted to newer audio, the same rule Voice Replay Studio used.
 

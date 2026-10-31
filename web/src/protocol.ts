@@ -198,6 +198,17 @@ export const snapshotSchema = z.object({
       transcriptStatus: z.string().max(600).optional(),
       hotkey: z.boolean().optional(),
       hotkeyStatus: z.string().max(600).optional(),
+      recent: z
+        .array(
+          z.object({
+            assetId: z.string().max(64),
+            name: z.string().max(200),
+            by: z.string().max(80),
+            at: z.number(),
+          }),
+        )
+        .max(20)
+        .nullish(),
     })
     .nullable()
     .optional(),

@@ -2,6 +2,16 @@
 
 Notable changes to Soundpad Web. Versions follow the website's `package.json`; the Windows companion is versioned separately and only needs updating when a release says so.
 
+## 2.10.0 — Mimic clips are shared moments
+
+**Update the Windows companion** for this; with a 2.9 companion the list stays empty and no notices appear.
+
+### Added
+
+- **Everyone hears about a new clip.** When anyone makes a Mimic clip, from the window or with the host's F6 mid-game, every participant gets a short notice such as *Alice mimicked "ask not what your country…"*. Clips that existed before you joined are not announced.
+- **Just mimicked is now the session's list**, not just your tab's: the last 5 clips from anyone, with who made them and a **Replay** button each. Clips removed from Temp drop off, and the list clears at End Hosting.
+- Tests: the companion records who made each clip, F6 clips included, and clears the list at End Hosting. The live-relay guest test checks that the host sees the notice when a guest clips, and that the clip is in the shared list.
+
 ## 2.9.5 — Mimic remembers your source
 
 Website update; the companion is rebuilt as 2.9.5 with no code changes.

@@ -108,9 +108,6 @@ function rememberedSource() {
     return null; // storage can be unavailable; the default still works
   }
 }
-const RECENT_CLIPS = 5;
-/** Clips made from this tab, newest first. Kept for the page's lifetime so reopening the window keeps them. */
-const recentClips: { assetId: string; name: string }[] = [];
 const MIN_MS = 150;
 /** How close (in CSS pixels) the pointer must be to a selection edge to grab its handle. */
 const EDGE_PX = 8;
@@ -273,7 +270,10 @@ export function MimicPanel({
   const [selection, setSelection] = useState<Selection | null>(null);
   const [name, setName] = useState('');
   const [busy, setBusy] = useState(false);
-  const [recent, setRecent] = useState(() => [...recentClips]);
+  // The session's latest clips, from anyone (window or F6), skipping ones already removed from Temp.
+  const recent = (mimic?.recent ?? []).filter((clip) =>
+    state.library.sounds.some((s) => s.assetId === clip.assetId),
+  );
   const nameField = useRef<HTMLInputElement>(null);
   const [focusName, setFocusName] = useState(false);
   useEffect(() => {
@@ -349,15 +349,6 @@ export function MimicPanel({
         endMs: selection.to,
         ...((name.trim() || suggestion) && { name: name.trim() || suggestion }),
       })) as { assetId?: string } | undefined;
-      controller.notify('Mimicked! The clip is in Temp for this session.', 'success');
-      if (result?.assetId) {
-        recentClips.unshift({
-          assetId: result.assetId,
-          name: name.trim() || suggestion || 'Mimic clip',
-        });
-        recentClips.splice(RECENT_CLIPS);
-        setRecent([...recentClips]);
-      }
       setSelection(null);
       setName('');
       if (play && result?.assetId)
@@ -646,7 +637,7 @@ export function MimicPanel({
                   .catch(() => {})
               }
             >
-              <Play size={13} /> {clip.name}
+              <Play size={13} /> {clip.name} <small>· {clip.by}</small>
             </button>
           ))}
         </section>

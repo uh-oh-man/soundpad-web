@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, useSyncExternalStore } from 'react';
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { createRoot } from 'react-dom/client';
 import {
   AudioLines,
@@ -273,6 +273,20 @@ function App() {
   );
   const canMimic = connected && mimicSupported && (host || state.permissions.guestMimic === true);
   const mimicListening = mode !== 'landing' && !!state.mimic?.active;
+
+  // Tell everyone when a Mimic clip is made (also by the host's F6 mid-game). Clips that existed
+  // before this tab joined are not announced.
+  const newestClip = state.mimic?.recent?.[0];
+  const seenClip = useRef<number | null>(null);
+  useEffect(() => {
+    if (mode === 'landing') return;
+    const at = newestClip?.at ?? 0;
+    if (seenClip.current === null) seenClip.current = at;
+    else if (newestClip && at > seenClip.current) {
+      seenClip.current = at;
+      controller.notify(`${newestClip.by} mimicked \u201c${newestClip.name}\u201d`, 'success');
+    }
+  }, [mode, newestClip]);
 
   const organizationText = w ? JSON.stringify(organization(w)) : '';
   useEffect(() => {

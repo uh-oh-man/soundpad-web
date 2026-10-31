@@ -91,6 +91,8 @@ public sealed class MimicTests : IDisposable
         Assert.True(clip.Ok, clip.Error);
         var sound = bridge.Snapshot.Library.Sounds.Single(s => s.Temporary);
         Assert.Equal("Alice", sound.UploadedBy); Assert.StartsWith("Said it", sound.Name);
+        var recent = Assert.Single(bridge.Snapshot.Mimic!.Recent!);
+        Assert.Equal(("Said it", "Alice"), (recent.Name, recent.By)); // everyone in the session sees who mimicked what
         var journal = JsonSerializer.Deserialize<AudioJournal>(File.ReadAllText(Path.Combine(folder, "managed-audio", "journal.json")), Json.Options)!;
         using (var wave = new NAudio.Wave.WaveFileReader(journal.Assets.Single().Variants.Single().Path))
             Assert.InRange(wave.TotalTime.TotalMilliseconds, 480, 520);
@@ -199,8 +201,10 @@ public sealed class MimicTests : IDisposable
         var journal = JsonSerializer.Deserialize<AudioJournal>(File.ReadAllText(Path.Combine(folder, "managed-audio", "journal.json")), Json.Options)!;
         using (var wave = new NAudio.Wave.WaveFileReader(journal.Assets.Single().Variants.Single().Path))
             Assert.InRange(wave.TotalTime.TotalSeconds, 9.9, 10.1);
+        Assert.Equal("Host", Assert.Single(bridge.Snapshot.Mimic!.Recent!).By);
         Assert.True((await bridge.Execute(Cmd("endSession"), "host")).Ok);
         Assert.False(key.Active); Assert.False(bridge.Snapshot.Mimic!.Hotkey);
+        Assert.Empty(bridge.Snapshot.Mimic!.Recent!);
     }
 
     [Fact]
