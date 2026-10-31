@@ -479,8 +479,10 @@ function App() {
                         className="icon-button"
                         title="Refresh library"
                         aria-label="Refresh library"
-                        disabled={!connected || pending > 0}
+                        disabled={!connected}
+                        aria-disabled={pending > 0 || undefined}
                         onClick={() => {
+                          if (pending > 0) return;
                           clearWaveforms();
                           void run('refresh');
                         }}

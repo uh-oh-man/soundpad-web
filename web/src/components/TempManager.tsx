@@ -109,6 +109,8 @@ export function TempManager({
     op: 'audioPlay' | 'keepAudio' | 'removeAudio' | 'retryAudio' | 'retryCleanup' | 'trimAudio',
     fields: Parameters<typeof controller.run>[1] = {},
   ) {
+    // Busy buttons stay enabled (aria-disabled) so they keep keyboard focus; ignore presses until done.
+    if (pending) return;
     setPending(fields.assetId ?? 'manager');
     setError('');
     try {
@@ -185,8 +187,8 @@ export function TempManager({
                   {(['normal', 'reversed'] as const).map((orientation) => (
                     <button
                       key={orientation}
+                      aria-disabled={!!pending || undefined}
                       disabled={
-                        !!pending ||
                         !state.available ||
                         !connected ||
                         (!host && !state.permissions.remotePlayback) ||
@@ -203,7 +205,8 @@ export function TempManager({
                     durationOf(a) !== undefined &&
                     supports(state.companionVersion, 'trim') && (
                       <button
-                        disabled={!!pending || !connected}
+                        disabled={!connected}
+                        aria-disabled={!!pending || undefined}
                         onClick={() =>
                           setTrimming({
                             id: a.id,
@@ -292,7 +295,8 @@ export function TempManager({
                     <button
                       className="primary"
                       type="submit"
-                      disabled={!!pending || trimming.to - trimming.from < 0.1 || trimming.from < 0}
+                      disabled={trimming.to - trimming.from < 0.1 || trimming.from < 0}
+                      aria-disabled={!!pending || undefined}
                     >
                       Save copy
                     </button>
@@ -315,7 +319,7 @@ export function TempManager({
                       </span>
                       {host && !v.permanent && v.state === 'ready' && v.nativeLabel && (
                         <button
-                          disabled={!!pending}
+                          aria-disabled={!!pending || undefined}
                           onClick={() => {
                             setSaving({ asset: a, variant: v });
                             setCategory('');
@@ -330,16 +334,17 @@ export function TempManager({
                 {host && (
                   <div className="temp-actions">
                     <button
-                      disabled={!!pending}
+                      aria-disabled={!!pending || undefined}
                       onClick={() => void run('retryAudio', { assetId: a.id })}
                     >
                       Retry preparation
                     </button>
                     {a.hasTemporary && (
                       <button
-                        disabled={!!pending}
+                        aria-disabled={!!pending || undefined}
                         onClick={() => {
                           if (
+                            !pending &&
                             confirm(
                               `Remove temporary audio for “${a.name}”? Permanent copies and native originals are preserved.`,
                             )
@@ -375,7 +380,7 @@ export function TempManager({
             </p>
           ))}
           {host && (
-            <button disabled={!!pending} onClick={() => void run('retryCleanup')}>
+            <button aria-disabled={!!pending || undefined} onClick={() => void run('retryCleanup')}>
               Retry recovery & cleanup
             </button>
           )}
@@ -416,7 +421,7 @@ export function TempManager({
               </label>
               <div className="temp-actions">
                 <button
-                  disabled={!!pending}
+                  aria-disabled={!!pending || undefined}
                   onClick={() => {
                     const chosen = categories.find((c) => c.category.id === category)?.category;
                     void run('keepAudio', {
@@ -432,7 +437,7 @@ export function TempManager({
                 >
                   Confirm permanent save
                 </button>
-                <button disabled={!!pending} onClick={() => setSaving(undefined)}>
+                <button aria-disabled={!!pending || undefined} onClick={() => setSaving(undefined)}>
                   Cancel
                 </button>
               </div>

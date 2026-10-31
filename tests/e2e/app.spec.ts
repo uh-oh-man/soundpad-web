@@ -1584,7 +1584,7 @@ test('accessibility: no serious or critical axe violations in the dialogs, views
   expect(problems).toEqual([]);
 });
 
-test('slow connection: busy buttons and Mimic toggles keep keyboard focus while the companion answers', async ({
+test('slow connection: busy buttons, Temp and Mimic toggles keep keyboard focus while the companion answers', async ({
   page,
   harness,
 }) => {
@@ -1610,6 +1610,19 @@ test('slow connection: busy buttons and Mimic toggles keep keyboard focus while 
     await expect(button).toBeFocused();
   }
   await expect(page.getByLabel('Kick count', { exact: true })).toHaveText('1');
+  // The reverse above left a Temp source; its buttons and Refresh library behave the same way.
+  await page.locator('#temp-manager > summary').click();
+  for (const button of [
+    page.getByRole('button', { name: 'Play normal', exact: true }).first(),
+    page.getByRole('button', { name: 'Refresh library', exact: true }),
+  ]) {
+    await button.focus();
+    await page.keyboard.press('Enter');
+    await expect(button).toHaveAttribute('aria-disabled', 'true');
+    await expect(button).toBeFocused();
+    await expect(button).not.toHaveAttribute('aria-disabled');
+    await expect(button).toBeFocused();
+  }
   await page.getByRole('button', { name: 'Mimic', exact: true }).click();
   const dialog = page.getByRole('dialog', { name: 'Mimic' });
   await dialog.getByRole('button', { name: 'Start listening' }).click();

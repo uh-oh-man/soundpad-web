@@ -66,6 +66,7 @@ export function IconEditor({ sound, close }: { sound: Sound; close: () => void }
     });
   }
   async function save(remove = false) {
+    if (busy) return; // buttons stay focusable while saving (aria-disabled), so ignore repeats
     setBusy(true);
     setError('');
     try {
@@ -226,13 +227,22 @@ export function IconEditor({ sound, close }: { sound: Sound; close: () => void }
         </p>
       )}
       <div className="editor-actions">
-        <button disabled={!sound.icon || busy} onClick={() => void save(true)}>
+        <button
+          disabled={!sound.icon}
+          aria-disabled={busy || undefined}
+          onClick={() => void save(true)}
+        >
           <Trash2 size={15} /> Remove custom icon
         </button>
-        <button onClick={close} disabled={busy}>
+        <button onClick={() => !busy && close()} aria-disabled={busy || undefined}>
           Cancel
         </button>
-        <button className="primary" disabled={!bitmap || busy} onClick={() => void save()}>
+        <button
+          className="primary"
+          disabled={!bitmap}
+          aria-disabled={busy || undefined}
+          onClick={() => void save()}
+        >
           <Save size={15} />
           {busy ? 'Saving…' : 'Save icon'}
         </button>

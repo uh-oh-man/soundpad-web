@@ -2,6 +2,18 @@
 
 Notable changes to Soundpad Web. Versions follow the website's `package.json`; the Windows companion is versioned separately and only needs updating when a release says so.
 
+## 2.13.3 — Keyboard focus in Temp, Refresh library and the icon editor
+
+Website only; the companion is unchanged apart from its version number (it reports 2.13.3).
+
+### Fixed
+
+- **The last controls that dropped keyboard focus while busy now keep it.** These are Temp's Play normal/reversed, Edit copy, Save copy, Keep permanently, Retry preparation, Remove temporary audio, Retry recovery & cleanup, Confirm permanent save and Cancel, plus **Refresh library** and the icon editor's Save, Remove and Cancel. Each used to disable itself, or the whole panel, while a command ran, which sent keyboard users back to the top of the page on a slow link. As in 2.13.2, they now look busy and ignore presses until the companion answers, while keeping focus. Remove temporary audio no longer asks for confirmation while another Temp command is still running.
+
+### Tests
+
+- The slow-connection e2e test now also presses Temp's Play normal and Refresh library from the keyboard; it fails on 2.13.2.
+
 ## 2.13.2 — Keyboard focus stays on Play, Reverse and the Kick counter
 
 Website only; the companion is unchanged apart from its version number (it reports 2.13.2).
