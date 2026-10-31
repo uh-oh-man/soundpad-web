@@ -1,6 +1,8 @@
 /* Mimic window and the session-wide "listening" badge. */
 .mimic-badge {
   display: inline-flex;
+  flex: none;
+  white-space: nowrap;
   align-items: center;
   gap: 6px;
   padding: 5px 10px;

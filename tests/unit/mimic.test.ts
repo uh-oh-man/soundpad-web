@@ -16,7 +16,7 @@ describe('Mimic selection', () => {
   });
   it('labels positions as seconds before now', () => {
     expect(ago(25800, 30000)).toBe('−4.2 s');
-    expect(ago(30000, 30000)).toBe('−0.0 s');
+    expect(ago(30000, 30000)).toBe('now');
   });
 });
 

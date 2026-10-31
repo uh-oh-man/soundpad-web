@@ -24,7 +24,8 @@ const MIN_MS = 150;
 const QUICK_SECONDS = [3, 5, 10];
 
 /** Seconds before "now" for a position in the window, e.g. "−4.2 s". */
-export const ago = (ms: number, windowMs: number) => `−${((windowMs - ms) / 1000).toFixed(1)} s`;
+export const ago = (ms: number, windowMs: number) =>
+  windowMs - ms < 50 ? 'now' : `−${((windowMs - ms) / 1000).toFixed(1)} s`;
 
 /** Clamp and order a dragged range so it stays inside the window and meets the minimum length. */
 export function normalizeSelection(a: number, b: number, windowMs: number): Selection | null {
