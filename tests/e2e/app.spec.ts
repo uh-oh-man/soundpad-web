@@ -939,7 +939,7 @@ test('full tile scrubbing and bottom-player precision zoom work at desktop and p
   await expect(footer.getByRole('button', { name: 'Fit waveform Airhorn' })).toBeVisible();
   await footer.getByRole('button', { name: 'Edit', exact: true }).click();
   await footer.getByLabel('Cue time seconds', { exact: true }).fill('0.123');
-  await footer.getByRole('button', { name: 'Seek selected position Airhorn' }).click();
+  await footer.getByRole('button', { name: 'Seek here: selected position Airhorn' }).click();
   await expect.poll(() => harness.plays).toContain('DoSeekMs(123)');
   await footer.getByRole('button', { name: 'Edit', exact: true }).click();
   await page.screenshot({
@@ -1500,6 +1500,59 @@ test('accessibility: no serious or critical axe violations on the main screens',
   await page.keyboard.press('Escape');
   await page.setViewportSize({ width: 390, height: 844 });
   await scan(page, 'phone');
+  expect(problems).toEqual([]);
+});
+
+test('accessibility: no serious or critical axe violations in the dialogs, views and player tools', async ({
+  page,
+  harness,
+}) => {
+  const problems: string[] = [];
+  async function scan(screen: string) {
+    const { violations } = await new AxeBuilder({ page }).analyze();
+    for (const v of violations)
+      if (v.impact === 'serious' || v.impact === 'critical')
+        problems.push(`${screen}: ${v.id} (${v.nodes.map((n) => n.target.join(' ')).join(', ')})`);
+  }
+  await host(page, harness);
+  for (const [button, screen] of [
+    ['Edit icon for Airhorn', 'icon editor'],
+    ['Statistics for Airhorn', 'statistics'],
+    ['Manage layout', 'my layout'],
+  ]) {
+    await page.getByRole('button', { name: button, exact: true }).click();
+    await expect(page.getByRole('dialog')).toBeVisible();
+    await scan(screen);
+    await page.keyboard.press('Escape');
+    await expect(page.getByRole('dialog')).toHaveCount(0);
+  }
+  await page.getByRole('button', { name: 'My Layout', exact: true }).click();
+  await page.getByRole('button', { name: 'Organize Airhorn', exact: true }).click();
+  await expect(page.getByRole('dialog')).toBeVisible();
+  await scan('organize');
+  await page.keyboard.press('Escape');
+  await page.getByRole('button', { name: 'Host Layout', exact: true }).click();
+  await page.getByLabel('View mode', { exact: true }).selectOption('waveforms');
+  await scan('waveforms view');
+  await page.getByLabel('View mode', { exact: true }).selectOption('details');
+  await page.getByRole('button', { name: 'Play from start: Airhorn', exact: true }).click();
+  await expect(page.getByRole('progressbar', { name: 'Sound progress' })).toBeVisible();
+  await scan('details view while playing');
+  await page.locator('.player').getByRole('button', { name: 'Edit', exact: true }).click();
+  await expect(page.getByLabel('Cue time seconds', { exact: true })).toBeVisible();
+  await scan('player edit tools');
+  await page
+    .getByLabel('Add session audio', { exact: true })
+    .setInputFiles({ name: 'Scan tone.wav', mimeType: 'audio/wav', buffer: sessionWave() });
+  await expect(
+    page.getByRole('button', { name: 'Play from start: Scan tone', exact: true }),
+  ).toBeEnabled();
+  await page.locator('#temp-manager > summary').click();
+  await page
+    .locator('.temp-source', { hasText: 'Scan tone' })
+    .getByRole('button', { name: 'Edit copy' })
+    .click();
+  await scan('temp edit copy');
   expect(problems).toEqual([]);
 });
 

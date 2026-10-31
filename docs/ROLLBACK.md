@@ -6,6 +6,7 @@ Every release stays on GitHub permanently, so any earlier version can be restore
 
 | Version | What it is | Git tag | Download |
 | --- | --- | --- | --- |
+| 2.12.4 | Accessibility in dialogs and player tools | `v2.12.4` | [Release](https://github.com/uh-oh-man/soundpad-web/releases/tag/v2.12.4) |
 | 2.12.3 | Lighter Mimic capture | `v2.12.3` | [Release](https://github.com/uh-oh-man/soundpad-web/releases/tag/v2.12.3) |
 | 2.12.2 | Everyone is told when Mimic listens | `v2.12.2` | [Release](https://github.com/uh-oh-man/soundpad-web/releases/tag/v2.12.2) |
 | 2.12.1 | Mimic window code split up (no behavior change) | `v2.12.1` | [Release](https://github.com/uh-oh-man/soundpad-web/releases/tag/v2.12.1) |

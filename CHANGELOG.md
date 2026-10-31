@@ -2,7 +2,18 @@
 
 Notable changes to Soundpad Web. Versions follow the website's `package.json`; the Windows companion is versioned separately and only needs updating when a release says so.
 
-## Unreleased
+## 2.12.4 — Accessibility in dialogs and player tools
+
+Website only; no companion update needed.
+
+### Fixed
+
+- **Details view while a sound plays.** The progress bar sat directly in the table row, outside any cell, so screen readers met a row with a stray child (axe rated it critical). It now sits inside the sound's cell, under its button, and each details row is a plain row element instead of an `<article>`.
+- **"Seek here" in the player's Edit tools** is now announced as "Seek here: selected position …", so its spoken name starts with the words on the button (voice control users can say what they see).
+
+### Tests
+
+- A second permanent accessibility test scans the icon editor, statistics, My layout, organize, the waveforms view, the details view while playing, the player Edit tools and the Temp Edit copy form, and fails on any serious or critical axe finding.
 
 - **Weekly live-relay check.** New workflow `.github/workflows/live-relay.yml` runs the four real-guest tests over the public Nostr relays every Monday, on demand, and whenever the workflow changes. Those tests cover joining, playback, the counter, revoking invites, uploads, shared layouts, Spotify and Mimic. Normal CI deliberately never depends on public relays, so before this a relay or library change that broke joining would only have shown up in a real session.
 

@@ -166,8 +166,10 @@ export function SoundCollection({
             state.playback.soundId === sound.id &&
             state.playback.identitySource === 'web' &&
             ['PLAYING', 'PAUSED', 'SEEKING'].includes(state.playback.status);
+          // A details row is a table row, which an <article> may not be.
+          const Entry = mode === 'details' ? 'div' : 'article';
           return (
-            <article
+            <Entry
               key={sound.id}
               role={mode === 'details' ? 'row' : undefined}
               className={`sound-tile sound-entry ${active ? 'now-playing' : ''} ${pending === sound.id ? 'pressed' : ''}`}
@@ -203,6 +205,7 @@ export function SoundCollection({
                   play={() => play(sound)}
                   choose={(at) => choosePosition(sound, state, at)}
                 />
+                {active && mode === 'details' && <ActiveProgress playback={state.playback} />}
               </div>
               {mode === 'details' && (
                 <>
@@ -320,7 +323,9 @@ export function SoundCollection({
                   </>
                 )}
               </div>
-              {active && mode !== 'waveforms' && <ActiveProgress playback={state.playback} />}
+              {active && mode !== 'waveforms' && mode !== 'details' && (
+                <ActiveProgress playback={state.playback} />
+              )}
               {mode === 'waveforms' && (
                 <Waveform
                   sound={sound}
@@ -334,7 +339,7 @@ export function SoundCollection({
               {mode === 'details' && (
                 <span className="category-note">{membership.get(sound.id)?.join(' · ')}</span>
               )}
-            </article>
+            </Entry>
           );
         })}
       </div>

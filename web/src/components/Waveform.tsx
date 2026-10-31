@@ -345,7 +345,7 @@ export function Waveform({
                 </label>
                 <button
                   disabled={disabled}
-                  aria-label={`Seek selected position ${sound.name}`}
+                  aria-label={`Seek here: selected position ${sound.name}`}
                   onClick={() => void pick(selected)}
                 >
                   Seek here
