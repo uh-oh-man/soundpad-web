@@ -4,6 +4,7 @@ Notable changes to Soundpad Web. Versions follow the website's `package.json`; t
 
 ## Unreleased
 
+- **README:** the user guide now covers the hotkey key choice (F6–F10), waveform zoom, which browsers guests can use, and what "WebRTC blocked" means.
 - **Tests:** two more timing assumptions fixed after GitHub's WebKit runner needed retries. The Mimic Edit copy check now also accepts a 3.00 s clip, and the session-upload test allows 25 s for decoding the upload.
 
 ## 2.14.5 — CI upkeep

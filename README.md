@@ -20,7 +20,7 @@ Use current Chrome or Edge to host, and allow the browser's local-network permis
 
 ## Join a session
 
-Open the invite link in a modern browser, on a computer or phone, and pick a name. Tapping a sound plays it on the **host's** PC, not on your device.
+Open the invite link in a modern browser (Chrome, Edge, Firefox or Safari, on a computer or phone) and pick a name. Tapping a sound plays it on the **host's** PC, not on your device.
 
 ## Mimic
 
@@ -32,7 +32,7 @@ The host chooses an app (for example Discord) or an output device. The companion
 - **Mimic it** to save it as a Temp sound, or **Mimic & play** it through Soundpad. The host can **Preview** it privately first;
 - replay, reverse, trim or add an effect afterwards (Chipmunk, Slow-mo, Echo).
 
-The host can also press **F6 in any app** to save the last few seconds mid-game. Mimic is off until the host starts it, never records a microphone, and everyone is told when it listens. Full guide: [docs/MIMIC.md](docs/MIMIC.md).
+The host can also press a hotkey **in any app** to save the last few seconds mid-game: F6 by default, or F7–F10 if a game already uses F6. The waveform zooms to the last 30, 10 or 5 seconds for picking short moments. Mimic is off until the host starts it, never records a microphone, and everyone is told when it listens. Full guide: [docs/MIMIC.md](docs/MIMIC.md).
 
 ## Features
 
@@ -66,6 +66,7 @@ Guests receive sound titles, category names/order/membership/icons, custom icons
 
 - **Waiting for Soundpad:** open Soundpad yourself. The companion retries automatically and refreshes the library every 30 seconds. You can also click Refresh.
 - **Companion disconnected:** keep the EXE running. Permit local-network access for this site if prompted, and use current Chrome/Edge. Another host tab may already own the connection. Do not disable browser security settings.
+- **WebRTC blocked:** the guest's browser has WebRTC turned off or doesn't support it, often because of a privacy extension or setting. Allow WebRTC for the site, or use an up-to-date browser.
 - **Host unavailable:** the host tab or companion may be closed, a laptop may be asleep, or signaling/WebRTC may be blocked. Check the invite and try another network. The app does not display Connected until the host's cryptographic handshake verifies.
 - **Access revoked:** ask for the replacement invitation. If your tab missed revocation, an old invitation may instead wait for an unavailable host.
 - **Soundpad library changed:** click the sound again after refresh. Stale indexes are rejected to avoid playing a different sound.
@@ -85,7 +86,7 @@ Every release stays on GitHub. Download any older `SoundpadWeb.exe` from [Releas
 | Part | Where | What it does |
 | --- | --- | --- |
 | Website | `web/` | The static React site on GitHub Pages: soundboard, Temp, Mimic window, host settings. Guests only ever need this. |
-| Windows companion | `companion/` | One portable `SoundpadWeb.exe` on the host PC. It talks to Soundpad, manages Temp audio, and runs Mimic: capture, local Whisper transcript, F6, preview, trim and effects. |
+| Windows companion | `companion/` | One portable `SoundpadWeb.exe` on the host PC. It talks to Soundpad, manages Temp audio, and runs Mimic: capture, local Whisper transcript, the F6–F10 hotkey, preview, trim and effects. |
 | Voice Replay Studio | `mimic/` | The original Mimic desktop app (V1.1), kept intact with its own [README](mimic/README.md), tests and licenses. |
 | Docs | `docs/` | [Mimic](docs/MIMIC.md), [rolling back](docs/ROLLBACK.md), [developers](docs/DEVELOPERS.md), API research, protocol and verification notes. Version histories: [2.3](docs/V2.3.md), [V2](docs/V2.md). |
 
