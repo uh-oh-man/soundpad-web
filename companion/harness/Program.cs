@@ -113,6 +113,20 @@ if (args.FirstOrDefault() == "--whisper-bench" && args.Length == 2)
     }
     return;
 }
+if (args.FirstOrDefault() == "--peek-bench")
+{
+    // Cost of one Mimic peek (30 s window at 48 kHz, 300 buckets), the work each guest refresh triggers.
+    var ring = new MimicRing(48000, 45);
+    ring.Write(Enumerable.Range(0, 48000 * 45).Select(i => MathF.Sin(i * 0.01f)).ToArray());
+    for (int i = 0; i < 20; i++) ring.Levels(ring.Written, 48000L * 30, 300);
+    var clock = System.Diagnostics.Stopwatch.StartNew();
+    for (int i = 0; i < 200; i++) ring.Levels(ring.Written, 48000L * 30, 300);
+    var each = clock.Elapsed.TotalMilliseconds / 200;
+    Console.WriteLine($"One peek: {each:0.00} ms. 12 guests at the 12/s limit = {each * 144 / 10:0.0}% of a core.");
+    // The bridge shares one computation per 100 ms between all viewers, so the worst case is 10 per second.
+    Console.WriteLine($"With the shared 100 ms result: at most {each * 10 / 10:0.00}% of a core, however many guests.");
+    return;
+}
 if (args.FirstOrDefault() == "--analyze-file" && args.Length == 2)
 {
     var scratch = Path.Combine(Path.GetTempPath(), "soundpad-web-analysis-" + Guid.NewGuid().ToString("N"));

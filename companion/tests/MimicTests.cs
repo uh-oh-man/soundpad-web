@@ -258,4 +258,20 @@ public sealed class MimicTests : IDisposable
         using var wave = new NAudio.Wave.WaveFileReader(copy.Variants.Single().Path);
         Assert.InRange(wave.TotalTime.TotalMilliseconds, 1990, 2010);
     }
+
+    [Fact]
+    public async Task PeeksWithin100MsShareOneComputation()
+    {
+        await using var mock = new MockSoundpad(); using var pipe = new SoundpadPipe(mock.Name, true); using var bridge = new Bridge(pipe, new StateStore(folder));
+        var fixture = new MimicFixture(); bridge.UseMimicCapture(fixture); await bridge.Poll(true);
+        Assert.True((await bridge.Execute(Cmd("mimicStart") with { SourceId = MimicFixture.Source.Id }, "host")).Ok);
+        fixture.Advance(TimeSpan.FromSeconds(5));
+        var first = Data<MimicPeek>(await bridge.Execute(Cmd("mimicPeek"), "host"));
+        var second = Data<MimicPeek>(await bridge.Execute(Cmd("mimicPeek"), "host"));
+        Assert.Equal(first.End, second.End); // same snapshot, so a clip lines up with what either viewer saw
+        Assert.Equal(first.Levels, second.Levels);
+        fixture.Advance(TimeSpan.FromSeconds(1));
+        var later = Data<MimicPeek>(await bridge.Execute(Cmd("mimicPeek"), "host"));
+        Assert.True(later.End >= first.End + MimicFixture.Rate);
+    }
 }

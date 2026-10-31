@@ -53,6 +53,7 @@ Mimic can show what was said, line by line, under the waveform. Click a line to 
 - **No microphones.** Only output devices and app loopback are offered. Mimic cannot listen to the host's room.
 - **Everyone can see it.** While capture runs, every participant's header shows **Mimic on** with the source name.
 - **Audio stays on the host PC.** Guests receive only 300 peak levels for the waveform, plus transcript text when the host turns transcripts on. A clip is cut on the companion and imported locally, like any Temp upload.
+- **Light on the host, however many guests.** The live waveform is computed at most every 100 ms and shared by every viewer (2.9.3), so 12 guests cost the same as one: at most about 3% of a CPU core on the owner's PC.
 - **Memory only, bounded.** The buffer holds 45 seconds (the 30 s window plus 15 s of grace so a selection survives the round trip from a guest). Nothing is written to disk unless someone clips, and clips follow the existing Temp limits.
 - **Separate permission.** Guest clipping needs **Guest Mimic**; playing the result also needs **Remote playback**. Only the host can choose or change the source.
 - **Be fair to the people you record.** Mimic captures other people's voices. Tell your session it is on; the badge exists for that reason.

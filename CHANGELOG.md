@@ -2,6 +2,15 @@
 
 Notable changes to Soundpad Web. Versions follow the website's `package.json`; the Windows companion is versioned separately and only needs updating when a release says so.
 
+## 2.9.3 — Mimic waveform shared between guests
+
+**Update the Windows companion** to get this; nothing looks different.
+
+### Fixed
+
+- Every Mimic waveform refresh scanned the whole 30 s buffer, 2.9 ms on the owner's PC, while holding the buffer lock that audio capture also needs. Twelve guests polling at the session's rate limit could have used about 42% of a CPU core and stalled capture. The companion now computes the waveform at most every 100 ms and shares it with every viewer, so the cost stays at or below 2.9% of a core however many guests watch. Clips stay exact, because each peek still reports the precise frame its waveform was drawn at. Measured with the new `SoundpadWeb.Harness.exe --peek-bench`.
+- Test: two peeks within 100 ms return the same snapshot; a later peek moves on.
+
 ## 2.9.2 — Dead CSS removed
 
 Website maintenance; nothing looks or behaves differently. The companion is rebuilt as 2.9.2 with no code changes.

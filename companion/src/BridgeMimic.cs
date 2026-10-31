@@ -52,6 +52,27 @@ public sealed partial class Bridge
     /// <summary>Replaces the capture backend; tests and the e2e harness use a deterministic fixture source.</summary>
     public void UseMimicCapture(IMimicCapture capture) { mimicCapture.Dispose(); mimicCapture = capture; }
 
+    private readonly object peekGate = new();
+    private (MimicRing Ring, long End, int[] Levels)? lastPeek;
+
+    /// <summary>
+    /// Waveform levels for the window ending now, computed at most every 100 ms and shared by every viewer.
+    /// One computation scans the whole 30 s window (~3 ms) under the buffer lock; twelve guests polling
+    /// at the session rate limit would otherwise cost ~40% of a core and stall capture writes.
+    /// </summary>
+    private (long End, int[] Levels) PeekLevels(MimicRing ring, long frames)
+    {
+        lock (peekGate)
+        {
+            long now = ring.Written;
+            if (lastPeek is { } cached && ReferenceEquals(cached.Ring, ring) && now - cached.End < ring.Rate / 10)
+                return (cached.End, cached.Levels);
+            var levels = ring.Levels(now, frames, MimicBuckets);
+            lastPeek = (ring, now, levels);
+            return (now, levels);
+        }
+    }
+
     private static bool IsMimic(string op) => op is "mimicSources" or "mimicStart" or "mimicStop" or "mimicPeek" or "mimicClip" or "mimicTranscribe" or "mimicHotkey";
 
     private bool GuestMimicAllowed(string? requester, string? audience) =>
@@ -94,8 +115,9 @@ public sealed partial class Bridge
                 case "mimicPeek":
                     {
                         var ring = mimicCapture.Ring ?? throw new InvalidDataException("Mimic is not listening.");
-                        long end = ring.Written, frames = (long)ring.Rate * MimicWindowMs / 1000;
-                        return new("ack", c.Id, true, Data: new MimicPeek(end, ring.Rate, MimicWindowMs, ring.Levels(end, frames, MimicBuckets), mimicCapture.Running, transcriber.Lines(ring, end - frames, end)));
+                        long frames = (long)ring.Rate * MimicWindowMs / 1000;
+                        var (end, levels) = PeekLevels(ring, frames);
+                        return new("ack", c.Id, true, Data: new MimicPeek(end, ring.Rate, MimicWindowMs, levels, mimicCapture.Running, transcriber.Lines(ring, end - frames, end)));
                     }
                 case "mimicClip":
                     {
