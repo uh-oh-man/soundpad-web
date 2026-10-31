@@ -2,7 +2,20 @@
 
 Notable changes to Soundpad Web. Versions follow the website's `package.json`; the Windows companion is versioned separately and only needs updating when a release says so.
 
-## Unreleased
+## 2.9.1 — Lighter transcripts for gaming hosts
+
+**Update the Windows companion** to get the lighter setting; nothing else changes.
+
+### Changed
+
+- Mimic transcripts use 2 CPU threads (1 on PCs with fewer than 8 cores) instead of up to 4, because hosts are often playing a game at the same time. Benchmarked with the new `SoundpadWeb.Harness.exe --whisper-bench <wav>` on the owner's PC, 11 s of speech took:
+  - 1 thread: 4.7 s (2.3x real time), 4.6 s CPU.
+  - 2 threads: 2.7 s (4.1x real time), 5.0 s CPU.
+  - 4 threads: 1.6 s (6.9x real time), 6.3 s CPU.
+
+  The transcript was identical at every setting. Lines now appear about a second later in long sentences, in exchange for half the busy cores and about 20% less CPU.
+
+### Verified
 
 - Verified the full real chain end to end without any sound: real Windows app-loopback capture, Mimic's buffer, and the real Whisper transcript. New `SoundpadWeb.Harness.exe --mimic-silent-selftest <wav>` plays the file at stream volume 0 and captures its own process, because Windows' per-app capture taps audio before stream volume. On the owner's PC the JFK sentence came through exactly (1,507 packets, peak 783/1000). This was the last untested part of Mimic.
 

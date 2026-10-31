@@ -18,8 +18,14 @@ public interface ITranscriptEngine : IDisposable
     Task<IReadOnlyList<TranscribedSpan>> Transcribe(float[] samples16k, CancellationToken cancel);
 }
 
-public sealed class WhisperEngine(string modelPath, string? sharedModelPath = null, string? nativeDirectory = null) : ITranscriptEngine
+public sealed class WhisperEngine(string modelPath, string? sharedModelPath = null, string? nativeDirectory = null, int? threads = null) : ITranscriptEngine
 {
+    /// <summary>
+    /// CPU threads for recognition. Hosts are often gaming, so stay light: 2 threads on 8+ cores, else 1.
+    /// Measured on the owner's 16-thread PC (11 s of speech): 1 thread 2.3x real time, 2 threads 4.1x, 4 threads 6.9x but
+    /// four busy cores and ~25% more total CPU (harness --whisper-bench). Same transcript at every setting.
+    /// </summary>
+    public int Threads { get; } = threads ?? Math.Clamp(Environment.ProcessorCount / 4, 1, 2);
     private static readonly string[] NativeLibraries = ["ggml-base-whisper.dll", "ggml-cpu-whisper.dll", "ggml-whisper.dll", "whisper.dll"];
     private static readonly object nativeGate = new();
     /// <summary>
@@ -83,7 +89,7 @@ public sealed class WhisperEngine(string modelPath, string? sharedModelPath = nu
     {
         if (factory == null) UseEmbeddedNativeLibraries();
         processor ??= (factory ??= WhisperFactory.FromPath(Model ?? throw new InvalidDataException("Download the speech model first.")))
-            .CreateBuilder().WithLanguage("en").WithThreads(Math.Clamp(Environment.ProcessorCount / 2, 1, 4)).WithProbabilities().WithNoSpeechThreshold(.5f).Build();
+            .CreateBuilder().WithLanguage("en").WithThreads(Threads).WithProbabilities().WithNoSpeechThreshold(.5f).Build();
         var result = new List<TranscribedSpan>();
         await foreach (var segment in processor.ProcessAsync(samples16k, cancel))
             if (segment.Probability >= .45f && segment.Text.Trim() is { Length: > 0 } text && !text.StartsWith('[') && !text.StartsWith('('))
