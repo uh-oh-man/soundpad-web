@@ -21,7 +21,7 @@ if (args.FirstOrDefault() == "--mimic-probe")
     var pick = args.Length > 1 ? sources.First(s => s.Id == args[1] || s.Name.Contains(args[1], StringComparison.OrdinalIgnoreCase)) : sources.First(s => s.Kind == "output");
     await capture.Start(pick, 5); await Task.Delay(2000);
     var ring = capture.Ring!; var levels = ring.Levels(ring.Written, ring.Rate * 2L, 20);
-    Console.WriteLine(Json.Write(new { source = pick.Name, capture.Status, capture.Running, frames = ring.Written, rate = ring.Rate, peak = levels.Max() }));
+    Console.WriteLine(Json.Write(new { source = pick.Name, capture.Status, capture.Running, frames = ring.Written, capture.Packets, rate = ring.Rate, peak = levels.Max() }));
     return;
 }
 if (args.FirstOrDefault() == "--analyze-file" && args.Length == 2)

@@ -97,14 +97,16 @@ public sealed class WasapiMimicCapture : IMimicCapture
 {
     private const int Rate = 48000;
     private readonly object gate = new();
-    private WasapiCapture? device;
-    private CancellationTokenSource? processStop;
+    private CancellationTokenSource? captureStop;
     private MimicRing? ring;
     private long lastFrameTicks;
     private int generation;
     public bool Running { get; private set; }
     public string Status { get; private set; } = "Off";
     public string? SourceName { get; private set; }
+    /// <summary>Capture packets received from Windows since Start; used by the device probe.</summary>
+    public long Packets => Interlocked.Read(ref packets);
+    private long packets;
     public MimicRing? Ring { get { lock (gate) { PadSilence(0); return ring; } } }
 
     public IReadOnlyList<MimicSource> Sources()
@@ -124,71 +126,52 @@ public sealed class WasapiMimicCapture : IMimicCapture
     {
         Stop();
         int session;
-        lock (gate) { session = generation; ring = new(Rate, seconds); lastFrameTicks = Stopwatch.GetTimestamp(); SourceName = source.Name; Status = "Connecting…"; }
-        try
+        CancellationTokenSource stop;
+        lock (gate) { session = generation; stop = captureStop = new(); ring = new(Rate, seconds); lastFrameTicks = Stopwatch.GetTimestamp(); SourceName = source.Name; Status = "Connecting…"; }
+        Interlocked.Exchange(ref packets, 0);
+        var ready = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        // Build, run and dispose the recorder on one MTA task: process-loopback clients cannot cross apartments.
+        _ = Task.Run(async () =>
         {
-            if (source.Kind == "app")
+            MMDeviceEnumerator? devices = null;
+            MMDevice? endpoint = null;
+            try
             {
-                if (!uint.TryParse(source.Id.AsSpan(4), out uint pid)) throw new InvalidDataException("Unknown app.");
-                var stop = processStop = new();
-                var ready = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-                // The activated client is not marshalable across apartments: keep its whole life on one MTA task.
-                _ = Task.Run(async () =>
+                var builder = new WasapiRecorderBuilder().WithSharedMode();
+                if (source.Kind == "app")
                 {
-                    try
-                    {
-                        using var client = await AudioClient.ActivateProcessLoopbackAsync(pid, ProcessLoopbackMode.IncludeTargetProcessTree);
-                        var format = WaveFormat.CreateIeeeFloatWaveFormat(Rate, 2);
-                        client.Initialize(AudioClientShareMode.Shared, AudioClientStreamFlags.Loopback, 200000, 0, format, Guid.Empty);
-                        var reader = client.AudioCaptureClient;
-                        client.Start();
-                        lock (gate) if (session == generation) { Running = true; Status = "Listening"; }
-                        ready.TrySetResult();
-                        try
-                        {
-                            while (!stop.IsCancellationRequested)
-                            {
-                                while (reader.GetNextPacketSize() > 0)
-                                {
-                                    var pointer = reader.GetBuffer(out int frames, out var flags);
-                                    try
-                                    {
-                                        var bytes = new byte[frames * format.BlockAlign];
-                                        if (!flags.HasFlag(AudioClientBufferFlags.Silent)) System.Runtime.InteropServices.Marshal.Copy(pointer, bytes, 0, bytes.Length);
-                                        Feed(session, bytes, bytes.Length, format);
-                                    }
-                                    finally { reader.ReleaseBuffer(frames); }
-                                }
-                                await Task.Delay(10, stop.Token);
-                            }
-                        }
-                        finally { client.Stop(); }
-                    }
-                    catch (OperationCanceledException) { ready.TrySetResult(); }
-                    catch (Exception ex) when (ex is not OutOfMemoryException)
-                    {
-                        Fail(session, "App capture stopped: " + ex.Message);
-                        ready.TrySetException(new InvalidDataException("Cannot capture that app. It may have closed, or this Windows build lacks app capture."));
-                    }
-                });
-                await ready.Task;
-            }
-            else
-            {
-                using var devices = new MMDeviceEnumerator();
-                var capture = new WasapiLoopbackCapture(devices.GetDevice(source.Id["output:".Length..]));
-                capture.DataAvailable += (_, e) => Feed(session, e.Buffer, e.BytesRecorded, capture.WaveFormat);
-                capture.RecordingStopped += (_, e) => { if (e.Exception != null) Fail(session, "Output capture stopped: " + e.Exception.Message); };
-                lock (gate) device = capture;
-                capture.StartRecording();
+                    if (!uint.TryParse(source.Id.AsSpan(4), out uint pid)) throw new InvalidDataException("Unknown app.");
+                    builder = builder.WithProcessLoopback(pid, ProcessLoopbackMode.IncludeTargetProcessTree).WithFormat(WaveFormat.CreateIeeeFloatWaveFormat(Rate, 2));
+                }
+                else
+                {
+                    devices = new();
+                    endpoint = devices.GetDevice(source.Id["output:".Length..]);
+                    builder = builder.WithDevice(endpoint).WithLoopbackCapture();
+                }
+                await using var recorder = await builder.BuildAsync();
+                var format = recorder.WaveFormat;
                 lock (gate) if (session == generation) { Running = true; Status = "Listening"; }
+                ready.TrySetResult();
+                await foreach (var buffer in recorder.CaptureAsync(stop.Token))
+                {
+                    Interlocked.Increment(ref packets);
+                    var bytes = buffer.Data.ToArray();
+                    if (buffer.Flags.HasFlag(AudioClientBufferFlags.Silent)) Array.Clear(bytes);
+                    Feed(session, bytes, bytes.Length, format);
+                }
             }
-        }
-        catch (Exception ex) when (ex is not (OutOfMemoryException or InvalidDataException))
-        {
-            Stop();
-            throw new InvalidDataException("Cannot capture that source: " + ex.Message);
-        }
+            catch (OperationCanceledException) { ready.TrySetResult(); }
+            catch (Exception ex) when (ex is not OutOfMemoryException)
+            {
+                Fail(session, "Capture stopped: " + ex.Message);
+                ready.TrySetException(new InvalidDataException(source.Kind == "app"
+                    ? "Cannot capture that app. It may have closed, or this Windows build lacks app capture."
+                    : "Cannot capture that output: " + ex.Message));
+            }
+            finally { endpoint?.Dispose(); devices?.Dispose(); }
+        });
+        try { await ready.Task; }
         catch (InvalidDataException) { Stop(); throw; }
     }
 
@@ -238,18 +221,11 @@ public sealed class WasapiMimicCapture : IMimicCapture
 
     public void Stop()
     {
-        WasapiCapture? oldDevice;
         lock (gate)
         {
             generation++;
-            processStop?.Cancel(); processStop = null;
-            oldDevice = device; device = null;
+            captureStop?.Cancel(); captureStop = null;
             ring = null; Running = false; SourceName = null; Status = "Off";
-        }
-        if (oldDevice != null)
-        {
-            try { oldDevice.StopRecording(); } catch (Exception ex) when (ex is not OutOfMemoryException) { }
-            oldDevice.Dispose();
         }
     }
     public void Dispose() => Stop();
