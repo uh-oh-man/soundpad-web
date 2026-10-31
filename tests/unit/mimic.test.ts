@@ -4,6 +4,8 @@ import {
   lineSelection,
   nudgeSelection,
   normalizeSelection,
+  preferredSource,
+  sourceKey,
   transcriptFor,
 } from '../../web/src/components/MimicPanel';
 import {
@@ -97,5 +99,25 @@ describe('Mimic keyboard selection', () => {
       from: 1050,
       to: 1200,
     });
+  });
+});
+
+describe('Mimic source default', () => {
+  const sources = [
+    { id: 'output:1', name: 'Output: Headphones', kind: 'output' },
+    { id: 'app:200', name: 'App: chrome [200]', kind: 'app' },
+    { id: 'app:300', name: 'App: Discord [300]', kind: 'app' },
+  ];
+  it('ignores process ids when remembering an app', () => {
+    expect(sourceKey('App: Discord [1234]')).toBe('App: Discord');
+    expect(sourceKey('Output: Speakers [Realtek]')).toBe('Output: Speakers [Realtek]');
+  });
+  it('keeps the current choice, then the remembered one, then Discord, then the first', () => {
+    expect(preferredSource(sources, 'app:200', 'App: Discord')).toBe('app:200');
+    expect(preferredSource(sources, '', 'App: chrome')).toBe('app:200');
+    expect(preferredSource(sources, '', 'App: closed app')).toBe('app:300');
+    expect(preferredSource(sources, '', null)).toBe('app:300');
+    expect(preferredSource(sources.slice(0, 2), '', null)).toBe('output:1');
+    expect(preferredSource([], '', null)).toBe('');
   });
 });

@@ -16,7 +16,7 @@ The capture engine in the companion is a port of Voice Replay Studio's `CaptureS
 **Host**
 
 1. Click **Mimic** above the soundboard.
-2. Under **Listen to**, choose an **Output** (everything that device plays) or an **App** (that program and its child processes, e.g. Discord).
+2. Under **Listen to**, choose an **Output** (everything that device plays) or an **App** (that program and its child processes, e.g. Discord, whose voice runs in a child process). The window remembers your last choice by name and otherwise preselects Discord if it is running (2.9.5).
 3. Click **Start listening**. A pulsing **Mimic on** badge appears in everyone's header.
 4. To let guests clip, turn on **Session & access → Guest Mimic**. It is off by default.
 5. Optional (2.7.0): turn on **F6 hotkey**. While Mimic is listening, pressing **F6 in any app** on the host PC saves the last 10 seconds to Temp, named after its transcript when transcripts are on, just like Voice Replay Studio's F6. It is off by default so it never takes F6 from a game; if another app already owns F6 (for example Voice Replay Studio itself), the window says so. End hosting and quitting release the key.

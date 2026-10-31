@@ -2,6 +2,15 @@
 
 Notable changes to Soundpad Web. Versions follow the website's `package.json`; the Windows companion is versioned separately and only needs updating when a release says so.
 
+## 2.9.5 — Mimic remembers your source
+
+Website update; the companion is rebuilt as 2.9.5 with no code changes.
+
+### Changed
+
+- The **Listen to** picker preselects the source you last started, matched by name ("App: Discord", not its process id, which changes every launch). If none was saved, it picks Discord when it is running, since that is the usual reason to use Mimic, and otherwise the first source. Saved only in this browser; nothing is sent anywhere.
+- Unit tests for the choice order and for stripping process ids.
+
 ## 2.9.4 — Replay your recent Mimic clips
 
 Website update; the companion is rebuilt as 2.9.4 with no code changes.

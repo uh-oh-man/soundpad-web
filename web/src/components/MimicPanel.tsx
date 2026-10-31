@@ -83,6 +83,31 @@ export function transcriptFor(lines: TranscriptLine[], selection: Selection) {
 }
 
 const POLL_MS = 500;
+const SOURCE_KEY = 'soundpad-mimic-source';
+type Source = { id: string; name: string; kind: string };
+
+/** A source's stable name: "App: Discord [1234]" -> "App: Discord" (process ids change on every launch). */
+export const sourceKey = (name: string) => name.replace(/\s*\[\d+\]$/, '');
+
+/**
+ * Which source to preselect: the one still chosen, else the last one used (by stable name), else Discord,
+ * the usual reason to use Mimic, else the first.
+ */
+export function preferredSource(sources: Source[], current: string, remembered: string | null) {
+  if (sources.some((s) => s.id === current)) return current;
+  const match =
+    (remembered && sources.find((s) => sourceKey(s.name) === remembered)) ||
+    sources.find((s) => s.kind === 'app' && /discord/i.test(s.name));
+  return (match ?? sources[0])?.id ?? '';
+}
+
+function rememberedSource() {
+  try {
+    return localStorage.getItem(SOURCE_KEY);
+  } catch {
+    return null; // storage can be unavailable; the default still works
+  }
+}
 const RECENT_CLIPS = 5;
 /** Clips made from this tab, newest first. Kept for the page's lifetime so reopening the window keeps them. */
 const recentClips: { assetId: string; name: string }[] = [];
@@ -276,9 +301,7 @@ export function MimicPanel({
     try {
       const parsed = sourcesSchema.parse(await controller.run('mimicSources'));
       setSources(parsed.sources);
-      setSource((current) =>
-        parsed.sources.some((s) => s.id === current) ? current : (parsed.sources[0]?.id ?? ''),
-      );
+      setSource((current) => preferredSource(parsed.sources, current, rememberedSource()));
     } catch {
       /* Controller shows the error. */
     }
@@ -436,7 +459,13 @@ export function MimicPanel({
               disabled={busy || !source || !connected}
               onClick={async () => {
                 setBusy(true);
-                await controller.run('mimicStart', { sourceId: source }).catch(() => {});
+                const name = sources.find((s) => s.id === source)?.name;
+                try {
+                  await controller.run('mimicStart', { sourceId: source });
+                  if (name) localStorage.setItem(SOURCE_KEY, sourceKey(name));
+                } catch {
+                  /* Controller shows the error; storage is optional. */
+                }
                 setBusy(false);
               }}
             >
