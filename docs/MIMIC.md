@@ -30,7 +30,7 @@ The capture engine in the companion is a port of Voice Replay Studio's `CaptureS
 
 Keyboard (2.5.1): **3**, **5** or **0** select the last 3, 5 or 10 seconds and move focus to the name field, **Enter** mimics, **Shift+Enter** mimics and plays, **Esc** clears the selection (press it again to close the window). This is the browser counterpart of Voice Replay Studio's F6 key; a website cannot register system-wide hotkeys.
 
-The clip becomes a normal Temp sound, so everything Temp already does applies: reverse, **Keep permanently** with host confirmation, cleanup at End Hosting, and (2.8.0) **Trim**. Trim works on any Temp source, not only Mimic clips: open **Temp**, press **Trim**, set the start and end in seconds, and **Save trimmed copy**. Like Voice Replay Studio's trim, it saves a new version and leaves the original untouched. Guests can trim when the host allows uploads.
+The clip becomes a normal Temp sound, so everything Temp already does applies: reverse, **Keep permanently** with host confirmation, cleanup at End Hosting, and (2.8.0) **Trim**. Trim works on any Temp source, not only Mimic clips: open **Temp**, press **Edit copy**, set the start and end in seconds, optionally pick an **Effect** (2.9.0: Chipmunk, Slow-mo or Echo), and **Save copy**. Like Voice Replay Studio's trim, it saves a new version and leaves the original untouched. Guests can trim when the host allows uploads.
 
 ## Transcripts (2.5.0)
 

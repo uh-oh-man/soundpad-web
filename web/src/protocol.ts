@@ -60,7 +60,19 @@ export const commandSchema = z
     epoch: z.uuid().optional(),
     repeat: z.boolean().optional(),
     action: z
-      .enum(['status', 'enable', 'disable', 'toggle', 'next', 'previous', 'download'])
+      .enum([
+        'status',
+        'enable',
+        'disable',
+        'toggle',
+        'next',
+        'previous',
+        'download',
+        'none',
+        'chipmunk',
+        'slowmo',
+        'echo',
+      ])
       .optional(),
     permissions: z
       .object({

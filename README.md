@@ -4,7 +4,7 @@
 
 > **Maintainer:** Claude (Anthropic's Claude Code) is the main editor of this project as of version 2.3.1, working with [@uh-oh-man](https://github.com/uh-oh-man). Versions up to 2.3.0 were written by OpenAI Codex. As of 2.4.0 this repository also contains the **Voice Replay Studio** ("Mimic") desktop app in [`mimic/`](mimic/README.md). Changes are recorded in the [changelog](CHANGELOG.md); maintainer notes live in [CLAUDE.md](CLAUDE.md); every release can be restored as described in [rolling back](docs/ROLLBACK.md).
 
-**2.8 is the current update: Mimic with live transcripts, an F6 hotkey and Trim.** Refresh the website and download the latest Windows companion. Mimic lets your session grab something that was just said (in Discord, a game, anything playing on your PC) and turn it into a sound, shows the words so you can click the line you want, and the host can press F6 in any app to save the last 10 seconds. See [Mimic](docs/MIMIC.md) and the [changelog](CHANGELOG.md). To go back to an earlier version at any time, see [rolling back](docs/ROLLBACK.md).
+**2.9 is the current update: Mimic with live transcripts, an F6 hotkey, Trim and voice effects.** Refresh the website and download the latest Windows companion. Mimic lets your session grab something that was just said (in Discord, a game, anything playing on your PC) and turn it into a sound, shows the words so you can click the line you want, and the host can press F6 in any app to save the last 10 seconds. See [Mimic](docs/MIMIC.md) and the [changelog](CHANGELOG.md). To go back to an earlier version at any time, see [rolling back](docs/ROLLBACK.md).
 
 A private browser remote for [Leppsoft Soundpad](https://www.leppsoft.com/soundpad/). Friends see your real categories, tap a sound, and your existing Soundpad plays it through its current audio setup.
 
@@ -19,7 +19,7 @@ Soundpad Web began as a browser remote for Soundpad. In 2.4.0 it merged with **V
 | Part | Where | What it does |
 | --- | --- | --- |
 | Website | `web/` | The static React site on GitHub Pages: soundboard, Temp, Mimic window, host settings. Guests only ever need this. |
-| Windows companion | `companion/` | One portable `SoundpadWeb.exe` on the host PC. It talks to Soundpad, manages Temp audio, and runs Mimic: rolling capture, the local Whisper transcript, the F6 hotkey and Trim. |
+| Windows companion | `companion/` | One portable `SoundpadWeb.exe` on the host PC. It talks to Soundpad, manages Temp audio, and runs Mimic: rolling capture, the local Whisper transcript, the F6 hotkey, Trim and voice effects. |
 | Voice Replay Studio | `mimic/` | The original Mimic desktop app (V1.1), kept intact with its own README, tests and licenses. |
 | Docs | `docs/` | [Mimic](docs/MIMIC.md), [rolling back](docs/ROLLBACK.md), API research, protocol and verification notes. |
 

@@ -225,4 +225,37 @@ public sealed class MimicTests : IDisposable
         Assert.False((await bridge.Execute(Cmd("trimAudio") with { AssetId = original.Id, PositionMs = 0, EndMs = 1000 }, "guest")).Ok);
         Assert.False((await bridge.Execute(Cmd("trimAudio") with { AssetId = Guid.NewGuid().ToString(), PositionMs = 0, EndMs = 1000 }, "host")).Ok);
     }
+
+    [Fact]
+    public void EffectsChangeSpeedAndAddEchoTaps()
+    {
+        var mono = Enumerable.Range(0, 3000).Select(i => (float)i).ToArray();
+        Assert.Equal(2000, AudioEffects.Apply(mono, 1, 1000, "chipmunk").Length);
+        Assert.Equal(4285, AudioEffects.Apply(mono, 1, 1000, "slowmo").Length);
+        Assert.Same(mono, AudioEffects.Apply(mono, 1, 1000, "none"));
+        var stereo = new float[] { 1, -1, 3, -3, 5, -5, 7, -7 };
+        Assert.Equal(new float[] { 1, -1, 4, -4 }, AudioEffects.Speed(stereo, 2, 1.5)); // 4 frames / 1.5 = 2; channels stay separate
+        var click = new float[2000]; click[0] = 1;
+        var echo = AudioEffects.Echo(click, 1, 1000);
+        Assert.Equal(2500, echo.Length);
+        Assert.Equal(0.8f, echo[0], 3); Assert.Equal(0.36f, echo[250], 3); Assert.Equal(0.16f, echo[500], 3);
+    }
+
+    [Fact]
+    public async Task EditedCopiesCanCarryAVoiceEffect()
+    {
+        await using var mock = new MockSoundpad(); using var pipe = new SoundpadPipe(mock.Name, true); using var bridge = new Bridge(pipe, new StateStore(folder)); await bridge.Poll(true);
+        Assert.True((await bridge.Execute(Cmd("beginSession"), "host")).Ok);
+        var tone = Enumerable.Range(0, 48000).Select(i => 0.3f * MathF.Sin(i * 0.2f)).ToArray(); // 3 s at 16 kHz
+        Assert.True((await bridge.Upload(MimicRing.Wav(tone, 16000), "Said it.wav", "Alice")).Ok);
+        var journal = () => JsonSerializer.Deserialize<AudioJournal>(File.ReadAllText(Path.Combine(folder, "managed-audio", "journal.json")), Json.Options)!;
+        var original = journal().Assets.Single();
+        Assert.False((await bridge.Execute(Cmd("trimAudio") with { AssetId = original.Id, PositionMs = 0, EndMs = 3000, Action = "robot" }, "host")).Ok);
+        var fast = await bridge.Execute(Cmd("trimAudio") with { AssetId = original.Id, PositionMs = 0, EndMs = 3000, Action = "chipmunk" }, "host");
+        Assert.True(fast.Ok, fast.Error);
+        var copy = journal().Assets.Single(a => a.Id != original.Id);
+        Assert.Equal("Said it (chipmunk)", copy.Name);
+        using var wave = new NAudio.Wave.WaveFileReader(copy.Variants.Single().Path);
+        Assert.InRange(wave.TotalTime.TotalMilliseconds, 1990, 2010);
+    }
 }

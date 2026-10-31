@@ -52,6 +52,16 @@ const response = z.object({
 });
 type Asset = z.infer<typeof asset>;
 type Variant = z.infer<typeof variant>;
+/** Voice effects the companion can apply to an edited copy (2.9.0). */
+const effects = {
+  none: 'None',
+  chipmunk: 'Chipmunk (1.5× faster, higher)',
+  slowmo: 'Slow-mo (0.7×, deeper)',
+  echo: 'Echo',
+} as const;
+const effectSuffix = { chipmunk: 'chipmunk', slowmo: 'slow-mo', echo: 'echo' } as const;
+type Effect = keyof typeof effects;
+
 export function TempManager({
   state,
   host,
@@ -73,6 +83,7 @@ export function TempManager({
     from: number;
     to: number;
     name: string;
+    effect: Effect;
   }>();
   const [refresh, setRefresh] = useState(0);
   useEffect(() => {
@@ -107,7 +118,7 @@ export function TempManager({
       }
       if (op === 'trimAudio') {
         setTrimming(undefined);
-        controller.notify('Trimmed copy added to Temp. The original is unchanged.', 'success');
+        controller.notify('Copy added to Temp. The original is unchanged.', 'success');
       }
       setRefresh((n) => n + 1);
     } catch (e) {
@@ -192,23 +203,34 @@ export function TempManager({
                       <button
                         disabled={!!pending || !connected}
                         onClick={() =>
-                          setTrimming({ id: a.id, from: 0, to: durationOf(a)! / 1000, name: '' })
+                          setTrimming({
+                            id: a.id,
+                            from: 0,
+                            to: durationOf(a)! / 1000,
+                            name: '',
+                            effect: 'none',
+                          })
                         }
                       >
-                        Trim
+                        Edit copy
                       </button>
                     )}
                 </div>
                 {trimming?.id === a.id && (
                   <form
                     className="temp-trim"
-                    aria-label={`Trim ${a.name}`}
+                    aria-label={`Edit a copy of ${a.name}`}
+                    // The exact length (e.g. 2.614 s) is rarely a multiple of the 0.05 s step, which
+                    // would make the browser silently refuse to submit. Clamp here instead.
+                    noValidate
                     onSubmit={(e) => {
                       e.preventDefault();
+                      const length = durationOf(a)!;
                       void run('trimAudio', {
                         assetId: a.id,
-                        positionMs: Math.round(trimming.from * 1000),
-                        endMs: Math.round(trimming.to * 1000),
+                        positionMs: Math.round(Math.min(Math.max(0, trimming.from * 1000), length)),
+                        endMs: Math.round(Math.min(Math.max(0, trimming.to * 1000), length)),
+                        action: trimming.effect,
                         ...(trimming.name.trim() && { name: trimming.name.trim() }),
                       });
                     }}
@@ -236,10 +258,25 @@ export function TempManager({
                       />
                     </label>
                     <label>
+                      Effect
+                      <select
+                        value={trimming.effect}
+                        onChange={(e) =>
+                          setTrimming({ ...trimming, effect: e.target.value as Effect })
+                        }
+                      >
+                        {Object.entries(effects).map(([value, label]) => (
+                          <option key={value} value={value}>
+                            {label}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <label>
                       Name
                       <input
                         maxLength={100}
-                        placeholder={`${a.name} (trimmed)`}
+                        placeholder={`${a.name} (${trimming.effect === 'none' ? 'trimmed' : effectSuffix[trimming.effect]})`}
                         value={trimming.name}
                         onChange={(e) => setTrimming({ ...trimming, name: e.target.value })}
                       />
@@ -253,7 +290,7 @@ export function TempManager({
                       type="submit"
                       disabled={!!pending || trimming.to - trimming.from < 0.1 || trimming.from < 0}
                     >
-                      Save trimmed copy
+                      Save copy
                     </button>
                     <button type="button" onClick={() => setTrimming(undefined)}>
                       Cancel

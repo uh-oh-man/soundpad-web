@@ -758,7 +758,7 @@ body,
   font-size: 12px;
   color: var(--text-muted);
 }
-.temp-trim input {
+.temp-trim :is(input, select) {
   width: 110px;
   min-height: 34px;
   padding: 6px 8px;
