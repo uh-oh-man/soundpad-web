@@ -1336,6 +1336,13 @@ test('Mimic: host listens, everyone sees it, and a selection becomes a playable 
   await canvas.focus();
   await page.keyboard.press('Shift+ArrowLeft');
   await expect(canvas).toHaveAccessibleName(/showing the last 30 seconds/);
+  // A new drag in that widened view stays in it until release: 80%–90% of 30 s is −6 s to −3 s.
+  await page.mouse.move(box.x + box.width * 0.8, box.y + box.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(box.x + box.width * 0.85, box.y + box.height / 2);
+  await page.mouse.move(box.x + box.width * 0.9, box.y + box.height / 2);
+  await page.mouse.up();
+  await expect(dialog.locator('.mimic-range')).toContainText('−6.0 s → −3.0 s · 3.0 s');
   await dialog.getByRole('button', { name: 'Clear' }).click();
   await zoom.getByRole('button', { name: '30 s', exact: true }).click();
   // The F6 hotkey is host-only and reports its state (the harness uses a fixture key, never real F6).

@@ -49,9 +49,10 @@ export function MimicWave({
   const [draft, setDraft] = useState<Selection | null>(null);
   const colors = useCanvasColors();
   const [viewSeconds, setViewSeconds] = useState(rememberedView);
+  // The range a drag started in: kept until the pointer is released, so the view never jumps under it.
+  const [dragRange, setDragRange] = useState<{ start: number; end: number } | null>(null);
   const shown = draft ?? selection;
-  // While dragging, keep the range the drag started in, so the view never jumps under the pointer.
-  const { start, end } = visibleRange(peek.windowMs, viewSeconds * 1000, draft ? null : selection);
+  const { start, end } = dragRange ?? visibleRange(peek.windowMs, viewSeconds * 1000, selection);
   const span = end - start;
   useEffect(() => {
     const el = canvas.current;
@@ -135,6 +136,7 @@ export function MimicWave({
         onPointerDown={(e) => {
           e.currentTarget.setPointerCapture(e.pointerId);
           drag.current = anchorFor(e) ?? at(e);
+          setDragRange({ start, end });
           setDraft(null);
         }}
         onPointerMove={(e) => {
@@ -142,10 +144,16 @@ export function MimicWave({
             e.currentTarget.style.cursor = anchorFor(e) === null ? '' : 'ew-resize';
           else setDraft({ from: Math.min(drag.current, at(e)), to: Math.max(drag.current, at(e)) });
         }}
+        onPointerCancel={() => {
+          drag.current = null;
+          setDragRange(null);
+          setDraft(null);
+        }}
         onPointerUp={(e) => {
           if (drag.current === null) return;
           const next = normalizeSelection(drag.current, at(e), peek.windowMs);
           drag.current = null;
+          setDragRange(null);
           setDraft(null);
           onSelect(next);
         }}

@@ -208,6 +208,8 @@ export function TempManager({
                         disabled={!connected}
                         aria-disabled={!!pending || undefined}
                         onClick={() =>
+                          // A running command closes open forms when it finishes; don't open one now.
+                          !pending &&
                           setTrimming({
                             id: a.id,
                             from: 0,
@@ -321,6 +323,7 @@ export function TempManager({
                         <button
                           aria-disabled={!!pending || undefined}
                           onClick={() => {
+                            if (pending) return;
                             setSaving({ asset: a, variant: v });
                             setCategory('');
                             setDirectory('');
@@ -437,7 +440,10 @@ export function TempManager({
                 >
                   Confirm permanent save
                 </button>
-                <button aria-disabled={!!pending || undefined} onClick={() => setSaving(undefined)}>
+                <button
+                  aria-disabled={!!pending || undefined}
+                  onClick={() => !pending && setSaving(undefined)}
+                >
                   Cancel
                 </button>
               </div>

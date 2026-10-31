@@ -2,6 +2,19 @@
 
 Notable changes to Soundpad Web. Versions follow the website's `package.json`; the Windows companion is versioned separately and only needs updating when a release says so.
 
+## 2.13.4 — Review fixes for zoom and Temp
+
+Website only; the companion is unchanged apart from its version number (it reports 2.13.4). An independent review of every change since 2.12.3 found these two problems; nothing else.
+
+### Fixed
+
+- **Mimic zoom: a drag that starts while the view is widened now stays where you point.** When a selection had widened the zoomed view to the whole buffer, starting a new drag snapped the view back to the zoom mid-drag. The drag then ended on a different moment from the one under the pointer (for example −6 s → −1 s instead of −6 s → −3 s). The view is now held from press to release, and a cancelled touch drag also resets cleanly. This was introduced in 2.13.0.
+- **Temp: Edit copy, Keep permanently and the save form's Cancel ignore presses while another Temp command runs,** as they did before 2.13.3. Otherwise a form opened during a running Save copy or permanent save was closed again, losing what had been typed, when that command finished.
+
+### Tests
+
+- The Mimic e2e test drags inside a widened zoomed view and checks the exact range; it fails on 2.13.3.
+
 ## 2.13.3 — Keyboard focus in Temp, Refresh library and the icon editor
 
 Website only; the companion is unchanged apart from its version number (it reports 2.13.3).
