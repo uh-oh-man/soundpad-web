@@ -2,6 +2,16 @@
 
 Notable changes to Soundpad Web. Versions follow the website's `package.json`; the Windows companion is versioned separately and only needs updating when a release says so.
 
+## 2.12.0 — Private preview
+
+**Update the Windows companion** for this; with older companions the button is hidden.
+
+### Added
+
+- **Preview** (host only) in the Mimic window: hear the selected moment on your own PC before saving it, as Voice Replay Studio's Play Selection allowed. Until now the only way to hear a selection was **Mimic & play**, which sends it through Soundpad into voice chat.
+- How it stays private: the companion hands the selection to the host's own browser tab over the local loopback connection, and the browser plays it on that PC's output, normally your headphones. It never goes through Soundpad or to guests, and it saves nothing. Playing it on a Windows output from the companion was rejected, because the default device can be routed into voice chat on some setups, which is why Voice Replay Studio needed a monitor-device picker.
+- Tests: C# (exact 2.5 s, guest refused, nothing saved; 79 total); e2e (the preview plays in the browser and Soundpad plays nothing); the live-relay guest test confirms guests have no Preview.
+
 ## 2.11.2 — Hear it backwards
 
 Website update; the companion is rebuilt as 2.11.2 with no code changes.

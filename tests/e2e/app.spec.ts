@@ -1240,6 +1240,12 @@ test('Mimic: host listens, everyone sees it, and a selection becomes a playable 
   await page.waitForTimeout(2600);
   await dialog.getByRole('button', { name: 'Last 3 s' }).click();
   await expect(dialog.locator('.mimic-range')).toContainText('3.0 s');
+  // Private preview: plays in this tab only, saves nothing, and Soundpad plays nothing.
+  const playsBefore = harness.plays.length;
+  await dialog.getByRole('button', { name: 'Preview' }).click();
+  await expect(dialog.getByRole('button', { name: 'Stop preview' })).toBeVisible();
+  await expect(dialog.getByRole('button', { name: 'Preview' })).toBeVisible({ timeout: 8000 });
+  expect(harness.plays.length).toBe(playsBefore);
   await dialog.getByLabel('Clip name').fill('Fixture mimic');
   await dialog.getByRole('button', { name: 'Mimic & play' }).click();
   const sound = page.getByRole('button', { name: 'Play from start: Fixture mimic', exact: true });
@@ -1418,6 +1424,7 @@ test('live Nostr/WebRTC: guests see Mimic only when allowed and can clip from it
         .first(),
     ).toBeVisible({ timeout: 20000 });
     await dialog.getByRole('button', { name: 'Last 3 s' }).click();
+    await expect(dialog.getByRole('button', { name: 'Preview' })).toHaveCount(0); // audio never goes to guests
     await dialog.getByLabel('Clip name').fill('Guest mimic');
     await dialog.getByRole('button', { name: 'Mimic it' }).click();
     await expect(

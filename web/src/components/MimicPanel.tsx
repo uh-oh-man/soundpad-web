@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState, type PointerEvent } from 'rea
 import {
   Captions,
   Download,
+  Headphones,
   Keyboard,
   Mic2,
   Play,
@@ -342,6 +343,41 @@ export function MimicPanel({
     }
   }, [active]);
 
+  // Host-only private preview: the companion hands the selection to this tab over loopback and the
+  // browser plays it on this PC's output. It never goes through Soundpad or to guests.
+  const preview = useRef<HTMLAudioElement | null>(null);
+  const [previewing, setPreviewing] = useState(false);
+  const stopPreview = useCallback(() => {
+    if (!preview.current) return;
+    preview.current.pause();
+    URL.revokeObjectURL(preview.current.src);
+    preview.current = null;
+    setPreviewing(false);
+  }, []);
+  useEffect(() => stopPreview, [stopPreview]);
+  async function playPreview() {
+    if (!peek || !selection) return;
+    stopPreview();
+    try {
+      const result = z.object({ wav: z.string().max(8_000_000) }).parse(
+        await controller.run('mimicPreview', {
+          mimicEnd: peek.end,
+          positionMs: selection.from,
+          endMs: selection.to,
+          ...(peek.ringId && { sourceId: peek.ringId }),
+        }),
+      );
+      const bytes = Uint8Array.from(atob(result.wav), (c) => c.charCodeAt(0));
+      const audio = new Audio(URL.createObjectURL(new Blob([bytes], { type: 'audio/wav' })));
+      audio.onended = stopPreview;
+      preview.current = audio;
+      setPreviewing(true);
+      await audio.play();
+    } catch {
+      stopPreview(); /* Controller shows command errors; a blocked autoplay just ends the preview. */
+    }
+  }
+
   async function clip(play: boolean) {
     if (!peek || !selection) return;
     setBusy(true);
@@ -634,6 +670,14 @@ export function MimicPanel({
                 value={name}
                 onChange={(e) => setName(e.target.value)}
               />
+              {host && supports(state.companionVersion, 'preview') && (
+                <button
+                  title="Hear the selection on this PC only; nobody else hears it"
+                  onClick={() => (previewing ? stopPreview() : void playPreview())}
+                >
+                  <Headphones size={15} /> {previewing ? 'Stop preview' : 'Preview'}
+                </button>
+              )}
               <button disabled={busy} onClick={() => void clip(false)}>
                 <Scissors size={15} /> Mimic it
               </button>

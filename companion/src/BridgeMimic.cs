@@ -96,7 +96,18 @@ public sealed partial class Bridge
         }
     }
 
-    private static bool IsMimic(string op) => op is "mimicSources" or "mimicStart" or "mimicStop" or "mimicPeek" or "mimicClip" or "mimicTranscribe" or "mimicHotkey";
+    /// <summary>The buffer frames a person selected in a peek they saw (see docs/MIMIC.md, Protocol).</summary>
+    private (MimicRing Ring, long Start, long Stop) Selection(Command c)
+    {
+        var ring = mimicCapture.Ring ?? throw new InvalidDataException("Mimic is not listening.");
+        if (c.SourceId != null && c.SourceId != ring.Id) throw new InvalidDataException("Mimic restarted since you selected that. Select it again.");
+        if (c.MimicEnd is not long end || c.PositionMs is not long from || c.EndMs is not long to || from < 0 || to > MimicWindowMs || to - from < MimicMinimumMs) throw new InvalidDataException($"Select between {MimicMinimumMs} ms and {MimicWindowMs / 1000} seconds of audio.");
+        long windowStart = end - (long)ring.Rate * MimicWindowMs / 1000;
+        // Time before capture started has no audio; trim it instead of treating it as expired.
+        return (ring, Math.Max(0, windowStart + from * ring.Rate / 1000), windowStart + to * ring.Rate / 1000);
+    }
+
+    private static bool IsMimic(string op) => op is "mimicSources" or "mimicStart" or "mimicStop" or "mimicPeek" or "mimicClip" or "mimicTranscribe" or "mimicHotkey" or "mimicPreview";
 
     private bool GuestMimicAllowed(string? requester, string? audience) =>
         disk.Permissions.GuestMimic && (audioAudience == null || sessionAccepting && audience == audioAudience) && (requester == null || !revokedAudioPeers.ContainsKey(requester));
@@ -152,14 +163,17 @@ public sealed partial class Bridge
                     }
                 case "mimicClip":
                     {
-                        var ring = mimicCapture.Ring ?? throw new InvalidDataException("Mimic is not listening.");
-                        if (c.SourceId != null && c.SourceId != ring.Id) throw new InvalidDataException("Mimic restarted since you selected that. Select it again.");
-                        if (c.MimicEnd is not long end || c.PositionMs is not long from || c.EndMs is not long to || from < 0 || to > MimicWindowMs || to - from < MimicMinimumMs) throw new InvalidDataException($"Select between {MimicMinimumMs} ms and {MimicWindowMs / 1000} seconds of audio.");
-                        long windowStart = end - (long)ring.Rate * MimicWindowMs / 1000;
-                        // Time before capture started has no audio; trim it instead of treating it as expired.
-                        long start = Math.Max(0, windowStart + from * ring.Rate / 1000), stop = windowStart + to * ring.Rate / 1000;
+                        var (ring, start, stop) = Selection(c);
                         var result = await SaveMimic(ring, start, stop, c.Name, Person(actor, participant).Name, host, requester ?? participant?.Id ?? actor, audience);
                         return result with { Id = c.Id };
+                    }
+                case "mimicPreview":
+                    {
+                        // Host only (checked above): the audio goes to the host's own browser tab over loopback, to be
+                        // heard on that PC. It never reaches guests or Soundpad.
+                        var (ring, start, stop) = Selection(c);
+                        if (stop - start < (long)ring.Rate * MimicMinimumMs / 1000) throw new InvalidDataException("Mimic had not started listening yet at that moment.");
+                        return new("ack", c.Id, true, Data: new { wav = Convert.ToBase64String(MimicRing.Wav(ring.Read(start, stop), ring.Rate)) });
                     }
                 default: throw new InvalidDataException("Unsupported command.");
             }

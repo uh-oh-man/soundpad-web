@@ -6,6 +6,7 @@ Every release stays on GitHub permanently, so any earlier version can be restore
 
 | Version | What it is | Git tag | Download |
 | --- | --- | --- | --- |
+| 2.12.0 | Private preview | `v2.12.0` | [Release](https://github.com/uh-oh-man/soundpad-web/releases/tag/v2.12.0) |
 | 2.11.2 | Hear it backwards | `v2.11.2` | [Release](https://github.com/uh-oh-man/soundpad-web/releases/tag/v2.11.2) |
 | 2.11.1 | Mimic on phones | `v2.11.1` | [Release](https://github.com/uh-oh-man/soundpad-web/releases/tag/v2.11.1) |
 | 2.11.0 | Choose how much F6 saves | `v2.11.0` | [Release](https://github.com/uh-oh-man/soundpad-web/releases/tag/v2.11.0) |

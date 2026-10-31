@@ -42,7 +42,8 @@ The companion's console window logs these events with the time, including who ma
    - or use the keyboard: **3**, **5** or **0** select the last 3, 5 or 10 seconds and focus the name field. On the focused waveform, **Left/Right** move the end, **Shift+Left/Right** the start, and **Ctrl** makes 1-second steps.
 
    A selection freezes the view so the moment stays put.
-3. Optionally type a name; otherwise the transcript's words, or the time, are used. Then press **Mimic it** (or **Enter**) to add the clip to Temp, or **Mimic & play** (**Shift+Enter**) to also play it through Soundpad. **Esc** clears the selection; press it again to close the window.
+3. The host can press **Preview** to hear the selection on their own PC only. It plays in the host's browser tab, never through Soundpad or to guests, and saves nothing.
+4. Optionally type a name; otherwise the transcript's words, or the time, are used. Then press **Mimic it** (or **Enter**) to add the clip to Temp, or **Mimic & play** (**Shift+Enter**) to also play it through Soundpad. **Esc** clears the selection; press it again to close the window.
 
 Everyone gets a short notice when anyone makes a clip, F6 included. **Just mimicked** lists the session's last 5 clips, with who made them, a **Replay** button and a **Reverse** button to hear it backwards.
 
@@ -91,6 +92,7 @@ The website always serves the newest version and hides anything the host's compa
 | Voice effects | 2.9 |
 | Shared recent clips and notices | 2.10 |
 | F6 length choice | 2.11 |
+| Private preview (host) | 2.12 |
 
 ## Protocol
 
@@ -99,7 +101,8 @@ The website always serves the newest version and hides anything the host's compa
   - `mimicStart` with `sourceId`;
   - `mimicStop`;
   - `mimicTranscribe` with `action` `enable`, `disable` or `download`;
-  - `mimicHotkey` with `enable`, `disable` or `length`, and `positionMs` set to the F6 length (3000–30000).
+  - `mimicHotkey` with `enable`, `disable` or `length`, and `positionMs` set to the F6 length (3000–30000);
+  - `mimicPreview` with the same selection fields as `mimicClip`; returns the selection as base64 WAV to the host's own tab.
 - **Host, or guests with `guestMimic`:** `mimicPeek` and `mimicClip`. A clip sends `mimicEnd`, `positionMs`/`endMs`, an optional `name`, and the capture's `sourceId`.
 - **Host, or guests with uploads:** `trimAudio`, with `assetId`, `positionMs`/`endMs`, `action` (`none`, `chipmunk`, `slowmo` or `echo`) and an optional `name`.
 - **New permission:** `guestMimic`, default `false`.

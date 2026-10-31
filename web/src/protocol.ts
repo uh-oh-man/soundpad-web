@@ -37,6 +37,7 @@ export const commandSchema = z
       'mimicClip',
       'mimicTranscribe',
       'mimicHotkey',
+      'mimicPreview',
       'trimAudio',
     ]),
     assetId: z.uuid().optional(),

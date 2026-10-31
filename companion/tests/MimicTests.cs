@@ -332,4 +332,24 @@ public sealed class MimicTests : IDisposable
         Assert.False(await transcriber.Step(ring, false, default, generation: 999));
         Assert.Empty(transcriber.Lines(ring, 0, ring.Written));
     }
+
+    [Fact]
+    public async Task PreviewReturnsTheSelectionToTheHostOnly()
+    {
+        await using var mock = new MockSoundpad(); using var pipe = new SoundpadPipe(mock.Name, true); using var bridge = new Bridge(pipe, new StateStore(folder));
+        var fixture = new MimicFixture(); bridge.UseMimicCapture(fixture); await bridge.Poll(true);
+        Assert.True((await bridge.Execute(Cmd("permissions") with { Permissions = new(GuestMimic: true) }, "host")).Ok);
+        Assert.True((await bridge.Execute(Cmd("mimicStart") with { SourceId = MimicFixture.Source.Id }, "host")).Ok);
+        fixture.Advance(TimeSpan.FromSeconds(10));
+        var peek = Data<MimicPeek>(await bridge.Execute(Cmd("mimicPeek"), "host"));
+        var select = Cmd("mimicPreview") with { MimicEnd = peek.End, PositionMs = 27000, EndMs = 29500, SourceId = peek.RingId };
+        var guest = await bridge.Execute(select, "guest");
+        Assert.False(guest.Ok); // audio never goes to guests
+        var preview = await bridge.Execute(select with { Id = Guid.NewGuid().ToString() }, "host");
+        Assert.True(preview.Ok, preview.Error);
+        var wav = Convert.FromBase64String(JsonSerializer.SerializeToElement(preview.Data, Json.Options).GetProperty("wav").GetString()!);
+        using var reader = new NAudio.Wave.WaveFileReader(new MemoryStream(wav));
+        Assert.InRange(reader.TotalTime.TotalMilliseconds, 2490, 2510);
+        Assert.Empty(bridge.Snapshot.Library.Sounds.Where(s => s.Temporary)); // a preview saves nothing
+    }
 }
