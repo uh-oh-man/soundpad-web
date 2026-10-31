@@ -175,6 +175,52 @@ public sealed class MimicTests : IDisposable
     }
 
     [Fact]
+    public async Task VoiceReplayStudioClipsCanBeListedAndImportedByTheHostOnly()
+    {
+        await using var mock = new MockSoundpad(); using var pipe = new SoundpadPipe(mock.Name, true); using var bridge = new Bridge(pipe, new StateStore(folder));
+        var vrs = Path.Combine(folder, "vrs"); Directory.CreateDirectory(Path.Combine(vrs, "Clips"));
+        bridge.UseVoiceReplayLibrary(new VoiceReplayLibrary(vrs)); await bridge.Poll(true);
+        Assert.True((await bridge.Execute(Cmd("beginSession"), "host")).Ok);
+        // No library yet: nothing listed, and the host is told.
+        var none = await bridge.Execute(Cmd("mimicLibrary"), "host");
+        Assert.True(none.Ok); Assert.Contains("\"available\":false", JsonSerializer.Serialize(none.Data, Json.Options));
+        // A library as Voice Replay Studio writes it: one clip with audio, one whose file is gone, one MP3.
+        string wav = Path.Combine(vrs, "Clips", "HELLO.wav"); File.WriteAllBytes(wav, MimicRing.Wav(Enumerable.Range(0, 57600).Select(i => 0.3f * MathF.Sin(i * 2 * MathF.PI * 440 / 48000)).ToArray(), 48000));
+        string mp3 = Path.Combine(vrs, "Clips", "SONG.mp3"); File.WriteAllBytes(mp3, [1, 2, 3]);
+        Guid hello = Guid.NewGuid(), gone = Guid.NewGuid(), song = Guid.NewGuid();
+        var library = JsonSerializer.Serialize(new object[]
+        {
+            new { Id = hello, AudioPath = wav, Title = "Hello there", Transcript = "hello there friend", CapturedAt = DateTimeOffset.Now, Duration = 1.2, Summary = "x" },
+            new { Id = gone, AudioPath = Path.Combine(vrs, "Clips", "GONE.wav"), Title = "Gone", Transcript = "", CapturedAt = DateTimeOffset.Now.AddMinutes(-1), Duration = 2.0 },
+            new { Id = song, AudioPath = mp3, Title = "Song", Transcript = "", CapturedAt = DateTimeOffset.Now.AddMinutes(-2), Duration = 3.0 },
+        });
+        File.WriteAllText(Path.Combine(vrs, "library.json"), library);
+        var stamp = File.GetLastWriteTimeUtc(Path.Combine(vrs, "library.json"));
+        var listed = JsonSerializer.Serialize((await bridge.Execute(Cmd("mimicLibrary"), "host")).Data, Json.Options);
+        Assert.Contains("Hello there", listed); Assert.Contains("hello there friend", listed); Assert.Contains("1200", listed);
+        Assert.DoesNotContain("Gone", listed);
+        // Guests can neither list nor import, even with Guest Mimic on.
+        Assert.False((await bridge.Execute(Cmd("mimicLibrary"), "guest")).Ok);
+        Assert.False((await bridge.Execute(Cmd("mimicLibraryImport") with { SourceId = hello.ToString() }, "guest")).Ok);
+        // Importing copies the clip into Temp under its title.
+        Assert.True((await bridge.Execute(Cmd("mimicLibraryImport") with { SourceId = hello.ToString() }, "host")).Ok);
+        Assert.Contains(bridge.Snapshot.Library.Sounds, s => s.Temporary && s.Name == "Hello there");
+        Assert.True(File.Exists(wav)); // the original stays in Voice Replay Studio
+        // Missing files, non-WAV files and unknown ids are refused with a reason.
+        Assert.Contains("missing", (await bridge.Execute(Cmd("mimicLibraryImport") with { SourceId = gone.ToString() }, "host")).Error);
+        Assert.Contains("WAV", (await bridge.Execute(Cmd("mimicLibraryImport") with { SourceId = song.ToString() }, "host")).Error);
+        Assert.False((await bridge.Execute(Cmd("mimicLibraryImport") with { SourceId = "not-a-clip" }, "host")).Ok);
+        // Voice Replay Studio's library file is never written.
+        Assert.Equal(library, File.ReadAllText(Path.Combine(vrs, "library.json")));
+        Assert.Equal(stamp, File.GetLastWriteTimeUtc(Path.Combine(vrs, "library.json")));
+        // A damaged library is reported and left as it is.
+        File.WriteAllText(Path.Combine(vrs, "library.json"), "{ not json");
+        var damaged = await bridge.Execute(Cmd("mimicLibrary"), "host");
+        Assert.False(damaged.Ok); Assert.Contains("left untouched", damaged.Error);
+        Assert.Equal("{ not json", File.ReadAllText(Path.Combine(vrs, "library.json")));
+    }
+
+    [Fact]
     public async Task HotkeyKeyCanBeChangedAndATakenKeyKeepsTheWorkingOne()
     {
         await using var mock = new MockSoundpad(); using var pipe = new SoundpadPipe(mock.Name, true); using var bridge = new Bridge(pipe, new StateStore(folder));

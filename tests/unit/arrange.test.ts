@@ -114,5 +114,7 @@ describe('feature gates for older companions', () => {
     expect(supports('2.11.0', 'hotkeyLength')).toBe(true);
     expect(supports('2.13.5', 'hotkeyKey')).toBe(false);
     expect(supports('2.14.0', 'hotkeyKey')).toBe(true);
+    expect(supports('2.14.5', 'voiceReplayLibrary')).toBe(false);
+    expect(supports('2.15.0', 'voiceReplayLibrary')).toBe(true);
   });
 });

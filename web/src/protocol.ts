@@ -38,6 +38,8 @@ export const commandSchema = z
       'mimicTranscribe',
       'mimicHotkey',
       'mimicPreview',
+      'mimicLibrary',
+      'mimicLibraryImport',
       'trimAudio',
     ]),
     assetId: z.uuid().optional(),
@@ -255,6 +257,7 @@ export const slowOps: readonly Command['op'][] = [
   'endSession',
   'mimicStart',
   'mimicClip',
+  'mimicLibraryImport',
   'trimAudio',
 ];
 export function isGuestAllowed(c: Command, s: Snapshot) {

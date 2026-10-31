@@ -52,6 +52,14 @@ if (args.FirstOrDefault() == "--mimic-stream-transcript" && args.Length == 2)
     Console.WriteLine($"Speech starts at {(end - 48000L * 30 < 48000 ? (48000 - (end - 48000L * 30)) / 48.0 : 0):0} ms into the window; streamed {audio.Length / 48000.0:0.0} s in {clock.Elapsed.TotalSeconds:0.0} s.");
     return;
 }
+if (args.FirstOrDefault() == "--vrs-library")
+{
+    // Reads this PC's Voice Replay Studio library the way the companion does, read-only. Prints counts only.
+    var library = new VoiceReplayLibrary();
+    var clips = library.List();
+    Console.WriteLine($"library.json: {(library.Exists ? "found" : "not found")}; clips with audio: {clips.Count}; total {clips.Sum(c => c.DurationMs) / 1000.0:0.0} s");
+    return;
+}
 if (args.FirstOrDefault() == "--hotkey-probe")
 {
     // Registers and releases each hotkey the host can pick with Windows; reports any another app already owns. Presses nothing.
@@ -219,6 +227,7 @@ using var bridge = new Bridge(pipe, new StateStore(directory));
 bridge.UseMimicCapture(new MimicFixture());
 bridge.UseTranscriptEngine(new TranscriptFixture());
 bridge.UseHotkeys(key => new HotkeyFixture(key) { Taken = key == "F9" }); // F9 plays a key another app owns
+bridge.UseVoiceReplayLibrary(VoiceReplayFixture.Create(Path.Combine(directory, "voice-replay"))); // never the real library
 await bridge.Poll(true);
 await using var server = new LocalServer(bridge, args.FirstOrDefault() ?? "http://127.0.0.1:5173");
 await server.Start();

@@ -32,7 +32,7 @@ The host chooses an app (for example Discord) or an output device. The companion
 - **Mimic it** to save it as a Temp sound, or **Mimic & play** it through Soundpad. The host can **Preview** it privately first;
 - replay, reverse, trim or add an effect afterwards (Chipmunk, Slow-mo, Echo).
 
-The host can also press a hotkey **in any app** to save the last few seconds mid-game: F6 by default, or F7–F10 if a game already uses F6. The waveform zooms to the last 30, 10 or 5 seconds for picking short moments. Mimic is off until the host starts it, never records a microphone, and everyone is told when it listens. Full guide: [docs/MIMIC.md](docs/MIMIC.md).
+The host can also press a hotkey **in any app** to save the last few seconds mid-game: F6 by default, or F7–F10 if a game already uses F6. The waveform zooms to the last 30, 10 or 5 seconds for picking short moments. Mimic is off until the host starts it, never records a microphone, and everyone is told when it listens. Clips you saved in the Voice Replay Studio desktop app can be imported into the session from the Mimic window too. Full guide: [docs/MIMIC.md](docs/MIMIC.md).
 
 ## Features
 

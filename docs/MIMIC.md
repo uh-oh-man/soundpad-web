@@ -48,6 +48,14 @@ The companion's console window logs these events with the time, including who ma
 
 Everyone gets a short notice when anyone makes a clip, F6 included. **Just mimicked** lists the session's last 5 clips, with who made them, a **Replay** button and a **Reverse** button to hear it backwards.
 
+### From Voice Replay Studio
+
+The two halves of the idea meet here. If Voice Replay Studio (the desktop app in `mimic/`) has saved clips on the host PC, the host can open **From Voice Replay Studio** at the bottom of the Mimic window (companion 2.15+). It lists them newest first, with title, length, date and transcript, and a search box when there are more than six. **Import** copies a clip into Temp, where it behaves like any Mimic clip and everyone in the session can play it.
+
+- **Host only.** Guests never see the list or the clips' titles.
+- **Read-only.** The companion reads `%LOCALAPPDATA%\Voice Replay Studio\library.json` and the clip's WAV, and never writes, moves or locks them. Voice Replay Studio can stay open. A damaged library is reported and left as it is.
+- **WAV clips up to Temp's 16 MiB limit**, the same as uploads. A clip whose file is missing isn't listed.
+
 ### Afterwards: Temp and Edit copy
 
 A clip is a normal Temp sound, so reverse, **Keep permanently** (with host confirmation) and cleanup at End Hosting all apply.
@@ -95,6 +103,7 @@ The website always serves the newest version and hides anything the host's compa
 | F6 length choice | 2.11 |
 | Private preview (host) | 2.12 |
 | Hotkey key choice (F6–F10) | 2.14 |
+| Import from Voice Replay Studio (host) | 2.15 |
 
 ## Protocol
 
@@ -105,6 +114,7 @@ The website always serves the newest version and hides anything the host's compa
   - `mimicTranscribe` with `action` `enable`, `disable` or `download`;
   - `mimicHotkey` with `enable`, `disable` or `length` (with `positionMs` set to the hotkey's length, 3000–30000), or `key` with `name` set to `F6`–`F10` (2.14+);
   - `mimicPreview` with the same selection fields as `mimicClip`; returns the selection as base64 WAV to the host's own tab.
+- **Host only, 2.15+:** `mimicLibrary` lists Voice Replay Studio clips (`available`, and `clips` with `id`, `title`, `transcript`, `capturedAt`, `durationMs`); `mimicLibraryImport` with `sourceId` set to a clip id copies it into Temp.
 - **Host, or guests with `guestMimic`:** `mimicPeek` and `mimicClip`. A clip sends `mimicEnd`, `positionMs`/`endMs`, an optional `name`, and the capture's `sourceId`.
 - **Host, or guests with uploads:** `trimAudio`, with `assetId`, `positionMs`/`endMs`, `action` (`none`, `chipmunk`, `slowmo` or `echo`) and an optional `name`.
 - **New permission:** `guestMimic`, default `false`.
@@ -140,6 +150,7 @@ On a real PC (the harness is `companion\harness\bin\Release\net10.0-windows10.0.
 - `SoundpadWeb.Harness.exe --mimic-probe [source]`: listens to a device or app for 2 s and prints packet counts and the peak level. Nothing is saved.
 - `SoundpadWeb.Harness.exe --mimic-silent-selftest <wav>`: tests the **whole real chain without sound**. It plays the WAV at stream volume 0 while Mimic's real app capture listens to the harness itself, and real Whisper transcribes the result. Windows' per-app capture taps audio before stream volume. On the owner's PC the JFK sample came through word for word.
 - `SoundpadWeb.Harness.exe --mimic-stream-transcript <wav>`: real-time streaming into the buffer with real Whisper, without any device.
+- `SoundpadWeb.Harness.exe --vrs-library`: reads this PC's Voice Replay Studio library as the companion does, read-only, and prints only counts. On the owner's PC: 2 clips, 20 s.
 - `SoundpadWeb.Harness.exe --whisper-bench <wav>`, `--peek-bench` and `--capture-bench`: the CPU and memory measurements quoted in this guide and the changelog. Capture itself uses about 1–2% of one core.
 - `SoundpadWeb.Harness.exe --hotkey-probe`: checks whether each of F6–F10 is free, without pressing anything.
 - `SoundpadWeb.exe --transcribe-file <wav> [--download] [--verbose]`: checks the model and Whisper's native libraries in the real single-file EXE.
@@ -147,4 +158,4 @@ On a real PC (the harness is `companion\harness\bin\Release\net10.0-windows10.0.
 
 ## What stays in the desktop app
 
-Every Voice Replay Studio feature that fits a shared soundboard is in the browser version: rolling capture, the live transcript, F6, selection handles, trim and more. Only its personal clip library with re-transcription stays desktop-only (`mimic/`). Soundpad Web keeps clips in Soundpad's Temp and permanent categories instead, and because clips are named after their transcript, the normal sound search finds them by their words.
+Every Voice Replay Studio feature that fits a shared soundboard is in the browser version: rolling capture, the live transcript, F6, selection handles, trim and more. Its personal clip library, with re-transcription and editing, stays in the desktop app (`mimic/`), but since 2.15 the host can bring any of its clips into a session (see [From Voice Replay Studio](#from-voice-replay-studio)). Soundpad Web keeps clips in Soundpad's Temp and permanent categories instead, and because clips are named after their transcript, the normal sound search finds them by their words.

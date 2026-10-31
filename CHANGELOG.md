@@ -2,7 +2,31 @@
 
 Notable changes to Soundpad Web. Versions follow the website's `package.json`; the Windows companion is versioned separately and only needs updating when a release says so.
 
-## Unreleased
+## 2.15.0 — Import clips from Voice Replay Studio
+
+**Update the Windows companion** to get this; older companions don't show the new section.
+
+### Added
+
+- **Bring Voice Replay Studio clips into a session.** The Mimic window has a new host-only section, **From Voice Replay Studio**. It lists the clips that the desktop app (`mimic/`) saved on this PC, newest first, with title, length, date and transcript, and a search box when there are many. **Import** copies one into Temp, where everyone can play it like any Mimic clip. Until now those clips lived only in the desktop app; now its library feeds the shared soundboard.
+  - **Read-only:** the companion reads Voice Replay Studio's `library.json` and the clip's WAV, and never writes, moves or locks them, so that app can stay open. A damaged library is reported and left untouched.
+  - **Host only:** guests can neither list nor import, and never see the titles. Only WAV clips up to Temp's 16 MiB limit are imported, through the same checks as uploads.
+  - **Protocol:** new host-only `mimicLibrary` and `mimicLibraryImport` ops, gated as `FEATURES.voiceReplayLibrary` (2.15). Nothing new is saved by the companion, so rolling back is unaffected.
+
+### Tests
+
+- New C# test against a temporary library:
+  - lists a clip and skips one whose file is missing;
+  - imports a clip into Temp under its title;
+  - refuses guests, MP3s, missing files and unknown ids;
+  - proves `library.json` is never written;
+  - reports a damaged library without touching it.
+
+  81 C# tests pass.
+- The e2e harness uses a fixture Voice Replay Studio library (never the real one). A new e2e test lists its two clips, imports one, plays it from Temp, and runs axe on the open section. The live guest test checks that guests don't see the section.
+- `SoundpadWeb.Harness.exe --vrs-library` reads this PC's real library read-only and prints only counts. On the owner's PC: 2 clips, 20 s, parsed correctly.
+
+### Also in this release
 
 - **README:** the user guide now covers the hotkey key choice (F6–F10), waveform zoom, which browsers guests can use, and what "WebRTC blocked" means.
 - **Tests:** two more timing assumptions fixed after GitHub's WebKit runner needed retries. The Mimic Edit copy check now also accepts a 3.00 s clip, and the session-upload test allows 25 s for decoding the upload.

@@ -17,6 +17,7 @@ import {
 import { MimicWave } from './mimic/MimicWave';
 import { MimicHostControls } from './mimic/MimicHostControls';
 import { MimicRecent } from './mimic/MimicRecent';
+import { MimicLibrary } from './mimic/MimicLibrary';
 
 const POLL_MS = 500;
 const peekSchema = z.object({
@@ -305,6 +306,9 @@ export function MimicPanel({
         <p className="muted">Loading the live buffer…</p>
       )}
       {allowed && <MimicRecent state={state} host={host} canPlay={canPlay} />}
+      {host && supports(state.companionVersion, 'voiceReplayLibrary') && (
+        <MimicLibrary connected={connected} />
+      )}
     </div>
   );
 }

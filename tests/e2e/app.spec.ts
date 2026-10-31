@@ -1479,6 +1479,7 @@ test('live Nostr/WebRTC: guests see Mimic only when allowed and can clip from it
     await expect(dialog.getByLabel('Mimic source', { exact: true })).toHaveCount(0);
     await expect(dialog.getByLabel('Transcribe Mimic audio')).toHaveCount(0);
     await expect(dialog.getByLabel('F6 hotkey')).toHaveCount(0);
+    await expect(dialog.getByText('From Voice Replay Studio')).toHaveCount(0); // host only
     // The host's transcript reaches the guest as text; clicking a line selects that audio.
     await expect(
       dialog
@@ -1757,6 +1758,31 @@ test('Mimic hotkey: the host browser remembers its key and length across compani
   await dialog.getByLabel('F7 hotkey').check();
   await expect(page.getByText('F9 is already used by another app', { exact: false })).toBeVisible();
   await expect(dialog.getByText('Press F7 in any app to save the last 15 s')).toBeVisible();
+});
+
+test('Mimic: the host imports a clip from Voice Replay Studio into Temp', async ({
+  page,
+  harness,
+}) => {
+  // The harness points at a fixture Voice Replay Studio library with two clips, never the real one.
+  await host(page, harness);
+  await page.getByRole('button', { name: 'Mimic', exact: true }).click();
+  const dialog = page.getByRole('dialog', { name: 'Mimic' });
+  await dialog.getByText('From Voice Replay Studio').click();
+  const list = dialog.getByRole('list', { name: 'Voice Replay Studio clips' });
+  await expect(list.getByRole('listitem')).toHaveCount(2);
+  await expect(list.getByRole('listitem').first()).toContainText('Fixture hello there');
+  await expect(list.getByRole('listitem').first()).toContainText('hello there from voice replay');
+  const { violations } = await new AxeBuilder({ page }).analyze();
+  expect(
+    violations.filter((v) => v.impact === 'serious' || v.impact === 'critical').map((v) => v.id),
+  ).toEqual([]);
+  await list.getByRole('button', { name: 'Import Fixture hello there' }).click();
+  await expect(page.getByText('Imported “Fixture hello there” into Temp.')).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(
+    page.getByRole('button', { name: 'Play from start: Fixture hello there', exact: true }),
+  ).toBeEnabled();
 });
 
 test('Mimic fits a phone: header keeps Settings on screen and long clip names do not widen the window', async ({

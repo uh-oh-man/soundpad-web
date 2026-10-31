@@ -114,7 +114,11 @@ public sealed partial class Bridge
         return (ring, Math.Max(0, windowStart + from * ring.Rate / 1000), windowStart + to * ring.Rate / 1000);
     }
 
-    private static bool IsMimic(string op) => op is "mimicSources" or "mimicStart" or "mimicStop" or "mimicPeek" or "mimicClip" or "mimicTranscribe" or "mimicHotkey" or "mimicPreview";
+    private static bool IsMimic(string op) => op is "mimicSources" or "mimicStart" or "mimicStop" or "mimicPeek" or "mimicClip" or "mimicTranscribe" or "mimicHotkey" or "mimicPreview" or "mimicLibrary" or "mimicLibraryImport";
+
+    private VoiceReplayLibrary voiceReplay = new();
+    /// <summary>Points at another Voice Replay Studio data folder; tests use a temporary one.</summary>
+    public void UseVoiceReplayLibrary(VoiceReplayLibrary library) => voiceReplay = library;
 
     private bool GuestMimicAllowed(string? requester, string? audience) =>
         disk.Permissions.GuestMimic && (audioAudience == null || sessionAccepting && audience == audioAudience) && (requester == null || !revokedAudioPeers.ContainsKey(requester));
@@ -199,6 +203,16 @@ public sealed partial class Bridge
                         var (ring, start, stop) = Selection(c);
                         if (stop - start < (long)ring.Rate * MimicMinimumMs / 1000) throw new InvalidDataException("Mimic had not started listening yet at that moment.");
                         return new("ack", c.Id, true, Data: new { wav = Convert.ToBase64String(MimicRing.Wav(ring.Read(start, stop), ring.Rate)) });
+                    }
+                case "mimicLibrary":
+                    // Host only (checked above): clips saved in Voice Replay Studio on this PC, read without changing them.
+                    return new("ack", c.Id, true, Data: new { available = voiceReplay.Exists, clips = voiceReplay.List() });
+                case "mimicLibraryImport":
+                    {
+                        var (wav, title) = voiceReplay.Read(c.SourceId ?? "");
+                        var reply = await Upload(wav, title + ".wav", "Host", true, "host", audioAudience);
+                        if (reply.Ok) Log($"Imported \"{title}\" from Voice Replay Studio into Temp");
+                        return reply with { Id = c.Id };
                     }
                 default: throw new InvalidDataException("Unsupported command.");
             }

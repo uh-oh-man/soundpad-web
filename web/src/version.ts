@@ -29,6 +29,7 @@ export const FEATURES = {
   hotkeyLength: [2, 11],
   preview: [2, 12],
   hotkeyKey: [2, 14],
+  voiceReplayLibrary: [2, 15],
 } as const satisfies Record<string, readonly [number, number]>;
 
 export const supports = (version: string | null | undefined, feature: keyof typeof FEATURES) =>

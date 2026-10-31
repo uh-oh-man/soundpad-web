@@ -265,3 +265,54 @@
   flex: none;
   padding: 6px 8px;
 }
+/* Host only: clips from Voice Replay Studio's library on this PC. */
+.mimic-library {
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
+}
+.mimic-library summary {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  font-size: 13px;
+  color: var(--text-muted);
+}
+.mimic-library ul {
+  list-style: none;
+  margin: 8px 0;
+  padding: 0;
+  display: grid;
+  gap: 6px;
+  max-height: 260px;
+  overflow-y: auto;
+}
+.mimic-library li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.mimic-library-text {
+  display: grid;
+  flex: 1;
+  min-width: 0;
+}
+.mimic-library-text strong,
+.mimic-library-text small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.mimic-library-text small {
+  color: var(--text-muted);
+  font-size: 11px;
+}
+.mimic-library input[type='search'] {
+  width: 100%;
+  margin-top: 8px;
+}
+.mimic-library button {
+  padding: 6px 10px;
+  font-size: 12px;
+  flex: none;
+}
