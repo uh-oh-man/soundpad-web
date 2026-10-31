@@ -2,7 +2,30 @@
 
 Notable changes to Soundpad Web. Versions follow the website's `package.json`; the Windows companion is versioned separately and only needs updating when a release says so.
 
-## Unreleased
+## 2.4.0 — Mimic
+
+Soundpad Web and the separate **Voice Replay Studio** ("Mimic") project are now one repository. **Update both the website (refresh) and the Windows companion** to use Mimic; everything else still works with a 2.3 companion. To go back, see [docs/ROLLBACK.md](docs/ROLLBACK.md). The last pre-Mimic version is `v2.3.1` (tag `backup/pre-mimic`).
+
+### Added
+
+- **Mimic window.** The host chooses an app or output device, and the companion keeps the last 30 seconds in memory. Anyone allowed can select a moment on a live waveform and turn it into a Temp sound, or **Mimic & play** it immediately. See [docs/MIMIC.md](docs/MIMIC.md).
+- **Mimic on** badge in every participant's header while capture runs.
+- **Guest Mimic** permission (off by default). Only the host can choose or change the source.
+- Voice Replay Studio V1.1 source imported unchanged under `mimic/`, with its README, tests and licenses. CI now builds it.
+- `SoundpadWeb.Harness.exe --mimic-probe` checks real capture on a PC without saving audio.
+- Tests: 5 companion tests, 4 unit tests and 2 e2e tests (one opt-in live-relay) for Mimic.
+
+### Changed
+
+- Companion version 2.4.0. Mimic is the only feature that needs it.
+- The list of slow commands (longer timeouts) is shared between the companion bridge and the guest session instead of being copied in both.
+
+### Fixed during development
+
+- A selection near the left edge of the window was always refused as "scrolled out", because the buffer held exactly the visible 30 seconds. The buffer now keeps 15 extra seconds.
+- Right after Mimic started, any selection that reached before the start of recording was refused; it is now trimmed to the recorded part.
+
+## Unreleased (2.3.x)
 
 - CI: browser tests retry once on GitHub Actions. A retried test is flagged as flaky in the run's public annotations, so intermittent failures are visible without downloading logs. An intermittent failure seen on the 2.3.1 `main` run did not reproduce in 144 later runs (72 local, 72 on CI).
 

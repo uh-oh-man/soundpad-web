@@ -24,6 +24,8 @@ jobs:
       - run: npm run build
       - run: dotnet test companion/tests/SoundpadWeb.Tests.csproj -c Release
       - run: dotnet build companion/harness/SoundpadWeb.Harness.csproj -c Release
+      - name: Voice Replay Studio (mimic/) build and tests
+        run: dotnet run --project mimic/tests/VoiceReplay.Tests -c Release
       - run: npx playwright install chromium
       - run: npm run test:e2e
       - name: Publish portable companion
