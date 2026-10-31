@@ -1210,6 +1210,10 @@ test('Mimic: host listens, everyone sees it, and a selection becomes a playable 
   const sound = page.getByRole('button', { name: 'Play Fixture mimic', exact: true });
   await expect(sound).toBeEnabled();
   await expect.poll(() => harness.plays).toContain('DoPlaySound(5)');
+  // The clip can be replayed from the window without hunting for it on the board.
+  const recent = dialog.getByRole('region', { name: 'Just mimicked' });
+  await recent.getByRole('button', { name: 'Replay Fixture mimic' }).click();
+  await expect.poll(() => harness.plays.filter((p) => p === 'DoPlaySound(5)').length).toBe(2);
   // Trim saves an exact copy as a new Temp sound and keeps the original.
   await page.keyboard.press('Escape');
   await page.locator('#temp-manager > summary').click();

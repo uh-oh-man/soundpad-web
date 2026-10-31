@@ -26,7 +26,7 @@ The capture engine in the companion is a port of Voice Replay Studio's `CaptureS
 
 1. Open **Mimic** (or click the **Mimic on** badge).
 2. Drag across the waveform, or use **Last 3 s / 5 s / 10 s**. A selection freezes the view so the moment stays put. Drag either edge handle of a selection to adjust just that end (2.6.0). From the keyboard (2.8.1), focus the waveform: Left/Right move the end, Shift+Left/Right the start, Ctrl for 1-second steps.
-3. Optionally name it, then **Mimic it** (adds it to Temp) or **Mimic & play** (adds it and plays it through Soundpad).
+3. Optionally name it, then **Mimic it** (adds it to Temp) or **Mimic & play** (adds it and plays it through Soundpad). Your last 5 clips appear under **Just mimicked** with a **Replay** button each (2.9.4).
 
 Keyboard (2.5.1): **3**, **5** or **0** select the last 3, 5 or 10 seconds and move focus to the name field, **Enter** mimics, **Shift+Enter** mimics and plays, **Esc** clears the selection (press it again to close the window). This is the browser counterpart of Voice Replay Studio's F6 key; a website cannot register system-wide hotkeys.
 

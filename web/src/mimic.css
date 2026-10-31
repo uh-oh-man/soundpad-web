@@ -194,3 +194,22 @@
   font: inherit;
   font-size: 11px;
 }
+
+.mimic-recent {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
+}
+.mimic-recent small {
+  flex: 1 1 100%;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+.mimic-recent button {
+  max-width: 100%;
+  padding: 6px 10px;
+  font-size: 12px;
+}

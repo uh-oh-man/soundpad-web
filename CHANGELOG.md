@@ -2,6 +2,15 @@
 
 Notable changes to Soundpad Web. Versions follow the website's `package.json`; the Windows companion is versioned separately and only needs updating when a release says so.
 
+## 2.9.4 — Replay your recent Mimic clips
+
+Website update; the companion is rebuilt as 2.9.4 with no code changes.
+
+### Added
+
+- **Just mimicked** row in the Mimic window: your last 5 clips from this tab, each with a **Replay** button, so you can fire one again mid-conversation without closing the window and finding it on the board. The list survives closing and reopening the window; it is not saved anywhere, like Temp itself. The buttons are labelled "Replay …" so screen readers can tell them apart from the board's "Play …" buttons.
+- e2e: replaying a clip from the row plays it again through Soundpad.
+
 ## 2.9.3 — Mimic waveform shared between guests
 
 **Update the Windows companion** to get this; nothing looks different.

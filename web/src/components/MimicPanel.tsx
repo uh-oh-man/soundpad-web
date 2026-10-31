@@ -83,6 +83,9 @@ export function transcriptFor(lines: TranscriptLine[], selection: Selection) {
 }
 
 const POLL_MS = 500;
+const RECENT_CLIPS = 5;
+/** Clips made from this tab, newest first. Kept for the page's lifetime so reopening the window keeps them. */
+const recentClips: { assetId: string; name: string }[] = [];
 const MIN_MS = 150;
 /** How close (in CSS pixels) the pointer must be to a selection edge to grab its handle. */
 const EDGE_PX = 8;
@@ -245,6 +248,7 @@ export function MimicPanel({
   const [selection, setSelection] = useState<Selection | null>(null);
   const [name, setName] = useState('');
   const [busy, setBusy] = useState(false);
+  const [recent, setRecent] = useState(() => [...recentClips]);
   const nameField = useRef<HTMLInputElement>(null);
   const [focusName, setFocusName] = useState(false);
   useEffect(() => {
@@ -323,6 +327,14 @@ export function MimicPanel({
         ...((name.trim() || suggestion) && { name: name.trim() || suggestion }),
       })) as { assetId?: string } | undefined;
       controller.notify('Mimicked! The clip is in Temp for this session.', 'success');
+      if (result?.assetId) {
+        recentClips.unshift({
+          assetId: result.assetId,
+          name: name.trim() || suggestion || 'Mimic clip',
+        });
+        recentClips.splice(RECENT_CLIPS);
+        setRecent([...recentClips]);
+      }
       setSelection(null);
       setName('');
       if (play && result?.assetId)
@@ -590,6 +602,25 @@ export function MimicPanel({
         </>
       ) : (
         <p className="muted">Loading the live buffer…</p>
+      )}
+      {allowed && recent.length > 0 && (
+        <section className="mimic-recent" aria-label="Just mimicked">
+          <small>Just mimicked</small>
+          {recent.map((clip) => (
+            <button
+              key={clip.assetId}
+              disabled={!canPlay}
+              aria-label={`Replay ${clip.name}`}
+              onClick={() =>
+                void controller
+                  .run('audioPlay', { assetId: clip.assetId, orientation: 'normal' })
+                  .catch(() => {})
+              }
+            >
+              <Play size={13} /> {clip.name}
+            </button>
+          ))}
+        </section>
       )}
     </div>
   );
