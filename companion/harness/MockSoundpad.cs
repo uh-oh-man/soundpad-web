@@ -55,8 +55,18 @@ public sealed class MockSoundpad : IAsyncDisposable
             int removed = int.Parse(command[17..^1]);
             var target = cats.Descendants("Category").SingleOrDefault(e => (int)e.Attribute("index")! == removed);
             if (target == null) return "R-404";
+            // Measured on Soundpad 4.0.35 (2.16): a removed category's sounds leave the main list too (files stay on disk).
+            var urls = target.Descendants("Sound").Select(e => (string?)e.Attribute("url")).ToHashSet(StringComparer.OrdinalIgnoreCase);
             target.Remove();
             foreach (var e in cats.Descendants("Category").Where(e => (int)e.Attribute("index")! > removed)) e.SetAttributeValue("index", (int)e.Attribute("index")! - 1);
+            if (urls.Count > 0)
+            {
+                all.Root!.Elements("Sound").Where(e => urls.Contains((string?)e.Attribute("url"))).Remove();
+                cats.Descendants("Sound").Where(e => urls.Contains((string?)e.Attribute("url"))).Remove();
+                var indexes = all.Root.Elements("Sound").Select((e, i) => (Old: (int)e.Attribute("index")!, New: i + 1)).ToDictionary(x => x.Old, x => x.New);
+                foreach (var e in cats.Descendants("Sound")) e.SetAttributeValue("index", indexes[(int)e.Attribute("index")!]);
+                foreach (var e in all.Root.Elements("Sound")) e.SetAttributeValue("index", indexes[(int)e.Attribute("index")!]);
+            }
         }
         else if (command.StartsWith("DoSelectCategory(")) selectedCategory = int.Parse(command[17..^1]);
         else if (command.StartsWith("DoSelectIndex(")) selectedIndex = int.Parse(command[14..^1]);

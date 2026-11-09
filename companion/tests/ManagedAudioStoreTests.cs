@@ -49,22 +49,42 @@ public sealed class ManagedAudioStoreTests : IDisposable
         var reopened = Store(pipe); await reopened.Recover(true); Assert.True(File.Exists(permanent.Path)); Assert.Contains(permanent.Path, mock.AllXml);
     }
     [Fact]
-    public async Task ProductionStyleSelectionOnlyAdapterPreservesOrphansAndReportsThem()
+    public async Task ProductionStyleSelectionOnlyAdapterRemovesTheWholeTempCategoryAtSessionEnd()
+    {
+        // 2.16: the app's own Temp category goes in one command, taking its entries with it; no selection is used.
+        await using var mock = new MockSoundpad(); using var pipe = new SoundpadPipe(mock.Name); var store = Store(pipe); store.BeginSession();
+        var asset = await store.Upload(Wave(), "Gone.wav", "Alice", "peer-a", false); var file = asset.Variants.Single().Path; var temp = store.Public.TempCategoryName!;
+        store.RetireSession(); await store.Cleanup();
+        Assert.False(File.Exists(file)); Assert.DoesNotContain(file, mock.AllXml); Assert.DoesNotContain(temp, mock.CategoryXml);
+        Assert.Equal(4, System.Xml.Linq.XDocument.Parse(mock.AllXml).Descendants("Sound").Count()); // the owner's sounds stay
+        Assert.Single(mock.Commands, c => c.StartsWith("DoRemoveCategory("));
+        Assert.DoesNotContain(mock.Commands, c => c.StartsWith("DoSelect") || c.StartsWith("DoRemoveSelected"));
+        Assert.DoesNotContain(store.Public.Issues, i => i.Code == "native-removal-required");
+        Assert.Empty(store.Public.Assets); // the cleaned-up upload's record is forgotten too
+    }
+    [Fact]
+    public async Task ATempCategoryHoldingSomethingElseIsKeptAndItsOrphansReported()
     {
         await using var mock = new MockSoundpad(); using var pipe = new SoundpadPipe(mock.Name); var store = Store(pipe); store.BeginSession();
-        var asset = await store.Upload(Wave(), "Protected.wav", "Alice", "peer-a", false); var file = asset.Variants.Single().Path;
+        var asset = await store.Upload(Wave(), "Protected.wav", "Alice", "peer-a", false); var file = asset.Variants.Single().Path; var temp = store.Public.TempCategoryName!;
+        // The owner dragged one of their own sounds into the app's Temp category: it is not the app's to remove.
+        var cats = System.Xml.Linq.XDocument.Parse(mock.CategoryXml);
+        cats.Descendants("Category").Single(c => (string?)c.Attribute("name") == temp).Add(new System.Xml.Linq.XElement("Sound", new System.Xml.Linq.XAttribute("index", 1), new System.Xml.Linq.XAttribute("url", @"C:\Private\airhorn.wav")));
+        mock.CategoryXml = cats.ToString();
         store.RetireSession(); await store.Cleanup();
-        Assert.True(File.Exists(file)); Assert.Contains(file, mock.AllXml); Assert.Contains(store.Public.Issues, i => i.Code == "native-removal-required");
-        Assert.DoesNotContain(mock.Commands, c => c.StartsWith("DoSelect") || c.StartsWith("DoRemoveSelected"));
+        Assert.True(File.Exists(file)); Assert.Contains(file, mock.AllXml); Assert.Contains(temp, mock.CategoryXml);
+        Assert.Contains(store.Public.Issues, i => i.Code == "native-removal-required");
+        Assert.DoesNotContain(mock.Commands, c => c.StartsWith("DoRemoveCategory(") || c.StartsWith("DoSelect") || c.StartsWith("DoRemoveSelected"));
     }
     [Fact]
     public async Task ConcurrentNativeChangeAndPlayingAudioPreventCleanup()
     {
         await using var mock = new MockSoundpad { DurationMs = 60000 }; using var pipe = new SoundpadPipe(mock.Name, true); var store = Store(pipe); store.BeginSession();
         var asset = await store.Upload(Wave(), "Race.wav", "Alice", "peer-a", false); var file = asset.Variants.Single().Path;
-        store.RetireSession(); mock.ChangeLibraryBeforeOwnedRemoval = true; await store.Cleanup(); Assert.True(File.Exists(file)); Assert.Contains(file, mock.AllXml);
-        mock.BeginFixturePlayback(); await store.Cleanup(); Assert.True(File.Exists(file)); Assert.Contains(store.Public.Issues, i => i.Code == "playback-active");
-        await pipe.Request("DoStopSound()"); await store.Cleanup(); Assert.False(File.Exists(file)); Assert.Equal(4, System.Xml.Linq.XDocument.Parse(mock.AllXml).Descendants("Sound").Count());
+        // Nothing is removed while a sound plays; cleanup waits for it to stop.
+        store.RetireSession(); mock.BeginFixturePlayback(); await store.Cleanup(); Assert.True(File.Exists(file)); Assert.Contains(file, mock.AllXml); Assert.Contains(store.Public.Issues, i => i.Code == "playback-active");
+        Assert.DoesNotContain(mock.Commands, c => c.StartsWith("DoRemoveCategory("));
+        await pipe.Request("DoStopSound()"); await store.Cleanup(); Assert.False(File.Exists(file)); Assert.DoesNotContain(file, mock.AllXml); Assert.Equal(4, System.Xml.Linq.XDocument.Parse(mock.AllXml).Descendants("Sound").Count());
     }
     [Fact]
     public async Task ExistingTempCategoryIsNeverClaimedOrDeleted()
@@ -72,7 +92,7 @@ public sealed class ManagedAudioStoreTests : IDisposable
         await using var mock = new MockSoundpad { CategoryXml = MockSoundpad.Categories.Replace("</Categories>", "<Category index=\"9\" name=\"temp\"><Sound index=\"1\" url=\"C:\\Private\\airhorn.wav\"/></Category></Categories>") };
         using var pipe = new SoundpadPipe(mock.Name, true); var store = Store(pipe); store.BeginSession(); await store.Upload(Wave(), "Separate.wav", "Alice", "peer-a", false);
         Assert.NotEqual(9, store.Public.TempCategoryId); Assert.StartsWith("Temp - Soundpad Web", store.Public.TempCategoryName); store.RetireSession(); await store.Cleanup();
-        Assert.Contains("name=\"temp\"", mock.CategoryXml); Assert.Contains("airhorn.wav", mock.CategoryXml); Assert.DoesNotContain(mock.Commands, c => c.StartsWith("DoRemoveCategory("));
+        Assert.Contains("name=\"temp\"", mock.CategoryXml); Assert.Contains("airhorn.wav", mock.CategoryXml); Assert.DoesNotContain("DoRemoveCategory(9)", mock.Commands); // the owner's "temp" is never removed
     }
     [Fact]
     public void MalformedJournalIsPreservedAndManagedMutationsAreBlocked()
@@ -124,8 +144,9 @@ public sealed class ManagedAudioStoreTests : IDisposable
     public async Task FileLockAndPlaybackStartingDuringCleanupPreserveFilesAndNativeOriginals()
     {
         await using var mock=new MockSoundpad();using var pipe=new SoundpadPipe(mock.Name,true);var store=Store(pipe);store.BeginSession();var asset=await store.Upload(Wave(),"Locked.wav","Alice","peer",false);var source=asset.Variants.Single();store.RetireSession();
-        mock.StartPlaybackBeforeOwnedRemoval=true;await store.Cleanup();Assert.True(File.Exists(source.Path));Assert.Contains(source.Path,mock.AllXml);await pipe.Request("DoStopSound()");
-        using(var file=new FileStream(source.Path,FileMode.Open,FileAccess.Read,FileShare.Read)){await store.Cleanup();Assert.True(File.Exists(source.Path));Assert.Contains(store.Public.Issues,i=>i.Code=="cleanup-file");}
+        mock.BeginFixturePlayback();await store.Cleanup();Assert.True(File.Exists(source.Path));Assert.Contains(source.Path,mock.AllXml);await pipe.Request("DoStopSound()");
+        // A locked file: Soundpad's entry goes with the Temp category, the file is kept and retried.
+        using(var file=new FileStream(source.Path,FileMode.Open,FileAccess.Read,FileShare.Read)){await store.Cleanup();Assert.True(File.Exists(source.Path));Assert.DoesNotContain(source.Path,mock.AllXml);Assert.Contains(store.Public.Issues,i=>i.Code=="cleanup-file");}
         await store.Cleanup();Assert.False(File.Exists(source.Path));Assert.Equal(4,System.Xml.Linq.XDocument.Parse(mock.AllXml).Descendants("Sound").Count());
     }
     [Fact]

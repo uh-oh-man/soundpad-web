@@ -55,6 +55,7 @@ export const commandSchema = z
     sourceId: z.string().max(512).optional(),
     mimicEnd: z.number().int().nonnegative().safe().optional(),
     name: z.string().max(100).optional(),
+    speed: z.number().min(0.05).max(20).optional(),
     soundId: z.string().max(64).optional(),
     libraryVersion: z.string().max(64).optional(),
     delta: z.union([z.literal(-1), z.literal(1)]).optional(),
@@ -76,6 +77,7 @@ export const commandSchema = z
         'chipmunk',
         'slowmo',
         'echo',
+        'speed',
         'length',
         'key',
       ])

@@ -455,6 +455,7 @@ test('V2: real waveform, pause, epoch seek, cue and region metadata, named stati
   await wave.getByLabel('Repeat region Middle', { exact: true }).check();
   const detailSurface = wave.getByRole('slider', { name: 'Seek Airhorn', exact: true });
   await detailSurface.hover();
+  await page.waitForTimeout(1100); // wheel zoom starts after resting on the waveform for 1 s
   await page.mouse.wheel(0, -240);
   await expect(
     wave.getByRole('button', { name: 'Fit waveform Airhorn', exact: true }),
@@ -962,6 +963,7 @@ test('full tile scrubbing and bottom-player precision zoom work at desktop and p
   const footer = page.locator('.player');
   const surface = footer.getByRole('slider', { name: 'Seek Airhorn', exact: true });
   await surface.hover();
+  await page.waitForTimeout(1100); // wheel zoom starts after resting on the waveform for 1 s
   await page.mouse.wheel(0, -240);
   await expect(footer.getByRole('button', { name: 'Fit waveform Airhorn' })).toBeVisible();
   await footer.getByRole('button', { name: 'Edit', exact: true }).click();
@@ -1572,6 +1574,31 @@ test('a guest whose browser has no WebRTC is told why at once', async ({
   }
 });
 
+test('scrolling over a waveform scrolls the page until the pointer rests there for a second', async ({
+  page,
+  harness,
+}) => {
+  await host(page, harness);
+  await page.getByLabel('Search sounds').fill('Airhorn');
+  await page.getByLabel('View mode').selectOption('waveforms');
+  const wave = page
+    .locator('.sound-entry')
+    .filter({ has: page.getByRole('button', { name: 'Play from start: Airhorn', exact: true }) })
+    .locator('.wave-block');
+  const surface = wave.getByRole('slider', { name: 'Seek Airhorn', exact: true });
+  await expect(surface).toBeVisible();
+  const fit = wave.getByRole('button', { name: 'Fit waveform Airhorn', exact: true });
+  // Just arrived: the wheel belongs to the page, not the waveform.
+  await surface.hover();
+  await page.mouse.wheel(0, -240);
+  await page.waitForTimeout(300);
+  await expect(fit).toHaveCount(0);
+  // Each wheel that went to the page restarts the wait; after a quiet second the wheel zooms.
+  await page.waitForTimeout(1100);
+  await page.mouse.wheel(0, -240);
+  await expect(fit).toBeVisible();
+});
+
 test('wheel zoom works when the waveform data arrives late', async ({ page, harness }) => {
   // Hold back waveform requests, as a busy PC would, so the waveform surface mounts after the zoom
   // logic first ran. Before 2.14.4 the wheel listener was never attached in that case.
@@ -1593,6 +1620,7 @@ test('wheel zoom works when the waveform data arrives late', async ({ page, harn
   const surface = wave.getByRole('slider', { name: 'Seek Airhorn', exact: true });
   await expect(surface).toBeVisible();
   await surface.hover();
+  await page.waitForTimeout(1100); // wheel zoom starts after resting on the waveform for 1 s
   await page.mouse.wheel(0, -240);
   await expect(
     wave.getByRole('button', { name: 'Fit waveform Airhorn', exact: true }),
@@ -1627,6 +1655,37 @@ test('Temp offers to remove duplicate Temp categories that old companions create
   await page.getByRole('button', { name: 'Remove duplicate categories' }).click();
   // The companion removes only empty garbled copies of its own category; the mock has none.
   await expect(page.getByText('Removed 0 duplicate Temp categories from Soundpad.')).toBeVisible();
+});
+
+test('Edit copy can make a copy at any speed', async ({ page, harness }) => {
+  await host(page, harness);
+  await page
+    .getByLabel('Add session audio', { exact: true })
+    .setInputFiles({ name: 'Speed tone.wav', mimeType: 'audio/wav', buffer: sessionWave() });
+  await expect(
+    page.getByRole('button', { name: 'Play from start: Speed tone', exact: true }),
+  ).toBeEnabled({ timeout: 25000 });
+  await page.locator('#temp-manager > summary').click();
+  await page
+    .locator('.temp-source', { hasText: 'Speed tone' })
+    .getByRole('button', { name: 'Edit copy' })
+    .click();
+  const form = page.getByRole('form', { name: 'Edit a copy of Speed tone' });
+  await form.getByRole('combobox').selectOption('speed');
+  const speed = form.getByRole('group', { name: 'Speed' });
+  await speed.getByLabel('Exact speed (×)').fill('0.5');
+  await expect(speed).toContainText('0.5×: the copy lasts 2.00 s');
+  await expect(form.getByLabel('Name')).toHaveAttribute('placeholder', 'Speed tone (0.5x speed)');
+  // The slider is logarithmic: all the way left is 20 times slower, all the way right 20 times faster.
+  await speed.getByRole('slider').fill('-100');
+  await expect(speed.getByLabel('Exact speed (×)')).toHaveValue('0.05');
+  await speed.getByRole('slider').fill('100');
+  await expect(speed.getByLabel('Exact speed (×)')).toHaveValue('20');
+  await speed.getByLabel('Exact speed (×)').fill('0.5');
+  await form.getByRole('button', { name: 'Save copy' }).click();
+  await expect(
+    page.getByRole('button', { name: 'Play from start: Speed tone (0.5x speed)', exact: true }),
+  ).toBeEnabled({ timeout: 25000 });
 });
 
 test('Temp keeps the native original distinct from its generated reverse', async ({

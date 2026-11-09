@@ -55,6 +55,24 @@ try
     await server.Start();
     using var shutdown = new CancellationTokenSource();
     Console.CancelKeyPress += (_, e) => { e.Cancel = true; shutdown.Cancel(); };
+    // Closing the window with X (or logging off / shutting down) gives a console app about 5 seconds before
+    // Windows ends it. Use them for the same cleanup as End hosting, so temporary audio and the Temp category
+    // disappear then and there (2.16). Anything not finished in time is removed on the next start.
+    void CleanUpBeforeWindowsCloses(System.Runtime.InteropServices.PosixSignalContext context)
+    {
+        Console.WriteLine("Closing: removing temporary audio...");
+        try
+        {
+            // Cleanup never removes anything while audio plays; stop it first, but only if it's a Temp sound.
+            var snapshot = bridge.Snapshot;
+            if (snapshot.Playback.Status is "PLAYING" or "PAUSED" or "SEEKING" && snapshot.Library.Sounds.Any(s => s.Id == snapshot.Playback.SoundId && s.Temporary))
+                pipe.Request("DoStopSound()").Wait(TimeSpan.FromSeconds(1));
+            bridge.CleanupSession().Wait(TimeSpan.FromSeconds(3.5));
+        }
+        catch (Exception) { /* finished on next start */ }
+    }
+    using var onClose = System.Runtime.InteropServices.PosixSignalRegistration.Create(System.Runtime.InteropServices.PosixSignal.SIGHUP, CleanUpBeforeWindowsCloses);
+    using var onShutdown = System.Runtime.InteropServices.PosixSignalRegistration.Create(System.Runtime.InteropServices.PosixSignal.SIGTERM, CleanUpBeforeWindowsCloses);
     _ = Task.Run(() => { if (Console.ReadLine() != null) shutdown.Cancel(); });
     try { await bridge.CleanupSession(); } catch (Exception) { Console.WriteLine("Temporary audio cleanup will retry when Soundpad is available."); }
     var url = clean + "#host=" + server.Port + "." + server.Token;

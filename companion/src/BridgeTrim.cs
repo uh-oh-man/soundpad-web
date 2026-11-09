@@ -66,6 +66,8 @@ public sealed partial class Bridge
             if (path == null || !File.Exists(path)) throw new InvalidDataException("The original audio for that source is no longer available.");
             var effect = c.Action ?? "none";
             if (!AudioEffects.Names.ContainsKey(effect)) throw new InvalidDataException("Unknown effect.");
+            // "speed" takes any factor in range (2.16): 0.05 is 20 times slower, 20 is 20 times faster.
+            double speed = effect == "speed" ? c.Speed is double s && double.IsFinite(s) && s >= AudioEffects.MinSpeed && s <= AudioEffects.MaxSpeed ? s : throw new InvalidDataException($"Choose a speed from {AudioEffects.MinSpeed}x to {AudioEffects.MaxSpeed}x.") : 1;
             float[] cut; int rate, channels;
             using (var audio = new DecodedAudio(path))
             {
@@ -73,9 +75,10 @@ public sealed partial class Bridge
                 rate = audio.Rate; channels = audio.Channels;
                 long skip = from * rate / 1000 * channels, keep = (Math.Min(to, (long)audio.Duration.TotalMilliseconds) - from) * rate / 1000 * channels;
                 // Even mono at the lowest quality must fit Temp's 16 MiB per-sound limit; say so before decoding.
-                double seconds = keep / (double)channels / rate * AudioEffects.Stretch(effect) + (effect == "echo" ? 0.5 : 0);
+                double stretch = AudioEffects.Stretch(effect, speed);
+                double seconds = keep / (double)channels / rate * stretch + (effect == "echo" ? 0.5 : 0);
                 if (seconds * MinimumCopyRate * 2 + 44 > UploadLimit)
-                    throw new InvalidDataException($"That copy is too long for Temp. Choose at most {Math.Floor((UploadLimit - 44) / (2.0 * MinimumCopyRate) / AudioEffects.Stretch(effect))} s of this sound.");
+                    throw new InvalidDataException($"That copy is too long for Temp. Choose at most {Math.Floor((UploadLimit - 44) / (2.0 * MinimumCopyRate) / stretch)} s of this sound{(effect == "speed" ? " at this speed, or a faster speed" : "")}.");
                 var samples = new List<float>((int)keep);
                 var buffer = new float[channels * 4096];
                 int read;
@@ -89,7 +92,7 @@ public sealed partial class Bridge
                 }
                 cut = samples.ToArray();
             }
-            var processed = AudioEffects.Apply(cut, channels, rate, effect);
+            var processed = AudioEffects.Apply(cut, channels, rate, effect, speed);
             (processed, rate, channels) = FitForTemp(processed, rate, channels);
             byte[] wav;
             using (var output = new MemoryStream())
@@ -98,7 +101,8 @@ public sealed partial class Bridge
                     foreach (var sample in processed) writer.WriteSample(Math.Clamp(sample, -1f, 1f));
                 wav = output.ToArray();
             }
-            var name = string.IsNullOrWhiteSpace(c.Name) ? $"{original} ({(effect == "none" ? "trimmed" : AudioEffects.Names[effect])})" : c.Name.Trim();
+            var label = effect switch { "none" => "trimmed", "speed" => $"{speed.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture)}x speed", _ => AudioEffects.Names[effect] };
+            var name = string.IsNullOrWhiteSpace(c.Name) ? $"{original} ({label})" : c.Name.Trim();
             if (name.Length > 100) name = name[..99].TrimEnd() + "\u2026";
             return (await Upload(wav, name + ".wav", Person(actor, participant).Name, actor == "host", owner, audience)) with { Id = c.Id };
             }
@@ -113,18 +117,25 @@ public static class AudioEffects
 {
     public static readonly IReadOnlyDictionary<string, string> Names = new Dictionary<string, string>
     {
-        ["none"] = "trimmed", ["chipmunk"] = "chipmunk", ["slowmo"] = "slow-mo", ["echo"] = "echo",
+        ["none"] = "trimmed", ["chipmunk"] = "chipmunk", ["slowmo"] = "slow-mo", ["echo"] = "echo", ["speed"] = "speed",
     };
-    /// <summary>How much longer the effect makes the audio (Slow-mo plays at 0.7x).</summary>
-    public static double Stretch(string effect) => effect switch { "slowmo" => 1 / 0.7, "chipmunk" => 1 / 1.5, _ => 1 };
-    public static float[] Apply(float[] interleaved, int channels, int rate, string effect) => effect switch
+    /// <summary>Range of the free speed control: 20 times slower to 20 times faster.</summary>
+    public const double MinSpeed = 0.05, MaxSpeed = 20;
+    /// <summary>How much longer the effect makes the audio (Slow-mo plays at 0.7x; "speed" at the chosen factor).</summary>
+    public static double Stretch(string effect, double speed = 1) => effect switch { "slowmo" => 1 / 0.7, "chipmunk" => 1 / 1.5, "speed" => 1 / speed, _ => 1 };
+    public static float[] Apply(float[] interleaved, int channels, int rate, string effect, double speed = 1) => effect switch
     {
         "chipmunk" => Speed(interleaved, channels, 1.5),
         "slowmo" => Speed(interleaved, channels, 0.7),
+        "speed" => Speed(interleaved, channels, speed),
         "echo" => Echo(interleaved, channels, rate),
         _ => interleaved,
     };
-    /// <summary>Plays faster or slower at the same sample rate, so pitch moves with speed (the classic effect).</summary>
+    /// <summary>
+    /// Plays faster or slower at the same sample rate, so pitch moves with speed (the classic effect). Slower
+    /// interpolates between samples; faster averages the samples each output step covers, which keeps high
+    /// speeds (up to 20x) from sounding harsh.
+    /// </summary>
     public static float[] Speed(float[] input, int channels, double factor)
     {
         int frames = input.Length / channels, outFrames = (int)(frames / factor);
@@ -135,8 +146,18 @@ public static class AudioEffects
             int index = (int)position; double t = position - index;
             for (int c = 0; c < channels; c++)
             {
-                float a = input[Math.Min(index, frames - 1) * channels + c], b = input[Math.Min(index + 1, frames - 1) * channels + c];
-                output[i * channels + c] = (float)(a + (b - a) * t);
+                if (factor > 1)
+                {
+                    int last = Math.Min((int)(position + factor), frames);
+                    float sum = 0; int count = 0;
+                    for (int f = index; f < last; f++) { sum += input[f * channels + c]; count++; }
+                    output[i * channels + c] = count > 0 ? sum / count : input[Math.Min(index, frames - 1) * channels + c];
+                }
+                else
+                {
+                    float a = input[Math.Min(index, frames - 1) * channels + c], b = input[Math.Min(index + 1, frames - 1) * channels + c];
+                    output[i * channels + c] = (float)(a + (b - a) * t);
+                }
             }
         }
         return output;

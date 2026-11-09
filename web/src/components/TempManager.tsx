@@ -60,9 +60,20 @@ const effects = {
   chipmunk: 'Chipmunk (1.5× faster, higher)',
   slowmo: 'Slow-mo (0.7×, deeper)',
   echo: 'Echo',
+  speed: 'Any speed',
 } as const;
 const effectSuffix = { chipmunk: 'chipmunk', slowmo: 'slow-mo', echo: 'echo' } as const;
 type Effect = keyof typeof effects;
+/** Free speed range (companion 2.16): 20 times slower to 20 times faster. */
+const MIN_SPEED = 0.05,
+  MAX_SPEED = 20;
+const clampSpeed = (s: number) =>
+  Math.min(MAX_SPEED, Math.max(MIN_SPEED, Number.isFinite(s) ? s : 1));
+/** The slider is logarithmic, -100..100 ↔ 0.05×..20×, so slowing down gets as much travel as speeding up. */
+const speedToSlider = (s: number) =>
+  Math.round((Math.log(clampSpeed(s)) / Math.log(MAX_SPEED)) * 100);
+const sliderToSpeed = (v: number) => Number(Math.pow(MAX_SPEED, v / 100).toPrecision(2));
+const formatSpeed = (s: number) => `${Number(s.toFixed(2))}×`;
 
 export function TempManager({
   state,
@@ -86,6 +97,7 @@ export function TempManager({
     to: number;
     name: string;
     effect: Effect;
+    speed: number;
   }>();
   const [refresh, setRefresh] = useState(0);
   useEffect(() => {
@@ -236,6 +248,7 @@ export function TempManager({
                             to: durationOf(a)! / 1000,
                             name: '',
                             effect: 'none',
+                            speed: 1,
                           })
                         }
                       >
@@ -258,6 +271,7 @@ export function TempManager({
                         positionMs: Math.round(Math.min(Math.max(0, trimming.from * 1000), length)),
                         endMs: Math.round(Math.min(Math.max(0, trimming.to * 1000), length)),
                         action: trimming.effect,
+                        ...(trimming.effect === 'speed' && { speed: clampSpeed(trimming.speed) }),
                         ...(trimming.name.trim() && { name: trimming.name.trim() }),
                       });
                     }}
@@ -293,19 +307,75 @@ export function TempManager({
                             setTrimming({ ...trimming, effect: e.target.value as Effect })
                           }
                         >
-                          {Object.entries(effects).map(([value, label]) => (
-                            <option key={value} value={value}>
-                              {label}
-                            </option>
-                          ))}
+                          {Object.entries(effects)
+                            .filter(
+                              ([value]) =>
+                                value !== 'speed' || supports(state.companionVersion, 'speed'),
+                            )
+                            .map(([value, label]) => (
+                              <option key={value} value={value}>
+                                {label}
+                              </option>
+                            ))}
                         </select>
                       </label>
+                    )}
+                    {trimming.effect === 'speed' && (
+                      // Any speed: tape style, so pitch moves with it (slower is deeper, faster is higher).
+                      <div className="temp-speed" role="group" aria-label="Speed">
+                        <label>
+                          Speed
+                          <input
+                            type="range"
+                            min={-100}
+                            max={100}
+                            step={1}
+                            aria-valuetext={formatSpeed(trimming.speed)}
+                            value={speedToSlider(trimming.speed)}
+                            onChange={(e) =>
+                              setTrimming({
+                                ...trimming,
+                                speed: sliderToSpeed(Number(e.target.value)),
+                              })
+                            }
+                          />
+                        </label>
+                        <label>
+                          Exact speed (×)
+                          <input
+                            type="number"
+                            min={MIN_SPEED}
+                            max={MAX_SPEED}
+                            step={0.05}
+                            value={trimming.speed}
+                            onChange={(e) =>
+                              setTrimming({ ...trimming, speed: Number(e.target.value) })
+                            }
+                            onBlur={() =>
+                              setTrimming({ ...trimming, speed: clampSpeed(trimming.speed) })
+                            }
+                          />
+                        </label>
+                        <span className="muted">
+                          {formatSpeed(clampSpeed(trimming.speed))}: the copy lasts{' '}
+                          {(
+                            Math.max(0, trimming.to - trimming.from) / clampSpeed(trimming.speed)
+                          ).toFixed(2)}{' '}
+                          s. Pitch changes with speed.
+                        </span>
+                      </div>
                     )}
                     <label>
                       Name
                       <input
                         maxLength={100}
-                        placeholder={`${a.name} (${trimming.effect === 'none' ? 'trimmed' : effectSuffix[trimming.effect]})`}
+                        placeholder={`${a.name} (${
+                          trimming.effect === 'none'
+                            ? 'trimmed'
+                            : trimming.effect === 'speed'
+                              ? `${Number(clampSpeed(trimming.speed).toFixed(2))}x speed`
+                              : effectSuffix[trimming.effect]
+                        })`}
                         value={trimming.name}
                         onChange={(e) => setTrimming({ ...trimming, name: e.target.value })}
                       />

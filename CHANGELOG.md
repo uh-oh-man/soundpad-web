@@ -2,6 +2,54 @@
 
 Notable changes to Soundpad Web. Versions follow the website's `package.json`; the Windows companion is versioned separately and only needs updating when a release says so.
 
+## 2.16.0 — Any speed, no reverse limits, everything gone when you close
+
+**Update the Windows companion** to get this. With an older companion, the website hides the option, and Settings lists it under what an update adds.
+
+### Added
+
+- **Any speed, as slow or as fast as you want.** In **Temp → Edit copy**, the Effect list now has **Any speed**.
+  - Pick any speed from **0.05×** (20 times slower) to **20×** (20 times faster), with a slider or an exact number.
+  - The slider is logarithmic, so slowing down gets as much room as speeding up.
+  - The form shows how long the copy will be. The copy is saved as a new Temp sound, named for example "Laugh (0.5x speed)". The original is not changed.
+  - It works like a tape: pitch moves with speed (slower is deeper, faster is higher).
+  - Soundpad's remote control has no playback-speed setting, so speed applies to copies, like Chipmunk and Slow-mo.
+  - Very slow copies are long, so Temp's 16 MiB limit still applies. Long copies are reduced in quality to fit. If even that is too long, the companion says how many seconds fit at that speed.
+- **Faster speeds sound cleaner.** When a copy is sped up (including Chipmunk), the companion now averages the samples it skips instead of dropping them, which avoids harsh aliasing at high speeds.
+- **Reverse has no size or count limits anymore.**
+  - Gone: the ten-minute and 64 MiB decoded caps, the 30-second conversion timeout (now 10 minutes), and Temp's 32-file / 256 MiB total for reversed copies. You can reverse long sounds and as many as you like.
+  - What stays: one file per reversed sound can be up to **512 MiB**, about 46 minutes of 48 kHz stereo. Every companion version checks that number in its saved journal, so a larger file would make an older companion refuse the journal, and going back to an older version would stop working.
+  - Uploads and Edit copy keep their 16 MiB per sound, for the same rollback reason.
+- **Everything temporary disappears when hosting ends, and when you close the companion window with the X.**
+  - Before, cleanup deleted the companion's files but left every reversed or uploaded entry in Soundpad's Temp category. Soundpad can only remove "the selected entry", so it asked you to remove them by hand.
+  - Now, at **End hosting**, the companion removes its own Temp category in one command. Measured on Soundpad 4.0.35, that takes the category's sounds out of Soundpad's list too (the files are not touched). Then it deletes its files.
+  - It only does this when every entry in that category is one of its own temporary files and nothing is playing. If you put something of your own in there, it falls back to the old careful way.
+  - Closing the window with the X, or logging off or shutting down, now runs the same cleanup in the few seconds Windows allows. If a Temp sound is playing, it is stopped first; your own sounds are never interrupted. Anything not finished in time is cleaned up on the next start, as before.
+  - Each session starts a fresh Temp category.
+- **The journal no longer fills up.** At session end, records of files that are already gone are forgotten. Before, a sound you reversed often eventually hit the 64-version limit for good, and old uploads counted toward the 2,048-source limit.
+- **Scrolling the board no longer zooms the waveforms it passes over.** The mouse wheel now scrolls the page until the pointer has rested on a waveform for one second, with no scrolling in between. Before, scrolling down the board zoomed whichever tile's waveform slid under the pointer. Once you've paused on a waveform, the wheel zooms it as before. This covers tiles and the Waveforms view.
+- Protocol: `trimAudio` accepts `action: "speed"` with `speed` (0.05 to 20). The feature is gated as `FEATURES.speed` (2.16).
+
+### Tests
+
+- C# tests for cleanup:
+  - session end removes the whole Temp category and its file without any selection command, and forgets the record;
+  - a Temp category holding someone else's sound is kept, with the old manual-removal note;
+  - nothing is removed while a sound plays;
+  - a locked file loses its Soundpad entry, is kept and retried, then deleted.
+- The mock Soundpad's category removal now also removes that category's sounds, as measured on the real one.
+- **Checked on the owner's PC:**
+  - a harness probe confirmed the window-close handler runs when the window is closed (the same message as the X);
+  - a real Soundpad probe added one test sound in its own category, removed the category, and saw the sound leave the main list, leaving the library exactly as before (122 sounds, 9 categories).
+- C# tests for speed:
+  - 4× slower is 4× longer, and 4× faster is a quarter as long;
+  - fast speeds average the skipped samples;
+  - a 3 s source at 0.5× becomes a 6 s "(0.5x speed)" copy;
+  - missing and out-of-range speeds are refused.
+- An e2e test sets the exact speed, checks the predicted length and name, checks the slider's ends (0.05× and 20×), and saves the copy.
+- Unit tests cover the new feature gate and the wheel rule.
+- New e2e test, in both browsers: a wheel right after arriving on a waveform doesn't zoom it, and after a quiet second it does. It fails on 2.15.9. The three existing wheel-zoom tests now pause for a second first.
+
 ## 2.15.9 — Reverse works again, no more Temp category spam, instant playback
 
 **Update the Windows companion** (SoundpadWeb.exe below). Then, if Soundpad shows many "Temp Â· Soundpad Web" categories, open **Temp** in the website and press **Remove duplicate categories**.

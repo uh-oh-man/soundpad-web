@@ -99,12 +99,14 @@ public sealed partial class ManagedAudioStore
         if (source == null) throw new InvalidDataException("No verified source orientation is available. The original files have been preserved.");
         var now = Environment.TickCount64;
         if (transformations.TryGetValue(asset.Id, out var last) && now - last < 1000) throw new InvalidDataException("Audio is still preparing. Retry in a moment.");
-        transformations[asset.Id] = now; Capacity();
+        // No Temp capacity check for reverse (2.16): the owner wants no limit here, and everything temporary is
+        // removed at session end. Each file is still bounded by the journal's per-variant size (512 MiB).
+        transformations[asset.Id] = now;
         foreach (var old in asset.Variants.Where(v => v.Current && v.Orientation == orientation)) { old.Current = false; if (old.OwnsFile && !old.Permanent && !old.LegacyApproval) old.Retired = true; }
         var variant = Allocate(asset, orientation); asset.Variants.Add(variant); asset.State = "processing"; Save();
         try
         {
-            await Generate(asset, variant, source.Path, true, cancel);
+            await Generate(asset, variant, source.Path, true, cancel, unlimited: true);
             if (!ManagedFiles.Verified(source.Path, source.FileHash, source.Bytes)) throw new InvalidDataException("The source changed during reversal. The previous files were preserved.");
             variant.SourceHash = asset.SourceHash; await EnsureImported(asset, variant); asset.State = "temporary"; Save(); return (asset, variant);
         }
@@ -122,9 +124,9 @@ public sealed partial class ManagedAudioStore
         variant.Path = Path.Combine(Sessions, journal.SessionId ?? "recovery", asset.Id, ManagedFiles.Name(asset.Name) + "-" + orientation + "-" + variant.Id[..8] + ".wav");
         ManagedFiles.RequireOwnedPath(variant.Path, Sessions); return variant;
     }
-    private async Task Generate(AudioAsset asset, AudioVariant variant, string input, bool reverse, CancellationToken cancel)
+    private async Task Generate(AudioAsset asset, AudioVariant variant, string input, bool reverse, CancellationToken cancel, bool unlimited = false)
     {
-        long remaining = 256L * 1024 * 1024 - TemporaryBytes();
+        long remaining = unlimited ? ManagedAudioCodec.MaxVariantBytes : 256L * 1024 * 1024 - TemporaryBytes();
         await Task.Run(() => ManagedAudioCodec.Convert(input, variant.Path, reverse, remaining, cancel), cancel);
         variant.Bytes = new FileInfo(variant.Path).Length; variant.FileHash = ManagedFiles.Hash(variant.Path); variant.State = "ready";
         asset.ModifiedAt = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(); Save();

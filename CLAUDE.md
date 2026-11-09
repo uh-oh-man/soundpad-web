@@ -6,6 +6,10 @@ Claude (Claude Code) is the main editor of this repository as of 2.3.1. The owne
 
 `reports/` holds every report about this app, on this PC only (it is in `.gitignore`; never commit it). Before editing anything, read `reports/bugs/` and `reports/features/` and fix open bugs first. File every new report the owner gives in chat, and every new GitHub issue, as its own file in `bugs/`, `features/` or `spam/` (format in `reports/README.md`). When one is fixed or built, set its status to the version and move it to `done/`.
 
+## Testing on the owner's real Soundpad
+
+The owner allows tests on their real Soundpad and companion data without asking first (2026-11-08), as long as each test leaves their library as it found it (no lasting changes to their sounds or categories) and anything it adds is removed again. Back up `%LOCALAPPDATA%\SoundpadWeb\state.json` and `managed-audio\journal.json` to the scratchpad first, and say afterwards what was run and what it changed.
+
 ## Layout
 
 - `web/src`: React website (Vite). `main.tsx` holds the app shell. `controller.ts` owns connection state. `arrange.ts` is the pure sound sorting and filtering logic. `components/` holds UI pieces. The Mimic window is `components/MimicPanel.tsx` plus `components/mimic/`, with pure helpers in `mimic/selection.ts`. `version.ts` has the `FEATURES` gate table.
@@ -37,6 +41,7 @@ npm run test:e2e                  # needs the prebuilt harness in companion/harn
 - Every new companion-dependent control must be gated with `supports(state.companionVersion, feature)`; add the feature and its first companion version to `FEATURES` in `web/src/version.ts`, and its name to `FEATURE_NAMES` there (Settings lists what an update adds). The website is always newest, so hosts on older companions see it.
 - Dependencies: only adopt releases at least two weeks old, and don't force major-version overrides under tools. Open item (2026-10-31): moderate `minimatch` < 11.0.1 advisory inside ESLint/typescript-eslint (dev-only). Update once ESLint depends on `minimatch` 11 and that release is two weeks old; see CHANGELOG 2.11.2. Checked again for 2.13.5: `minimatch` 11.0.1 was published 2026-10-27, and ESLint 10.14.0 (2026-10-30) still depends on `^10.2.6`.
 - Soundpad reads commands in the Windows ANSI code page, not UTF-8 (2.15.9): send every command through `SoundpadPipe` (it encodes with `SoundpadText`), keep app-made names ASCII, and keep `MockSoundpad` decoding code page 1252 so tests see what the real Soundpad stores.
+- Soundpad removes a category's sounds along with the category (measured 2.16). The companion uses that only for its own Temp category at session end, and only when every entry in it is a retired temporary file of its own (`RemoveTempCategory`).
 - Never loosen validation of persisted data (`state.json`, the managed-audio journal, e.g. the 16 MiB staged-input check): older companions would reject the newer data and rolling back would break. After changing anything persisted, rerun the rollback test in `docs/ROLLBACK.md` (harness `--make-rollback-fixture`) against the v2.3.1 companion.
 - Work on a branch. When a requested feature is done and verified, merge it to `main` and push the release tag yourself (the owner asked for this); confirm the Pages and release runs succeed.
 - Push to `main` first and wait for its CI run to pass, then push the `vX.Y.Z` tag. Never tag first: a tag whose CI fails gets no release and no EXE, and public tags are never moved or deleted. v2.14.3 and v2.15.4 are source-only for this reason.

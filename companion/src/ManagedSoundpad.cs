@@ -99,6 +99,26 @@ internal static class ManagedSoundpad
             progress?.Invoke(removed);
         }
     }
+    /// <summary>
+    /// Removes one category and, as Soundpad does, every sound in it (measured on the owner's Soundpad 4.0.35:
+    /// a removed category's sounds leave the main list too; files on disk are untouched). Then waits until
+    /// Soundpad shows exactly that: the category and its sounds gone, everything else unchanged.
+    /// </summary>
+    public static async Task RemoveCategoryWithSounds(ISoundpad pipe, NativeCatalog before, NativeCategory category)
+    {
+        await Ok(pipe, $"DoRemoveCategory({category.Index})");
+        var gone = new HashSet<string>(category.Paths, StringComparer.OrdinalIgnoreCase);
+        var expectedSounds = before.Entries.Select(e => e.Path).Where(p => !gone.Contains(p)).OrderBy(p => p, StringComparer.OrdinalIgnoreCase).ToArray();
+        var expectedCategories = before.Categories.Where(c => c.Index != category.Index).OrderBy(c => c.Index).Select(c => c.Name).ToArray();
+        for (int attempt = 0; attempt < 20; attempt++)
+        {
+            if (attempt > 0) await Task.Delay(150);
+            var after = await Read(pipe);
+            if (after.Entries.Select(e => e.Path).OrderBy(p => p, StringComparer.OrdinalIgnoreCase).SequenceEqual(expectedSounds, StringComparer.OrdinalIgnoreCase)
+                && after.Categories.OrderBy(c => c.Index).Select(c => c.Name).SequenceEqual(expectedCategories)) return;
+        }
+        throw new InvalidDataException("Soundpad did not confirm removing the Temp category. Nothing else was changed; cleanup retries later.");
+    }
     public static async Task<NativeAudioReference> Import(ISoundpad pipe, string path, int category, string expectedName)
     {
         var before = await Read(pipe);

@@ -30,6 +30,7 @@ export const FEATURES = {
   preview: [2, 12],
   hotkeyKey: [2, 14],
   voiceReplayLibrary: [2, 15],
+  speed: [2, 16],
 } as const satisfies Record<string, readonly [number, number]>;
 
 export const supports = (version: string | null | undefined, feature: keyof typeof FEATURES) =>
@@ -46,6 +47,7 @@ const FEATURE_NAMES: Record<keyof typeof FEATURES, string> = {
   preview: 'private preview',
   hotkeyKey: 'the hotkey key choice (F6–F10)',
   voiceReplayLibrary: 'importing from Voice Replay Studio',
+  speed: 'any speed for edited copies (0.05× to 20×)',
 };
 
 /**

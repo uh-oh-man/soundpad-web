@@ -376,6 +376,10 @@ public sealed class MimicTests : IDisposable
         Assert.Equal(2000, AudioEffects.Apply(mono, 1, 1000, "chipmunk").Length);
         Assert.Equal(4285, AudioEffects.Apply(mono, 1, 1000, "slowmo").Length);
         Assert.Same(mono, AudioEffects.Apply(mono, 1, 1000, "none"));
+        // Free speed (2.16): 4x slower is 4x longer, 4x faster a quarter; fast speeds average what they skip.
+        Assert.Equal(12000, AudioEffects.Apply(mono, 1, 1000, "speed", 0.25).Length);
+        Assert.Equal(750, AudioEffects.Apply(mono, 1, 1000, "speed", 4).Length);
+        Assert.Equal(1.5f, AudioEffects.Speed([0, 1, 2, 3], 1, 4)[0]);
         var stereo = new float[] { 1, -1, 3, -3, 5, -5, 7, -7 };
         Assert.Equal(new float[] { 1, -1, 4, -4 }, AudioEffects.Speed(stereo, 2, 1.5)); // 4 frames / 1.5 = 2; channels stay separate
         var click = new float[2000]; click[0] = 1;
@@ -400,6 +404,14 @@ public sealed class MimicTests : IDisposable
         Assert.Equal("Said it (chipmunk)", copy.Name);
         using var wave = new NAudio.Wave.WaveFileReader(copy.Variants.Single().Path);
         Assert.InRange(wave.TotalTime.TotalMilliseconds, 1990, 2010);
+        // Any speed in range: half speed makes 3 s into 6 s and says so in the name.
+        foreach (var bad in new double?[] { null, 0, 0.01, 25, double.NaN })
+            Assert.False((await bridge.Execute(Cmd("trimAudio") with { AssetId = original.Id, PositionMs = 0, EndMs = 3000, Action = "speed", Speed = bad }, "host")).Ok);
+        var slow = await bridge.Execute(Cmd("trimAudio") with { AssetId = original.Id, PositionMs = 0, EndMs = 3000, Action = "speed", Speed = 0.5 }, "host");
+        Assert.True(slow.Ok, slow.Error);
+        var halved = journal().Assets.Single(a => a.Name == "Said it (0.5x speed)");
+        using var slowWave = new NAudio.Wave.WaveFileReader(halved.Variants.Single().Path);
+        Assert.InRange(slowWave.TotalTime.TotalMilliseconds, 5990, 6010);
     }
 
     [Fact]

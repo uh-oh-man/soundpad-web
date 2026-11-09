@@ -820,3 +820,21 @@ body,
 .connected-guests .guest-names::before {
   content: '· ';
 }
+/* Temp → Edit copy → Speed: slider and exact value (2.16). */
+.temp-speed {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: 8px 12px;
+  flex: 1 1 100%;
+}
+.temp-speed input[type='range'] {
+  width: min(260px, 100%);
+}
+.temp-speed input[type='number'] {
+  width: 90px;
+}
+.temp-speed .muted {
+  flex: 1 1 100%;
+  font-size: 12px;
+}

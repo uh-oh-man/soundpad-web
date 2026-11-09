@@ -68,6 +68,77 @@ if (args.FirstOrDefault() == "--cleanup-real-categories")
     foreach (var c in realBridge.Snapshot.Library.Categories) Console.WriteLine($"  category: {c.Name} ({c.SoundIds.Length} sounds)");
     return;
 }
+if (args.FirstOrDefault() == "--close-signal-probe" && args.Length == 2)
+{
+    // Proves the companion's window-close handling (2.16): registers the same SIGHUP handler (Windows maps it to
+    // CTRL_CLOSE_EVENT, the window's X) and writes a marker file from it, given ~1 s of simulated cleanup.
+    using var onClose = System.Runtime.InteropServices.PosixSignalRegistration.Create(System.Runtime.InteropServices.PosixSignal.SIGHUP, _ =>
+    {
+        Thread.Sleep(1000);
+        File.WriteAllText(args[1], "cleanup ran on window close at " + DateTime.Now.ToString("HH:mm:ss.fff"));
+    });
+    Console.WriteLine("waiting to be closed...");
+    Thread.Sleep(Timeout.Infinite);
+}
+if (args.FirstOrDefault() == "--real-session-cleanup")
+{
+    // Runs exactly what the companion does on start and on window close (2.16): End-hosting cleanup on this PC's
+    // real Soundpad and companion data. Run with the companion closed.
+    var data = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "SoundpadWeb");
+    using var realPipe = new SoundpadPipe();
+    using var realBridge = new Bridge(realPipe, new StateStore(data));
+    await realBridge.Poll(true);
+    Console.WriteLine("before: " + string.Join(", ", realBridge.Snapshot.Library.Categories.Select(c => c.Name)));
+    await realBridge.CleanupSession(); await realBridge.Poll(true);
+    Console.WriteLine("after: " + string.Join(", ", realBridge.Snapshot.Library.Categories.Select(c => c.Name)));
+    var journal = System.Text.Json.JsonDocument.Parse(File.ReadAllText(Path.Combine(data, "managed-audio", "journal.json"))).RootElement;
+    Console.WriteLine($"journal: tempCategory={journal.GetProperty("tempCategory")}; assets={journal.GetProperty("assets").GetArrayLength()}; issues: {string.Join("; ", journal.GetProperty("issues").EnumerateArray().Select(i => i.GetProperty("code").GetString()))}");
+    return;
+}
+if (args.FirstOrDefault() == "--test-real-category-removal")
+{
+    // Owner-approved probe (2.16): does removing a category also remove its sounds from Soundpad's main list?
+    // Adds one silent WAV in its own new category, removes the category, and reports. If the sound is left in the
+    // main list it is removed with "remove selected" inside a fresh category holding only it. Leaves nothing behind.
+    using var real = new SoundpadPipe();
+    async Task<NativeCatalog> Settle(Func<NativeCatalog, bool> done) { NativeCatalog c = await ManagedSoundpad.Read(real); for (int i = 0; i < 20 && !done(c); i++) { await Task.Delay(150); c = await ManagedSoundpad.Read(real); } return c; }
+    var folder = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "SoundpadWeb", "managed-audio", "removal-test");
+    Directory.CreateDirectory(folder);
+    var file = Path.Combine(folder, "soundpad-web-removal-test.wav");
+    File.WriteAllBytes(file, MimicRing.Wav(new float[24000], 48000));
+    const string name = "Soundpad Web removal test";
+    var before = await ManagedSoundpad.Read(real);
+    Console.WriteLine($"before: {before.Entries.Length} sounds, {before.Categories.Length} categories");
+    if (before.Categories.Any(c => c.Name == name) || before.Entries.Any(e => e.Path.Equals(file, StringComparison.OrdinalIgnoreCase))) { Console.WriteLine("ABORT: leftovers from an earlier run"); return; }
+    Console.WriteLine("add category: " + await real.Request($"DoAddCategory(\"{name}\", -1)"));
+    var withCategory = await Settle(c => c.Categories.Any(x => x.Name == name));
+    int index = withCategory.Categories.Single(c => c.Name == name).Index;
+    Console.WriteLine("add sound: " + await real.Request($"DoAddSound(\"{file}\", {index}, 1)"));
+    var withSound = await Settle(c => c.Entries.Any(e => e.Path.Equals(file, StringComparison.OrdinalIgnoreCase)));
+    Console.WriteLine($"sound in main list: {withSound.Entries.Any(e => e.Path.Equals(file, StringComparison.OrdinalIgnoreCase))}; in its category: {withSound.Categories.Single(c => c.Name == name).Paths.Contains(file, StringComparer.OrdinalIgnoreCase)}");
+    Console.WriteLine("remove category: " + await real.Request($"DoRemoveCategory({index})"));
+    var after = await Settle(c => !c.Categories.Any(x => x.Name == name));
+    bool left = after.Entries.Any(e => e.Path.Equals(file, StringComparison.OrdinalIgnoreCase));
+    Console.WriteLine($"RESULT: after removing the category, the sound is {(left ? "STILL in" : "GONE from")} the main list ({after.Entries.Length} sounds, {after.Categories.Length} categories)");
+    if (left)
+    {
+        // Put it back into a fresh category of its own and remove it there by selection: the category holds only it.
+        Console.WriteLine("cleanup add category: " + await real.Request($"DoAddCategory(\"{name}\", -1)"));
+        var again = await Settle(c => c.Categories.Any(x => x.Name == name)); int cleanup = again.Categories.Single(c => c.Name == name).Index;
+        Console.WriteLine("cleanup add (existing path): " + await real.Request($"DoAddSound(\"{file}\", {cleanup}, 1)"));
+        await Settle(c => c.Categories.Single(x => x.Name == name).Paths.Length > 0);
+        Console.WriteLine("select category: " + await real.Request($"DoSelectCategory({cleanup})"));
+        Console.WriteLine("select row 1: " + await real.Request("DoSelectIndex(1)"));
+        Console.WriteLine("remove selected (not on disk): " + await real.Request("DoRemoveSelectedEntries(false)"));
+        var cleaned = await Settle(c => !c.Entries.Any(e => e.Path.Equals(file, StringComparison.OrdinalIgnoreCase)));
+        Console.WriteLine($"after remove-selected: sound in main list: {cleaned.Entries.Any(e => e.Path.Equals(file, StringComparison.OrdinalIgnoreCase))}");
+        Console.WriteLine("remove cleanup category: " + await real.Request($"DoRemoveCategory({cleanup})"));
+    }
+    var final = await Settle(c => !c.Categories.Any(x => x.Name == name));
+    Console.WriteLine($"final: {final.Entries.Length} sounds, {final.Categories.Length} categories (before: {before.Entries.Length}, {before.Categories.Length}); same paths: {final.Entries.Select(e => e.Path).OrderBy(p => p).SequenceEqual(before.Entries.Select(e => e.Path).OrderBy(p => p))}");
+    try { File.Delete(file); Directory.Delete(folder); } catch (IOException) { Console.WriteLine("test file still in use: " + file); }
+    return;
+}
 if (args.FirstOrDefault() == "--check-real-temp-category")
 {
     // Owner check (2.15.9): on the real Soundpad, creates or finds the companion's Temp category the way a reverse does,

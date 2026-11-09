@@ -1,6 +1,22 @@
 import { useCallback, useEffect, useRef, useState, type HTMLAttributes } from 'react';
 export const MAX_ZOOM = 128;
 export type Viewport = { zoom: number; offset: number };
+/**
+ * The wheel scrolls the page until the pointer has rested on a waveform for this long, with no page scrolling in
+ * between. Without it, scrolling down the board zoomed whichever tile's waveform passed under the pointer (2.16).
+ */
+export const WHEEL_ZOOM_DELAY_MS = 1000;
+let lastPageScroll = 0;
+// Any scrolling anywhere (the board, a side panel) counts: the pointer may sit still while tiles move under it.
+if (typeof window !== 'undefined')
+  window.addEventListener('scroll', () => (lastPageScroll = performance.now()), {
+    capture: true,
+    passive: true,
+  });
+/** True when a wheel event should go to the page instead of zooming: recent page scrolling, or the pointer only just arrived. */
+export function wheelGoesToPage(now: number, hoverSince: number, lastPage: number) {
+  return now - Math.max(hoverSince, lastPage) < WHEEL_ZOOM_DELAY_MS;
+}
 export function boundedView(total: number, zoom: number, offset: number): Viewport {
   const z = Math.max(1, Math.min(MAX_ZOOM, Number.isFinite(zoom) ? zoom : 1));
   return {
@@ -89,7 +105,14 @@ export function useTimeline({
   }
   useEffect(() => {
     if (!node || !duration) return;
+    let hoverSince = performance.now();
+    const enter = () => (hoverSince = performance.now());
     const wheel = (event: WheelEvent) => {
+      const now = performance.now();
+      if (wheelGoesToPage(now, hoverSince, lastPageScroll)) {
+        lastPageScroll = now; // let the page scroll, and keep waiting while it does
+        return;
+      }
       event.preventDefault();
       const rect = node.getBoundingClientRect(),
         scale = event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? rect.width : 1;
@@ -108,8 +131,12 @@ export function useTimeline({
         setView((previous) => zoomAt(duration, previous, previous.zoom * factor, ratio));
       }
     };
+    node.addEventListener('pointerenter', enter);
     node.addEventListener('wheel', wheel, { passive: false });
-    return () => node.removeEventListener('wheel', wheel);
+    return () => {
+      node.removeEventListener('pointerenter', enter);
+      node.removeEventListener('wheel', wheel);
+    };
   }, [node, duration, identity]);
   const interactions: HTMLAttributes<HTMLDivElement> = {
     onPointerDown(event) {

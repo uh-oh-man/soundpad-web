@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { arrangeSounds, boardTitle, type BoardSelection } from '../../web/src/arrange';
 import { companionAtLeast, missingFeatures, supports } from '../../web/src/version';
+import { wheelGoesToPage, WHEEL_ZOOM_DELAY_MS } from '../../web/src/timeline';
 import { blankWorkspace, type Workspace } from '../../web/src/workspace';
 import { EMPTY, type Snapshot, type Sound } from '../../web/src/protocol';
 const host = 'a'.repeat(64);
@@ -119,8 +120,21 @@ describe('feature gates for older companions', () => {
     expect(missingFeatures('2.13.0')).toEqual([
       'the hotkey key choice (F6–F10)',
       'importing from Voice Replay Studio',
+      'any speed for edited copies (0.05× to 20×)',
     ]);
-    expect(missingFeatures('2.15.1')).toEqual([]);
+    expect(missingFeatures('2.15.9')).toEqual(['any speed for edited copies (0.05× to 20×)']);
+    expect(missingFeatures('2.16.0')).toEqual([]);
+    expect(supports('2.15.9', 'speed')).toBe(false);
+    expect(supports('2.16.0', 'speed')).toBe(true);
     expect(missingFeatures(null)).toEqual([]);
+  });
+});
+
+describe('waveform wheel delay', () => {
+  it('lets the page scroll until the pointer rested a second with no page scrolling', () => {
+    expect(WHEEL_ZOOM_DELAY_MS).toBe(1000);
+    expect(wheelGoesToPage(5000, 4500, 0)).toBe(true); // arrived half a second ago
+    expect(wheelGoesToPage(5000, 1000, 4800)).toBe(true); // the page scrolled just now
+    expect(wheelGoesToPage(5000, 1000, 3900)).toBe(false); // rested over a second: zoom
   });
 });

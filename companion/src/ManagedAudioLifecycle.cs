@@ -152,6 +152,7 @@ public sealed partial class ManagedAudioStore
             return;
         }
         journal.Issues.RemoveAll(i => i.Code is "native-unavailable" or "playback-active");
+        if (assetId == null && !journal.SessionOpen) await RemoveTempCategory();
         foreach (var asset in journal.Assets.Where(a => assetId == null || a.Id == assetId))
         {
             if (asset.Promotion is { State: not "committed" }) continue;
@@ -195,7 +196,49 @@ public sealed partial class ManagedAudioStore
             if (!asset.Variants.Any(v => v.Retired && v.State != "removed" && !v.Permanent)) ClearIssues(asset, "cleanup-file", "native-removal-required");
             if (asset.State is not ("waiting-soundpad" or "failed" or "accepted-needs-migration")) asset.State = asset.Variants.Any(v => v.Permanent && v.Current) ? "permanent" : asset.Variants.Any(v => v.OwnsFile && v.State != "removed") ? asset.Variants.Any(v => v.Retired && !v.Permanent) ? "cleanup-pending" : "temporary" : asset.Origin == "native" ? "native" : "removed";
         }
+        // Forget records whose files are gone (2.16). They used to pile up: a sound reversed often hit the journal's
+        // 64-variant limit for good, and cleaned-up uploads counted toward its 2,048-source limit.
+        // Only at session end: during a session, a repeated Keep permanently or retry may still name an old record.
+        if (assetId == null && !journal.SessionOpen)
+        {
+            foreach (var asset in journal.Assets) asset.Variants.RemoveAll(v => v.State == "removed" && !v.Current && !v.Permanent && !v.LegacyApproval);
+            journal.Assets.RemoveAll(a => a.Origin == "upload" && a.Variants.Count == 0 && a.Input == null && a.Promotion == null);
+        }
         Save();
+    }
+    /// <summary>
+    /// At session end (or on the next start after the window was closed), removes the app's whole Temp category
+    /// with one command, which takes every reversed or uploaded entry out of Soundpad at once (2.16). Only when
+    /// every entry in it is one of this app's retired temporary files and nothing is playing; otherwise the
+    /// per-entry cleanup below decides. The next session creates a fresh Temp category.
+    /// </summary>
+    private async Task RemoveTempCategory()
+    {
+        if (journal.TempCategory is not { State: "created", NativeId: int index } temp) return;
+        try
+        {
+            await Native(async () =>
+            {
+                if (await pipe.Request("GetPlayStatus()") != "STOPPED") return false;
+                var catalog = await ManagedSoundpad.Read(pipe);
+                var category = catalog.Categories.SingleOrDefault(c => c.Index == index && c.Name == temp.Name);
+                if (category == null)
+                {
+                    // Already gone (removed by hand, or Soundpad was reset): start fresh next session.
+                    if (!catalog.Categories.Any(c => c.Name == temp.Name)) { journal.TempCategory = null; Save(); }
+                    return false;
+                }
+                var ours = journal.Assets.SelectMany(a => a.Variants).Where(v => v.Retired && v.OwnsFile && !v.Permanent && !v.LegacyApproval && v.State != "removed").Select(v => v.Path).ToHashSet(StringComparer.OrdinalIgnoreCase);
+                if (category.Paths.Any(p => !ours.Contains(p))) return false;
+                await ManagedSoundpad.RemoveCategoryWithSounds(pipe, catalog, category);
+                journal.TempCategory = null; Save();
+                return true;
+            });
+        }
+        catch (Exception ex) when (ex is InvalidDataException or IOException or OperationCanceledException or System.Xml.XmlException)
+        {
+            Issue(null, "temp-category", ex is InvalidDataException ? ex.Message : "Soundpad was unavailable while removing the Temp category. Cleanup retries later.", "info"); Save();
+        }
     }
     public object[] HostLocations() => Volatile.Read(ref hostLocations);
 }

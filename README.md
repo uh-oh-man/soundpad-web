@@ -44,7 +44,7 @@ The host can also press a hotkey **in any app** to save the last few seconds mid
 - Host-controlled permissions for playback, the Kick counter, seeking, Spotify, uploads, reverse and Mimic; guests default to playback enabled and counter editing disabled.
 - Authoritative persistent Kick counter with duplicate-request protection.
 - Five personal views, real local waveform analysis, epoch-checked seeking, pause/resume, cues, regions and zoom.
-- **Temp:** session uploads, reversed variants, trimmed or effect copies, and **Keep permanently** with host confirmation.
+- **Temp:** session uploads, reversed variants, trimmed or effect copies (including any speed from 0.05× to 20×), and **Keep permanently** with host confirmation. Everything temporary is removed from Soundpad and from disk when hosting ends, even if you close the companion window.
 - Browser-personal nested layouts, favorites, hidden sounds and validated layout exports/imports.
 - Named guests, durable web statistics and guarded read-only native Soundpad statistics.
 - Large-photo PNG/JPEG cropping, dedicated 96-pixel icon storage, and safe V1 metadata migration.
@@ -71,7 +71,7 @@ Guests receive sound titles, category names/order/membership/icons, custom icons
 - **Access revoked:** ask for the replacement invitation. If your tab missed revocation, an old invitation may instead wait for an unavailable host.
 - **That sound is no longer in Soundpad:** it was removed or renamed in Soundpad. Refresh and choose it again. A sound that only moved plays at its new place.
 - **Temp shows "copies of the Temp category with a garbled name":** companions before 2.15.9 sent Soundpad garbled category names and kept creating new Temp categories, so reverse and uploads never finished. Update the companion, open **Temp** and press **Remove duplicate categories**. Only empty categories carrying the app's tag are removed.
-- **Temp says a native entry needs cleanup:** Soundpad's API cannot guarantee that another app or user will not change the selection between check and delete, so the companion keeps that entry and its file. Remove only the indicated app-generated entry in Soundpad, **without deleting its file**, then press Retry cleanup. Cleanup never stops current playback, removes your categories or files, or deletes audio you kept permanently.
+- **Temp says a native entry needs cleanup:** since 2.16 this only happens if something that isn't the app's own temporary audio is in its Temp category; the app then won't remove that category. Soundpad's API can only remove the selected entry, so the companion keeps that entry and its file. Remove only the indicated app-generated entry in Soundpad, **without deleting its file**, then press Retry cleanup. Cleanup never stops current playback, removes your categories or files, or deletes audio you kept permanently.
 - **Hosting stops when the tab sleeps:** browser background throttling or a suspended mobile host tab can interrupt hosting. Keep the host tab open on a PC.
 
 Connections use public relays to find each other, then encrypted peer-to-peer WebRTC. Restrictive networks can block that. Technical details are in [docs/DEVELOPERS.md](docs/DEVELOPERS.md#network-notes).
