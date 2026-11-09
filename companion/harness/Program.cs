@@ -80,6 +80,23 @@ if (args.FirstOrDefault() == "--close-signal-probe" && args.Length == 2)
     Console.WriteLine("waiting to be closed...");
     Thread.Sleep(Timeout.Infinite);
 }
+if (args.FirstOrDefault() == "--refresh-bench")
+{
+    // Read-only timing of library refreshes on this PC's Soundpad, with a throwaway data folder (never the companion's).
+    var scratch = Path.Combine(Path.GetTempPath(), "soundpad-web-bench-" + Guid.NewGuid().ToString("N"));
+    try
+    {
+        using var realPipe = new SoundpadPipe();
+        using var benchBridge = new Bridge(realPipe, new StateStore(scratch));
+        for (int i = 1; i <= 4; i++)
+        {
+            var watch = System.Diagnostics.Stopwatch.StartNew(); await benchBridge.Poll(true);
+            Console.WriteLine($"refresh {i}: {watch.ElapsedMilliseconds} ms ({benchBridge.Snapshot.Library.Sounds.Length} sounds, {benchBridge.Snapshot.Library.Categories.Length} categories)");
+        }
+    }
+    finally { try { Directory.Delete(scratch, true); } catch (IOException) { } }
+    return;
+}
 if (args.FirstOrDefault() == "--real-session-cleanup")
 {
     // Runs exactly what the companion does on start and on window close (2.16): End-hosting cleanup on this PC's

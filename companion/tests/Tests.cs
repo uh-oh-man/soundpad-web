@@ -56,6 +56,19 @@ public sealed class Tests : IDisposable
         Assert.Contains("DoPlaySound(2)", mock.Commands);
         Assert.True((await b.Execute(Cmd("stop"), "host")).Ok);
     }
+    [Fact]
+    public async Task LibraryRefreshReadsCategoryIconsOnlyWhenCategoriesChange()
+    {
+        // 2.16.1: categories with icons are the slowest Soundpad read; a play waits behind it.
+        await using var mock = new MockSoundpad(); using var pipe = new SoundpadPipe(mock.Name); var b = new Bridge(pipe, Store);
+        await b.Poll(true); Assert.Contains("GetCategories(true, true)", mock.Commands);
+        mock.Commands.Clear(); await b.Poll(true);
+        Assert.Contains("GetCategories(true, false)", mock.Commands); Assert.DoesNotContain("GetCategories(true, true)", mock.Commands);
+        Assert.True(b.Snapshot.Available); Assert.NotEmpty(b.Snapshot.Library.Categories);
+        mock.CategoryXml = MockSoundpad.Categories.Replace("</Categories>", "<Category index=\"99\" name=\"New one\"/></Categories>");
+        mock.Commands.Clear(); await b.Poll(true);
+        Assert.Contains("GetCategories(true, true)", mock.Commands); Assert.Contains(b.Snapshot.Library.Categories, c => c.Name == "New one");
+    }
     [Fact] public async Task ExpiredCommandsRejected() { await using var mock = new MockSoundpad(); using var pipe = new SoundpadPipe(mock.Name); var b = new Bridge(pipe, Store); foreach (var at in new[] { 0L, long.MinValue, long.MaxValue }) Assert.False((await b.Execute(Cmd("counter", delta: 1) with { At = at }, "host")).Ok); Assert.Equal(0, b.Snapshot.Counter); }
     [Fact] public async Task IconsPersistThroughBridgeRestartAndGuestsCannotEdit() { await using var mock = new MockSoundpad(); using var pipe = new SoundpadPipe(mock.Name); var b = new Bridge(pipe, Store); await b.Poll(true); var id = b.Snapshot.Library.Sounds[0].Id; using var bmp = new System.Drawing.Bitmap(16, 16); using var data = new MemoryStream(); bmp.Save(data, System.Drawing.Imaging.ImageFormat.Png); var c = Cmd("icon", id) with { Image = "data:image/png;base64," + Convert.ToBase64String(data.ToArray()) }; Assert.False((await b.Execute(c, "guest")).Ok); Assert.True((await b.Execute(c, "host")).Ok); var restarted = new Bridge(pipe, Store); await restarted.Poll(true); Assert.StartsWith("data:image/png;base64,", restarted.Snapshot.Library.Sounds[0].Icon); }
     [Fact] public async Task LoopbackRejectsInvalidTokenAndBindsOnlyLoopback() { await using var mock = new MockSoundpad(); using var pipe = new SoundpadPipe(mock.Name); var b = new Bridge(pipe, Store); await using var server = new LocalServer(b, "https://example.test"); await server.Start(); var endpoints = System.Net.NetworkInformation.IPGlobalProperties.GetIPGlobalProperties().GetActiveTcpListeners().Where(e => e.Port == server.Port).ToArray(); Assert.NotEmpty(endpoints); Assert.All(endpoints, e => Assert.True(System.Net.IPAddress.IsLoopback(e.Address))); using var ws = new ClientWebSocket(); ws.Options.SetRequestHeader("Origin", "https://example.test"); await ws.ConnectAsync(new Uri($"ws://127.0.0.1:{server.Port}/bridge"), CancellationToken.None); await ws.SendAsync(Encoding.UTF8.GetBytes("{\"token\":\"invalid\"}"), WebSocketMessageType.Text, true, CancellationToken.None); var r = await ws.ReceiveAsync(new byte[1000], CancellationToken.None); Assert.Equal(WebSocketMessageType.Close, r.MessageType); Assert.Equal(WebSocketCloseStatus.PolicyViolation, r.CloseStatus); }

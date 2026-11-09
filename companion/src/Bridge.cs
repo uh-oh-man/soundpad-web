@@ -27,13 +27,23 @@ public sealed partial class Bridge(ISoundpad pipe, StateStore store) : IDisposab
     public void SetWebsite(string site) { disk.Website = site; store.Save(disk); }
     private void Publish() { Interlocked.Increment(ref revision); Changed?.Invoke(Snapshot); }
     /// <summary>The sound list the current mapping was parsed from; a play only needs a full refresh when it differs.</summary>
-    private string? lastSoundlist;
+    private string? lastSoundlist, lastPlainCategories, lastIconCategories;
+    private long iconsDueAt;
     private async Task RefreshInner()
     {
         try
         {
             var all = await pipe.Request("GetSoundlist()");
-            var cats = await pipe.Request("GetCategories(true, true)");
+            // Categories with icons are slow on big libraries (about 0.35 s and 1.4 MB on the owner's Soundpad), and a
+            // play waits while they load. Read them without icons (about 35 ms) and fetch icons again only when the
+            // categories changed, or every 5 minutes so a changed icon still shows (2.16.1).
+            var plain = await pipe.Request("GetCategories(true, false)");
+            if (plain != lastPlainCategories || lastIconCategories == null || Environment.TickCount64 >= iconsDueAt)
+            {
+                lastIconCategories = await pipe.Request("GetCategories(true, true)");
+                lastPlainCategories = plain; iconsDueAt = Environment.TickCount64 + 300000;
+            }
+            var cats = lastIconCategories;
             if (cats.StartsWith("R-404")) throw new InvalidDataException("This Soundpad version does not support categories. Update Soundpad.");
             var next = LibraryParser.Parse(all, cats, disk, iconCache ??= store.ReadIcons(disk), nativeStatistics);
             parsed = next with { Public = next.Public with { Sounds = next.Public.Sounds.Select(s => managed?.Annotation(s.Id) is { } info ? s with { Name = info.Kind == "native" ? s.Name : info.Name, Icon = s.Icon ?? iconCache?.GetValueOrDefault(info.WorkspaceId) ?? info.Aliases.Select(id=>iconCache?.GetValueOrDefault(id)).FirstOrDefault(icon=>icon != null), Temporary = info.Temporary, UploadedBy = info.Uploader, AssetId = info.AssetId, Orientation = info.Orientation, AudioKind = info.Kind, InternalVariant = info.InternalVariant, AliasOf = info.AliasOf, WorkspaceId = info.WorkspaceId, Aliases = info.Aliases } : s).ToArray() } }; parsed = parsed with { Public = parsed.Public with { Version = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(Json.Write(parsed.Public)))).ToLowerInvariant()[..24] } }; available = true; error = null; lastSoundlist = all;

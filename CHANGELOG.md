@@ -2,6 +2,22 @@
 
 Notable changes to Soundpad Web. Versions follow the website's `package.json`; the Windows companion is versioned separately and only needs updating when a release says so.
 
+## 2.16.1 — Snappier with big libraries
+
+**Update the Windows companion** to get this; nothing looks different.
+
+### Changed
+
+- **The background library refresh is about 5 times faster, so a play never waits behind it.** The companion refreshes the library every 30 seconds, and a play pressed during that waits until it finishes.
+  - The refresh used to read every category with its icon each time: about 0.3 s on the owner's Soundpad.
+  - It now reads categories without icons (milliseconds), and fetches icons only when the categories changed, or every 5 minutes so a changed icon still shows up.
+  - Measured on the owner's Soundpad (143 sounds), read-only: 309 ms for the first refresh, then about 60 ms.
+
+### Tests
+
+- New C# test: an unchanged library refresh skips the icon read, and a changed category brings it back. 88 C# tests.
+- `SoundpadWeb.Harness.exe --refresh-bench` times refreshes on the real Soundpad, read-only, using a throwaway data folder.
+
 ## 2.16.0 — Any speed, no reverse limits, everything gone when you close
 
 **Update the Windows companion** to get this. With an older companion, the website hides the option, and Settings lists it under what an update adds.
