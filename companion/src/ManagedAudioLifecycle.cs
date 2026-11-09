@@ -203,6 +203,9 @@ public sealed partial class ManagedAudioStore
         {
             foreach (var asset in journal.Assets) asset.Variants.RemoveAll(v => v.State == "removed" && !v.Current && !v.Permanent && !v.LegacyApproval);
             journal.Assets.RemoveAll(a => a.Origin == "upload" && a.Variants.Count == 0 && a.Input == null && a.Promotion == null);
+            // Issues about a source with nothing left pending (all its temporary files gone) no longer apply (2.16.2).
+            var pending = journal.Assets.Where(a => a.Input != null || a.Promotion is { State: not "committed" } || a.Variants.Any(v => v.OwnsFile && !v.Permanent && v.State != "removed")).Select(a => a.Id).ToHashSet();
+            journal.Issues.RemoveAll(i => i.AssetId != null && !pending.Contains(i.AssetId));
         }
         Save();
     }

@@ -150,6 +150,22 @@ public sealed class ManagedAudioStoreTests : IDisposable
         await store.Cleanup();Assert.False(File.Exists(source.Path));Assert.Equal(4,System.Xml.Linq.XDocument.Parse(mock.AllXml).Descendants("Sound").Count());
     }
     [Fact]
+    public async Task ASuccessfulReverseClearsItsEarlierFailureAndSessionEndDropsStaleIssues()
+    {
+        // 2.16.2: old "could not finish" issues stayed in Temp for good, even after reverse worked again.
+        var bytes = Wave(); var path = Path.Combine(folder, "fixture.wav"); File.WriteAllBytes(path, bytes);
+        await using var mock = new MockSoundpad { AllXml = MockSoundpad.Sounds.Replace(@"C:\Private\airhorn.wav", path) }; using var pipe = new SoundpadPipe(mock.Name, true); var store = Store(pipe); store.BeginSession();
+        var asset = (await store.NativeSource(Id(path), path, "Native", "Host")).Asset;
+        mock.FailNextAddSound = true;
+        await Assert.ThrowsAsync<InvalidDataException>(() => store.Prepare(asset.Id, "reversed", true));
+        Assert.Contains(store.Public.Issues, i => i.AssetId == asset.Id && i.Code == "transform");
+        await Task.Delay(1050);
+        await store.Prepare(asset.Id, "reversed", true);
+        Assert.DoesNotContain(store.Public.Issues, i => i.AssetId == asset.Id && i.Code is "transform" or "native-import");
+        store.RetireSession(); await store.Cleanup();
+        Assert.DoesNotContain(store.Public.Issues, i => i.AssetId == asset.Id);
+    }
+    [Fact]
     public async Task ChangedNativeSourceInvalidatesGeneratedReverseWithoutChangingOriginal()
     {
         var bytes=Wave();var path=Path.Combine(folder,"fixture.wav");await using var mock=new MockSoundpad{AllXml=MockSoundpad.Sounds.Replace(@"C:\Private\airhorn.wav",path)};using var pipe=new SoundpadPipe(mock.Name,true);var store=Store(pipe);store.BeginSession();

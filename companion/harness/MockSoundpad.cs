@@ -17,6 +17,8 @@ public sealed class MockSoundpad : IAsyncDisposable
     private readonly Task loop;
     public bool ChangeLibraryBeforeOwnedRemoval { get; set; }
     public bool StartPlaybackBeforeOwnedRemoval { get; set; }
+    /// <summary>Refuses the next DoAddSound, as Soundpad does when it can't add a file.</summary>
+    public bool FailNextAddSound { get; set; }
     public bool FailOwnedRemovalOnce { get; set; }
     private int selectedCategory = 1, selectedIndex;
     private string CategoriesMetadata(bool withSounds = false)
@@ -44,6 +46,7 @@ public sealed class MockSoundpad : IAsyncDisposable
         if (command.StartsWith("DoAddCategory(")) { int id = cats.Descendants("Category").Select(e => (int)e.Attribute("index")!).DefaultIfEmpty(1).Max() + 1; cats.Root!.Add(new XElement("Category", new XAttribute("index", id), new XAttribute("name", Regex.Match(command, "\"([^\"]+)\"").Groups[1].Value))); }
         else if (command.StartsWith("DoAddSound("))
         {
+            if (FailNextAddSound) { FailNextAddSound = false; return "R-500"; }
             var m = Regex.Match(command, "^DoAddSound\\(\"([^\"]+)\", (\\d+), (?:-1|1)\\)$");
             if (!m.Success) return "R-400";
             int id = all.Root!.Elements("Sound").Select(e => (int)e.Attribute("index")!).DefaultIfEmpty(0).Max() + 1;

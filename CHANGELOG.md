@@ -2,6 +2,20 @@
 
 Notable changes to Soundpad Web. Versions follow the website's `package.json`; the Windows companion is versioned separately and only needs updating when a release says so.
 
+## 2.16.2 — Temp stops saying "needs attention" for old failures
+
+**Update the Windows companion** to get this.
+
+### Fixed
+
+- **Old failures leave Temp once they no longer apply.** Temp's issues ("This variant could not finish", "A prepared file is waiting for a verified native entry") were never cleared. Even after reverse worked again, Temp kept saying "needs attention"; the owner's PC had over 20 such issues left from the broken versions.
+  - A successful reverse now clears that sound's earlier failure, including when a retry only re-imports a file that was already made.
+  - Session end drops issues about sources with nothing left pending.
+
+### Tests
+
+- New C# test: the mock Soundpad refuses one import, so a reverse fails with an issue. The next reverse succeeds and clears it, and session end leaves no issue for that sound. 89 C# tests.
+
 ## 2.16.1 — Snappier with big libraries
 
 **Update the Windows companion** to get this; nothing looks different.

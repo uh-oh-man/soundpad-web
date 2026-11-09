@@ -91,7 +91,7 @@ public sealed partial class ManagedAudioStore
                 if ((asset.Origin == "upload" && !asset.Variants.Any(v=>v.Permanent)) || !journal.SessionOpen) throw new InvalidDataException("This temporary upload belongs to an ended session.");
                 existing.Retired = false; existing.LeaseSessionId = journal.SessionId; Save();
             }
-            await EnsureImported(asset, existing); return (asset, existing);
+            await EnsureImported(asset, existing); ClearIssues(asset, "transform", "native-import"); Save(); return (asset, existing);
         }
         if (!allowGeneration) throw new InvalidDataException("The host has disabled guest audio generation.");
         if (!journal.SessionOpen) throw new InvalidDataException("Hosting has ended.");
@@ -108,7 +108,7 @@ public sealed partial class ManagedAudioStore
         {
             await Generate(asset, variant, source.Path, true, cancel, unlimited: true);
             if (!ManagedFiles.Verified(source.Path, source.FileHash, source.Bytes)) throw new InvalidDataException("The source changed during reversal. The previous files were preserved.");
-            variant.SourceHash = asset.SourceHash; await EnsureImported(asset, variant); asset.State = "temporary"; Save(); return (asset, variant);
+            variant.SourceHash = asset.SourceHash; await EnsureImported(asset, variant); asset.State = "temporary"; ClearIssues(asset, "transform", "native-import"); Save(); return (asset, variant); // an old failure no longer applies
         }
         catch (Exception ex) when (ex is not OutOfMemoryException)
         {
