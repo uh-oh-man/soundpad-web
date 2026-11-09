@@ -69,7 +69,8 @@ Guests receive sound titles, category names/order/membership/icons, custom icons
 - **WebRTC blocked:** the guest's browser has WebRTC turned off or doesn't support it, often because of a privacy extension or setting. Allow WebRTC for the site, or use an up-to-date browser.
 - **Host unavailable:** the host tab or companion may be closed, a laptop may be asleep, or signaling/WebRTC may be blocked. Check the invite and try another network. The app does not display Connected until the host's cryptographic handshake verifies.
 - **Access revoked:** ask for the replacement invitation. If your tab missed revocation, an old invitation may instead wait for an unavailable host.
-- **Soundpad library changed:** click the sound again after refresh. Stale indexes are rejected to avoid playing a different sound.
+- **That sound is no longer in Soundpad:** it was removed or renamed in Soundpad. Refresh and choose it again. A sound that only moved plays at its new place.
+- **Temp shows "copies of the Temp category with a garbled name":** companions before 2.15.9 sent Soundpad garbled category names and kept creating new Temp categories, so reverse and uploads never finished. Update the companion, open **Temp** and press **Remove duplicate categories**. Only empty categories carrying the app's tag are removed.
 - **Temp says a native entry needs cleanup:** Soundpad's API cannot guarantee that another app or user will not change the selection between check and delete, so the companion keeps that entry and its file. Remove only the indicated app-generated entry in Soundpad, **without deleting its file**, then press Retry cleanup. Cleanup never stops current playback, removes your categories or files, or deletes audio you kept permanently.
 - **Hosting stops when the tab sleeps:** browser background throttling or a suspended mobile host tab can interrupt hosting. Keep the host tab open on a PC.
 

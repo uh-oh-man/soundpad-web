@@ -33,6 +33,7 @@ const response = z.object({
       z.object({
         id: z.string(),
         assetId: z.string().nullable(),
+        code: z.string().optional(),
         message: z.string(),
         severity: z.string(),
       }),
@@ -111,7 +112,14 @@ export function TempManager({
     };
   }, [connected, state.managedAudioVersion, refresh]);
   async function run(
-    op: 'audioPlay' | 'keepAudio' | 'removeAudio' | 'retryAudio' | 'retryCleanup' | 'trimAudio',
+    op:
+      | 'audioPlay'
+      | 'keepAudio'
+      | 'removeAudio'
+      | 'retryAudio'
+      | 'retryCleanup'
+      | 'cleanupCategories'
+      | 'trimAudio',
     fields: Parameters<typeof controller.run>[1] = {},
   ) {
     // Busy buttons stay enabled (aria-disabled) so they keep keyboard focus; ignore presses until done.
@@ -119,7 +127,14 @@ export function TempManager({
     setPending(fields.assetId ?? 'manager');
     setError('');
     try {
-      await controller.run(op, fields);
+      const result = await controller.run(op, fields);
+      if (op === 'cleanupCategories') {
+        const removed = z.object({ removed: z.number().int() }).safeParse(result);
+        controller.notify(
+          `Removed ${removed.success ? removed.data.removed : 'the'} duplicate Temp categories from Soundpad.`,
+          'success',
+        );
+      }
       if (op === 'keepAudio') {
         setSaving(undefined);
         controller.notify('Permanent file and Soundpad entry verified.', 'success');
@@ -385,6 +400,25 @@ export function TempManager({
           {data?.manager.issues.map((i) => (
             <p className="warning" key={i.id}>
               {i.message}
+              {host && i.code === 'category-duplicates' && (
+                <>
+                  {' '}
+                  <button
+                    aria-disabled={!!pending || undefined}
+                    onClick={() => {
+                      if (
+                        !pending &&
+                        confirm(
+                          'Remove the empty duplicate Temp categories from Soundpad? Only empty categories carrying this app’s tag are removed; your own categories and sounds are not touched. This can take a few minutes on a large library.',
+                        )
+                      )
+                        void run('cleanupCategories');
+                    }}
+                  >
+                    Remove duplicate categories
+                  </button>
+                </>
+              )}
             </p>
           ))}
           {host && (
@@ -418,7 +452,7 @@ export function TempManager({
                     .filter(
                       (c) =>
                         /^\d+$/.test(c.category.id) &&
-                        !/^All$|^Temp · Soundpad Web/.test(c.category.name),
+                        !/^All$|^Temp .{1,3} Soundpad Web \[/.test(c.category.name), // "-" since 2.15.9; "·" or garbled before
                     )
                     .map((c) => (
                       <option key={c.category.id} value={c.category.id}>

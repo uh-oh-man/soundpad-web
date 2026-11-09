@@ -104,7 +104,14 @@ export class LocalBridge {
           this.pending.delete(command.id);
           reject(Error('Command timed out. Playback is never retried automatically.'));
         },
-        slowOps.includes(command.op) ? 90000 : command.op === 'waveform' ? 45000 : 12000,
+        // Removing hundreds of duplicate categories one by one can take minutes (2.15.9).
+        command.op === 'cleanupCategories'
+          ? 600000
+          : slowOps.includes(command.op)
+            ? 90000
+            : command.op === 'waveform'
+              ? 45000
+              : 12000,
       );
       this.pending.set(command.id, { resolve, reject, timer });
       this.socket.send(

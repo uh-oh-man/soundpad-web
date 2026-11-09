@@ -91,6 +91,26 @@ test('landing page has an honest disconnected state', async ({ page }) => {
   await expect(page.getByText('Not connected', { exact: true })).toBeVisible();
   expect(await page.getByRole('button', { name: /Play / }).count()).toBe(0);
 });
+
+test('the host sees connected guests at the top of the board, above the sounds', async ({
+  page,
+  harness,
+}) => {
+  await host(page, harness);
+  const guests = page
+    .locator('.board-heading')
+    .getByRole('status')
+    .filter({ hasText: 'connected guest' });
+  await expect(guests).toHaveText(/0 connected guests/);
+  const heading = (await guests.boundingBox())!;
+  const firstSound = (await page
+    .getByRole('button', { name: /^Play from start: / })
+    .first()
+    .boundingBox())!;
+  expect(heading.y).toBeLessThan(firstSound.y);
+  await expect(page.locator('.board-footer')).not.toContainText('connected guest');
+  await page.screenshot({ path: 'test-results/guests-top.png' });
+});
 test('real loopback bridge: nested library, search, correct play command, counter and icons', async ({
   page,
   harness,
@@ -891,7 +911,7 @@ test('session uploads use temp, reverse immediately, and only approved files sur
   await expect(
     page
       .getByRole('navigation', { name: 'Sound categories' })
-      .getByRole('button', { name: /^Temp · Soundpad Web.*1$/ }),
+      .getByRole('button', { name: /^Temp - Soundpad Web.*1$/ }),
   ).toBeVisible();
   await page.getByRole('button', { name: 'Reverse and play Session tone', exact: true }).click();
   await expect.poll(() => harness.plays).toContain('DoPlaySound(6)');
@@ -1361,7 +1381,9 @@ test('Mimic: host listens, everyone sees it, and a selection becomes a playable 
   await dialog.getByLabel('Hotkey key', { exact: true }).selectOption('F9');
   await expect(page.getByText('F9 is already used by another app', { exact: false })).toBeVisible();
   await expect(dialog.getByLabel('Hotkey key', { exact: true })).toHaveValue('F6');
-  await expect(page.getByText('Pick another key next to Hotkey', { exact: false }).first()).toBeVisible();
+  await expect(
+    page.getByText('Pick another key next to Hotkey', { exact: false }).first(),
+  ).toBeVisible();
   // The F6 hotkey is host-only and reports its state (the harness uses a fixture key, never real F6).
   await dialog.getByLabel('F6 hotkey').check();
   await expect(dialog.getByText('Press F6 in any app to save the last 10 s')).toBeVisible();
@@ -1575,6 +1597,36 @@ test('wheel zoom works when the waveform data arrives late', async ({ page, harn
   await expect(
     wave.getByRole('button', { name: 'Fit waveform Airhorn', exact: true }),
   ).toBeVisible();
+});
+
+test('Temp offers to remove duplicate Temp categories that old companions created', async ({
+  page,
+  harness,
+}) => {
+  // The harness's mock library has none, so mark the Temp list as if the companion had found some.
+  await page.routeWebSocket(/ws:\/\/127\.0\.0\.1:\d+\/bridge/, (socket) => {
+    const server = socket.connectToServer();
+    socket.onMessage((message) => server.send(message));
+    server.onMessage((message) => {
+      const frame = JSON.parse(String(message));
+      if (frame.type === 'ack' && frame.data?.manager?.issues)
+        frame.data.manager.issues.push({
+          id: 'manager:category-duplicates',
+          assetId: null,
+          code: 'category-duplicates',
+          message: 'Soundpad has 1507 copies of the Temp category with a garbled name.',
+          severity: 'warning',
+        });
+      socket.send(JSON.stringify(frame));
+    });
+  });
+  await host(page, harness);
+  await page.locator('#temp-manager > summary').click();
+  await expect(page.getByText('Soundpad has 1507 copies')).toBeVisible();
+  page.once('dialog', (dialog) => void dialog.accept());
+  await page.getByRole('button', { name: 'Remove duplicate categories' }).click();
+  // The companion removes only empty garbled copies of its own category; the mock has none.
+  await expect(page.getByText('Removed 0 duplicate Temp categories from Soundpad.')).toBeVisible();
 });
 
 test('Temp keeps the native original distinct from its generated reverse', async ({

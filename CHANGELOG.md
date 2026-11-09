@@ -2,6 +2,53 @@
 
 Notable changes to Soundpad Web. Versions follow the website's `package.json`; the Windows companion is versioned separately and only needs updating when a release says so.
 
+## 2.15.9 — Reverse works again, no more Temp category spam, instant playback
+
+**Update the Windows companion** (SoundpadWeb.exe below). Then, if Soundpad shows many "Temp Â· Soundpad Web" categories, open **Temp** in the website and press **Remove duplicate categories**.
+
+### Fixed
+
+- **Reverse (and session uploads) work again, and Soundpad no longer fills up with Temp categories.**
+  - Soundpad reads the companion's commands in the Windows ANSI code page (code page 1252 on most English PCs), but the companion sent UTF-8.
+  - So the Temp category "Temp · Soundpad Web [...]" arrived as "Temp Â· Soundpad Web [...]".
+  - The companion never recognised that category, so every reverse and every recovery pass created another one. On the owner's PC there were **1,507**.
+  - Reverse waits for that category, so it never finished.
+  - Now commands are sent in the code page Soundpad expects, and text it can't carry is refused with a clear message instead of being garbled. Characters such as emoji in managed file names become `_`, and new app category names are plain ASCII ("Temp - Soundpad Web [...]").
+- **The create loop can't come back.** If garbled copies of the app's category exist, the companion stops instead of making another one. **Temp** then shows how many there are, with a **Remove duplicate categories** button.
+  - The button removes only empty categories carrying the app's own tag, never your categories or sounds.
+  - It works from the highest index down and checks Soundpad after every 50.
+  - On the owner's PC it removed all 1,507 and left the other 8 categories and every sound untouched.
+- **Playing a sound is immediate and doesn't fail.**
+  - Every press used to re-read the whole library first: the sound list plus every category with icons, about 1.4 MB and 0.35 s on a large library.
+  - It also refused to play ("Soundpad library changed. Try the sound again") whenever anything in the library had changed since the page last looked. With the Temp categories piling up, that was nearly always.
+  - Now a play reads only the sound list (about 10 ms), and re-reads the rest only if that list changed.
+  - A sound that moved plays at its new place, never a stale one; reverse works the same way.
+- **Temp says why something failed.** Issues used to show only a generic line ("This variant could not finish"); they now include the actual reason.
+
+### Changed
+
+- **Connected guests are shown at the top of the board,** under the title, with their names (up to four, then "+N more"), instead of a count in the footer.
+- **Every GitHub release now carries its version number and what changed.** The title and notes come from this changelog ("Soundpad Web v2.15.9 — ..."), instead of GitHub's list of commits. CI fails before any tag if the changelog has no section for the version being built.
+
+### Tests
+
+- The mock Soundpad now decodes commands in code page 1252, like the real one; decoding UTF-8 is what hid this bug.
+- New C# tests, each failing on 2.15.8:
+  - a "·" category name reaches Soundpad intact and is created once;
+  - garbled copies stop the create loop, and only the empty ones are removed;
+  - a play with an unchanged library reads no categories, and an added category doesn't stop a play.
+- Updated C# test: a moved sound plays at its fresh index. There are now 86 C# tests.
+- New e2e tests: the Temp cleanup button, and connected guests at the top.
+- New unit tests for the release notes.
+- **Checked on the owner's real Soundpad (4.0.35), with permission:**
+  - the cleanup removed the 1,507 duplicates;
+  - the companion then created its Temp category once, under exactly the expected name, and found it again instead of making another.
+  - Not checked live: a full reverse, which would have played audio through the mic route.
+
+### Reports
+
+- Reports now go in a local `reports/` folder (bugs, features, spam, done), which is not uploaded. `CLAUDE.md` tells Claude to read it before every change.
+
 ## 2.15.8 — A taken hotkey points at the key picker
 
 **Update the Windows companion** to get the new wording.

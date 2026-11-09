@@ -51,7 +51,7 @@ public sealed partial class ManagedAudioStore
             }
             else
             {
-                journal.SavedCategory ??= new() { Name = "Saved · Soundpad Web [" + journal.AppId[..6] + "-" + Guid.NewGuid().ToString("N")[..6] + "]" }; Save();
+                journal.SavedCategory ??= new() { Name = "Saved - Soundpad Web [" + journal.AppId[..6] + "-" + Guid.NewGuid().ToString("N")[..6] + "]" }; Save();
                 category = await ManagedSoundpad.EnsureCategory(pipe, journal.SavedCategory, Save); name = journal.SavedCategory.Name;
             }
             plan.State = "import-pending"; Save();
@@ -77,6 +77,7 @@ public sealed partial class ManagedAudioStore
     public async Task Recover(bool retireSession = false)
     {
         RetryJournal(); if (retireSession) RetireSession();
+        await CheckDuplicateCategories();
         foreach (var asset in journal.Assets)
         {
             if (asset.Promotion is { State: not "committed" })
@@ -87,10 +88,43 @@ public sealed partial class ManagedAudioStore
             foreach (var variant in asset.Variants.Where(v => v.Current && v.State == "ready" && (!v.Retired || v.Permanent || v.LegacyApproval) && (retireSession || v.Native is not { VerifiedAt: > 0 } || asset.State == "waiting-soundpad")))
             {
                 try { await EnsureImported(asset, variant); ClearIssues(asset, "native-import"); asset.State = variant.LegacyApproval ? "accepted-needs-migration" : variant.Permanent ? "permanent" : "temporary"; }
-                catch (Exception ex) when (ex is not OutOfMemoryException) { Issue(asset, "native-import", "A prepared file is waiting for a verified native entry. Open Soundpad or resolve native duplicates, then retry."); }
+                catch (Exception ex) when (ex is not OutOfMemoryException) { Report(asset, "native-import", "A prepared file is waiting for a verified native entry. Open Soundpad or resolve native duplicates, then retry.", ex); }
             }
         }
         Save(); await Cleanup();
+    }
+    /// <summary>Creates or finds the Temp category exactly as a reverse would, without importing or playing anything (harness check).</summary>
+    internal Task<int> EnsureTempCategory()
+    {
+        journal.TempCategory ??= new() { Name = "Temp - Soundpad Web [" + journal.AppId[..6] + "-" + Guid.NewGuid().ToString("N")[..6] + "]" };
+        Save(); return Native(() => ManagedSoundpad.EnsureCategory(pipe, journal.TempCategory, Save));
+    }
+    /// <summary>Raises (or clears) the Temp issue offering to remove garbled duplicate categories, so the host sees it at once.</summary>
+    private async Task CheckDuplicateCategories()
+    {
+        var owned = new[] { journal.TempCategory, journal.SavedCategory }.OfType<OwnedCategory>().ToArray();
+        if (owned.Length == 0) return;
+        try
+        {
+            var catalog = await Native(() => ManagedSoundpad.Read(pipe));
+            int count = owned.Sum(r => ManagedSoundpad.GarbledCopies(catalog, r).Length);
+            journal.Issues.RemoveAll(i => i.Code == "category-duplicates");
+            if (count > 0) Issue(null, "category-duplicates", $"Soundpad has {count} cop{(count == 1 ? "y" : "ies")} of the Temp category with a garbled name, made by companions before 2.15.9. They stop reverse and uploads from finishing. Remove duplicate categories cleans up the empty ones.", "warning", "cleanup-categories");
+            Save();
+        }
+        catch (Exception ex) when (ex is IOException or InvalidDataException or OperationCanceledException or System.Xml.XmlException) { /* Soundpad unavailable: checked again next time */ }
+    }
+    /// <summary>
+    /// Host action: removes the empty garbled copies of this app's categories that companions before 2.15.9
+    /// created in a loop. Only empty categories carrying this app's random tag are touched. Returns the count.
+    /// </summary>
+    public async Task<int> RemoveDuplicateCategories()
+    {
+        RequireWritable();
+        var owned = new[] { journal.TempCategory, journal.SavedCategory }.OfType<OwnedCategory>().ToArray();
+        int removed = owned.Length == 0 ? 0 : await Native(() => ManagedSoundpad.RemoveGarbledCopies(pipe, owned));
+        journal.Issues.RemoveAll(i => i.Code == "category-duplicates"); Save();
+        return removed;
     }
     public async Task RetryAsset(string assetId, CancellationToken cancel = default)
     {

@@ -52,6 +52,37 @@ if (args.FirstOrDefault() == "--mimic-stream-transcript" && args.Length == 2)
     Console.WriteLine($"Speech starts at {(end - 48000L * 30 < 48000 ? (48000 - (end - 48000L * 30)) / 48.0 : 0):0} ms into the window; streamed {audio.Length / 48000.0:0.0} s in {clock.Elapsed.TotalSeconds:0.0} s.");
     return;
 }
+if (args.FirstOrDefault() == "--cleanup-real-categories")
+{
+    // Recovery tool (2.15.9): on this PC's real Soundpad and companion data, sends the same host command as
+    // Temp's "Remove duplicate categories" button, then reports what is left. Run it with the companion closed.
+    var data = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "SoundpadWeb");
+    using var realPipe = new SoundpadPipe();
+    using var realBridge = new Bridge(realPipe, new StateStore(data));
+    await realBridge.Poll(true);
+    Console.WriteLine($"Soundpad available: {realBridge.Snapshot.Available}; categories: {realBridge.Snapshot.Library.Categories.Length}");
+    var started = System.Diagnostics.Stopwatch.StartNew();
+    var reply = await realBridge.Execute(new Command(2, Guid.NewGuid().ToString(), DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(), "cleanupCategories"), "host");
+    Console.WriteLine($"cleanupCategories: ok={reply.Ok} {reply.Error} {Json.Write(reply.Data)} in {started.Elapsed.TotalSeconds:0.0} s");
+    await realBridge.Poll(true);
+    foreach (var c in realBridge.Snapshot.Library.Categories) Console.WriteLine($"  category: {c.Name} ({c.SoundIds.Length} sounds)");
+    return;
+}
+if (args.FirstOrDefault() == "--check-real-temp-category")
+{
+    // Owner check (2.15.9): on the real Soundpad, creates or finds the companion's Temp category the way a reverse does,
+    // twice, and shows the name Soundpad stored. It must be created at most once and match exactly.
+    var data = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "SoundpadWeb");
+    using var realPipe = new SoundpadPipe();
+    var store = new ManagedAudioStore(data, realPipe, path => path, work => work()); // native ids aren't used by this check
+    int first = await store.EnsureTempCategory(), second = await store.EnsureTempCategory();
+    var catalog = await ManagedSoundpad.Read(realPipe);
+    var matches = catalog.Categories.Where(c => c.Name.Contains("Soundpad Web")).ToArray();
+    Console.WriteLine($"journal name: {store.Public.TempCategoryName}; first index {first}, second index {second}");
+    foreach (var c in matches) Console.WriteLine($"  Soundpad has: index {c.Index} name [{c.Name}] exact match: {c.Name == store.Public.TempCategoryName}");
+    Console.WriteLine(matches.Length == 1 && first == second && matches[0].Name == store.Public.TempCategoryName ? "RESULT: one correct Temp category" : "RESULT: PROBLEM");
+    return;
+}
 if (args.FirstOrDefault() == "--vrs-library")
 {
     // Reads this PC's Voice Replay Studio library the way the companion does, read-only. Prints counts only.

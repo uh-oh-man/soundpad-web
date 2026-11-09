@@ -466,6 +466,22 @@ function App() {
                       ? `${sounds.length} matching sound${sounds.length === 1 ? '' : 's'}`
                       : `${sounds.length} sound${sounds.length === 1 ? '' : 's'} · ${host ? 'Ready when your friends are' : 'Tap a sound to play on the host'}`}
                   </p>
+                  {host && (
+                    // Who is connected, at the top where the host looks (it used to sit in the footer).
+                    <p className="connected-guests" role="status" aria-live="polite">
+                      <Users size={15} aria-hidden="true" />
+                      <span>{`${view.guests.length} connected guest${view.guests.length === 1 ? '' : 's'}`}</span>
+                      {view.guests.length > 0 && (
+                        <span className="guest-names">
+                          {view.guests
+                            .slice(0, 4)
+                            .map((id, i) => view.people[id]?.name ?? `Guest ${i + 1}`)
+                            .join(', ')}
+                          {view.guests.length > 4 && ` +${view.guests.length - 4} more`}
+                        </span>
+                      )}
+                    </p>
+                  )}
                 </div>
                 <div className="board-actions">
                   {canMimic && (
@@ -720,12 +736,6 @@ function App() {
                 </div>
               )}
               <div className="board-footer">
-                <span>
-                  <Users size={15} />
-                  {host
-                    ? `${view.guests.length} connected guest${view.guests.length === 1 ? '' : 's'}`
-                    : 'Guest access'}
-                </span>
                 <span>Audio plays through the host’s Soundpad</span>
                 <ProjectFooter />
               </div>

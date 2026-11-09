@@ -77,6 +77,15 @@ public sealed partial class Bridge
                 }
                 else if (c.Op == "endSession") { if (!Audio.Public.Blocked) { Audio.RetireSession(); await Audio.Cleanup(); } }
                 else if (c.Op == "retryCleanup") await Audio.Recover();
+                else if (c.Op == "cleanupCategories")
+                {
+                    if (actor != "host") throw new InvalidDataException("Only the host can change Soundpad's categories.");
+                    int removed = await Audio.RemoveDuplicateCategories();
+                    Log($"Removed {removed} duplicate Temp categories from Soundpad");
+                    await Audio.Recover();
+                    await gate.WaitAsync(); try { await RefreshInner(); SaveAudioReceipt(c); Publish(); } finally { gate.Release(); }
+                    return new("ack", c.Id, true, Data: new { removed });
+                }
                 else if (c.Op == "removeAudio") await Audio.Remove(c.AssetId ?? throw new InvalidDataException("Choose a managed source."));
                 else if (c.Op == "retryAudio") await Audio.RetryAsset(c.AssetId ?? throw new InvalidDataException("Choose a managed source."));
                 else if (c.Op == "keepAudio") await Audio.Promote(c.AssetId ?? throw new InvalidDataException("Open Temp to confirm a permanent destination."), c.VariantId ?? throw new InvalidDataException("Choose the normal or reversed variant."), c.DestinationDirectory, c.CategoryId, c.CategoryName, c.Confirmed);
@@ -97,7 +106,9 @@ public sealed partial class Bridge
                             try
                             {
                                 await RefreshInner();
-                                if (!available || c.LibraryVersion != parsed.Public.Version || !parsed.Paths.TryGetValue(c.SoundId, out path!)) throw new InvalidDataException("The native library changed. Refresh and try again.");
+                                // The id comes from the file path and the mapping was just re-read, so a change elsewhere in the library
+                                // (a category, an icon) is no reason to refuse (2.15.9).
+                                if (!available || !parsed.Paths.TryGetValue(c.SoundId, out path!)) throw new InvalidDataException("That sound is no longer in Soundpad. Refresh and choose it again.");
                                 name = parsed.Public.Sounds.Single(s => s.Id == c.SoundId).Name;
                             }
                             finally { gate.Release(); }

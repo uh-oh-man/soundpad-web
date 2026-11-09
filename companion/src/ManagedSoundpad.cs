@@ -6,6 +6,22 @@ namespace SoundpadWeb;
 
 internal static class ManagedSoundpad
 {
+    /// <summary>Marks the error raised when Soundpad holds garbled copies of an app category (see <see cref="GarbledCopies"/>).</summary>
+    public const string GarbledKey = "garbledCategories";
+    private static InvalidDataException Garbled(int count)
+    {
+        var error = new InvalidDataException($"Soundpad has {count} cop{(count == 1 ? "y" : "ies")} of the Temp category with a garbled name, made by companions before 2.15.9. Use Remove duplicate categories in Temp, then retry.");
+        error.Data[GarbledKey] = count;
+        return error;
+    }
+    /// <summary>A name reduced to ASCII letters, digits, brackets and hyphens, so "Temp Â· Soundpad Web [x]" and "Temp · Soundpad Web [x]" compare equal.</summary>
+    private static string Fold(string name) => new(name.Where(c => c < 128 && (char.IsLetterOrDigit(c) || c is '[' or ']' or '-')).ToArray());
+    /// <summary>
+    /// Categories that are this app category under a different (garbled) name. The random tag in the name
+    /// (e.g. "[ed4a3e-ee037c]") makes a match ours; an exact-name match is the real one, not a copy.
+    /// </summary>
+    public static NativeCategory[] GarbledCopies(NativeCatalog catalog, OwnedCategory reference) =>
+        catalog.Categories.Where(c => c.Name != reference.Name && c.Name.Length > 0 && Fold(c.Name) == Fold(reference.Name) && reference.Name.Contains('[')).ToArray();
     private static XDocument Xml(string input, string root)
     {
         using var reader = XmlReader.Create(new StringReader(input), new XmlReaderSettings { DtdProcessing = DtdProcessing.Prohibit, XmlResolver = null, MaxCharactersInDocument = 16 * 1024 * 1024 });
@@ -44,6 +60,9 @@ internal static class ManagedSoundpad
             if (recovered.Length == 1) { reference.NativeId = recovered[0].Index; reference.State = "created"; checkpoint(); return recovered[0].Index; }
             if (recovered.Length > 1) throw new InvalidDataException("The app-owned category is ambiguous. Preserve both categories and resolve the conflict in Soundpad.");
         }
+        // Garbled copies mean an earlier companion's creations were never recognised: stop rather than add another.
+        var garbled = GarbledCopies(catalog, reference);
+        if (garbled.Length > 0) throw Garbled(garbled.Length);
         // Never adopt a category just because its display name matches.
         if (catalog.Categories.Any(c => c.Name == reference.Name)) throw new InvalidDataException("The planned category already exists without a verified creation record. Choose a new managed category.");
         reference.NativeId = null; reference.State = "creating"; checkpoint();
@@ -51,6 +70,34 @@ internal static class ManagedSoundpad
         var after = await Read(pipe); var candidates = after.Categories.Where(c => c.Name == reference.Name && !catalog.Categories.Any(old => old.Index == c.Index)).ToArray();
         if (candidates.Length != 1) throw new InvalidDataException("Soundpad did not confirm a unique managed category. No existing category was claimed.");
         reference.NativeId = candidates[0].Index; reference.State = "created"; checkpoint(); return candidates[0].Index;
+    }
+    /// <summary>
+    /// Removes the empty garbled copies of the given app categories. Copies holding any sound are kept.
+    /// Works in batches from the highest index down, so a removal never shifts a later target, and re-reads
+    /// Soundpad before each batch to confirm every target is still an empty garbled copy at that index.
+    /// </summary>
+    public static async Task<int> RemoveGarbledCopies(ISoundpad pipe, IEnumerable<OwnedCategory> references, Action<int>? progress = null)
+    {
+        var owned = references.ToArray(); int removed = 0;
+        while (true)
+        {
+            var catalog = await Read(pipe);
+            var targets = owned.SelectMany(r => GarbledCopies(catalog, r)).Where(c => c.Paths.Length == 0).OrderByDescending(c => c.Index).Take(50).ToArray();
+            if (targets.Length == 0) return removed;
+            foreach (var target in targets) { await Ok(pipe, $"DoRemoveCategory({target.Index})"); removed++; }
+            // Every other category must be exactly as before, in order: only the batch may have gone.
+            // Soundpad applies removals a moment later on its own thread, so re-read until it has caught up (on the
+            // owner's PC a check right after a batch sometimes still saw the last few).
+            var expected = catalog.Categories.Where(c => !targets.Contains(c)).OrderBy(c => c.Index).Select(c => c.Name).ToArray();
+            bool settled = false;
+            for (int attempt = 0; attempt < 20 && !settled; attempt++)
+            {
+                if (attempt > 0) await Task.Delay(150);
+                settled = (await Read(pipe)).Categories.OrderBy(c => c.Index).Select(c => c.Name).SequenceEqual(expected);
+            }
+            if (!settled) throw new InvalidDataException("Soundpad's categories changed during cleanup, so it stopped. Retry when Soundpad is idle.");
+            progress?.Invoke(removed);
+        }
     }
     public static async Task<NativeAudioReference> Import(ISoundpad pipe, string path, int category, string expectedName)
     {

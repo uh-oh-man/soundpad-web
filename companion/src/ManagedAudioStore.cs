@@ -182,6 +182,15 @@ public sealed partial class ManagedAudioStore
         journal.Issues.RemoveAll(i => i.Id == id); journal.Issues.Add(new(id, asset?.Id, code, message, severity, action));
         if (journal.Issues.Count > 128) journal.Issues.RemoveRange(0, journal.Issues.Count - 128);
     }
+    /// <summary>
+    /// Records a failure with its actual reason, so Temp shows why (the generic text alone hid the
+    /// Soundpad encoding bug). Garbled duplicate categories get their own issue with a cleanup action.
+    /// </summary>
+    private void Report(AudioAsset asset, string code, string generic, Exception ex)
+    {
+        if (ex.Data.Contains(ManagedSoundpad.GarbledKey)) { Issue(null, "category-duplicates", ex.Message, "warning", "cleanup-categories"); return; }
+        Issue(asset, code, ex is InvalidDataException ? generic + " Reason: " + ex.Message : generic);
+    }
     private void ClearIssues(AudioAsset asset, params string[] codes) => journal.Issues.RemoveAll(i => i.AssetId == asset.Id && codes.Contains(i.Code));
     private async Task<T> Native<T>(Func<Task<T>> work) { T result = default!; await nativeBatch(async () => result = await work()); return result; }
     public AudioAsset AssetById(string id) => Asset(id);

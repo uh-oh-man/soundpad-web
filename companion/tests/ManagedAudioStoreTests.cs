@@ -71,7 +71,7 @@ public sealed class ManagedAudioStoreTests : IDisposable
     {
         await using var mock = new MockSoundpad { CategoryXml = MockSoundpad.Categories.Replace("</Categories>", "<Category index=\"9\" name=\"temp\"><Sound index=\"1\" url=\"C:\\Private\\airhorn.wav\"/></Category></Categories>") };
         using var pipe = new SoundpadPipe(mock.Name, true); var store = Store(pipe); store.BeginSession(); await store.Upload(Wave(), "Separate.wav", "Alice", "peer-a", false);
-        Assert.NotEqual(9, store.Public.TempCategoryId); Assert.StartsWith("Temp · Soundpad Web", store.Public.TempCategoryName); store.RetireSession(); await store.Cleanup();
+        Assert.NotEqual(9, store.Public.TempCategoryId); Assert.StartsWith("Temp - Soundpad Web", store.Public.TempCategoryName); store.RetireSession(); await store.Cleanup();
         Assert.Contains("name=\"temp\"", mock.CategoryXml); Assert.Contains("airhorn.wav", mock.CategoryXml); Assert.DoesNotContain(mock.Commands, c => c.StartsWith("DoRemoveCategory("));
     }
     [Fact]

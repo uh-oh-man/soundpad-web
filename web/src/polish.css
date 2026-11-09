@@ -799,3 +799,24 @@ body,
     bottom: 16px;
   }
 }
+/* Host: who is connected, under the board title. */
+.connected-guests {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-top: 6px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+.connected-guests > span:first-of-type {
+  color: var(--text-primary);
+  font-weight: 600;
+}
+.connected-guests .guest-names {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.connected-guests .guest-names::before {
+  content: '· ';
+}

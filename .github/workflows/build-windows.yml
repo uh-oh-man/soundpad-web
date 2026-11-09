@@ -18,6 +18,10 @@ jobs:
         with:
           dotnet-version: '10.0.x'
       - run: npm ci
+      # The release for this version takes its title and notes from CHANGELOG.md; fail now, before any tag, if it has none.
+      - name: CHANGELOG has a section for this version
+        shell: pwsh
+        run: node scripts/release-notes.mjs "v$((Get-Content package.json -Raw | ConvertFrom-Json).version)" release-notes-check.md
       - run: npm run lint
       - run: npm test
       - run: npm audit --audit-level=high
@@ -66,13 +70,18 @@ jobs:
     permissions:
       contents: write
     steps:
+      # CHANGELOG.md gives each release its version-numbered title and notes (scripts/release-notes.mjs).
+      - uses: actions/checkout@v7
       - uses: actions/download-artifact@v8
         with:
           name: SoundpadWeb-win-x64
           path: release
       - name: Publish tagged release assets
         shell: pwsh
-        run: gh release create $env:RELEASE_TAG release/SoundpadWeb.exe release/SHA256.txt --repo $env:REPOSITORY --generate-notes --title "Soundpad Web $env:RELEASE_TAG"
+        run: |
+          $title = node scripts/release-notes.mjs $env:RELEASE_TAG release-notes.md
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+          gh release create $env:RELEASE_TAG release/SoundpadWeb.exe release/SHA256.txt --repo $env:REPOSITORY --title "$title" --notes-file release-notes.md
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ github.ref_name }}

@@ -18,7 +18,8 @@ internal static class ManagedFiles
     }
     public static string Name(string value)
     {
-        var result = new string(value.Where(c => !char.IsControl(c) && !Path.GetInvalidFileNameChars().Contains(c)).Take(60).ToArray()).Trim().TrimEnd('.');
+        // Soundpad receives file paths in the ANSI code page, so characters it can't represent become '_'.
+        var result = new string(SoundpadText.Sendable(value).Where(c => !char.IsControl(c) && !Path.GetInvalidFileNameChars().Contains(c)).Take(60).ToArray()).Trim().TrimEnd('.');
         return string.IsNullOrWhiteSpace(result) ? "Audio" : result;
     }
     public static bool Beneath(string path, string root)

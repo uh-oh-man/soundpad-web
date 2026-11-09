@@ -6,6 +6,7 @@ Every release stays on GitHub permanently, so any earlier version can be restore
 
 | Version | What it is | Git tag | Download |
 | --- | --- | --- | --- |
+| 2.15.9 | Reverse works again, no Temp category spam, instant playback | `v2.15.9` | [Release](https://github.com/uh-oh-man/soundpad-web/releases/tag/v2.15.9) |
 | 2.15.8 | A taken hotkey points at the key picker | `v2.15.8` | [Release](https://github.com/uh-oh-man/soundpad-web/releases/tag/v2.15.8) |
 | 2.15.7 | Touch wording in Mimic on phones | `v2.15.7` | [Release](https://github.com/uh-oh-man/soundpad-web/releases/tag/v2.15.7) |
 | 2.15.6 | Guest phones: no false "Too many requests", notices out of the way | `v2.15.6` | [Release](https://github.com/uh-oh-man/soundpad-web/releases/tag/v2.15.6) |

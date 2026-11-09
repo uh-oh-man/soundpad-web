@@ -26,6 +26,8 @@ public sealed partial class Bridge(ISoundpad pipe, StateStore store) : IDisposab
     public string? Website => disk.Website;
     public void SetWebsite(string site) { disk.Website = site; store.Save(disk); }
     private void Publish() { Interlocked.Increment(ref revision); Changed?.Invoke(Snapshot); }
+    /// <summary>The sound list the current mapping was parsed from; a play only needs a full refresh when it differs.</summary>
+    private string? lastSoundlist;
     private async Task RefreshInner()
     {
         try
@@ -34,7 +36,7 @@ public sealed partial class Bridge(ISoundpad pipe, StateStore store) : IDisposab
             var cats = await pipe.Request("GetCategories(true, true)");
             if (cats.StartsWith("R-404")) throw new InvalidDataException("This Soundpad version does not support categories. Update Soundpad.");
             var next = LibraryParser.Parse(all, cats, disk, iconCache ??= store.ReadIcons(disk), nativeStatistics);
-            parsed = next with { Public = next.Public with { Sounds = next.Public.Sounds.Select(s => managed?.Annotation(s.Id) is { } info ? s with { Name = info.Kind == "native" ? s.Name : info.Name, Icon = s.Icon ?? iconCache?.GetValueOrDefault(info.WorkspaceId) ?? info.Aliases.Select(id=>iconCache?.GetValueOrDefault(id)).FirstOrDefault(icon=>icon != null), Temporary = info.Temporary, UploadedBy = info.Uploader, AssetId = info.AssetId, Orientation = info.Orientation, AudioKind = info.Kind, InternalVariant = info.InternalVariant, AliasOf = info.AliasOf, WorkspaceId = info.WorkspaceId, Aliases = info.Aliases } : s).ToArray() } }; parsed = parsed with { Public = parsed.Public with { Version = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(Json.Write(parsed.Public)))).ToLowerInvariant()[..24] } }; available = true; error = null;
+            parsed = next with { Public = next.Public with { Sounds = next.Public.Sounds.Select(s => managed?.Annotation(s.Id) is { } info ? s with { Name = info.Kind == "native" ? s.Name : info.Name, Icon = s.Icon ?? iconCache?.GetValueOrDefault(info.WorkspaceId) ?? info.Aliases.Select(id=>iconCache?.GetValueOrDefault(id)).FirstOrDefault(icon=>icon != null), Temporary = info.Temporary, UploadedBy = info.Uploader, AssetId = info.AssetId, Orientation = info.Orientation, AudioKind = info.Kind, InternalVariant = info.InternalVariant, AliasOf = info.AliasOf, WorkspaceId = info.WorkspaceId, Aliases = info.Aliases } : s).ToArray() } }; parsed = parsed with { Public = parsed.Public with { Version = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(Json.Write(parsed.Public)))).ToLowerInvariant()[..24] } }; available = true; error = null; lastSoundlist = all;
         }
         catch (Exception ex) when (ex is IOException or InvalidDataException or OperationCanceledException or System.Xml.XmlException or ArgumentException)
         {
@@ -69,7 +71,7 @@ public sealed partial class Bridge(ISoundpad pipe, StateStore store) : IDisposab
         if (c.Op == "endSession" && actor == "host") { StopMimic(); Publish(); }
         var query = await Query(c, actor); if (query != null) return query;
         var intent = ReservePlaybackIntent(c, actor, requester, audience);
-        if (c.Op is "reverse" or "audioPlay" or "keepAudio" or "removeAudio" or "retryAudio" or "retryCleanup" or "beginSession" or "endSession" || (c.Op is "play" or "startAt" or "region" && c.SoundId != null && managed?.Annotation(c.SoundId) is { Kind: not "native" })) return await ExecuteAudio(c, actor, participant, intent, requester, audience);
+        if (c.Op is "reverse" or "audioPlay" or "keepAudio" or "removeAudio" or "retryAudio" or "retryCleanup" or "cleanupCategories" or "beginSession" or "endSession" || (c.Op is "play" or "startAt" or "region" && c.SoundId != null && managed?.Annotation(c.SoundId) is { Kind: not "native" })) return await ExecuteAudio(c, actor, participant, intent, requester, audience);
         if (Interlocked.Increment(ref waiting) > 24) { Interlocked.Decrement(ref waiting); return new("ack", c.Id, false, "Busy. Try again."); }
         await gate.WaitAsync();
         try
@@ -89,11 +91,15 @@ public sealed partial class Bridge(ISoundpad pipe, StateStore store) : IDisposab
                 case "play":
                 case "startAt":
                 case "region":
-                    if (!available || c.LibraryVersion != parsed.Public.Version || c.SoundId == null || !parsed.Indexes.ContainsKey(c.SoundId)) throw new InvalidDataException("Library changed or Soundpad unavailable. Refresh and try again.");
-                    // Re-read global mapping immediately before play. Never trust a cached index after reordering.
-                    var expected = parsed.Public.Version;
-                    await RefreshInner();
-                    if (!available || expected != parsed.Public.Version || !parsed.Indexes.TryGetValue(c.SoundId, out int index)) throw new InvalidDataException("Soundpad library changed. Try the sound again.");
+                    if (!available || c.SoundId == null) throw new InvalidDataException("Soundpad is unavailable. Open it normally; reconnection is automatic.");
+                    // Re-read the global mapping immediately before play; never trust a cached index after reordering.
+                    // Only the small sound list is needed (about 10 ms). Sound ids come from file paths, so if the list
+                    // is unchanged the cached index is exact. The full library (categories and icons, over 1 MB on big
+                    // libraries) is re-read only when the list changed. A change elsewhere in the library (a category,
+                    // an icon) no longer refuses the play: that made presses fail while the library kept changing (2.15.9).
+                    var soundlist = await pipe.Request("GetSoundlist()");
+                    if (soundlist != lastSoundlist) await RefreshInner();
+                    if (!available || !parsed.Indexes.TryGetValue(c.SoundId, out int index)) throw new InvalidDataException("That sound is no longer in Soundpad. Refresh and choose it again.");
                     await StartPlayback(c, actor, participant, index);
                     break;
                 case "seek":

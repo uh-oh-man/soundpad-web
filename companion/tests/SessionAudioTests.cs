@@ -35,7 +35,7 @@ public sealed class SessionAudioTests : IDisposable
         var originals = bridge.Snapshot.Library.Sounds.Select(s => s.Id).ToArray();
         Assert.True((await bridge.Upload(File.ReadAllBytes(input), "First.wav", "Alice")).Ok);
         var first = bridge.Snapshot.Library.Sounds.Single(s => s.Temporary); Assert.Equal("Alice", first.UploadedBy);
-        Assert.Contains(bridge.Snapshot.Library.Categories, c => c.Name.StartsWith("Temp · Soundpad Web") && c.SoundIds.Contains(first.Id));
+        Assert.Contains(bridge.Snapshot.Library.Categories, c => c.Name.StartsWith("Temp - Soundpad Web") && c.SoundIds.Contains(first.Id));
         Assert.False((await bridge.Execute(Cmd("keepAudio", first.Id), "guest")).Ok);
         var beforeKeep = bridge.Snapshot.Library.Version;
         var journal = System.Text.Json.JsonSerializer.Deserialize<AudioJournal>(File.ReadAllText(Path.Combine(folder,"managed-audio","journal.json")),Json.Options)!; var asset=journal.Assets.Single();

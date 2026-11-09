@@ -9,3 +9,6 @@ playwright-report/
 *.user
 .env*
 !.env.example
+
+# Owner reports (bugs, feature wishes, spam): kept on this PC only, never uploaded. See reports/README.md.
+reports/

@@ -49,6 +49,15 @@ public sealed class MockSoundpad : IAsyncDisposable
             int id = all.Root!.Elements("Sound").Select(e => (int)e.Attribute("index")!).DefaultIfEmpty(0).Max() + 1;
             var sound = new XElement("Sound", new XAttribute("index", id), new XAttribute("url", m.Groups[1].Value), new XAttribute("title", "Uploaded audio")); try { using var wave = new NAudio.Wave.WaveFileReader(m.Groups[1].Value); sound.SetAttributeValue("duration", wave.TotalTime.ToString(@"mm\:ss\.fff")); } catch (Exception) { /* like Soundpad, length is optional */ } all.Root.Add(sound); cats.Descendants("Category").Single(e => (int)e.Attribute("index")! == int.Parse(m.Groups[2].Value)).Add(new XElement(sound));
         }
+        else if (command.StartsWith("DoRemoveCategory("))
+        {
+            // Like Soundpad: later categories move up one index.
+            int removed = int.Parse(command[17..^1]);
+            var target = cats.Descendants("Category").SingleOrDefault(e => (int)e.Attribute("index")! == removed);
+            if (target == null) return "R-404";
+            target.Remove();
+            foreach (var e in cats.Descendants("Category").Where(e => (int)e.Attribute("index")! > removed)) e.SetAttributeValue("index", (int)e.Attribute("index")! - 1);
+        }
         else if (command.StartsWith("DoSelectCategory(")) selectedCategory = int.Parse(command[17..^1]);
         else if (command.StartsWith("DoSelectIndex(")) selectedIndex = int.Parse(command[14..^1]);
         else if (command == "DoRemoveSelectedEntries(false)")
@@ -71,6 +80,8 @@ public sealed class MockSoundpad : IAsyncDisposable
     private string ReportStatus() => remainingStops-- > 0 ? "STOPPED" : Status;
     private long Position => position + (Status == "PLAYING" ? Environment.TickCount64 - startedTick : 0);
     public void BeginFixturePlayback() { position = 0; startedTick = Environment.TickCount64; Status = "PLAYING"; }
+    private static readonly Encoding Ansi = CodePages();
+    private static Encoding CodePages() { Encoding.RegisterProvider(CodePagesEncodingProvider.Instance); return Encoding.GetEncoding(1252); }
     public MockSoundpad(string? name = null) { if (name != null) Name = name; loop = Run(); }
     private async Task Run()
     {
@@ -83,10 +94,12 @@ public sealed class MockSoundpad : IAsyncDisposable
                 while (server.IsConnected && !cancel.IsCancellationRequested)
                 {
                     byte[] buffer = new byte[4096]; int read = await server.ReadAsync(buffer, cancel.Token); if (read == 0) break;
-                    var command = Encoding.UTF8.GetString(buffer, 0, read); lock (Commands) Commands.Add(command);
+                    // Real Soundpad decodes commands in the Windows ANSI code page (1252 on the owner's PC and CI), not
+                    // UTF-8; decoding UTF-8 here hid the 2.15.8 bug where "·" arrived as "Â·".
+                    var command = Ansi.GetString(buffer, 0, read); lock (Commands) Commands.Add(command);
                     if (Status == "PLAYING" && Position >= DurationMs) Status = "STOPPED";
                     string result = command switch { "GetSoundlist()" => AllXml, "GetCategories(true, true)" => CategoryXml, "GetCategories(false, false)" => CategoriesMetadata(), "GetCategories(true, false)" => CategoriesMetadata(true), "GetPlayStatus()" => ReportStatus(), "GetPlaybackPositionInMs()" => ReportPosition().ToString(), "GetPlaybackDurationInMs()" => DurationMs.ToString(), "IsAlive()" => "R-200", _ => command.StartsWith("Do") ? "R-200" : "R-404" };
-                    if (command.StartsWith("FixtureRemoveOwnedEntry(") || command.StartsWith("DoAdd") || command.StartsWith("DoSelectCategory(") || command.StartsWith("DoSelectIndex(") || command.StartsWith("DoRemoveSelectedEntries(")) result = Manage(command);
+                    if (command.StartsWith("FixtureRemoveOwnedEntry(") || command.StartsWith("DoAdd") || command.StartsWith("DoRemoveCategory(") || command.StartsWith("DoSelectCategory(") || command.StartsWith("DoSelectIndex(") || command.StartsWith("DoRemoveSelectedEntries(")) result = Manage(command);
                     if (command.StartsWith("DoPlaySound(")) { BeginFixturePlayback(); Console.WriteLine("TEST_PLAY " + command); }
                     if (command.StartsWith("DoSeekMs(")) { beforeSeek = Position; remainingLag = SeekLagSamples; remainingStops = TransientSeekStop ? 1 : 0; position = long.Parse(command[9..^1]); startedTick = Environment.TickCount64; Console.WriteLine("TEST_PLAY " + command); }
                     if (command == "DoTogglePause()") { Console.WriteLine("TEST_PLAY " + command); position = Position; Status = Status == "PLAYING" ? "PAUSED" : "PLAYING"; startedTick = Environment.TickCount64; }
