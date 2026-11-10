@@ -110,7 +110,7 @@ test('after the website updates, a one-time line links the new version notes', a
   await expect(line).toContainText(`v${version}`);
   await expect(line.getByRole('link', { name: "See what's new" })).toHaveAttribute(
     'href',
-    `https://github.com/uh-oh-man/soundpad-web/releases/tag/v${version}`,
+    'https://github.com/uh-oh-man/soundpad-web/blob/main/CHANGELOG.md',
   );
   await line.getByRole('button', { name: "Dismiss what's new" }).click();
   await expect(line).toHaveCount(0);

@@ -31,8 +31,11 @@ export function WhatsNew({ projectUrl }: { projectUrl: string }) {
     <aside className="whats-new" role="status">
       <span>
         Soundpad Web updated to <strong>v{APP_VERSION}</strong>.{' '}
+        {/* The changelog, not the release page (2.30.1): Pages publishes the website before the tag is
+            pushed and its release built, so the release page 404s for the first 15 minutes or so. The
+            changelog on main always starts with this version's notes. */}
         <a
-          href={`${projectUrl}/releases/tag/v${APP_VERSION}`}
+          href={`${projectUrl}/blob/main/CHANGELOG.md`}
           target="_blank"
           rel="noreferrer"
           onClick={dismiss}

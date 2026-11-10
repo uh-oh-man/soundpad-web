@@ -2,6 +2,18 @@
 
 Notable changes to Soundpad Web. Versions follow the website's `package.json`; the Windows companion is versioned separately and only needs updating when a release says so.
 
+## 2.30.1 — "See what's new" always opens
+
+Website only; works with every companion. The companion reports 2.30.1 in this release, with no other change.
+
+### Fixed
+
+- **The "See what's new" link after a website update (2.18.2) could open a 404 page.** It pointed to the version's GitHub release. But the website is published as soon as `main` passes its checks, before the version tag is pushed and its release built, so the release page doesn't exist for the first 15 minutes or so. For v2.29.0, which never got a release, it never existed. The link now opens the changelog, which always starts with the new version's notes.
+
+### Tests
+
+- The What's-new e2e test expects the changelog link.
+
 ## 2.30.0 — Undo decided by the companion
 
 **Update the Windows companion** to get this. With an older companion, Undo works as in 2.29.3.
