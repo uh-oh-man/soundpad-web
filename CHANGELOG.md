@@ -2,10 +2,17 @@
 
 Notable changes to Soundpad Web. Versions follow the website's `package.json`; the Windows companion is versioned separately and only needs updating when a release says so.
 
-## Unreleased
+## 2.27.1 — Readable clip names in Mimic on phones
+
+Website only; works with every companion. The companion reports 2.27.1 in this release, with no other change.
+
+### Fixed
+
+- **On a phone, a fresh clip's name in Mimic's "Just mimicked" list was squeezed to its first letter** ("A… · Host"), because the Edit (2.21) and Keep (2.26) buttons took the row's space. On a narrow screen the name now keeps its room, and the buttons and Effect menu move to the line below when they don't fit beside it. On a wider screen each clip is one row, with its buttons lined up under each other's.
 
 ### Tests
 
+- New e2e test at phone width: a long clip name stays over 100 px wide (it was 4 px before the fix), and every button and menu stays inside the window.
 - New harness tool `--real-edit-copy-probe` checks Edit copy on this PC's real Soundpad, with the companion closed. It uses a throwaway data folder (never the companion's), so it has its own Temp category, and plays nothing aloud. It uploads a tone, makes a chipmunk copy, previews an echo copy, and ends hosting. On the owner's PC (2026-11-10): the copy was made in 272 ms and listed by Soundpad; it lasted exactly 1.00 s (1.5 s at 1.5×); the preview worked; Soundpad ended exactly as before (143 sounds, 9 categories, the same paths and names); and the companion's own `state.json` and journal were byte-for-byte unchanged.
 
 ## 2.27.0 — Save & play in Edit copy

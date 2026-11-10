@@ -2468,6 +2468,34 @@ test('accessibility: no serious or critical axe violations in the newer controls
   expect(problems).toEqual([]);
 });
 
+test('Mimic on a phone: a fresh clip keeps its name readable beside Edit, Keep and Effect', async ({
+  page,
+  harness,
+}) => {
+  // 2.21 and 2.26 added buttons to each row; on a phone they squeezed the name to its first letter.
+  await page.setViewportSize({ width: 390, height: 844 });
+  await host(page, harness);
+  await page.getByRole('button', { name: 'Mimic', exact: true }).click();
+  const dialog = page.getByRole('dialog', { name: 'Mimic' });
+  await dialog.getByRole('button', { name: 'Start listening' }).click();
+  await page.waitForTimeout(2600);
+  await page.keyboard.press('5');
+  await dialog
+    .getByLabel('Clip name', { exact: true })
+    .fill('A rather long clip name that someone typed');
+  await page.keyboard.press('Enter');
+  const recent = dialog.getByRole('region', { name: 'Just mimicked' });
+  const name = recent.locator('.mimic-recent-name').first();
+  await expect(name).toBeVisible();
+  expect((await name.boundingBox())!.width).toBeGreaterThan(100);
+  // Everything stays inside the window.
+  const recentBox = (await recent.boundingBox())!;
+  for (const control of await recent.locator('button, select').all()) {
+    const box = (await control.boundingBox())!;
+    expect(box.x + box.width).toBeLessThanOrEqual(recentBox.x + recentBox.width + 1);
+  }
+});
+
 test('Mimic fits a phone: header keeps Settings on screen and long clip names do not widen the window', async ({
   page,
   harness,

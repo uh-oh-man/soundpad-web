@@ -254,12 +254,17 @@
 
 .mimic-recent-item {
   display: flex;
+  flex: 1 1 100%;
+  flex-wrap: wrap;
   gap: 4px;
   max-width: 100%;
   min-width: 0;
 }
+/* The clip's name keeps room to be read (2.27.1): with Edit, Keep and Effect beside it a phone squeezed it
+   to its first letter, so when they don't fit they move to a line of their own. */
 .mimic-recent-item > button:first-child {
-  flex: 0 1 auto;
+  flex: 1 1 10rem;
+  justify-content: flex-start;
 }
 .mimic-recent-item .icon-button {
   flex: none;
