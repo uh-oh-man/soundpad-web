@@ -389,6 +389,32 @@ public sealed class MimicTests : IDisposable
     }
 
     [Fact]
+    public void KeepPitchChangesLengthButNotFrequency()
+    {
+        // 2.17: "Keep pitch" stretches time with WSOLA; the plain speed effect changes pitch like a tape.
+        const int rate = 16000;
+        var tone = Enumerable.Range(0, rate * 2).Select(i => 0.5f * MathF.Sin(2 * MathF.PI * 440 * i / rate)).ToArray(); // 2 s, 440 Hz
+        static double Hertz(float[] mono, int rate)
+        {
+            int from = mono.Length / 4, to = mono.Length * 3 / 4, crossings = 0; // middle half, away from the edges
+            for (int i = from + 1; i < to; i++) if (mono[i - 1] < 0 && mono[i] >= 0) crossings++;
+            return crossings / ((to - from) / (double)rate);
+        }
+        foreach (var speed in new[] { 0.5, 2.0 })
+        {
+            var kept = AudioEffects.Apply(tone, 1, rate, "speed", speed, keepPitch: true);
+            Assert.InRange(kept.Length, (int)(tone.Length / speed) - 1, (int)(tone.Length / speed) + 1);
+            Assert.InRange(Hertz(kept, rate), 430, 450);
+            var tape = AudioEffects.Apply(tone, 1, rate, "speed", speed);
+            Assert.InRange(Hertz(tape, rate), 440 * speed - 10, 440 * speed + 10);
+        }
+        // Stereo channels stay separate and in step.
+        var stereo = tone.SelectMany(v => new[] { v, -v }).ToArray();
+        var stretched = AudioEffects.TimeStretch(stereo, 2, rate, 0.5);
+        for (int f = 100; f < stretched.Length / 2; f += 997) Assert.Equal(stretched[f * 2], -stretched[f * 2 + 1], 4);
+    }
+
+    [Fact]
     public async Task EditedCopiesCanCarryAVoiceEffect()
     {
         await using var mock = new MockSoundpad(); using var pipe = new SoundpadPipe(mock.Name, true); using var bridge = new Bridge(pipe, new StateStore(folder)); await bridge.Poll(true);
@@ -410,6 +436,9 @@ public sealed class MimicTests : IDisposable
         var slow = await bridge.Execute(Cmd("trimAudio") with { AssetId = original.Id, PositionMs = 0, EndMs = 3000, Action = "speed", Speed = 0.5 }, "host");
         Assert.True(slow.Ok, slow.Error);
         var halved = journal().Assets.Single(a => a.Name == "Said it (0.5x speed)");
+        var same = await bridge.Execute(Cmd("trimAudio") with { AssetId = original.Id, PositionMs = 0, EndMs = 3000, Action = "speed", Speed = 0.5, KeepPitch = true }, "host");
+        Assert.True(same.Ok, same.Error);
+        Assert.Single(journal().Assets, a => a.Name == "Said it (0.5x speed, same pitch)");
         using var slowWave = new NAudio.Wave.WaveFileReader(halved.Variants.Single().Path);
         Assert.InRange(slowWave.TotalTime.TotalMilliseconds, 5990, 6010);
     }

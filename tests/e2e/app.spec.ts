@@ -1686,6 +1686,28 @@ test('Edit copy can make a copy at any speed', async ({ page, harness }) => {
   await expect(
     page.getByRole('button', { name: 'Play from start: Speed tone (0.5x speed)', exact: true }),
   ).toBeEnabled({ timeout: 25000 });
+  // Keep pitch (2.17): same speed, voices keep their pitch; the copy's name says so.
+  await page
+    .locator('.temp-source', { hasText: 'Speed tone' })
+    .first()
+    .getByRole('button', { name: 'Edit copy' })
+    .click();
+  const again = page.getByRole('form', { name: 'Edit a copy of Speed tone' });
+  await again.getByRole('combobox').selectOption('speed');
+  await again.getByRole('group', { name: 'Speed' }).getByLabel('Exact speed (×)').fill('0.5');
+  await again.getByLabel('Keep pitch').check();
+  await expect(again.getByRole('group', { name: 'Speed' })).toContainText('Same pitch.');
+  await expect(again.getByLabel('Name')).toHaveAttribute(
+    'placeholder',
+    'Speed tone (0.5x speed, same pitch)',
+  );
+  await again.getByRole('button', { name: 'Save copy' }).click();
+  await expect(
+    page.getByRole('button', {
+      name: 'Play from start: Speed tone (0.5x speed, same pitch)',
+      exact: true,
+    }),
+  ).toBeEnabled({ timeout: 25000 });
 });
 
 test('Temp keeps the native original distinct from its generated reverse', async ({

@@ -92,7 +92,8 @@ public sealed partial class Bridge
                 }
                 cut = samples.ToArray();
             }
-            var processed = AudioEffects.Apply(cut, channels, rate, effect, speed);
+            bool keepPitch = effect == "speed" && c.KeepPitch;
+            var processed = AudioEffects.Apply(cut, channels, rate, effect, speed, keepPitch);
             (processed, rate, channels) = FitForTemp(processed, rate, channels);
             byte[] wav;
             using (var output = new MemoryStream())
@@ -101,7 +102,7 @@ public sealed partial class Bridge
                     foreach (var sample in processed) writer.WriteSample(Math.Clamp(sample, -1f, 1f));
                 wav = output.ToArray();
             }
-            var label = effect switch { "none" => "trimmed", "speed" => $"{speed.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture)}x speed", _ => AudioEffects.Names[effect] };
+            var label = effect switch { "none" => "trimmed", "speed" => $"{speed.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture)}x speed{(keepPitch ? ", same pitch" : "")}", _ => AudioEffects.Names[effect] };
             var name = string.IsNullOrWhiteSpace(c.Name) ? $"{original} ({label})" : c.Name.Trim();
             if (name.Length > 100) name = name[..99].TrimEnd() + "\u2026";
             return (await Upload(wav, name + ".wav", Person(actor, participant).Name, actor == "host", owner, audience)) with { Id = c.Id };
@@ -123,8 +124,9 @@ public static class AudioEffects
     public const double MinSpeed = 0.05, MaxSpeed = 20;
     /// <summary>How much longer the effect makes the audio (Slow-mo plays at 0.7x; "speed" at the chosen factor).</summary>
     public static double Stretch(string effect, double speed = 1) => effect switch { "slowmo" => 1 / 0.7, "chipmunk" => 1 / 1.5, "speed" => 1 / speed, _ => 1 };
-    public static float[] Apply(float[] interleaved, int channels, int rate, string effect, double speed = 1) => effect switch
+    public static float[] Apply(float[] interleaved, int channels, int rate, string effect, double speed = 1, bool keepPitch = false) => effect switch
     {
+        "speed" when keepPitch => TimeStretch(interleaved, channels, rate, speed),
         "chipmunk" => Speed(interleaved, channels, 1.5),
         "slowmo" => Speed(interleaved, channels, 0.7),
         "speed" => Speed(interleaved, channels, speed),
@@ -161,6 +163,63 @@ public static class AudioEffects
             }
         }
         return output;
+    }
+    /// <summary>
+    /// Changes speed but keeps pitch (2.17), by WSOLA time-stretching: overlapping 40 ms Hann-windowed slices are
+    /// laid down at the new pace, each taken from wherever (within ±10 ms) it best continues the previous slice,
+    /// so waves line up instead of clicking. Alignment uses a mono mix so stereo channels stay together.
+    /// </summary>
+    public static float[] TimeStretch(float[] input, int channels, int rate, double speed)
+    {
+        int frames = input.Length / channels;
+        if (frames == 0 || speed == 1) return input;
+        var mono = new float[frames];
+        for (int f = 0; f < frames; f++)
+        {
+            float sum = 0;
+            for (int c = 0; c < channels; c++) sum += input[f * channels + c];
+            mono[f] = sum / channels;
+        }
+        int size = Math.Clamp(rate / 25, 256, 4096) & ~1, hop = size / 2, tolerance = size / 4, overlap = size / 2;
+        int outFrames = (int)(frames / speed);
+        var output = new float[(outFrames + size) * channels];
+        var weight = new float[outFrames + size];
+        var window = new float[size];
+        for (int i = 0; i < size; i++) window[i] = 0.5f - 0.5f * MathF.Cos(2 * MathF.PI * i / size);
+        int previous = 0;
+        for (int k = 0; (long)k * hop < outFrames; k++)
+        {
+            int target = (int)Math.Min(frames - 1, Math.Round(k * hop * speed)), best = target;
+            if (k > 0)
+            {
+                // Where the previous slice would naturally carry on; pick the candidate that matches it best.
+                int natural = previous + hop; double bestScore = double.NegativeInfinity;
+                for (int candidate = Math.Max(0, target - tolerance); candidate <= Math.Min(frames - 1, target + tolerance); candidate += 2)
+                {
+                    double score = 0;
+                    for (int i = 0; i < overlap; i += 4)
+                    {
+                        if (natural + i >= frames || candidate + i >= frames) break;
+                        score += mono[natural + i] * mono[candidate + i];
+                    }
+                    if (score > bestScore) { bestScore = score; best = candidate; }
+                }
+            }
+            int start = k * hop;
+            for (int i = 0; i < size && best + i < frames && start + i < weight.Length; i++)
+            {
+                float w = window[i]; weight[start + i] += w;
+                for (int c = 0; c < channels; c++) output[(start + i) * channels + c] += input[(best + i) * channels + c] * w;
+            }
+            previous = best;
+        }
+        var result = new float[outFrames * channels];
+        for (int f = 0; f < outFrames; f++)
+        {
+            float w = weight[f] > 1e-3f ? weight[f] : 1;
+            for (int c = 0; c < channels; c++) result[f * channels + c] = output[f * channels + c] / w;
+        }
+        return result;
     }
     /// <summary>Two taps (250 ms at 45 %, 500 ms at 20 %) with the tail kept so the last word echoes too.</summary>
     public static float[] Echo(float[] input, int channels, int rate)

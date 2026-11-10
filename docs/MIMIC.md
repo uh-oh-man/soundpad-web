@@ -63,7 +63,7 @@ A clip is a normal Temp sound, so reverse, **Keep permanently** (with host confi
 **Edit copy** works on any Temp source, not only Mimic clips:
 1. Open **Temp**.
 2. Press **Edit copy** and set the start and end in seconds.
-3. Optionally pick an **Effect**: Chipmunk (1.5× faster and higher), Slow-mo (0.7×, deeper), Echo, or **Any speed** (companion 2.16+): any speed from 0.05× (20 times slower) to 20× (20 times faster), set with a slider or an exact number. The form shows how long the copy will be. Like a tape, pitch moves with speed: slower is deeper, faster is higher.
+3. Optionally pick an **Effect**: Chipmunk (1.5× faster and higher), Slow-mo (0.7×, deeper), Echo, or **Any speed** (companion 2.16+): any speed from 0.05× (20 times slower) to 20× (20 times faster), set with a slider or an exact number. The form shows how long the copy will be. Like a tape, pitch moves with speed: slower is deeper, faster is higher. Tick **Keep pitch** (companion 2.17+) to change speed while voices keep their pitch.
 4. Press **Save copy**.
 
 Like Voice Replay Studio's trim, it saves a new Temp sound and never changes the original. Everything in Temp is removed from Soundpad and from disk when hosting ends, or when the companion window is closed (2.16+). Guests can edit copies when the host allows uploads. Temp holds at most 16 MiB per sound, so long copies are made mono and then given a lower sample rate (never below 16 kHz) to fit. Anything still too long is refused before any work is done, with the longest length that would fit.

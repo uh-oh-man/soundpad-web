@@ -98,6 +98,7 @@ export function TempManager({
     name: string;
     effect: Effect;
     speed: number;
+    keepPitch: boolean;
   }>();
   const [refresh, setRefresh] = useState(0);
   useEffect(() => {
@@ -249,6 +250,7 @@ export function TempManager({
                             name: '',
                             effect: 'none',
                             speed: 1,
+                            keepPitch: false,
                           })
                         }
                       >
@@ -272,6 +274,9 @@ export function TempManager({
                         endMs: Math.round(Math.min(Math.max(0, trimming.to * 1000), length)),
                         action: trimming.effect,
                         ...(trimming.effect === 'speed' && { speed: clampSpeed(trimming.speed) }),
+                        ...(trimming.effect === 'speed' &&
+                          trimming.keepPitch &&
+                          supports(state.companionVersion, 'keepPitch') && { keepPitch: true }),
                         ...(trimming.name.trim() && { name: trimming.name.trim() }),
                       });
                     }}
@@ -356,12 +361,28 @@ export function TempManager({
                             }
                           />
                         </label>
+                        {supports(state.companionVersion, 'keepPitch') && (
+                          // Time-stretch (2.17): voices keep their pitch instead of going deep or squeaky.
+                          <label className="temp-keep-pitch">
+                            <input
+                              type="checkbox"
+                              checked={trimming.keepPitch}
+                              onChange={(e) =>
+                                setTrimming({ ...trimming, keepPitch: e.target.checked })
+                              }
+                            />
+                            Keep pitch
+                          </label>
+                        )}
                         <span className="muted">
                           {formatSpeed(clampSpeed(trimming.speed))}: the copy lasts{' '}
                           {(
                             Math.max(0, trimming.to - trimming.from) / clampSpeed(trimming.speed)
                           ).toFixed(2)}{' '}
-                          s. Pitch changes with speed.
+                          s.{' '}
+                          {trimming.keepPitch && supports(state.companionVersion, 'keepPitch')
+                            ? 'Same pitch.'
+                            : 'Pitch changes with speed.'}
                         </span>
                       </div>
                     )}
@@ -373,7 +394,7 @@ export function TempManager({
                           trimming.effect === 'none'
                             ? 'trimmed'
                             : trimming.effect === 'speed'
-                              ? `${Number(clampSpeed(trimming.speed).toFixed(2))}x speed`
+                              ? `${Number(clampSpeed(trimming.speed).toFixed(2))}x speed${trimming.keepPitch && supports(state.companionVersion, 'keepPitch') ? ', same pitch' : ''}`
                               : effectSuffix[trimming.effect]
                         })`}
                         value={trimming.name}

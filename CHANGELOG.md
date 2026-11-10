@@ -2,7 +2,25 @@
 
 Notable changes to Soundpad Web. Versions follow the website's `package.json`; the Windows companion is versioned separately and only needs updating when a release says so.
 
-## Unreleased
+## 2.17.0 — Keep pitch when changing speed
+
+**Update the Windows companion** to get this. With an older companion, the website hides the option, and Settings lists it under what an update adds.
+
+### Added
+
+- **Keep pitch.** In **Temp → Edit copy → Any speed**, tick **Keep pitch** to slow down or speed up a copy without the voice going deep or squeaky. The copy is named for example "Laugh (0.5x speed, same pitch)". Without the tick, speed still works like a tape, as in 2.16.
+  - It uses WSOLA time-stretching: the audio is cut into overlapping 40 ms slices and laid down at the new pace. Each slice is taken from wherever, within ±10 ms, it best continues the previous one, so the waves line up instead of clicking. Stereo channels stay together.
+  - Checked with real speech: Whisper transcribed the JFK sample word for word at half speed and at double speed with Keep pitch. The tape-style half-speed copy came out too deep for Whisper to recognise.
+- Protocol: `trimAudio` accepts `keepPitch: true` with `action: "speed"`. The feature is gated as `FEATURES.keepPitch` (2.17).
+
+### Tests
+
+- New C# test: a 440 Hz tone at 0.5× and 2× with Keep pitch changes length but stays at 430–450 Hz. Tape-style moves the pitch as expected, and stereo channels stay in step. 90 C# tests.
+- The C# trim test makes a "(0.5x speed, same pitch)" copy. The e2e speed test ticks Keep pitch, checks the wording and name, and saves.
+- New harness tool: `SoundpadWeb.Harness.exe --stretch <in.wav> <out.wav> <speed> <keep-pitch>` writes the effect to a file.
+
+### Also in this release
+
 
 - **Every version now has a download.** The owner asked for ready-made EXEs for v2.14.3 and v2.15.4, whose CI failed when they were tagged, so no release was published for them. A new workflow, *Rebuild an old release* (`.github/workflows/rebuild-old-release.yml`, started by pushing a `rebuild-vX.Y.Z` tag), builds an old tag's exact source the way its release job did and runs the EXE smoke test. It then publishes the release, labelled as rebuilt later, with that version's changelog notes. The tests that failed back then are not re-run, and the release says so. v2.14.3 has a waveform-zoom bug fixed in 2.14.4; v2.15.4's app is the same as 2.15.5. Both are now published. All 59 version tags have a download, and docs/ROLLBACK.md links each one.
 

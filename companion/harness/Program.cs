@@ -80,6 +80,19 @@ if (args.FirstOrDefault() == "--close-signal-probe" && args.Length == 2)
     Console.WriteLine("waiting to be closed...");
     Thread.Sleep(Timeout.Infinite);
 }
+if (args.FirstOrDefault() == "--stretch" && args.Length == 5)
+{
+    // --stretch <in.wav> <out.wav> <speed> <keep-pitch true|false>: writes Edit copy's speed effect to a file (2.17).
+    using var decoded = new DecodedAudio(args[1]); // the companion's own decoder, as Edit copy uses
+    var samples = new List<float>(); var block = new float[decoded.Channels * 4096]; int got;
+    while ((got = decoded.Read(block)) > 0) samples.AddRange(block.AsSpan(0, got));
+    double factor = double.Parse(args[3], System.Globalization.CultureInfo.InvariantCulture);
+    var result = AudioEffects.Apply(samples.ToArray(), decoded.Channels, decoded.Rate, "speed", factor, bool.Parse(args[4]));
+    using (var writer = new NAudio.Wave.WaveFileWriter(args[2], new NAudio.Wave.WaveFormat(decoded.Rate, 16, decoded.Channels)))
+        foreach (var sample in result) writer.WriteSample(Math.Clamp(sample, -1f, 1f));
+    Console.WriteLine($"{samples.Count / decoded.Channels / (double)decoded.Rate:0.00} s -> {result.Length / decoded.Channels / (double)decoded.Rate:0.00} s");
+    return;
+}
 if (args.FirstOrDefault() == "--refresh-bench")
 {
     // Read-only timing of library refreshes on this PC's Soundpad, with a throwaway data folder (never the companion's).

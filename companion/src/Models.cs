@@ -34,7 +34,7 @@ public sealed class DiskState
     public string? Website { get; set; }
 }
 public record Command(int V, string Id, long At, string Op, string? SoundId = null, string? LibraryVersion = null, int? Delta = null, string? Image = null, Permissions? Permissions = null,
-    long? PositionMs = null, string? Epoch = null, long? EndMs = null, bool Repeat = false, string? Action = null, string? AssetId = null, string? VariantId = null, string? Orientation = null, string? DestinationDirectory = null, int? CategoryId = null, string? CategoryName = null, bool Confirmed = false, string? AudienceId = null, string? OwnerId = null, string? SourceId = null, long? MimicEnd = null, string? Name = null, double? Speed = null);
+    long? PositionMs = null, string? Epoch = null, long? EndMs = null, bool Repeat = false, string? Action = null, string? AssetId = null, string? VariantId = null, string? Orientation = null, string? DestinationDirectory = null, int? CategoryId = null, string? CategoryName = null, bool Confirmed = false, string? AudienceId = null, string? OwnerId = null, string? SourceId = null, long? MimicEnd = null, string? Name = null, double? Speed = null, bool KeepPitch = false);
 public record Reply(string Type, string Id, bool Ok, string? Error = null, object? Data = null);
 public static class Json
 {

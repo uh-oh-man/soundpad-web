@@ -838,3 +838,9 @@ body,
   flex: 1 1 100%;
   font-size: 12px;
 }
+.temp-keep-pitch {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-direction: row;
+}
