@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { z } from 'zod';
 import { controller } from '../controller';
 import { supports } from '../version';
@@ -186,7 +186,10 @@ export function TempManager({
     }
   }
   // Host-only Preview of an edited copy (2.20): heard on this PC only, never through Soundpad.
-  const { previewing, play: preview, stop: stopPreview } = usePreviewAudio();
+  const { previewing, play: preview, stop: stopPreview, setLooping } = usePreviewAudio();
+  // Loop (2.23), like Voice Replay Studio's Loop selection: the preview repeats, and changing the cut or
+  // effect restarts it with the change, so edges can be tuned by ear.
+  const [loop, setLoop] = useState(false);
   /** What Save copy and Preview send: the chosen part, clamped to the sound, and its effect. */
   const trimFields = (assetId: string, length: number, t: NonNullable<typeof trimming>) => ({
     assetId,
@@ -223,6 +226,35 @@ export function TempManager({
       start?.focus({ preventScroll: true });
     }, 50);
   });
+  const loopKey =
+    trimming && previewing && loop
+      ? JSON.stringify([
+          trimming.id,
+          trimming.from,
+          trimming.to,
+          trimming.effect,
+          trimming.speed,
+          trimming.keepPitch,
+        ])
+      : '';
+  const loopedKey = useRef('');
+  useEffect(() => {
+    if (!loopKey || !trimming) {
+      loopedKey.current = '';
+      return;
+    }
+    if (!loopedKey.current) loopedKey.current = loopKey; // the Preview press itself started this one
+    if (loopedKey.current === loopKey) return;
+    loopedKey.current = loopKey;
+    // Wait for a pause in dragging or typing, then hear the new cut.
+    const timer = setTimeout(() => {
+      const a = data?.manager.assets.find((x) => x.id === trimming.id);
+      const length = a && durationOf(a);
+      if (length !== undefined && trimming.to - trimming.from >= 0.1 && trimming.from >= 0)
+        void preview('trimPreview', trimFields(trimming.id, length, trimming), { loop: true });
+    }, 400);
+    return () => clearTimeout(timer);
+  }, [loopKey]);
   const categories = flattenCategories(state.library.categories).filter(
     (c) => c.category.id !== undefined,
   );
@@ -484,11 +516,28 @@ export function TempManager({
                             : void preview(
                                 'trimPreview',
                                 trimFields(a.id, durationOf(a)!, trimming),
+                                { loop },
                               )
                         }
                       >
                         <Headphones size={15} /> {previewing ? 'Stop preview' : 'Preview'}
                       </button>
+                    )}
+                    {host && supports(state.companionVersion, 'trimPreview') && (
+                      <label
+                        className="temp-loop"
+                        title="Repeat the preview; changing the cut or effect restarts it"
+                      >
+                        <input
+                          type="checkbox"
+                          checked={loop}
+                          onChange={(e) => {
+                            setLoop(e.target.checked);
+                            setLooping(e.target.checked);
+                          }}
+                        />
+                        Loop
+                      </label>
                     )}
                     <button
                       type="button"

@@ -1793,6 +1793,61 @@ test('Edit copy: Zoom to selection shows just the chosen part for fine dragging'
   await expect(form.getByText('Drag to choose the part to copy', { exact: false })).toBeVisible();
 });
 
+test('Edit copy: Loop repeats the preview and replays it when the cut changes', async ({
+  page,
+  harness,
+  browserName,
+}) => {
+  // Preview is host-only and hosts run on Windows, where Safari doesn't exist; headless WebKit often
+  // refuses to play.
+  test.skip(browserName === 'webkit', 'Preview playback is checked in Chromium');
+  // Record each preview the page starts, and whether it repeats.
+  await page.addInitScript(() => {
+    const w = window as unknown as { previews: { loop: boolean; at: number }[] };
+    w.previews = [];
+    const play = HTMLMediaElement.prototype.play;
+    HTMLMediaElement.prototype.play = function () {
+      w.previews.push({ loop: this.loop, at: performance.now() });
+      return play.call(this);
+    };
+  });
+  const previews = () =>
+    page.evaluate(() => (window as unknown as { previews: { loop: boolean }[] }).previews);
+  await host(page, harness);
+  await page
+    .getByLabel('Add session audio', { exact: true })
+    .setInputFiles({ name: 'Loop tone.wav', mimeType: 'audio/wav', buffer: sessionWave(3) });
+  await expect(
+    page.getByRole('button', { name: 'Play from start: Loop tone', exact: true }),
+  ).toBeEnabled({ timeout: 25000 });
+  await page.locator('#temp-manager > summary').click();
+  await page
+    .locator('.temp-source', { hasText: 'Loop tone' })
+    .getByRole('button', { name: 'Edit copy' })
+    .click();
+  const form = page.getByRole('form', { name: 'Edit a copy of Loop tone' });
+  await form.getByLabel('Loop').check();
+  const playsBefore = harness.plays.length;
+  await form.getByRole('button', { name: 'Preview' }).click();
+  await expect.poll(async () => (await previews()).length).toBe(1);
+  expect((await previews())[0].loop).toBe(true);
+  // A looping 3-second preview is still going well after it would have ended once.
+  await page.waitForTimeout(3500);
+  await expect(form.getByRole('button', { name: 'Stop preview' })).toBeVisible();
+  // Changing the cut replays the new one (after a short pause in typing), still looping.
+  await form.getByLabel('Start (s)').fill('1');
+  await expect.poll(async () => (await previews()).length, { timeout: 8000 }).toBe(2);
+  expect((await previews())[1].loop).toBe(true);
+  // Unticking Loop lets the current one finish and stop by itself; Soundpad never played anything.
+  await form.getByLabel('Loop').uncheck();
+  await expect(form.getByRole('button', { name: 'Preview' })).toBeVisible({ timeout: 8000 });
+  expect(harness.plays.length).toBe(playsBefore);
+  // Without Loop, changing the cut doesn't start anything.
+  await form.getByLabel('End (s)').fill('2.5');
+  await page.waitForTimeout(1000);
+  expect((await previews()).length).toBe(2);
+});
+
 test('Edit copy can make a copy at any speed', async ({ page, harness }) => {
   await host(page, harness);
   await page

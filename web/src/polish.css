@@ -894,6 +894,21 @@ body,
   gap: 6px;
   flex-direction: row;
 }
+/* Edit copy's checkboxes, Keep pitch (2.17) and Loop (2.23): a box and its words on one line. Until
+   2.23, `.temp-trim label` (grid) and the Name field's `label:nth-of-type(3) input` (200 px) also hit
+   Keep pitch, drawing a big empty box away from its words; these selectors are deliberately stronger. */
+.temp-trim label:is(.temp-keep-pitch, .temp-loop) {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 6px;
+  align-self: center;
+}
+.temp-trim label:is(.temp-keep-pitch, .temp-loop) input {
+  width: auto;
+  min-height: 0;
+  padding: 0;
+}
 /* After the website updated itself: one dismissible line linking that version's notes (2.18.2). */
 .whats-new {
   display: flex;

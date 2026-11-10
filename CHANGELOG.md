@@ -2,6 +2,30 @@
 
 Notable changes to Soundpad Web. Versions follow the website's `package.json`; the Windows companion is versioned separately and only needs updating when a release says so.
 
+## 2.23.0 — Loop the preview while you tune the cut
+
+Website only; Loop needs a companion with Preview (2.20+). The companion reports 2.23.0 in this release, with no other change.
+
+### Added
+
+- **Loop** next to Edit copy's **Preview** (host), like **Loop selection** in Voice Replay Studio's editor.
+  - With Loop ticked, the preview repeats until **Stop preview**.
+  - Change the start, end, effect or speed while it plays (drag on the waveform or type), and after a short pause the new cut plays instead. Edges can be tuned by ear without pressing Preview again.
+  - Unticking Loop lets the current play finish and stop by itself.
+  - As before, only the host hears it, on their own PC. Soundpad plays nothing and nothing is saved.
+
+### Changed
+
+- **Stop preview** now also cancels a preview the companion is still preparing (Edit copy and Mimic). Before, a preview stopped during that moment would start playing anyway.
+
+### Fixed
+
+- Edit copy's **Keep pitch** checkbox (2.17–2.22) was drawn as a large empty box away from its label, because the form's text-field styling also applied to it. It is now a normal checkbox beside its words.
+
+### Tests
+
+- New e2e test: with Loop ticked, Preview plays with repeat on and is still playing after its 3 seconds; changing Start plays the new cut, still looping; unticking Loop lets it stop by itself; without Loop, changing the cut starts nothing; Soundpad plays nothing throughout.
+
 ## 2.22.0 — Zoom in on Edit copy's waveform
 
 Website only; works with any companion that has Edit copy. The companion reports 2.22.0 in this release, with no other change.
