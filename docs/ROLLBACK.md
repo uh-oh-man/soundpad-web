@@ -1,6 +1,6 @@
 # Rolling back
 
-Every release stays on GitHub permanently, so any earlier version can be restored by downloading it. Nothing in a newer version deletes or rewrites what an older one saved.
+Every release stays on GitHub permanently, so any earlier version can be restored by downloading it. Every version tag has a downloadable `SoundpadWeb.exe` (checked 2026-11-09: 59 of 59). Two were rebuilt later from their exact source by the *Rebuild an old release* workflow because their CI failed when tagged; their rows say so. Nothing in a newer version deletes or rewrites what an older one saved.
 
 ## Known-good points
 
@@ -14,14 +14,14 @@ Every release stays on GitHub permanently, so any earlier version can be restore
 | 2.15.7 | Touch wording in Mimic on phones | `v2.15.7` | [Release](https://github.com/uh-oh-man/soundpad-web/releases/tag/v2.15.7) |
 | 2.15.6 | Guest phones: no false "Too many requests", notices out of the way | `v2.15.6` | [Release](https://github.com/uh-oh-man/soundpad-web/releases/tag/v2.15.6) |
 | 2.15.5 | 2.15.4, released (test fix only) | `v2.15.5` | [Release](https://github.com/uh-oh-man/soundpad-web/releases/tag/v2.15.5) |
-| 2.15.4 | Security review follow-ups | `v2.15.4` | [Source code (zip)](https://github.com/uh-oh-man/soundpad-web/archive/refs/tags/v2.15.4.zip) only: its own new test failed on CI. Its app is identical to [2.15.5](https://github.com/uh-oh-man/soundpad-web/releases/tag/v2.15.5) apart from the version number. |
+| 2.15.4 | Security review follow-ups | `v2.15.4` | [Release](https://github.com/uh-oh-man/soundpad-web/releases/tag/v2.15.4) (rebuilt 2026-11-09 from its source; a timing flaw in its own new test failed at the time; app identical to 2.15.5) |
 | 2.15.3 | Import & play from Voice Replay Studio | `v2.15.3` | [Release](https://github.com/uh-oh-man/soundpad-web/releases/tag/v2.15.3) |
 | 2.15.2 | Tell the host what a companion update adds | `v2.15.2` | [Release](https://github.com/uh-oh-man/soundpad-web/releases/tag/v2.15.2) |
 | 2.15.1 | Review fixes for the Voice Replay Studio import | `v2.15.1` | [Release](https://github.com/uh-oh-man/soundpad-web/releases/tag/v2.15.1) |
 | 2.15.0 | Import clips from Voice Replay Studio | `v2.15.0` | [Release](https://github.com/uh-oh-man/soundpad-web/releases/tag/v2.15.0) |
 | 2.14.5 | CI upkeep (no app changes) | `v2.14.5` | [Release](https://github.com/uh-oh-man/soundpad-web/releases/tag/v2.14.5) |
 | 2.14.4 | Wheel zoom on waveforms that load late | `v2.14.4` | [Release](https://github.com/uh-oh-man/soundpad-web/releases/tag/v2.14.4) |
-| 2.14.3 | Safari checks and a clear message when WebRTC is blocked | `v2.14.3` | [Source code (zip)](https://github.com/uh-oh-man/soundpad-web/archive/refs/tags/v2.14.3.zip) only: its CI failed (its new WebKit tests caught a real bug, fixed in 2.14.4), so no EXE was built. For a ready-made companion use [2.14.2](https://github.com/uh-oh-man/soundpad-web/releases/tag/v2.14.2), identical apart from the version number. |
+| 2.14.3 | Safari checks and a clear message when WebRTC is blocked | `v2.14.3` | [Release](https://github.com/uh-oh-man/soundpad-web/releases/tag/v2.14.3) (rebuilt 2026-11-09 from its source; its tests failed at the time (waveform zoom bug, fixed in 2.14.4)) |
 | 2.14.2 | A taken hotkey key is reported straight away | `v2.14.2` | [Release](https://github.com/uh-oh-man/soundpad-web/releases/tag/v2.14.2) |
 | 2.14.1 | The Mimic hotkey remembers your key | `v2.14.1` | [Release](https://github.com/uh-oh-man/soundpad-web/releases/tag/v2.14.1) |
 | 2.14.0 | Choose the Mimic hotkey (F6–F10) | `v2.14.0` | [Release](https://github.com/uh-oh-man/soundpad-web/releases/tag/v2.14.0) |

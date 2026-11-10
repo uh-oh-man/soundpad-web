@@ -4,7 +4,7 @@ Notable changes to Soundpad Web. Versions follow the website's `package.json`; t
 
 ## Unreleased
 
-- **Every version now has a download.** The owner asked for ready-made EXEs for v2.14.3 and v2.15.4, whose CI failed when they were tagged, so no release was published for them. A new workflow, *Rebuild an old release* (`.github/workflows/rebuild-old-release.yml`, started by pushing a `rebuild-vX.Y.Z` tag), builds an old tag's exact source the way its release job did and runs the EXE smoke test. It then publishes the release, labelled as rebuilt later, with that version's changelog notes. The tests that failed back then are not re-run, and the release says so. v2.14.3 has a waveform-zoom bug fixed in 2.14.4; v2.15.4's app is the same as 2.15.5.
+- **Every version now has a download.** The owner asked for ready-made EXEs for v2.14.3 and v2.15.4, whose CI failed when they were tagged, so no release was published for them. A new workflow, *Rebuild an old release* (`.github/workflows/rebuild-old-release.yml`, started by pushing a `rebuild-vX.Y.Z` tag), builds an old tag's exact source the way its release job did and runs the EXE smoke test. It then publishes the release, labelled as rebuilt later, with that version's changelog notes. The tests that failed back then are not re-run, and the release says so. v2.14.3 has a waveform-zoom bug fixed in 2.14.4; v2.15.4's app is the same as 2.15.5. Both are now published. All 59 version tags have a download, and docs/ROLLBACK.md links each one.
 
 ## 2.16.2 — Temp stops saying "needs attention" for old failures
 
