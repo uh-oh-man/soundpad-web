@@ -2,10 +2,22 @@
 
 Notable changes to Soundpad Web. Versions follow the website's `package.json`; the Windows companion is versioned separately and only needs updating when a release says so.
 
-## Unreleased
+## 2.19.0 — Drag to choose what Edit copy keeps
+
+Website only; works with any companion that has Edit copy. The companion reports 2.19.0 in this release, with no other change.
+
+### Added
+
+- **Edit copy shows the sound's waveform, and you can drag on it to choose the part to copy,** like the gold handles in Voice Replay Studio's clip editor.
+  - Drag across it in either direction to choose a part, or drag the start or end edge to adjust it.
+  - Start and End fill in as you drag, and typing in them moves the drawn range, so exact values and the keyboard work as before.
+  - The skipped part is shaded and the copied part highlighted.
+  - It uses the same waveform data as the board's sound buttons, so no companion update is needed.
 
 ### Tests
 
+- New e2e test: drag across the middle of a 1-second tone and Start/End read 0.25 and 0.75; pull the end past the edge and it stops at 1; typing 0.5 moves the drawn edge; the copy saves.
+- Unit tests for the drag rules (which edge a press grabs, crossing edges swap, staying inside the sound).
 - The Mimic hotkey test now waits for each on/off command to finish before toggling again. The page ignores a toggle while the previous one is still running, so a slow run could fail. It failed once in a full local run and did not reproduce in 24 stress runs, before or after the change.
 
 ## 2.18.2 — "What's new" after an update

@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { controller } from '../controller';
 import { supports } from '../version';
 import { flattenCategories, type Snapshot } from '../protocol';
+import { TrimWave } from './TrimWave';
 const variant = z.object({
   id: z.string(),
   soundId: z.string().nullable(),
@@ -289,6 +290,16 @@ export function TempManager({
                       });
                     }}
                   >
+                    {a.normal?.soundId && (
+                      <TrimWave
+                        state={state}
+                        soundId={a.normal.soundId}
+                        lengthMs={durationOf(a)!}
+                        from={trimming.from}
+                        to={trimming.to}
+                        onChange={(range) => setTrimming({ ...trimming, ...range })}
+                      />
+                    )}
                     <label>
                       Start (s)
                       <input

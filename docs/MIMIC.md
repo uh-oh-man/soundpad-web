@@ -62,7 +62,7 @@ A clip is a normal Temp sound, so reverse, **Keep permanently** (with host confi
 
 **Edit copy** works on any Temp source, not only Mimic clips:
 1. Open **Temp**.
-2. Press **Edit copy** and set the start and end in seconds.
+2. Press **Edit copy** and choose the part to copy: drag across the waveform, or drag its start or end edge, like Voice Replay Studio's handles (2.19+). You can also type the start and end in seconds.
 3. Optionally pick an **Effect**: Chipmunk (1.5× faster and higher), Slow-mo (0.7×, deeper), Echo, or **Any speed** (companion 2.16+): any speed from 0.05× (20 times slower) to 20× (20 times faster), set with a slider or an exact number. The form shows how long the copy will be. Like a tape, pitch moves with speed: slower is deeper, faster is higher. Tick **Keep pitch** (companion 2.17+) to change speed while voices keep their pitch.
 4. Press **Save copy**.
 

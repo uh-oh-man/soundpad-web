@@ -1688,6 +1688,50 @@ test('Temp offers to remove duplicate Temp categories that old companions create
   await expect(page.getByText('Removed 0 duplicate Temp categories from Soundpad.')).toBeVisible();
 });
 
+test('Edit copy: dragging on the waveform sets Start and End', async ({ page, harness }) => {
+  await host(page, harness);
+  await page
+    .getByLabel('Add session audio', { exact: true })
+    .setInputFiles({ name: 'Drag tone.wav', mimeType: 'audio/wav', buffer: sessionWave() });
+  await expect(
+    page.getByRole('button', { name: 'Play from start: Drag tone', exact: true }),
+  ).toBeEnabled({ timeout: 25000 });
+  await page.locator('#temp-manager > summary').click();
+  await page
+    .locator('.temp-source', { hasText: 'Drag tone' })
+    .getByRole('button', { name: 'Edit copy' })
+    .click();
+  const form = page.getByRole('form', { name: 'Edit a copy of Drag tone' });
+  const wave = form.getByTestId('trim-wave');
+  await expect(wave.locator('.trim-wave-path')).toHaveAttribute('d', /M/, { timeout: 15000 });
+  const box = (await wave.boundingBox())!;
+  const at = (f: number) => [box.x + box.width * f, box.y + box.height / 2] as const;
+  // Drag across the middle half of the 1-second tone (right to left works too).
+  await page.mouse.move(...at(0.75));
+  await page.mouse.down();
+  await page.mouse.move(...at(0.5), { steps: 3 });
+  await page.mouse.move(...at(0.25), { steps: 3 });
+  await page.mouse.up();
+  const start = form.getByLabel('Start (s)'),
+    end = form.getByLabel('End (s)');
+  await expect.poll(async () => Number(await start.inputValue())).toBeCloseTo(0.25, 1);
+  await expect.poll(async () => Number(await end.inputValue())).toBeCloseTo(0.75, 1);
+  // Grab the end edge and pull it past the right side: it stops at the sound's end.
+  await page.mouse.move(...at(0.75));
+  await page.mouse.down();
+  await page.mouse.move(box.x + box.width + 40, box.y + box.height / 2, { steps: 4 });
+  await page.mouse.up();
+  await expect(end).toHaveValue('1');
+  await expect.poll(async () => Number(await start.inputValue())).toBeCloseTo(0.25, 1);
+  // The typed boxes still move the drawn range.
+  await start.fill('0.5');
+  await expect(wave.locator('.trim-wave-edge').first()).toHaveAttribute('x1', '400');
+  await form.getByRole('button', { name: 'Save copy' }).click();
+  await expect(
+    page.getByRole('button', { name: /^Play from start: Drag tone \(/ }).first(),
+  ).toBeEnabled({ timeout: 25000 });
+});
+
 test('Edit copy can make a copy at any speed', async ({ page, harness }) => {
   await host(page, harness);
   await page
