@@ -10,8 +10,9 @@ const { removeNewTempAudio } = await import('../../web/src/remove-temp');
 
 const id = '11111111-1111-4111-8111-111111111111';
 /** What the page last heard: nothing playing, this source ('s1') playing, or another sound ('s2'). */
-const heard = (soundId: string | null) => ({
+const heard = (soundId: string | null, companionVersion = '2.29.3') => ({
   state: {
+    companionVersion,
     library: {
       sounds: [
         { id: 's1', assetId: id },
@@ -68,6 +69,12 @@ describe('Undo removes a just-made Temp source (2.28/2.29)', () => {
     await outcome;
     expect(ops()).toEqual(['removeAudio']);
     expect(notify).toHaveBeenCalledWith(refusal.message, 'error');
+  });
+  it('with companion 2.30+, lets the companion decide in one request (no guessing here)', async () => {
+    snapshot = heard(null, '2.30.0');
+    run.mockResolvedValue(undefined);
+    await removeNewTempAudio(id);
+    expect(run.mock.calls).toEqual([['removeAudio', { assetId: id, action: 'stopIfPlaying' }]]);
   });
   it('reports any other refusal once and gives up', async () => {
     snapshot = heard(null);

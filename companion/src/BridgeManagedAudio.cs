@@ -98,7 +98,22 @@ public sealed partial class Bridge
                     await gate.WaitAsync(); try { await RefreshInner(); SaveAudioReceipt(c); Publish(); } finally { gate.Release(); }
                     return new("ack", c.Id, true, Data: new { removed });
                 }
-                else if (c.Op == "removeAudio") await Audio.Remove(c.AssetId ?? throw new InvalidDataException("Choose a managed source."));
+                else if (c.Op == "removeAudio")
+                {
+                    var assetId = c.AssetId ?? throw new InvalidDataException("Choose a managed source.");
+                    // Undo (2.30, host): "stopIfPlaying" stops the sound first only when it is this source that
+                    // the companion itself started (Save & play, Mimic & play). Soundpad can't say what is
+                    // playing, but the companion knows what it last played. Anything else keeps playing, and
+                    // Remove then refuses as before.
+                    if (c.Action == "stopIfPlaying" && actor == "host" && playback.SoundId is string current
+                        && parsed.Public.Sounds.FirstOrDefault(s => s.Id == current)?.AssetId == assetId
+                        && await pipe.Request("GetPlayStatus()") != "STOPPED")
+                    {
+                        await pipe.Request("DoStopSound()");
+                        for (int i = 0; i < 20 && await pipe.Request("GetPlayStatus()") != "STOPPED"; i++) await Task.Delay(100);
+                    }
+                    await Audio.Remove(assetId);
+                }
                 else if (c.Op == "retryAudio") await Audio.RetryAsset(c.AssetId ?? throw new InvalidDataException("Choose a managed source."));
                 else if (c.Op == "keepAudio") await Audio.Promote(c.AssetId ?? throw new InvalidDataException("Open Temp to confirm a permanent destination."), c.VariantId ?? throw new InvalidDataException("Choose the normal or reversed variant."), c.DestinationDirectory, c.CategoryId, c.CategoryName, c.Confirmed);
                 else

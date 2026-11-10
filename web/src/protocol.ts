@@ -83,6 +83,7 @@ export const commandSchema = z
         'speed',
         'length',
         'key',
+        'stopIfPlaying',
       ])
       .optional(),
     permissions: z

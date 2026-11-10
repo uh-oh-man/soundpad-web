@@ -35,6 +35,7 @@ export const FEATURES = {
   clearTemp: [2, 18],
   trimPreview: [2, 20],
   trimWords: [2, 24],
+  undoStop: [2, 30],
 } as const satisfies Record<string, readonly [number, number]>;
 
 /** True when the website changed version since this browser last used it (and it had used it before). */
@@ -60,6 +61,7 @@ const FEATURE_NAMES: Record<keyof typeof FEATURES, string> = {
   clearTemp: 'clearing all temporary audio during a session',
   trimPreview: 'previewing an edited copy before saving it',
   trimWords: 'naming trimmed copies after their words',
+  undoStop: 'Undo that stops only its own clip',
 };
 
 /**

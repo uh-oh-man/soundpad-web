@@ -125,6 +125,7 @@ describe('feature gates for older companions', () => {
       'clearing all temporary audio during a session',
       'previewing an edited copy before saving it',
       'naming trimmed copies after their words',
+      'Undo that stops only its own clip',
     ]);
     expect(missingFeatures('2.15.9')).toEqual([
       'any speed for edited copies (0.05× to 20×)',
@@ -132,30 +133,40 @@ describe('feature gates for older companions', () => {
       'clearing all temporary audio during a session',
       'previewing an edited copy before saving it',
       'naming trimmed copies after their words',
+      'Undo that stops only its own clip',
     ]);
     expect(missingFeatures('2.16.2')).toEqual([
       'Keep pitch when changing speed',
       'clearing all temporary audio during a session',
       'previewing an edited copy before saving it',
       'naming trimmed copies after their words',
+      'Undo that stops only its own clip',
     ]);
     expect(missingFeatures('2.17.0')).toEqual([
       'clearing all temporary audio during a session',
       'previewing an edited copy before saving it',
       'naming trimmed copies after their words',
+      'Undo that stops only its own clip',
     ]);
     expect(missingFeatures('2.19.0')).toEqual([
       'previewing an edited copy before saving it',
       'naming trimmed copies after their words',
+      'Undo that stops only its own clip',
     ]);
     expect(supports('2.19.0', 'trimPreview')).toBe(false);
     expect(supports('2.20.0', 'trimPreview')).toBe(true);
     expect(missingFeatures('2.18.0')).toEqual([
       'previewing an edited copy before saving it',
       'naming trimmed copies after their words',
+      'Undo that stops only its own clip',
     ]);
-    expect(missingFeatures('2.20.0')).toEqual(['naming trimmed copies after their words']);
-    expect(missingFeatures('2.24.0')).toEqual([]);
+    expect(missingFeatures('2.20.0')).toEqual([
+      'naming trimmed copies after their words',
+      'Undo that stops only its own clip',
+    ]);
+    expect(missingFeatures('2.29.3')).toEqual(['Undo that stops only its own clip']);
+    expect(missingFeatures('2.24.0')).toEqual(['Undo that stops only its own clip']);
+    expect(missingFeatures('2.30.0')).toEqual([]);
     expect(supports('2.15.9', 'speed')).toBe(false);
     expect(supports('2.16.0', 'speed')).toBe(true);
     expect(missingFeatures(null)).toEqual([]);

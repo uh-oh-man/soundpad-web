@@ -110,6 +110,7 @@ The website always serves the newest version and hides anything the host's compa
 | Clear all temporary audio (host) | 2.18 |
 | Preview an edited copy (host) | 2.20 |
 | Trimmed copies named after their words | 2.24 |
+| Undo that stops only its own clip | 2.30 |
 
 ## Protocol
 

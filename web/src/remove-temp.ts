@@ -1,4 +1,5 @@
 import { controller } from './controller';
+import { supports } from './version';
 
 const PLAYING_REFUSAL = /Stop playback/i;
 const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -21,6 +22,13 @@ function playing(assetId: string) {
  * refusal is shown (2.29.3: Undo used to stop whatever was playing).
  */
 export async function removeNewTempAudio(assetId: string) {
+  // Companion 2.30+ decides itself: it stops the sound only if it is this source it started, so nothing
+  // here guesses from a playback report that may not have arrived yet.
+  if (supports(controller.getSnapshot().state.companionVersion, 'undoStop')) {
+    await controller.run('removeAudio', { assetId, action: 'stopIfPlaying' });
+    return;
+  }
+  // Older companions: decide here from what this page has heard.
   if (playing(assetId).it) await controller.run('stop');
   for (let attempt = 0; ; attempt++) {
     try {

@@ -2,6 +2,21 @@
 
 Notable changes to Soundpad Web. Versions follow the website's `package.json`; the Windows companion is versioned separately and only needs updating when a release says so.
 
+## 2.30.0 — Undo decided by the companion
+
+**Update the Windows companion** to get this. With an older companion, Undo works as in 2.29.3.
+
+### Changed
+
+- **Undo (on Edit copy's and Mimic's notices) now asks the companion to stop the sound only if it is the clip being undone.** The companion knows what it started playing, so it decides exactly. It no longer guesses from a playback report that may not have reached the page yet, or matches the wording of an error message. Two problems found in the 2.29 review go away:
+  - Undo pressed the instant after Mimic & play or Save & play no longer depends on timing.
+  - Another sound that is playing is never stopped. Undo then says to stop playback first, as before.
+
+### Tests
+
+- New C# test: with one Temp sound playing, Undo of a different one is refused and that sound keeps playing; a guest's request stops nothing; Undo of the playing one stops it and removes it.
+- New unit test: with companion 2.30, Undo sends one request and leaves the decision to the companion. Older companions keep the 2.29.3 path, which is still tested.
+
 ## 2.29.3 — Fixes from a review of 2.19–2.29
 
 A code review of everything since 2.18.2 found these. The website fixes work with any companion. The two naming and preview fixes marked (companion) need this release's companion.

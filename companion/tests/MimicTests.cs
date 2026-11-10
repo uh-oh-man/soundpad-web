@@ -450,6 +450,38 @@ public sealed class MimicTests : IDisposable
     }
 
     [Fact]
+    public async Task UndoStopsOnlyItsOwnPlayingSource()
+    {
+        // 2.30: removeAudio with "stopIfPlaying" stops playback only when the companion itself started this
+        // source; another sound keeps playing and the removal is refused as before.
+        await using var mock = new MockSoundpad { DurationMs = 60000 }; using var pipe = new SoundpadPipe(mock.Name, true); using var bridge = new Bridge(pipe, new StateStore(folder)); await bridge.Poll(true);
+        Assert.True((await bridge.Execute(Cmd("beginSession"), "host")).Ok);
+        float[] Tone(float step) => Enumerable.Range(0, 16000).Select(i => 0.3f * MathF.Sin(i * step)).ToArray();
+        Assert.True((await bridge.Upload(MimicRing.Wav(Tone(0.2f), 16000), "Playing one.wav", "Alice")).Ok);
+        Assert.True((await bridge.Upload(MimicRing.Wav(Tone(0.3f), 16000), "Other one.wav", "Alice")).Ok);
+        var journal = JsonSerializer.Deserialize<AudioJournal>(File.ReadAllText(Path.Combine(folder, "managed-audio", "journal.json")), Json.Options)!;
+        var playingOne = journal.Assets.Single(a => a.Name == "Playing one");
+        var otherOne = journal.Assets.Single(a => a.Name == "Other one");
+        var played = await bridge.Execute(Cmd("audioPlay") with { AssetId = playingOne.Id, Orientation = "normal" }, "host");
+        Assert.True(played.Ok, played.Error);
+        Assert.Equal("PLAYING", await pipe.Request("GetPlayStatus()"));
+        // Undo of a different source never stops what is playing.
+        var other = await bridge.Execute(Cmd("removeAudio") with { AssetId = otherOne.Id, Action = "stopIfPlaying" }, "host");
+        Assert.False(other.Ok); Assert.Contains("Stop playback", other.Error);
+        Assert.Equal("PLAYING", await pipe.Request("GetPlayStatus()"));
+        // Guests can't remove, and their request stops nothing.
+        Assert.False((await bridge.Execute(Cmd("removeAudio") with { AssetId = playingOne.Id, Action = "stopIfPlaying" }, "guest")).Ok);
+        Assert.Equal("PLAYING", await pipe.Request("GetPlayStatus()"));
+        // Undo of the playing source stops it, then removes it.
+        var own = await bridge.Execute(Cmd("removeAudio") with { AssetId = playingOne.Id, Action = "stopIfPlaying" }, "host");
+        Assert.True(own.Ok, own.Error);
+        Assert.Equal("STOPPED", await pipe.Request("GetPlayStatus()"));
+        await bridge.Poll(true);
+        Assert.DoesNotContain(bridge.Snapshot.Library.Sounds, s => s.AssetId == playingOne.Id);
+        Assert.Contains(bridge.Snapshot.Library.Sounds, s => s.AssetId == otherOne.Id);
+    }
+
+    [Fact]
     public async Task CopyNamesKeepEveryWordAndStayPlain()
     {
         // 2.29.3: a '/' in a copy's name cut it short ("24/7" -> "7"), and Whisper's curly quotes and dashes
