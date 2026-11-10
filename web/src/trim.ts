@@ -30,3 +30,22 @@ export function trimDrag(
   const fixed = grab === 'new' ? clamp(anchor, length) : grab === 'from' ? range.to : range.from;
   return { from: round(Math.min(fixed, at)), to: round(Math.max(fixed, at)) };
 }
+
+/**
+ * The part of the sound "Zoom to selection" shows (2.22.0): the range with some room either side (15% of
+ * it, at least a quarter second), at least half a second wide, kept inside the sound.
+ */
+export function zoomView(from: number, to: number, length: number) {
+  const lo = Math.min(from, to),
+    hi = Math.max(from, to);
+  const pad = Math.max(0.25, (hi - lo) * 0.15);
+  let start = Math.max(0, lo - pad),
+    end = Math.min(length, hi + pad);
+  const short = 0.5 - (end - start);
+  if (short > 0) {
+    start = Math.max(0, start - short / 2);
+    end = Math.min(length, start + 0.5);
+    start = Math.max(0, end - 0.5);
+  }
+  return { start, end };
+}

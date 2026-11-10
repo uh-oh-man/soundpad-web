@@ -898,8 +898,8 @@ test('Spotify has one dedicated sidebar player with track, artist and artwork', 
   );
   await page.screenshot({ path: 'artifacts/screenshots/spotify-phone.png', fullPage: true });
 });
-function sessionWave() {
-  const frames = 48000,
+function sessionWave(seconds = 1) {
+  const frames = 48000 * seconds,
     wave = Buffer.alloc(44 + frames * 4);
   wave.write('RIFF', 0);
   wave.writeUInt32LE(wave.length - 8, 4);
@@ -1745,6 +1745,52 @@ test('Edit copy: dragging on the waveform sets Start and End, and the host can p
   await expect(
     page.getByRole('button', { name: /^Play from start: Drag tone \(/ }).first(),
   ).toBeEnabled({ timeout: 25000 });
+});
+
+test('Edit copy: Zoom to selection shows just the chosen part for fine dragging', async ({
+  page,
+  harness,
+}) => {
+  await host(page, harness);
+  await page
+    .getByLabel('Add session audio', { exact: true })
+    .setInputFiles({ name: 'Zoom tone.wav', mimeType: 'audio/wav', buffer: sessionWave(10) });
+  await expect(
+    page.getByRole('button', { name: 'Play from start: Zoom tone', exact: true }),
+  ).toBeEnabled({ timeout: 25000 });
+  await page.locator('#temp-manager > summary').click();
+  await page
+    .locator('.temp-source', { hasText: 'Zoom tone' })
+    .getByRole('button', { name: 'Edit copy' })
+    .click();
+  const form = page.getByRole('form', { name: 'Edit a copy of Zoom tone' });
+  const wave = form.getByTestId('trim-wave');
+  await expect(wave.locator('.trim-wave-path')).toHaveAttribute('d', /M/, { timeout: 15000 });
+  // The whole sound is chosen at first, so there is nothing to zoom to yet.
+  await expect(form.getByRole('button', { name: 'Zoom to selection' })).toHaveCount(0);
+  await form.getByLabel('Start (s)').fill('4');
+  await form.getByLabel('End (s)').fill('6');
+  const zoom = form.getByRole('button', { name: 'Zoom to selection' });
+  await zoom.click();
+  // 4–6 s with room either side: 3.7–6.3 s fills the strip.
+  await expect(form.getByText('Showing 3.70–6.30 s of 10.00 s')).toBeVisible();
+  await expect(form.getByRole('button', { name: 'Show whole sound' })).toHaveAttribute(
+    'aria-pressed',
+    'true',
+  );
+  // Dragging the start edge across half the strip now moves it by only 1.3 s.
+  const box = (await wave.boundingBox())!;
+  const xAt = (s: number) => box.x + ((s - 3.7) / 2.6) * box.width;
+  await page.mouse.move(xAt(4), box.y + box.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(xAt(5), box.y + box.height / 2, { steps: 4 });
+  await page.mouse.up();
+  await expect
+    .poll(async () => Number(await form.getByLabel('Start (s)').inputValue()))
+    .toBeCloseTo(5, 1);
+  await expect(form.getByLabel('End (s)')).toHaveValue('6');
+  await form.getByRole('button', { name: 'Show whole sound' }).click();
+  await expect(form.getByText('Drag to choose the part to copy', { exact: false })).toBeVisible();
 });
 
 test('Edit copy can make a copy at any speed', async ({ page, harness }) => {

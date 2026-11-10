@@ -2,6 +2,27 @@
 
 Notable changes to Soundpad Web. Versions follow the website's `package.json`; the Windows companion is versioned separately and only needs updating when a release says so.
 
+## 2.22.0 — Zoom in on Edit copy's waveform
+
+Website only; works with any companion that has Edit copy. The companion reports 2.22.0 in this release, with no other change.
+
+### Added
+
+- **Zoom to selection** under Edit copy's waveform, like the zoom in Voice Replay Studio's editor.
+  - It shows just the chosen part, with a little room either side, so both edges can be set finely by dragging even on a long sound.
+  - On a 3-minute sound the whole strip covers about 0.2 s per step. Zoomed to a 2-second part it covers about 0.003 s.
+  - **Show whole sound** zooms back out. A line under the strip says which seconds it shows.
+  - The button appears once the chosen part is less than most of the sound.
+
+### Fixed
+
+- Dragging on Edit copy's waveform could stop partway when text near it was selected: the browser started dragging the selected text instead. Pressing on the waveform no longer selects or drags text.
+
+### Tests
+
+- New e2e test: on a 10-second tone, choose 4–6 s and zoom. The strip shows 3.70–6.30 s, and dragging the start edge across half of it moves it by only about 1.3 s. Show whole sound zooms back out.
+- Unit tests for the zoomed view (room either side, at least half a second, inside the sound).
+
 ## 2.21.0 — Edit a fresh Mimic clip in one press
 
 Website only; works with any companion that has Edit copy. The companion reports 2.21.0 in this release, with no other change.
