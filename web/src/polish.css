@@ -933,3 +933,9 @@ body,
   background: color-mix(in srgb, var(--accent) 8%, transparent);
   font-size: 13px;
 }
+/* Keyboard focus is never hidden behind the player bar (2.27.2). On a phone the bar covers the bottom
+   ~160 px, and Tab scrolled controls like Edit copy's Save buttons into exactly that strip. The player
+   publishes its live height as --player-height, so scrolling keeps that much room at the bottom. */
+html {
+  scroll-padding-bottom: calc(var(--player-height, 0px) + 12px);
+}

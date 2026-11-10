@@ -2496,6 +2496,41 @@ test('Mimic on a phone: a fresh clip keeps its name readable beside Edit, Keep a
   }
 });
 
+test('on a phone, keyboard focus is never hidden behind the player bar', async ({
+  page,
+  harness,
+}) => {
+  // 2.27.2: Tab put Edit copy's Save copy and Save & play under the bar at the bottom of a phone screen.
+  await page.setViewportSize({ width: 375, height: 812 });
+  await host(page, harness);
+  await page
+    .getByLabel('Add session audio', { exact: true })
+    .setInputFiles({ name: 'Focus tone.wav', mimeType: 'audio/wav', buffer: sessionWave(2) });
+  await expect(
+    page.getByRole('button', { name: 'Play from start: Focus tone', exact: true }),
+  ).toBeEnabled({ timeout: 25000 });
+  await page.locator('#temp-manager > summary').click();
+  await page
+    .locator('.temp-source', { hasText: 'Focus tone' })
+    .getByRole('button', { name: 'Edit copy' })
+    .click();
+  const form = page.getByRole('form', { name: 'Edit a copy of Focus tone' });
+  await page.evaluate(() => window.scrollTo(0, 0));
+  await form.getByLabel('Name').focus();
+  for (const name of ['Save copy', 'Save & play', 'Preview']) {
+    await page.keyboard.press('Tab');
+    await expect(form.getByRole('button', { name })).toBeFocused();
+    // What is drawn at the focused control's centre is the control itself, not the player bar.
+    const shown = await page.evaluate(() => {
+      const el = document.activeElement as HTMLElement;
+      const r = el.getBoundingClientRect();
+      const hit = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+      return hit === el || el.contains(hit);
+    });
+    expect(shown, `${name} is visible when focused`).toBe(true);
+  }
+});
+
 test('Mimic fits a phone: header keeps Settings on screen and long clip names do not widen the window', async ({
   page,
   harness,

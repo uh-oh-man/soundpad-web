@@ -357,7 +357,8 @@ export function TempManager({
               type="search"
               className="temp-search"
               aria-label="Search Temp"
-              placeholder={`Search ${listed.length} sources by name or who added them`}
+              placeholder={`Search ${listed.length} sources`}
+              title="Matches the name or who added it"
               value={find}
               onChange={(e) => setFind(e.target.value)}
             />

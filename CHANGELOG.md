@@ -2,6 +2,19 @@
 
 Notable changes to Soundpad Web. Versions follow the website's `package.json`; the Windows companion is versioned separately and only needs updating when a release says so.
 
+## 2.27.2 — Keyboard focus never hides behind the player bar
+
+Website only; works with every companion. The companion reports 2.27.2 in this release, with no other change.
+
+### Fixed
+
+- **On a phone, pressing Tab could move focus to a control hidden behind the player bar.** For example, Edit copy's **Save copy** and **Save & play** ended up under the bar at the bottom of the screen, so a keyboard user couldn't see what was focused. The page now always keeps room for the bar when it scrolls a control into view, everywhere on the page. It follows the bar's real height, including when the bar is expanded.
+- Temp's search box (2.25) shows a shorter placeholder ("Search 7 sources"), which was cut off on phones. The full rule is in its tooltip.
+
+### Tests
+
+- New e2e test at phone width (Chromium and WebKit): tabbing to Save copy, Save & play and Preview shows each one, not the player bar, under the focused control. It fails without the fix.
+
 ## 2.27.1 — Readable clip names in Mimic on phones
 
 Website only; works with every companion. The companion reports 2.27.1 in this release, with no other change.
