@@ -1,0 +1,73 @@
+name: Rebuild an old release
+# Gives an old version whose CI failed (so it never got a release) a downloadable EXE, so every version can be
+# restored by downloading it (docs/ROLLBACK.md). The owner asked for this on 2026-11-09 for v2.14.3 and v2.15.4.
+#
+# Push a tag named rebuild-vX.Y.Z pointing at a main commit that has this file; the build uses the exact source of
+# the existing tag vX.Y.Z, the same way that version's release job did, and runs the EXE smoke test. The tests that
+# failed at the time are NOT re-run, and the release says so. Never used for a new version: new versions are only
+# released after main passes CI (CLAUDE.md).
+on:
+  push:
+    tags:
+      - 'rebuild-v*'
+permissions:
+  contents: write
+jobs:
+  rebuild:
+    runs-on: windows-latest
+    env:
+      RELEASE_TAG: ${{ github.ref_name }}
+    steps:
+      - name: Which version
+        id: version
+        shell: pwsh
+        run: |
+          $tag = $env:RELEASE_TAG -replace '^rebuild-', ''
+          if ($tag -notmatch '^v\d+\.\d+\.\d+$') { throw "Expected rebuild-vX.Y.Z, got $env:RELEASE_TAG" }
+          "tag=$tag" >> $env:GITHUB_OUTPUT
+      - name: Source of that version
+        uses: actions/checkout@v7
+        with:
+          ref: refs/tags/${{ steps.version.outputs.tag }}
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+          cache: npm
+      - uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: '10.0.x'
+      - run: npm ci
+      - run: npm run build
+      - name: Publish portable companion (as that version's release job did)
+        run: dotnet publish companion/SoundpadWeb.Companion.csproj -c Release -r win-x64 --self-contained true -o artifacts/release "-p:WebsiteUrl=$env:PUBLIC_WEBSITE_URL"
+        env:
+          PUBLIC_WEBSITE_URL: ${{ vars.SOUNDPAD_WEB_URL || format('https://{0}.github.io/{1}/', github.repository_owner, github.event.repository.name) }}
+      - run: ./scripts/smoke-exe.ps1 -UseEmbeddedWebsite
+      - name: Hash portable executable
+        shell: pwsh
+        run: (Get-FileHash artifacts/release/SoundpadWeb.exe -Algorithm SHA256).Hash | Set-Content artifacts/release/SHA256.txt
+      - name: Publish the release for the old tag
+        shell: pwsh
+        run: |
+          $tag = '${{ steps.version.outputs.tag }}'
+          $version = $tag.TrimStart('v')
+          $lines = Get-Content CHANGELOG.md -Encoding utf8
+          $start = ($lines | Select-String -Pattern "^## $([regex]::Escape($version))( |$)" | Select-Object -First 1).LineNumber
+          $section = ''
+          if ($start) {
+            $end = ($lines[$start..($lines.Count - 1)] | Select-String -Pattern '^## ' | Select-Object -First 1).LineNumber
+            $section = ($lines[$start..($(if ($end) { $start + $end - 2 } else { $lines.Count - 1 }))] -join "`n").Trim()
+            $title = "Soundpad Web $tag — " + ($lines[$start - 1] -replace "^## \S+\s*(—\s*)?", '') + ' (rebuilt)'
+          } else { $title = "Soundpad Web $tag (rebuilt)" }
+          $notes = @"
+          # Soundpad Web $tag (rebuilt later)
+
+          > **This EXE was built later, from this version's exact source** (tag ``$tag``), by the *Rebuild an old release* workflow on $(Get-Date -Format 'yyyy-MM-dd'). When this version was first tagged, its CI tests failed, so no release was published then. Those tests were **not** re-run for this build; only the EXE smoke test was. See docs/ROLLBACK.md for which version to prefer.
+
+          $section
+          "@
+          Set-Content release-notes.md $notes -Encoding utf8
+          gh release create $tag artifacts/release/SoundpadWeb.exe artifacts/release/SHA256.txt --repo $env:REPOSITORY --title "$title" --notes-file release-notes.md
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
