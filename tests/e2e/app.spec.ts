@@ -1585,19 +1585,20 @@ test('a guest whose browser has no WebRTC is told why at once', async ({
   const url = await invite(page);
   const context = await browser.newContext();
   try {
-    // As if WebRTC were turned off by a setting or a privacy extension.
+    // As if WebRTC were turned off by a setting or a privacy extension. A returning guest who already
+    // chose a name goes straight to joining, which is where the check runs (the name prompt is covered
+    // elsewhere). On a slow CI runner the name prompt once took over 30 s to appear in both attempts
+    // (v2.29.0's tag run), so this test no longer waits for it.
     await context.addInitScript(() => {
       delete (window as { RTCPeerConnection?: unknown }).RTCPeerConnection;
+      localStorage.setItem('soundpad-name-confirmed', '1');
     });
     const guest = await context.newPage();
     await guest.goto(url);
-    // A fresh browser context loads the whole app; give a slow CI runner time before the name prompt.
-    await expect(guest.getByRole('dialog', { name: /gamer name/i })).toBeVisible({
-      timeout: 30000,
-    });
-    await finishGuestName(guest, 'No RTC');
+    // A fresh browser context loads the whole app, which a slow CI runner can take a while to do (the
+    // other guest tests allow 60 s too). Once loaded, the message appears at once.
     await expect(guest.getByText('WebRTC is turned off or not supported')).toBeVisible({
-      timeout: 3000,
+      timeout: 60000,
     });
     await expect(guest.getByText('WebRTC blocked', { exact: true })).toBeVisible(); // header
   } finally {

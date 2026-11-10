@@ -2,6 +2,13 @@
 
 Notable changes to Soundpad Web. Versions follow the website's `package.json`; the Windows companion is versioned separately and only needs updating when a release says so.
 
+## 2.29.1 — 2.29.0, released
+
+Website only. The app is identical to 2.29.0 apart from the version number, so everything in 2.29.0 below arrives with this release.
+
+- **2.29.0's tag CI failed on a slow GitHub runner,** so no EXE was published for v2.29.0 (the same commit had passed on `main`). The run took 6.5 minutes against about 3 normally. In both attempts, the "guest without WebRTC" test waited over 30 s for the guest's name prompt, and an upload test needed its retry. Public tags are never moved, so v2.29.0 stays source-only, and this is the release.
+- That test is now sturdier. It joins as a returning guest who already chose a name, which is where the WebRTC check happens (the name prompt is tested elsewhere), and it allows 60 s for a fresh browser to load the app, like the other guest tests.
+
 ## 2.29.0 — Undo a Mimic clip
 
 Website only; works with every companion. The companion reports 2.29.0 in this release, with no other change.
