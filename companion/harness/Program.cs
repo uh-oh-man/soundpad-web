@@ -148,6 +148,51 @@ if (args.FirstOrDefault() == "--real-session-cleanup")
     Console.WriteLine($"journal: tempCategory={journal.GetProperty("tempCategory")}; assets={journal.GetProperty("assets").GetArrayLength()}; issues: {string.Join("; ", journal.GetProperty("issues").EnumerateArray().Select(i => i.GetProperty("code").GetString()))}");
     return;
 }
+if (args.FirstOrDefault() == "--real-edit-copy-probe")
+{
+    // Owner-approved check (2.27) of Edit copy on this PC's real Soundpad, run with the companion closed: upload a
+    // tone, make a chipmunk copy, preview, then End hosting. It uses a throwaway data folder (never the companion's),
+    // so its Temp category is its own; nothing is played aloud. It reports whether Soundpad ends exactly as before.
+    var scratch = Path.Combine(Path.GetTempPath(), "soundpad-web-edit-probe-" + Guid.NewGuid().ToString("N"));
+    using var real = new SoundpadPipe();
+    async Task<NativeCatalog> Settle(Func<NativeCatalog, bool> done) { NativeCatalog c = await ManagedSoundpad.Read(real); for (int i = 0; i < 30 && !done(c); i++) { await Task.Delay(200); c = await ManagedSoundpad.Read(real); } return c; }
+    Command Cmd(string op) => new(2, Guid.NewGuid().ToString(), DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(), op);
+    var before = await ManagedSoundpad.Read(real);
+    Console.WriteLine($"before: {before.Entries.Length} sounds, {before.Categories.Length} categories");
+    try
+    {
+        using (var probe = new Bridge(real, new StateStore(scratch)))
+        {
+            await probe.Poll(true);
+            Console.WriteLine("begin session: " + (await probe.Execute(Cmd("beginSession"), "host")).Ok);
+            var tone = Enumerable.Range(0, 48000 * 2).Select(i => 0.2f * MathF.Sin(i * 2 * MathF.PI * 523 / 48000)).ToArray();
+            var upload = await probe.Upload(MimicRing.Wav(tone, 48000), "Edit probe tone.wav", "Probe");
+            Console.WriteLine($"upload: {upload.Ok} {upload.Error}");
+            var journal = System.Text.Json.JsonSerializer.Deserialize<AudioJournal>(File.ReadAllText(Path.Combine(scratch, "managed-audio", "journal.json")), Json.Options)!;
+            var source = journal.Assets.Single();
+            var clock = System.Diagnostics.Stopwatch.StartNew();
+            var copy = await probe.Execute(Cmd("trimAudio") with { AssetId = source.Id, PositionMs = 250, EndMs = 1750, Action = "chipmunk" }, "host");
+            Console.WriteLine($"chipmunk copy: {copy.Ok} {copy.Error} in {clock.ElapsedMilliseconds} ms");
+            var named = System.Text.Json.JsonSerializer.Deserialize<AudioJournal>(File.ReadAllText(Path.Combine(scratch, "managed-audio", "journal.json")), Json.Options)!.Assets.SingleOrDefault(x => x.Id != source.Id);
+            var path = named?.Variants.FirstOrDefault()?.Path;
+            var listed = await Settle(c => path != null && c.Entries.Any(e => e.Path.Equals(path, StringComparison.OrdinalIgnoreCase)));
+            Console.WriteLine($"copy \"{named?.Name}\" in Soundpad: {path != null && listed.Entries.Any(e => e.Path.Equals(path, StringComparison.OrdinalIgnoreCase))}");
+            if (path != null) using (var wave = new NAudio.Wave.WaveFileReader(path)) Console.WriteLine($"copy length: {wave.TotalTime.TotalSeconds:0.00} s (1.5 s at 1.5x = 1.00 s)");
+            var preview = await probe.Execute(Cmd("trimPreview") with { AssetId = source.Id, PositionMs = 0, EndMs = 2000, Action = "echo" }, "host");
+            Console.WriteLine($"echo preview: {preview.Ok} {preview.Error} (returned to this tool only, not played)");
+            Console.WriteLine("end session: " + (await probe.Execute(Cmd("endSession"), "host")).Ok);
+        }
+        var after = await Settle(c => c.Entries.Length == before.Entries.Length && c.Categories.Length == before.Categories.Length);
+        bool same = after.Entries.Select(e => e.Path).OrderBy(p => p).SequenceEqual(before.Entries.Select(e => e.Path).OrderBy(p => p))
+            && after.Categories.Select(c => c.Name).OrderBy(n => n).SequenceEqual(before.Categories.Select(c => c.Name).OrderBy(n => n));
+        Console.WriteLine($"after: {after.Entries.Length} sounds, {after.Categories.Length} categories; RESULT: Soundpad {(same ? "is exactly as before" : "CHANGED")}");
+    }
+    finally
+    {
+        try { Directory.Delete(scratch, true); Console.WriteLine("throwaway data folder deleted"); } catch (IOException ex) { Console.WriteLine("could not delete " + scratch + ": " + ex.Message); }
+    }
+    return;
+}
 if (args.FirstOrDefault() == "--test-real-category-removal")
 {
     // Owner-approved probe (2.16): does removing a category also remove its sounds from Soundpad's main list?

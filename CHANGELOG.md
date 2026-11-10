@@ -2,6 +2,12 @@
 
 Notable changes to Soundpad Web. Versions follow the website's `package.json`; the Windows companion is versioned separately and only needs updating when a release says so.
 
+## Unreleased
+
+### Tests
+
+- New harness tool `--real-edit-copy-probe` checks Edit copy on this PC's real Soundpad, with the companion closed. It uses a throwaway data folder (never the companion's), so it has its own Temp category, and plays nothing aloud. It uploads a tone, makes a chipmunk copy, previews an echo copy, and ends hosting. On the owner's PC (2026-11-10): the copy was made in 272 ms and listed by Soundpad; it lasted exactly 1.00 s (1.5 s at 1.5×); the preview worked; Soundpad ended exactly as before (143 sounds, 9 categories, the same paths and names); and the companion's own `state.json` and journal were byte-for-byte unchanged.
+
 ## 2.27.0 — Save & play in Edit copy
 
 Website only; works with every companion that has Edit copy. The companion reports 2.27.0 in this release, with no other change.
