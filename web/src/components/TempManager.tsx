@@ -105,6 +105,8 @@ export function TempManager({
     keepPitch: boolean;
   }>();
   const [refresh, setRefresh] = useState(0);
+  // Search (2.25), like the Voice Replay Studio list: a long session's Temp holds many sources.
+  const [find, setFind] = useState('');
   // A clip whose Edit copy was asked for from Mimic (2.21), opened once Temp lists it.
   const [wantEdit, setWantEdit] = useState<string>();
   useEffect(
@@ -264,6 +266,19 @@ export function TempManager({
     }, 400);
     return () => clearTimeout(timer);
   }, [loopKey]);
+  const listed = (data?.manager.assets ?? []).filter(
+    (a) =>
+      a.state !== 'removed' &&
+      (a.origin === 'upload' || a.variants.some((v) => v.orientation === 'reversed')),
+  );
+  const findWords = listed.length > 6 ? find.trim().toLowerCase() : '';
+  // The source being edited stays listed, so a search never hides an open Edit copy form.
+  const shown = listed.filter(
+    (a) =>
+      !findWords ||
+      a.id === trimming?.id ||
+      `${a.name} ${a.uploader}`.toLowerCase().includes(findWords),
+  );
   const categories = flattenCategories(state.library.categories).filter(
     (c) => c.category.id !== undefined,
   );
@@ -300,334 +315,341 @@ export function TempManager({
               Managed audio is paused. Files are preserved; resolve the recovery issue below.
             </p>
           )}
-          {data?.manager.assets
-            .filter(
-              (a) =>
-                a.state !== 'removed' &&
-                (a.origin === 'upload' || a.variants.some((v) => v.orientation === 'reversed')),
-            )
-            .map((a) => (
-              <article className="temp-source" key={a.id}>
-                <div>
-                  <strong>{a.name}</strong>
-                  <small>
-                    {a.uploader} · {a.origin === 'native' ? 'Native source' : 'Upload'} · {a.state}
-                  </small>
-                </div>
-                <div className="temp-actions">
-                  {(['normal', 'reversed'] as const).map((orientation) => (
-                    <button
-                      key={orientation}
-                      aria-disabled={!!pending || undefined}
-                      disabled={
-                        !state.available ||
-                        !connected ||
-                        (!host && !state.permissions.remotePlayback) ||
-                        (!host &&
-                          !a[orientation]?.ready &&
-                          state.permissions.guestTransforms === false)
-                      }
-                      onClick={() => void run('audioPlay', { assetId: a.id, orientation })}
-                    >
-                      Play {orientation}
-                    </button>
-                  ))}
-                  {(host || state.permissions.guestUploads !== false) &&
-                    durationOf(a) !== undefined &&
-                    supports(state.companionVersion, 'trim') && (
-                      <button
-                        disabled={!connected}
-                        aria-disabled={!!pending || undefined}
-                        onClick={() =>
-                          // A running command closes open forms when it finishes; don't open one now.
-                          !pending &&
-                          setTrimming({
-                            id: a.id,
-                            from: 0,
-                            to: durationOf(a)! / 1000,
-                            name: '',
-                            effect: 'none',
-                            speed: 1,
-                            keepPitch: false,
-                          })
-                        }
-                      >
-                        Edit copy
-                      </button>
-                    )}
-                </div>
-                {trimming?.id === a.id && (
-                  <form
-                    className="temp-trim"
-                    aria-label={`Edit a copy of ${a.name}`}
-                    // The exact length (e.g. 2.614 s) is rarely a multiple of the 0.05 s step, which
-                    // would make the browser silently refuse to submit. Clamp here instead.
-                    noValidate
-                    onSubmit={(e) => {
-                      e.preventDefault();
-                      stopPreview();
-                      void run('trimAudio', {
-                        ...trimFields(a.id, durationOf(a)!, trimming),
-                        ...(trimming.name.trim() && { name: trimming.name.trim() }),
-                      });
-                    }}
+          {listed.length > 6 && (
+            <input
+              type="search"
+              className="temp-search"
+              aria-label="Search Temp"
+              placeholder={`Search ${listed.length} sources by name or who added them`}
+              value={find}
+              onChange={(e) => setFind(e.target.value)}
+            />
+          )}
+          {!shown.length && !!listed.length && (
+            <p className="muted">No sources match “{find.trim()}”.</p>
+          )}
+          {shown.map((a) => (
+            <article className="temp-source" key={a.id}>
+              <div>
+                <strong>{a.name}</strong>
+                <small>
+                  {a.uploader} · {a.origin === 'native' ? 'Native source' : 'Upload'} · {a.state}
+                </small>
+              </div>
+              <div className="temp-actions">
+                {(['normal', 'reversed'] as const).map((orientation) => (
+                  <button
+                    key={orientation}
+                    aria-disabled={!!pending || undefined}
+                    disabled={
+                      !state.available ||
+                      !connected ||
+                      (!host && !state.permissions.remotePlayback) ||
+                      (!host &&
+                        !a[orientation]?.ready &&
+                        state.permissions.guestTransforms === false)
+                    }
+                    onClick={() => void run('audioPlay', { assetId: a.id, orientation })}
                   >
-                    {a.normal?.soundId && (
-                      <TrimWave
-                        state={state}
-                        soundId={a.normal.soundId}
-                        lengthMs={durationOf(a)!}
-                        from={trimming.from}
-                        to={trimming.to}
-                        onChange={(range) => setTrimming({ ...trimming, ...range })}
-                      />
-                    )}
-                    <label>
-                      Start (s)
-                      <input
-                        type="number"
-                        min={0}
-                        max={durationOf(a)! / 1000}
-                        step={0.05}
-                        value={trimming.from}
-                        onChange={(e) => setTrimming({ ...trimming, from: Number(e.target.value) })}
-                      />
-                    </label>
-                    <label>
-                      End (s)
-                      <input
-                        type="number"
-                        min={0}
-                        max={durationOf(a)! / 1000}
-                        step={0.05}
-                        value={trimming.to}
-                        onChange={(e) => setTrimming({ ...trimming, to: Number(e.target.value) })}
-                      />
-                    </label>
-                    {supports(state.companionVersion, 'effects') && (
-                      <label>
-                        Effect
-                        <select
-                          value={trimming.effect}
-                          onChange={(e) =>
-                            setTrimming({ ...trimming, effect: e.target.value as Effect })
-                          }
-                        >
-                          {Object.entries(effects)
-                            .filter(
-                              ([value]) =>
-                                value !== 'speed' || supports(state.companionVersion, 'speed'),
-                            )
-                            .map(([value, label]) => (
-                              <option key={value} value={value}>
-                                {label}
-                              </option>
-                            ))}
-                        </select>
-                      </label>
-                    )}
-                    {trimming.effect === 'speed' && (
-                      // Any speed: tape style, so pitch moves with it (slower is deeper, faster is higher).
-                      <div className="temp-speed" role="group" aria-label="Speed">
-                        <label>
-                          Speed
-                          <input
-                            type="range"
-                            min={-100}
-                            max={100}
-                            step={1}
-                            aria-valuetext={formatSpeed(trimming.speed)}
-                            value={speedToSlider(trimming.speed)}
-                            onChange={(e) =>
-                              setTrimming({
-                                ...trimming,
-                                speed: sliderToSpeed(Number(e.target.value)),
-                              })
-                            }
-                          />
-                        </label>
-                        <label>
-                          Exact speed (×)
-                          <input
-                            type="number"
-                            min={MIN_SPEED}
-                            max={MAX_SPEED}
-                            step={0.05}
-                            value={trimming.speed}
-                            onChange={(e) =>
-                              setTrimming({ ...trimming, speed: Number(e.target.value) })
-                            }
-                            onBlur={() =>
-                              setTrimming({ ...trimming, speed: clampSpeed(trimming.speed) })
-                            }
-                          />
-                        </label>
-                        {supports(state.companionVersion, 'keepPitch') && (
-                          // Time-stretch (2.17): voices keep their pitch instead of going deep or squeaky.
-                          <label className="temp-keep-pitch">
-                            <input
-                              type="checkbox"
-                              checked={trimming.keepPitch}
-                              onChange={(e) =>
-                                setTrimming({ ...trimming, keepPitch: e.target.checked })
-                              }
-                            />
-                            Keep pitch
-                          </label>
-                        )}
-                        <span className="muted">
-                          {formatSpeed(clampSpeed(trimming.speed))}: the copy lasts{' '}
-                          {(
-                            Math.max(0, trimming.to - trimming.from) / clampSpeed(trimming.speed)
-                          ).toFixed(2)}{' '}
-                          s.{' '}
-                          {trimming.keepPitch && supports(state.companionVersion, 'keepPitch')
-                            ? 'Same pitch.'
-                            : 'Pitch changes with speed.'}
-                        </span>
-                      </div>
-                    )}
-                    <label>
-                      Name
-                      <input
-                        maxLength={100}
-                        placeholder={`${byWords(trimming) ? 'Its words' : a.name} (${
-                          trimming.effect === 'none'
-                            ? 'trimmed'
-                            : trimming.effect === 'speed'
-                              ? `${Number(clampSpeed(trimming.speed).toFixed(2))}x speed${trimming.keepPitch && supports(state.companionVersion, 'keepPitch') ? ', same pitch' : ''}`
-                              : effectSuffix[trimming.effect]
-                        })`}
-                        value={trimming.name}
-                        onChange={(e) => setTrimming({ ...trimming, name: e.target.value })}
-                      />
-                    </label>
-                    <span className="muted">
-                      {Math.max(0, trimming.to - trimming.from).toFixed(2)} s of{' '}
-                      {(durationOf(a)! / 1000).toFixed(2)} s · saved as a new Temp sound
-                      {byWords(trimming) &&
-                        ' · left unnamed, it is named after its words (transcripts are on)'}
-                    </span>
+                    Play {orientation}
+                  </button>
+                ))}
+                {(host || state.permissions.guestUploads !== false) &&
+                  durationOf(a) !== undefined &&
+                  supports(state.companionVersion, 'trim') && (
                     <button
-                      className="primary"
-                      type="submit"
-                      disabled={trimming.to - trimming.from < 0.1 || trimming.from < 0}
+                      disabled={!connected}
                       aria-disabled={!!pending || undefined}
+                      onClick={() =>
+                        // A running command closes open forms when it finishes; don't open one now.
+                        !pending &&
+                        setTrimming({
+                          id: a.id,
+                          from: 0,
+                          to: durationOf(a)! / 1000,
+                          name: '',
+                          effect: 'none',
+                          speed: 1,
+                          keepPitch: false,
+                        })
+                      }
                     >
-                      Save copy
+                      Edit copy
                     </button>
-                    {host && supports(state.companionVersion, 'trimPreview') && (
-                      <button
-                        type="button"
-                        title="Hear the copy on this PC only (its first 20 s); nobody else hears it"
-                        disabled={trimming.to - trimming.from < 0.1 || trimming.from < 0}
-                        onClick={() =>
-                          previewing
-                            ? stopPreview()
-                            : void preview(
-                                'trimPreview',
-                                trimFields(a.id, durationOf(a)!, trimming),
-                                { loop },
-                              )
+                  )}
+              </div>
+              {trimming?.id === a.id && (
+                <form
+                  className="temp-trim"
+                  aria-label={`Edit a copy of ${a.name}`}
+                  // The exact length (e.g. 2.614 s) is rarely a multiple of the 0.05 s step, which
+                  // would make the browser silently refuse to submit. Clamp here instead.
+                  noValidate
+                  onSubmit={(e) => {
+                    e.preventDefault();
+                    stopPreview();
+                    void run('trimAudio', {
+                      ...trimFields(a.id, durationOf(a)!, trimming),
+                      ...(trimming.name.trim() && { name: trimming.name.trim() }),
+                    });
+                  }}
+                >
+                  {a.normal?.soundId && (
+                    <TrimWave
+                      state={state}
+                      soundId={a.normal.soundId}
+                      lengthMs={durationOf(a)!}
+                      from={trimming.from}
+                      to={trimming.to}
+                      onChange={(range) => setTrimming({ ...trimming, ...range })}
+                    />
+                  )}
+                  <label>
+                    Start (s)
+                    <input
+                      type="number"
+                      min={0}
+                      max={durationOf(a)! / 1000}
+                      step={0.05}
+                      value={trimming.from}
+                      onChange={(e) => setTrimming({ ...trimming, from: Number(e.target.value) })}
+                    />
+                  </label>
+                  <label>
+                    End (s)
+                    <input
+                      type="number"
+                      min={0}
+                      max={durationOf(a)! / 1000}
+                      step={0.05}
+                      value={trimming.to}
+                      onChange={(e) => setTrimming({ ...trimming, to: Number(e.target.value) })}
+                    />
+                  </label>
+                  {supports(state.companionVersion, 'effects') && (
+                    <label>
+                      Effect
+                      <select
+                        value={trimming.effect}
+                        onChange={(e) =>
+                          setTrimming({ ...trimming, effect: e.target.value as Effect })
                         }
                       >
-                        <Headphones size={15} /> {previewing ? 'Stop preview' : 'Preview'}
-                      </button>
-                    )}
-                    {host && supports(state.companionVersion, 'trimPreview') && (
-                      <label
-                        className="temp-loop"
-                        title="Repeat the preview; changing the cut or effect restarts it"
-                      >
+                        {Object.entries(effects)
+                          .filter(
+                            ([value]) =>
+                              value !== 'speed' || supports(state.companionVersion, 'speed'),
+                          )
+                          .map(([value, label]) => (
+                            <option key={value} value={value}>
+                              {label}
+                            </option>
+                          ))}
+                      </select>
+                    </label>
+                  )}
+                  {trimming.effect === 'speed' && (
+                    // Any speed: tape style, so pitch moves with it (slower is deeper, faster is higher).
+                    <div className="temp-speed" role="group" aria-label="Speed">
+                      <label>
+                        Speed
                         <input
-                          type="checkbox"
-                          checked={loop}
-                          onChange={(e) => {
-                            setLoop(e.target.checked);
-                            setLooping(e.target.checked);
-                          }}
+                          type="range"
+                          min={-100}
+                          max={100}
+                          step={1}
+                          aria-valuetext={formatSpeed(trimming.speed)}
+                          value={speedToSlider(trimming.speed)}
+                          onChange={(e) =>
+                            setTrimming({
+                              ...trimming,
+                              speed: sliderToSpeed(Number(e.target.value)),
+                            })
+                          }
                         />
-                        Loop
                       </label>
-                    )}
+                      <label>
+                        Exact speed (×)
+                        <input
+                          type="number"
+                          min={MIN_SPEED}
+                          max={MAX_SPEED}
+                          step={0.05}
+                          value={trimming.speed}
+                          onChange={(e) =>
+                            setTrimming({ ...trimming, speed: Number(e.target.value) })
+                          }
+                          onBlur={() =>
+                            setTrimming({ ...trimming, speed: clampSpeed(trimming.speed) })
+                          }
+                        />
+                      </label>
+                      {supports(state.companionVersion, 'keepPitch') && (
+                        // Time-stretch (2.17): voices keep their pitch instead of going deep or squeaky.
+                        <label className="temp-keep-pitch">
+                          <input
+                            type="checkbox"
+                            checked={trimming.keepPitch}
+                            onChange={(e) =>
+                              setTrimming({ ...trimming, keepPitch: e.target.checked })
+                            }
+                          />
+                          Keep pitch
+                        </label>
+                      )}
+                      <span className="muted">
+                        {formatSpeed(clampSpeed(trimming.speed))}: the copy lasts{' '}
+                        {(
+                          Math.max(0, trimming.to - trimming.from) / clampSpeed(trimming.speed)
+                        ).toFixed(2)}{' '}
+                        s.{' '}
+                        {trimming.keepPitch && supports(state.companionVersion, 'keepPitch')
+                          ? 'Same pitch.'
+                          : 'Pitch changes with speed.'}
+                      </span>
+                    </div>
+                  )}
+                  <label>
+                    Name
+                    <input
+                      maxLength={100}
+                      placeholder={`${byWords(trimming) ? 'Its words' : a.name} (${
+                        trimming.effect === 'none'
+                          ? 'trimmed'
+                          : trimming.effect === 'speed'
+                            ? `${Number(clampSpeed(trimming.speed).toFixed(2))}x speed${trimming.keepPitch && supports(state.companionVersion, 'keepPitch') ? ', same pitch' : ''}`
+                            : effectSuffix[trimming.effect]
+                      })`}
+                      value={trimming.name}
+                      onChange={(e) => setTrimming({ ...trimming, name: e.target.value })}
+                    />
+                  </label>
+                  <span className="muted">
+                    {Math.max(0, trimming.to - trimming.from).toFixed(2)} s of{' '}
+                    {(durationOf(a)! / 1000).toFixed(2)} s · saved as a new Temp sound
+                    {byWords(trimming) &&
+                      ' · left unnamed, it is named after its words (transcripts are on)'}
+                  </span>
+                  <button
+                    className="primary"
+                    type="submit"
+                    disabled={trimming.to - trimming.from < 0.1 || trimming.from < 0}
+                    aria-disabled={!!pending || undefined}
+                  >
+                    Save copy
+                  </button>
+                  {host && supports(state.companionVersion, 'trimPreview') && (
                     <button
                       type="button"
-                      onClick={() => {
-                        stopPreview();
-                        setTrimming(undefined);
-                      }}
+                      title="Hear the copy on this PC only (its first 20 s); nobody else hears it"
+                      disabled={trimming.to - trimming.from < 0.1 || trimming.from < 0}
+                      onClick={() =>
+                        previewing
+                          ? stopPreview()
+                          : void preview(
+                              'trimPreview',
+                              trimFields(a.id, durationOf(a)!, trimming),
+                              { loop },
+                            )
+                      }
                     >
-                      Cancel
+                      <Headphones size={15} /> {previewing ? 'Stop preview' : 'Preview'}
                     </button>
-                  </form>
-                )}
-                {a.variants
-                  .filter((v) => v.current || v.legacyApproval)
-                  .map((v) => (
-                    <div className="temp-variant" key={v.id}>
-                      <span>
-                        {v.orientation} ·{' '}
-                        {v.permanent
-                          ? 'permanent'
-                          : v.legacyApproval
-                            ? 'accepted — move to permanent storage'
-                            : v.state}
-                      </span>
-                      {host && !v.permanent && v.state === 'ready' && v.nativeLabel && (
-                        <button
-                          aria-disabled={!!pending || undefined}
-                          onClick={() => {
-                            if (pending) return;
-                            setSaving({ asset: a, variant: v });
-                            setCategory('');
-                            setDirectory('');
-                          }}
-                        >
-                          Keep {v.orientation} permanently
-                        </button>
-                      )}
-                    </div>
-                  ))}
-                {host && (
-                  <div className="temp-actions">
-                    <button
-                      aria-disabled={!!pending || undefined}
-                      onClick={() => void run('retryAudio', { assetId: a.id })}
+                  )}
+                  {host && supports(state.companionVersion, 'trimPreview') && (
+                    <label
+                      className="temp-loop"
+                      title="Repeat the preview; changing the cut or effect restarts it"
                     >
-                      Retry preparation
-                    </button>
-                    {a.hasTemporary && (
+                      <input
+                        type="checkbox"
+                        checked={loop}
+                        onChange={(e) => {
+                          setLoop(e.target.checked);
+                          setLooping(e.target.checked);
+                        }}
+                      />
+                      Loop
+                    </label>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      stopPreview();
+                      setTrimming(undefined);
+                    }}
+                  >
+                    Cancel
+                  </button>
+                </form>
+              )}
+              {a.variants
+                .filter((v) => v.current || v.legacyApproval)
+                .map((v) => (
+                  <div className="temp-variant" key={v.id}>
+                    <span>
+                      {v.orientation} ·{' '}
+                      {v.permanent
+                        ? 'permanent'
+                        : v.legacyApproval
+                          ? 'accepted — move to permanent storage'
+                          : v.state}
+                    </span>
+                    {host && !v.permanent && v.state === 'ready' && v.nativeLabel && (
                       <button
                         aria-disabled={!!pending || undefined}
                         onClick={() => {
-                          if (
-                            !pending &&
-                            confirm(
-                              `Remove temporary audio for “${a.name}”? Permanent copies and native originals are preserved.`,
-                            )
-                          )
-                            void run('removeAudio', { assetId: a.id });
+                          if (pending) return;
+                          setSaving({ asset: a, variant: v });
+                          setCategory('');
+                          setDirectory('');
                         }}
                       >
-                        Remove temporary audio
+                        Keep {v.orientation} permanently
                       </button>
                     )}
                   </div>
-                )}
-                {host && (
-                  <details>
-                    <summary>File locations</summary>
-                    {data.locations
-                      ?.filter((l) => l.assetId === a.id)
-                      .map((l) => (
-                        <p className="temp-path" key={l.variantId}>
-                          {l.storage}: {l.path}
-                        </p>
-                      ))}
-                  </details>
-                )}
-              </article>
-            ))}
+                ))}
+              {host && (
+                <div className="temp-actions">
+                  <button
+                    aria-disabled={!!pending || undefined}
+                    onClick={() => void run('retryAudio', { assetId: a.id })}
+                  >
+                    Retry preparation
+                  </button>
+                  {a.hasTemporary && (
+                    <button
+                      aria-disabled={!!pending || undefined}
+                      onClick={() => {
+                        if (
+                          !pending &&
+                          confirm(
+                            `Remove temporary audio for “${a.name}”? Permanent copies and native originals are preserved.`,
+                          )
+                        )
+                          void run('removeAudio', { assetId: a.id });
+                      }}
+                    >
+                      Remove temporary audio
+                    </button>
+                  )}
+                </div>
+              )}
+              {host && (
+                <details>
+                  <summary>File locations</summary>
+                  {data?.locations
+                    ?.filter((l) => l.assetId === a.id)
+                    .map((l) => (
+                      <p className="temp-path" key={l.variantId}>
+                        {l.storage}: {l.path}
+                      </p>
+                    ))}
+                </details>
+              )}
+            </article>
+          ))}
           {!data?.manager.assets.length && (
             <p className="muted">No managed audio yet. Upload a sound or reverse one to start.</p>
           )}

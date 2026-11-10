@@ -1848,6 +1848,49 @@ test('Edit copy: Loop repeats the preview and replays it when the cut changes', 
   expect((await previews()).length).toBe(2);
 });
 
+test('Temp: a search appears once there are more than six sources', async ({ page, harness }) => {
+  test.setTimeout(120000);
+  await host(page, harness);
+  const names = ['Alpha', 'Bravo', 'Charlie', 'Delta', 'Echo', 'Foxtrot', 'Golf'];
+  // Different lengths, so no two uploads are the same audio (identical files are kept once).
+  for (const [i, name] of names.entries()) {
+    await page
+      .getByLabel('Add session audio', { exact: true })
+      .setInputFiles({ name: `${name}.wav`, mimeType: 'audio/wav', buffer: sessionWave(i + 1) });
+    await expect(
+      page.getByRole('button', { name: `Play from start: ${name}`, exact: true }),
+    ).toBeEnabled({ timeout: 25000 });
+    if (i === 5) {
+      // Six sources: no search yet.
+      await page.locator('#temp-manager > summary').click();
+      await expect(page.locator('.temp-source')).toHaveCount(6);
+      await expect(page.getByRole('searchbox', { name: 'Search Temp' })).toHaveCount(0);
+    }
+  }
+  const search = page.getByRole('searchbox', { name: 'Search Temp' });
+  await expect(search).toBeVisible();
+  await expect(page.locator('.temp-source')).toHaveCount(7);
+  await search.fill('fox');
+  await expect(page.locator('.temp-source')).toHaveCount(1);
+  await expect(page.locator('.temp-source')).toContainText('Foxtrot');
+  // An open Edit copy stays listed whatever the search says.
+  await page
+    .locator('.temp-source', { hasText: 'Foxtrot' })
+    .getByRole('button', { name: 'Edit copy' })
+    .click();
+  await search.fill('nothing like this');
+  await expect(page.getByText('No sources match', { exact: false })).toHaveCount(0);
+  await expect(page.getByRole('form', { name: 'Edit a copy of Foxtrot' })).toBeVisible();
+  await page
+    .getByRole('form', { name: 'Edit a copy of Foxtrot' })
+    .getByRole('button', { name: 'Cancel' })
+    .click();
+  await expect(page.getByText('No sources match “nothing like this”.')).toBeVisible();
+  // Who added it counts too.
+  await search.fill('host');
+  await expect(page.locator('.temp-source')).toHaveCount(7);
+});
+
 test('Edit copy can make a copy at any speed', async ({ page, harness }) => {
   await host(page, harness);
   await page

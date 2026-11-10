@@ -776,6 +776,17 @@ body,
   flex: 1 1 100%;
   font-size: 12px;
 }
+/* Temp's search (2.25), shown once a session has more than six sources. */
+.temp-search {
+  width: 100%;
+  min-height: 34px;
+  margin: 4px 0 8px;
+  padding: 6px 10px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--surface-2);
+  color: var(--text-primary);
+}
 /* Edit copy's waveform (2.19): drag to choose the part to copy, like Voice Replay Studio's editor. */
 .trim-wave {
   flex: 1 1 100%;

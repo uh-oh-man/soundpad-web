@@ -2,10 +2,20 @@
 
 Notable changes to Soundpad Web. Versions follow the website's `package.json`; the Windows companion is versioned separately and only needs updating when a release says so.
 
-## Unreleased
+## 2.25.0 — Search Temp
+
+Website only; works with every companion. The companion reports 2.25.0 in this release, with no other change.
+
+### Added
+
+- **A search box in Temp** once a session has more than six sources (reversed sounds, uploads, Mimic clips and edited copies), like the one in Mimic's Voice Replay Studio list.
+  - It matches the name or who added the sound.
+  - A source whose Edit copy is open stays listed whatever the search says, so a search never hides the form you're working in.
+  - When nothing matches, it says so.
 
 ### Tests
 
+- New e2e test: six sources show no search; the seventh adds it; "fox" leaves only Foxtrot; an open Edit copy stays listed while the search matches nothing; "No sources match" appears after closing it; searching "host" (who added them) shows all seven.
 - The permanent accessibility (axe) test now also covers Edit copy's waveform, Zoom to selection, Preview and Loop (on a desktop and a phone screen) and Mimic's Edit button (2.19–2.23). No serious or critical problems were found, in Chromium or WebKit. Edit copy was also checked at phone width: nothing overflows, and every control scrolls clear of the player bar.
 - New harness tool `--trim-words <wav> <fromMs> <toMs>` shows the name a trimmed copy gets from real Whisper (2.24). On the owner's PC, three cuts of the JFK sample were named "And so my fellow Americans.", "not what your country can do for you." and "Ask what you can do for your country.", in about 1.7 s each.
 
