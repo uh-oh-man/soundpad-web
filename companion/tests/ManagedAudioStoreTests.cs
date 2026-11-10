@@ -63,6 +63,31 @@ public sealed class ManagedAudioStoreTests : IDisposable
         Assert.Empty(store.Public.Assets); // the cleaned-up upload's record is forgotten too
     }
     [Fact]
+    public async Task ClearingTemporaryAudioMidSessionRemovesItAllAndHostingContinues()
+    {
+        // 2.18: "Clear all temporary audio" does what End hosting does, without ending the session.
+        await using var mock = new MockSoundpad(); using var pipe = new SoundpadPipe(mock.Name); var store = Store(pipe); store.BeginSession();
+        var first = await store.Upload(Wave(), "One.wav", "Alice", "peer-a", false); var firstFile = first.Variants.Single().Path;
+        var other = Wave(); other[44] ^= 0x55; // different bytes: identical uploads are merged into one source
+        var second = await store.Upload(other, "Two.wav", "Bob", "peer-b", false); var secondFile = second.Variants.Single().Path;
+        var third = Wave(); third[46] ^= 0x55;
+        var kept = await store.Upload(third, "Kept.wav", "Alice", "peer-a", false);
+        await store.Promote(kept.Id, kept.Variants.Single().Id, null, null, null, true);
+        var permanent = kept.Variants.Single(v => v.Permanent).Path; var temp = store.Public.TempCategoryName!;
+        var files = new[] { firstFile, secondFile };
+        Assert.Equal(2, await store.ClearTemporary());
+        Assert.All(files, f => { Assert.False(File.Exists(f)); Assert.DoesNotContain(f, mock.AllXml); });
+        Assert.DoesNotContain(temp, mock.CategoryXml);
+        Assert.True(File.Exists(permanent)); Assert.Contains(permanent, mock.AllXml);
+        Assert.Equal(4 + 1, System.Xml.Linq.XDocument.Parse(mock.AllXml).Descendants("Sound").Count()); // the owner's 4 + the kept one
+        // Hosting continues: a new upload goes into a fresh Temp category.
+        var fourth = Wave(); fourth[48] ^= 0x55;
+        var after = await store.Upload(fourth, "After.wav", "Alice", "peer-a", false);
+        var afterFile = after.Variants.First(v => v.OwnsFile && v.State != "removed").Path;
+        Assert.True(File.Exists(afterFile)); Assert.Contains(afterFile, mock.AllXml);
+        Assert.NotEqual(temp, store.Public.TempCategoryName);
+    }
+    [Fact]
     public async Task ATempCategoryHoldingSomethingElseIsKeptAndItsOrphansReported()
     {
         await using var mock = new MockSoundpad(); using var pipe = new SoundpadPipe(mock.Name); var store = Store(pipe); store.BeginSession();

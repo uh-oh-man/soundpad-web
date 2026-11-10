@@ -1710,6 +1710,29 @@ test('Edit copy can make a copy at any speed', async ({ page, harness }) => {
   ).toBeEnabled({ timeout: 25000 });
 });
 
+test('the host can clear all temporary audio mid-session and keep hosting', async ({
+  page,
+  harness,
+}) => {
+  await host(page, harness);
+  await page
+    .getByLabel('Add session audio', { exact: true })
+    .setInputFiles({ name: 'Clear me.wav', mimeType: 'audio/wav', buffer: sessionWave() });
+  const sound = page.getByRole('button', { name: 'Play from start: Clear me', exact: true });
+  await expect(sound).toBeEnabled({ timeout: 25000 });
+  await page.locator('#temp-manager > summary').click();
+  page.once('dialog', (dialog) => void dialog.accept());
+  await page.getByRole('button', { name: 'Clear all temporary audio' }).click();
+  await expect(
+    page.getByText(/Cleared 1 temporary audio file; Soundpad's Temp category is gone too\./),
+  ).toBeVisible();
+  await expect(sound).toHaveCount(0);
+  // Still hosting: the original sounds play.
+  await expect(
+    page.getByRole('button', { name: 'Play from start: Airhorn', exact: true }),
+  ).toBeEnabled();
+});
+
 test('Temp keeps the native original distinct from its generated reverse', async ({
   page,
   harness,

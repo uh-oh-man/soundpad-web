@@ -77,6 +77,18 @@ public sealed partial class Bridge
                 }
                 else if (c.Op == "endSession") { if (!Audio.Public.Blocked) { Audio.RetireSession(); await Audio.Cleanup(); } }
                 else if (c.Op == "retryCleanup") await Audio.Recover();
+                else if (c.Op == "clearTemp")
+                {
+                    if (actor != "host") throw new InvalidDataException("Only the host can clear temporary audio.");
+                    // Cleanup never removes anything while audio plays; stop it first if it's a Temp sound.
+                    var current = playback.SoundId; Sound? playing = null;
+                    if (current != null && playback.Status is "PLAYING" or "PAUSED" or "SEEKING") playing = parsed.Public.Sounds.FirstOrDefault(s => s.Id == current);
+                    if (playing is { Temporary: true }) await pipe.Request("DoStopSound()");
+                    int cleared = await Audio.ClearTemporary();
+                    Log($"Cleared {cleared} temporary audio file(s) and the Temp category");
+                    await gate.WaitAsync(); try { await RefreshInner(); SaveAudioReceipt(c); Publish(); } finally { gate.Release(); }
+                    return new("ack", c.Id, true, Data: new { cleared, pending = Audio.Public.Assets.Count(a => a.State == "cleanup-pending") });
+                }
                 else if (c.Op == "cleanupCategories")
                 {
                     if (actor != "host") throw new InvalidDataException("Only the host can change Soundpad's categories.");

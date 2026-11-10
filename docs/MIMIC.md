@@ -66,7 +66,7 @@ A clip is a normal Temp sound, so reverse, **Keep permanently** (with host confi
 3. Optionally pick an **Effect**: Chipmunk (1.5× faster and higher), Slow-mo (0.7×, deeper), Echo, or **Any speed** (companion 2.16+): any speed from 0.05× (20 times slower) to 20× (20 times faster), set with a slider or an exact number. The form shows how long the copy will be. Like a tape, pitch moves with speed: slower is deeper, faster is higher. Tick **Keep pitch** (companion 2.17+) to change speed while voices keep their pitch.
 4. Press **Save copy**.
 
-Like Voice Replay Studio's trim, it saves a new Temp sound and never changes the original. Everything in Temp is removed from Soundpad and from disk when hosting ends, or when the companion window is closed (2.16+). Guests can edit copies when the host allows uploads. Temp holds at most 16 MiB per sound, so long copies are made mono and then given a lower sample rate (never below 16 kHz) to fit. Anything still too long is refused before any work is done, with the longest length that would fit.
+Like Voice Replay Studio's trim, it saves a new Temp sound and never changes the original. Everything in Temp is removed from Soundpad and from disk when hosting ends, or when the companion window is closed (2.16+). The host can also press **Clear all temporary audio** in Temp to do that at any time without ending the session (2.18+). Guests can edit copies when the host allows uploads. Temp holds at most 16 MiB per sound, so long copies are made mono and then given a lower sample rate (never below 16 kHz) to fit. Anything still too long is refused before any work is done, with the longest length that would fit.
 
 ## Transcripts
 

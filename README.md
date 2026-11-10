@@ -44,7 +44,7 @@ The host can also press a hotkey **in any app** to save the last few seconds mid
 - Host-controlled permissions for playback, the Kick counter, seeking, Spotify, uploads, reverse and Mimic; guests default to playback enabled and counter editing disabled.
 - Authoritative persistent Kick counter with duplicate-request protection.
 - Five personal views, real local waveform analysis, epoch-checked seeking, pause/resume, cues, regions and zoom.
-- **Temp:** session uploads, reversed variants, trimmed or effect copies (including any speed from 0.05× to 20×, optionally keeping the pitch), and **Keep permanently** with host confirmation. Everything temporary is removed from Soundpad and from disk when hosting ends, even if you close the companion window.
+- **Temp:** session uploads, reversed variants, trimmed or effect copies (including any speed from 0.05× to 20×, optionally keeping the pitch), and **Keep permanently** with host confirmation. Everything temporary is removed from Soundpad and from disk when hosting ends, even if you close the companion window, or any time with **Clear all temporary audio**.
 - Browser-personal nested layouts, favorites, hidden sounds and validated layout exports/imports.
 - Named guests, durable web statistics and guarded read-only native Soundpad statistics.
 - Large-photo PNG/JPEG cropping, dedicated 96-pixel icon storage, and safe V1 metadata migration.

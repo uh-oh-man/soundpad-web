@@ -132,6 +132,7 @@ export function TempManager({
       | 'retryAudio'
       | 'retryCleanup'
       | 'cleanupCategories'
+      | 'clearTemp'
       | 'trimAudio',
     fields: Parameters<typeof controller.run>[1] = {},
   ) {
@@ -141,6 +142,13 @@ export function TempManager({
     setError('');
     try {
       const result = await controller.run(op, fields);
+      if (op === 'clearTemp') {
+        const cleared = z.object({ cleared: z.number().int() }).safeParse(result);
+        controller.notify(
+          `Cleared ${cleared.success ? cleared.data.cleared : 'all'} temporary audio file${cleared.success && cleared.data.cleared === 1 ? '' : 's'}; Soundpad's Temp category is gone too.`,
+          'success',
+        );
+      }
       if (op === 'cleanupCategories') {
         const removed = z.object({ removed: z.number().int() }).safeParse(result);
         controller.notify(
@@ -513,9 +521,30 @@ export function TempManager({
             </p>
           ))}
           {host && (
-            <button aria-disabled={!!pending || undefined} onClick={() => void run('retryCleanup')}>
-              Retry recovery & cleanup
-            </button>
+            <div className="temp-actions">
+              <button
+                aria-disabled={!!pending || undefined}
+                onClick={() => void run('retryCleanup')}
+              >
+                Retry recovery & cleanup
+              </button>
+              {supports(state.companionVersion, 'clearTemp') && (
+                <button
+                  aria-disabled={!!pending || undefined}
+                  onClick={() => {
+                    if (
+                      !pending &&
+                      confirm(
+                        'Clear all temporary audio now? Reversed sounds, uploads and edited copies are removed from Soundpad and deleted, as when hosting ends. Audio you kept permanently stays. Hosting continues.',
+                      )
+                    )
+                      void run('clearTemp');
+                  }}
+                >
+                  Clear all temporary audio
+                </button>
+              )}
+            </div>
           )}
           {saving && (
             <section className="temp-save" aria-label="Confirm permanent audio save">

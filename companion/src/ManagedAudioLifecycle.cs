@@ -93,6 +93,24 @@ public sealed partial class ManagedAudioStore
         }
         Save(); await Cleanup();
     }
+    /// <summary>
+    /// Host action (2.18): clears all temporary audio now, mid-session, the same way End hosting does: retires
+    /// every temporary file, removes the app's Temp category (and with it every Temp entry in Soundpad), deletes the
+    /// files and forgets their records. Hosting continues; the next reverse or upload starts a fresh Temp category.
+    /// Kept (permanent) audio is untouched. Returns how many temporary files were cleared.
+    /// </summary>
+    public async Task<int> ClearTemporary()
+    {
+        RequireWritable(); int count = 0;
+        foreach (var asset in journal.Assets)
+        {
+            if (asset.Input is { State: not "retired" } input) input.State = "retired";
+            foreach (var variant in asset.Variants.Where(v => v.OwnsFile && !v.Permanent && !v.LegacyApproval && v.State != "removed" && !v.Retired)) { variant.Retired = true; asset.State = "cleanup-pending"; count++; }
+        }
+        Save();
+        await Cleanup(everything: true);
+        return count;
+    }
     /// <summary>Creates or finds the Temp category exactly as a reverse would, without importing or playing anything (harness check).</summary>
     internal Task<int> EnsureTempCategory()
     {
@@ -140,7 +158,7 @@ public sealed partial class ManagedAudioStore
         foreach (var variant in asset.Variants.Where(v => v.Current && v.State == "ready" && !v.Retired)) await TryImport(asset, variant);
         await Cleanup(asset.Id); Save();
     }
-    public async Task Cleanup(string? assetId = null)
+    public async Task Cleanup(string? assetId = null, bool everything = false)
     {
         RequireWritable();
         string status;
@@ -152,7 +170,7 @@ public sealed partial class ManagedAudioStore
             return;
         }
         journal.Issues.RemoveAll(i => i.Code is "native-unavailable" or "playback-active");
-        if (assetId == null && !journal.SessionOpen) await RemoveTempCategory();
+        if (assetId == null && (!journal.SessionOpen || everything)) await RemoveTempCategory();
         foreach (var asset in journal.Assets.Where(a => assetId == null || a.Id == assetId))
         {
             if (asset.Promotion is { State: not "committed" }) continue;
@@ -199,7 +217,7 @@ public sealed partial class ManagedAudioStore
         // Forget records whose files are gone (2.16). They used to pile up: a sound reversed often hit the journal's
         // 64-variant limit for good, and cleaned-up uploads counted toward its 2,048-source limit.
         // Only at session end: during a session, a repeated Keep permanently or retry may still name an old record.
-        if (assetId == null && !journal.SessionOpen)
+        if (assetId == null && (!journal.SessionOpen || everything))
         {
             foreach (var asset in journal.Assets) asset.Variants.RemoveAll(v => v.State == "removed" && !v.Current && !v.Permanent && !v.LegacyApproval);
             journal.Assets.RemoveAll(a => a.Origin == "upload" && a.Variants.Count == 0 && a.Input == null && a.Promotion == null);

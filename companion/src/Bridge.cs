@@ -81,7 +81,7 @@ public sealed partial class Bridge(ISoundpad pipe, StateStore store) : IDisposab
         if (c.Op == "endSession" && actor == "host") { StopMimic(); Publish(); }
         var query = await Query(c, actor); if (query != null) return query;
         var intent = ReservePlaybackIntent(c, actor, requester, audience);
-        if (c.Op is "reverse" or "audioPlay" or "keepAudio" or "removeAudio" or "retryAudio" or "retryCleanup" or "cleanupCategories" or "beginSession" or "endSession" || (c.Op is "play" or "startAt" or "region" && c.SoundId != null && managed?.Annotation(c.SoundId) is { Kind: not "native" })) return await ExecuteAudio(c, actor, participant, intent, requester, audience);
+        if (c.Op is "reverse" or "audioPlay" or "keepAudio" or "removeAudio" or "retryAudio" or "retryCleanup" or "cleanupCategories" or "clearTemp" or "beginSession" or "endSession" || (c.Op is "play" or "startAt" or "region" && c.SoundId != null && managed?.Annotation(c.SoundId) is { Kind: not "native" })) return await ExecuteAudio(c, actor, participant, intent, requester, audience);
         if (Interlocked.Increment(ref waiting) > 24) { Interlocked.Decrement(ref waiting); return new("ack", c.Id, false, "Busy. Try again."); }
         await gate.WaitAsync();
         try

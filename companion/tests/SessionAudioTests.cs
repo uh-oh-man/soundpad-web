@@ -37,6 +37,7 @@ public sealed class SessionAudioTests : IDisposable
         var first = bridge.Snapshot.Library.Sounds.Single(s => s.Temporary); Assert.Equal("Alice", first.UploadedBy);
         Assert.Contains(bridge.Snapshot.Library.Categories, c => c.Name.StartsWith("Temp - Soundpad Web") && c.SoundIds.Contains(first.Id));
         Assert.False((await bridge.Execute(Cmd("keepAudio", first.Id), "guest")).Ok);
+        Assert.False((await bridge.Execute(Cmd("clearTemp"), "guest")).Ok); // host only (2.18)
         var beforeKeep = bridge.Snapshot.Library.Version;
         var journal = System.Text.Json.JsonSerializer.Deserialize<AudioJournal>(File.ReadAllText(Path.Combine(folder,"managed-audio","journal.json")),Json.Options)!; var asset=journal.Assets.Single();
         Assert.True((await bridge.Execute(Cmd("keepAudio") with { AssetId=asset.Id,VariantId=asset.Variants.Single().Id,Confirmed=true }, "host")).Ok); Assert.NotEqual(beforeKeep, bridge.Snapshot.Library.Version);

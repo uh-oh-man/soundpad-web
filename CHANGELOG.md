@@ -2,6 +2,24 @@
 
 Notable changes to Soundpad Web. Versions follow the website's `package.json`; the Windows companion is versioned separately and only needs updating when a release says so.
 
+## 2.18.0 — Clear all temporary audio, any time
+
+**Update the Windows companion** to get this. With an older companion, the website hides the button, and Settings lists it under what an update adds.
+
+### Added
+
+- **Clear all temporary audio** (host, in **Temp**): removes every reversed sound, upload and edited copy from Soundpad and deletes their files, exactly as End hosting does, but hosting carries on. It asks first.
+  - Soundpad's Temp category goes too, in one command; the next reverse or upload starts a fresh one.
+  - Audio you kept permanently is untouched.
+  - If a Temp sound is playing, it is stopped first; your own sounds are never interrupted.
+  - The notice says how many files were cleared.
+- Protocol: a new host-only `clearTemp` command, gated as `FEATURES.clearTemp` (2.18).
+
+### Tests
+
+- New C# test: two temporary uploads and one kept permanently. Clearing removes the two (files, Soundpad entries, Temp category) and keeps the permanent one and the owner's sounds. Hosting continues, and a new upload lands in a fresh Temp category. Guests can't clear. 91 C# tests.
+- New e2e test: upload a sound, clear, see the notice and the sound gone from the board, and the original sounds still playable.
+
 ## 2.17.0 — Keep pitch when changing speed
 
 **Update the Windows companion** to get this. With an older companion, the website hides the option, and Settings lists it under what an update adds.

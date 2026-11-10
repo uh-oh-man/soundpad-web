@@ -122,13 +122,19 @@ describe('feature gates for older companions', () => {
       'importing from Voice Replay Studio',
       'any speed for edited copies (0.05× to 20×)',
       'Keep pitch when changing speed',
+      'clearing all temporary audio during a session',
     ]);
     expect(missingFeatures('2.15.9')).toEqual([
       'any speed for edited copies (0.05× to 20×)',
       'Keep pitch when changing speed',
+      'clearing all temporary audio during a session',
     ]);
-    expect(missingFeatures('2.16.2')).toEqual(['Keep pitch when changing speed']);
-    expect(missingFeatures('2.17.0')).toEqual([]);
+    expect(missingFeatures('2.16.2')).toEqual([
+      'Keep pitch when changing speed',
+      'clearing all temporary audio during a session',
+    ]);
+    expect(missingFeatures('2.17.0')).toEqual(['clearing all temporary audio during a session']);
+    expect(missingFeatures('2.18.0')).toEqual([]);
     expect(supports('2.15.9', 'speed')).toBe(false);
     expect(supports('2.16.0', 'speed')).toBe(true);
     expect(missingFeatures(null)).toEqual([]);
