@@ -1922,6 +1922,66 @@ test('Edit copy: Save & play makes the copy and plays it through Soundpad', asyn
   await expect(form).toHaveCount(0);
 });
 
+test('Edit copy: Undo on the notice takes the new copy back out (host)', async ({
+  page,
+  harness,
+}) => {
+  await host(page, harness);
+  await page
+    .getByLabel('Add session audio', { exact: true })
+    .setInputFiles({ name: 'Undo me.wav', mimeType: 'audio/wav', buffer: sessionWave(2) });
+  await expect(
+    page.getByRole('button', { name: 'Play from start: Undo me', exact: true }),
+  ).toBeEnabled({ timeout: 25000 });
+  await page.locator('#temp-manager > summary').click();
+  await page
+    .locator('.temp-source', { hasText: 'Undo me' })
+    .getByRole('button', { name: 'Edit copy' })
+    .click();
+  const form = page.getByRole('form', { name: 'Edit a copy of Undo me' });
+  await form.getByRole('combobox').selectOption('echo');
+  await form.getByRole('button', { name: 'Save copy' }).click();
+  const copy = page.getByRole('button', { name: 'Play from start: Undo me (echo)', exact: true });
+  await expect(copy).toBeEnabled({ timeout: 25000 });
+  const notice = page.getByRole('status').filter({ hasText: 'Copy added to Temp.' });
+  await notice.getByRole('button', { name: 'Undo' }).click();
+  await expect(page.getByText('Copy removed from Temp.')).toBeVisible();
+  await expect(copy).toHaveCount(0, { timeout: 25000 });
+  // The original is untouched.
+  await expect(
+    page.getByRole('button', { name: 'Play from start: Undo me', exact: true }),
+  ).toBeEnabled();
+});
+
+test('Edit copy: Undo right after Save & play stops the copy, then removes it', async ({
+  page,
+  harness,
+}) => {
+  // The companion never removes temporary audio that is playing, so Undo stops it first.
+  await host(page, harness);
+  await page
+    .getByLabel('Add session audio', { exact: true })
+    .setInputFiles({ name: 'Undo me.wav', mimeType: 'audio/wav', buffer: sessionWave(3) });
+  await expect(
+    page.getByRole('button', { name: 'Play from start: Undo me', exact: true }),
+  ).toBeEnabled({ timeout: 25000 });
+  await page.locator('#temp-manager > summary').click();
+  await page
+    .locator('.temp-source', { hasText: 'Undo me' })
+    .getByRole('button', { name: 'Edit copy' })
+    .click();
+  const form = page.getByRole('form', { name: 'Edit a copy of Undo me' });
+  await form.getByRole('combobox').selectOption('echo');
+  await form.getByRole('button', { name: 'Save & play' }).click();
+  const notice = page.getByRole('status').filter({ hasText: 'Copy added to Temp and playing.' });
+  await notice.getByRole('button', { name: 'Undo' }).click();
+  await expect(page.getByText('Copy removed from Temp.')).toBeVisible({ timeout: 15000 });
+  await expect(
+    page.getByRole('button', { name: 'Play from start: Undo me (echo)', exact: true }),
+  ).toHaveCount(0, { timeout: 25000 });
+  await expect(page.getByText('Stop playback before removing', { exact: false })).toHaveCount(0);
+});
+
 test('Edit copy can make a copy at any speed', async ({ page, harness }) => {
   await host(page, harness);
   await page

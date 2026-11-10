@@ -2,6 +2,22 @@
 
 Notable changes to Soundpad Web. Versions follow the website's `package.json`; the Windows companion is versioned separately and only needs updating when a release says so.
 
+## 2.28.0 — Undo an edited copy
+
+Website only; works with every companion. The companion reports 2.28.0 in this release, with no other change.
+
+### Added
+
+- **Undo on the "Copy added to Temp" notice** after Edit copy's **Save copy** or **Save & play** (host), like Voice Replay Studio's **Undo trim**. One press removes that copy from Temp and Soundpad. The original is never touched.
+  - If the copy is still playing after Save & play, Undo stops it first, because the companion never removes temporary audio while it plays.
+  - The notice stays for 10 seconds, long enough to reach its button.
+  - Guests don't get Undo, because only the host can remove Temp audio.
+- Notices can now carry one button. This is the first use.
+
+### Tests
+
+- New e2e tests (Chromium and WebKit): Undo after Save copy removes the echo copy and keeps the original; Undo right after Save & play stops the copy and removes it, without the "Stop playback" error.
+
 ## 2.27.2 — Keyboard focus never hides behind the player bar
 
 Website only; works with every companion. The companion reports 2.27.2 in this release, with no other change.

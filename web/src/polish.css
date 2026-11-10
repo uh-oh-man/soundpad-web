@@ -939,3 +939,16 @@ body,
 html {
   scroll-padding-bottom: calc(var(--player-height, 0px) + 12px);
 }
+/* A notice's one action, e.g. Undo after Edit copy (2.28). */
+.notification-stack .toast-action {
+  flex: none;
+  align-self: center;
+  min-height: 28px;
+  padding: 3px 10px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--accent);
+  background: transparent;
+  border: 1px solid color-mix(in srgb, var(--accent) 45%, var(--line));
+  border-radius: 7px;
+}

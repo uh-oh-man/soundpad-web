@@ -19,7 +19,7 @@ import {
   type HostIdentity,
   type Invite,
 } from './network/identity';
-import { notify, type NoticeKind } from './notifications';
+import { notify, type NoticeAction, type NoticeKind } from './notifications';
 import { companionAtLeast } from './version';
 import type { SharedLayout, Organization } from './shared-layout';
 type View = {
@@ -115,7 +115,8 @@ export class Controller {
     this.view = { ...this.view, ...p };
     for (const f of this.listeners) f();
   }
-  notify = (message: string, kind: NoticeKind = 'info') => notify(message, kind);
+  notify = (message: string, kind: NoticeKind = 'info', action?: NoticeAction) =>
+    notify(message, kind, action);
   async start() {
     if (this.initialized) return;
     this.initialized = true;

@@ -18,6 +18,17 @@ export function Notifications() {
             <Info size={17} />
           )}
           <span>{notice.message}</span>
+          {notice.action && (
+            <button
+              className="toast-action"
+              onClick={() => {
+                dismissNotice(notice.id);
+                notice.action!.run();
+              }}
+            >
+              {notice.action.label}
+            </button>
+          )}
           <button
             className="icon-button"
             aria-label="Dismiss notification"

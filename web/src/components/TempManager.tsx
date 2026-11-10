@@ -181,19 +181,52 @@ export function TempManager({
         setTrimming(undefined);
         // Save & play (2.27), like Mimic & play: the new copy plays through Soundpad straight away.
         const copy = z.object({ assetId: z.string().max(64) }).safeParse(result);
-        if (play && copy.success) {
+        if (play && copy.success)
           await controller.run('audioPlay', { assetId: copy.data.assetId, orientation: 'normal' });
-          controller.notify(
-            'Copy added to Temp and playing. The original is unchanged.',
-            'success',
-          );
-        } else controller.notify('Copy added to Temp. The original is unchanged.', 'success');
+        // Undo (2.28, host): like Voice Replay Studio's Undo trim, take a copy made by mistake straight back out.
+        const undo =
+          host && copy.success
+            ? { label: 'Undo', run: () => void undoCopy(copy.data.assetId) }
+            : undefined;
+        controller.notify(
+          play && copy.success
+            ? 'Copy added to Temp and playing. The original is unchanged.'
+            : 'Copy added to Temp. The original is unchanged.',
+          'success',
+          undo,
+        );
       }
       setRefresh((n) => n + 1);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Temp action failed.');
     } finally {
       setPending('');
+    }
+  }
+  /**
+   * Undo after Edit copy (2.28): removes the new copy from Temp. The companion never removes a temporary
+   * file that is playing, so a copy still playing after Save & play is stopped first.
+   */
+  async function undoCopy(assetId: string) {
+    try {
+      const { state: now } = controller.getSnapshot();
+      const sound = now.library.sounds.find((s) => s.assetId === assetId);
+      if (sound && now.playback.soundId === sound.id && now.playback.status !== 'STOPPED')
+        await controller.run('stop');
+      for (let attempt = 0; ; attempt++) {
+        try {
+          await controller.run('removeAudio', { assetId });
+          break;
+        } catch (e) {
+          // Soundpad may report the stop a moment late; try again briefly before giving up.
+          if (attempt >= 4 || !(e instanceof Error) || !/Stop playback/i.test(e.message)) throw e;
+          await new Promise((r) => setTimeout(r, 400));
+        }
+      }
+      controller.notify('Copy removed from Temp.', 'success');
+      setRefresh((n) => n + 1);
+    } catch {
+      /* The controller shows the error. */
     }
   }
   // Host-only Preview of an edited copy (2.20): heard on this PC only, never through Soundpad.

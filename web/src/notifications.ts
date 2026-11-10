@@ -1,6 +1,14 @@
 import { useEffect, useSyncExternalStore } from 'react';
 export type NoticeKind = 'info' | 'success' | 'error';
-export type Notice = { id: string; message: string; kind: NoticeKind; expires: number };
+/** One button on a notice (2.28), e.g. Undo after Edit copy. It runs once, then the notice closes. */
+export type NoticeAction = { label: string; run: () => void };
+export type Notice = {
+  id: string;
+  message: string;
+  kind: NoticeKind;
+  expires: number;
+  action?: NoticeAction;
+};
 let notices: Notice[] = [];
 const listeners = new Set<() => void>();
 const emit = () => {
@@ -10,14 +18,16 @@ export function dismissNotice(id: string) {
   notices = notices.filter((n) => n.id !== id);
   emit();
 }
-export function notify(message: string, kind: NoticeKind = 'info') {
+export function notify(message: string, kind: NoticeKind = 'info', action?: NoticeAction) {
   if (!message) return;
   const existing = notices.find((n) => n.message === message);
-  const entry = {
+  const entry: Notice = {
     id: existing?.id ?? crypto.randomUUID(),
     message,
     kind,
-    expires: Date.now() + (kind === 'error' ? 8000 : 4000),
+    // A notice with a button stays long enough to reach it (2.28); errors 8 s as before, others 4 s.
+    expires: Date.now() + (action ? 10000 : kind === 'error' ? 8000 : 4000),
+    ...(action && { action }),
   };
   notices = [...notices.filter((n) => n.id !== entry.id), entry].slice(-4);
   emit();
