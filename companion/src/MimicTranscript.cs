@@ -177,6 +177,28 @@ public sealed class MimicTranscriber(ITranscriptEngine engine) : IDisposable
         }
     }
 
+    /// <summary>
+    /// The words in a finished piece of audio, for naming an edited copy after what it says (2.24), like
+    /// Voice Replay Studio's "Save + retranscribe". Only while the host has transcripts on; null when off,
+    /// silent or nothing was recognised. Shares the engine (and its one-at-a-time lock) with the live loop.
+    /// </summary>
+    public async Task<string?> Words(float[] interleaved, int rate, int channels, CancellationToken cancel)
+    {
+        if (!Enabled || !engine.Available || interleaved.Length == 0) return null;
+        var mono = new float[interleaved.Length / Math.Max(1, channels)];
+        for (int i = 0; i < mono.Length; i++)
+        {
+            float sum = 0;
+            for (int c = 0; c < channels; c++) sum += interleaved[i * channels + c];
+            mono[i] = sum / channels;
+        }
+        if (Quiet(mono)) return null;
+        var spans = await engine.Transcribe(Resample(mono, rate, SpeechRate), cancel);
+        var words = string.Join(" ", spans.Select(s => s.Text.Trim()).Where(t => t.Length > 0));
+        words = System.Text.RegularExpressions.Regex.Replace(words, @"\s+", " ").Trim();
+        return words.Length > 0 ? words : null;
+    }
+
     /// <summary>One step of the loop; public so tests can drive it deterministically.</summary>
     public async Task<bool> Step(MimicRing? current, bool force, CancellationToken cancel, int? generation = null)
     {

@@ -415,6 +415,41 @@ public sealed class MimicTests : IDisposable
     }
 
     [Fact]
+    public async Task PlainTrimsAreNamedAfterTheirWordsWhileTranscriptsAreOn()
+    {
+        await using var mock = new MockSoundpad(); using var pipe = new SoundpadPipe(mock.Name, true); using var bridge = new Bridge(pipe, new StateStore(folder));
+        var fixture = new MimicFixture(); bridge.UseMimicCapture(fixture);
+        var engine = new TranscriptFixture(); bridge.UseTranscriptEngine(engine); await bridge.Poll(true);
+        Assert.True((await bridge.Execute(Cmd("beginSession"), "host")).Ok);
+        // 1 s of silence, 1 s of tone, 1 s of silence, at 16 kHz.
+        var audio = Enumerable.Range(0, 48000).Select(i => i is >= 16000 and < 32000 ? 0.3f * MathF.Sin(i * 0.2f) : 0f).ToArray();
+        Assert.True((await bridge.Upload(MimicRing.Wav(audio, 16000), "Said something.wav", "Alice")).Ok);
+        var journal = () => JsonSerializer.Deserialize<AudioJournal>(File.ReadAllText(Path.Combine(folder, "managed-audio", "journal.json")), Json.Options)!;
+        var original = journal().Assets.Single();
+        // Transcripts off: the usual name, and the engine isn't asked.
+        Assert.True((await bridge.Execute(Cmd("trimAudio") with { AssetId = original.Id, PositionMs = 0, EndMs = 3000 }, "host")).Ok);
+        Assert.Single(journal().Assets, a => a.Name == "Said something (trimmed)");
+        Assert.Equal(0, engine.Calls);
+        Assert.True((await bridge.Execute(Cmd("mimicStart") with { SourceId = MimicFixture.Source.Id }, "host")).Ok);
+        Assert.True((await bridge.Execute(Cmd("mimicTranscribe") with { Action = "enable" }, "host")).Ok);
+        // Transcripts on: a plain trim is named after what it says.
+        var named = await bridge.Execute(Cmd("trimAudio") with { AssetId = original.Id, PositionMs = 500, EndMs = 2500 }, "host");
+        Assert.True(named.Ok, named.Error);
+        Assert.Single(journal().Assets, a => a.Name.StartsWith("Fixture tone ") && a.Name.EndsWith(" (trimmed)"));
+        // Silence has no words, so it keeps the usual name; so do effects and names the person typed.
+        Assert.True((await bridge.Execute(Cmd("trimAudio") with { AssetId = original.Id, PositionMs = 0, EndMs = 900 }, "host")).Ok);
+        Assert.Equal(2, journal().Assets.Count(a => a.Name == "Said something (trimmed)"));
+        Assert.True((await bridge.Execute(Cmd("trimAudio") with { AssetId = original.Id, PositionMs = 0, EndMs = 3000, Action = "echo" }, "host")).Ok);
+        Assert.Single(journal().Assets, a => a.Name == "Said something (echo)");
+        Assert.True((await bridge.Execute(Cmd("trimAudio") with { AssetId = original.Id, PositionMs = 200, EndMs = 2800, Name = "My pick" }, "host")).Ok);
+        Assert.Single(journal().Assets, a => a.Name == "My pick");
+        // Previews are never transcribed.
+        int calls = engine.Calls;
+        Assert.True((await bridge.Execute(Cmd("trimPreview") with { AssetId = original.Id, PositionMs = 0, EndMs = 3000 }, "host")).Ok);
+        Assert.Equal(calls, engine.Calls);
+    }
+
+    [Fact]
     public async Task TrimPreviewPlaysTheCopyToTheHostAndSavesNothing()
     {
         await using var mock = new MockSoundpad(); using var pipe = new SoundpadPipe(mock.Name, true); using var bridge = new Bridge(pipe, new StateStore(folder)); await bridge.Poll(true);

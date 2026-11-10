@@ -6,6 +6,7 @@ Every release stays on GitHub permanently, so any earlier version can be restore
 
 | Version | What it is | Git tag | Download |
 | --- | --- | --- | --- |
+| 2.24.0 | Trimmed copies named after their words (companion update) | `v2.24.0` | [Release](https://github.com/uh-oh-man/soundpad-web/releases/tag/v2.24.0) |
 | 2.23.0 | Loop the preview while you tune the cut | `v2.23.0` | [Release](https://github.com/uh-oh-man/soundpad-web/releases/tag/v2.23.0) |
 | 2.22.0 | Zoom in on Edit copy's waveform | `v2.22.0` | [Release](https://github.com/uh-oh-man/soundpad-web/releases/tag/v2.22.0) |
 | 2.21.0 | Edit a fresh Mimic clip in one press | `v2.21.0` | [Release](https://github.com/uh-oh-man/soundpad-web/releases/tag/v2.21.0) |

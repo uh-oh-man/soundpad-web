@@ -2266,6 +2266,36 @@ test('Mimic: Edit on a fresh clip opens its Edit copy in Temp', async ({ page, h
   ).toBeEnabled({ timeout: 25000 });
 });
 
+test('Edit copy: with transcripts on, a plain trim is named after its words', async ({
+  page,
+  harness,
+}) => {
+  // The harness's stand-in speech engine calls each burst of sound "Fixture tone N"; never real Whisper.
+  await host(page, harness);
+  await page.getByRole('button', { name: 'Mimic', exact: true }).click();
+  const dialog = page.getByRole('dialog', { name: 'Mimic' });
+  await dialog.getByRole('button', { name: 'Start listening' }).click();
+  await dialog.getByLabel('Transcribe Mimic audio').check();
+  await page.waitForTimeout(2600);
+  await page.keyboard.press('5');
+  await dialog.getByLabel('Clip name').fill('Words test');
+  await page.keyboard.press('Enter');
+  const recent = dialog.getByRole('region', { name: 'Just mimicked' });
+  await recent.getByRole('button', { name: 'Edit a copy of Words test' }).click();
+  const form = page.getByRole('form', { name: 'Edit a copy of Words test' });
+  await expect(form).toBeVisible({ timeout: 15000 });
+  await expect(form).toContainText('named after its words');
+  await expect(form.getByLabel('Name')).toHaveAttribute('placeholder', 'Its words (trimmed)');
+  // An effect keeps its effect name, so the hint goes away.
+  await form.getByRole('combobox').selectOption('echo');
+  await expect(form).not.toContainText('named after its words');
+  await form.getByRole('combobox').selectOption('none');
+  await form.getByRole('button', { name: 'Save copy' }).click();
+  await expect(
+    page.getByRole('button', { name: /^Play from start: Fixture tone \d+.* \(trimmed\)$/ }).first(),
+  ).toBeEnabled({ timeout: 25000 });
+});
+
 test('accessibility: no serious or critical axe violations in the newer controls', async ({
   page,
   harness,

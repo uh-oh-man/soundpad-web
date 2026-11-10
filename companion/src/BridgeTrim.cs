@@ -6,6 +6,8 @@ public sealed partial class Bridge
     public const int TrimMinimumMs = 100;
     /// <summary>How much of the finished copy a host preview plays (2.20): enough to judge the cut and effect.</summary>
     public const int TrimPreviewSeconds = 20;
+    /// <summary>Longest plain trim named after its own words when transcripts are on (2.24); longer copies keep "(trimmed)".</summary>
+    public const int TrimWordsSeconds = 30;
     // Temp's per-sound limit. It is also recorded in the audio journal, so raising it would make older
     // companions reject that journal and break rolling back; long copies are reduced to fit instead.
     private const int UploadLimit = 16777216, MinimumCopyRate = 16000;
@@ -120,7 +122,19 @@ public sealed partial class Bridge
             }
             if (preview) return new("ack", c.Id, true, Data: new { wav = Convert.ToBase64String(wav), seconds = processed.Length / (double)channels / rate });
             var label = effect switch { "none" => "trimmed", "speed" => $"{speed.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture)}x speed{(keepPitch ? ", same pitch" : "")}", _ => AudioEffects.Names[effect] };
-            var name = string.IsNullOrWhiteSpace(c.Name) ? $"{original} ({label})" : c.Name.Trim();
+            string? words = null;
+            // A plain trim, unnamed, while transcripts are on: name it after what it says. Effects garble speech
+            // for recognition, so they keep their effect name. Recognition is best effort and never blocks the copy.
+            if (effect == "none" && string.IsNullOrWhiteSpace(c.Name) && cut.Length <= (long)TrimWordsSeconds * rate * channels)
+            {
+                try
+                {
+                    using var limit = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+                    words = await transcriber.Words(cut, rate, channels, limit.Token);
+                }
+                catch (Exception ex) when (ex is not OutOfMemoryException) { words = null; }
+            }
+            var name = !string.IsNullOrWhiteSpace(c.Name) ? c.Name.Trim() : words != null ? $"{words} ({label})" : $"{original} ({label})";
             if (name.Length > 100) name = name[..99].TrimEnd() + "\u2026";
             return (await Upload(wav, name + ".wav", Person(actor, participant).Name, actor == "host", owner, audience)) with { Id = c.Id };
             }

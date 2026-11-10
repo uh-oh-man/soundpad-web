@@ -201,6 +201,15 @@ export function TempManager({
       t.keepPitch &&
       supports(state.companionVersion, 'keepPitch') && { keepPitch: true }),
   });
+  /**
+   * Whether an unnamed copy will be named after its own words (2.24, like Voice Replay Studio's "Save +
+   * retranscribe"): a plain trim of up to 30 s while the host has Mimic transcripts on.
+   */
+  const byWords = (t: NonNullable<typeof trimming>) =>
+    t.effect === 'none' &&
+    !!state.mimic?.transcribing &&
+    supports(state.companionVersion, 'trimWords') &&
+    t.to - t.from <= 30;
   /** Length of a source's normal variant, from the native library entry Soundpad reports. */
   const durationOf = (a: { normal?: { soundId?: string | null } | null }) =>
     state.library.sounds.find((s) => s.id === a.normal?.soundId)?.durationMs ?? undefined;
@@ -482,7 +491,7 @@ export function TempManager({
                       Name
                       <input
                         maxLength={100}
-                        placeholder={`${a.name} (${
+                        placeholder={`${byWords(trimming) ? 'Its words' : a.name} (${
                           trimming.effect === 'none'
                             ? 'trimmed'
                             : trimming.effect === 'speed'
@@ -496,6 +505,8 @@ export function TempManager({
                     <span className="muted">
                       {Math.max(0, trimming.to - trimming.from).toFixed(2)} s of{' '}
                       {(durationOf(a)! / 1000).toFixed(2)} s · saved as a new Temp sound
+                      {byWords(trimming) &&
+                        ' · left unnamed, it is named after its words (transcripts are on)'}
                     </span>
                     <button
                       className="primary"

@@ -2,6 +2,25 @@
 
 Notable changes to Soundpad Web. Versions follow the website's `package.json`; the Windows companion is versioned separately and only needs updating when a release says so.
 
+## 2.24.0 — Trimmed copies named after their words
+
+**Update the Windows companion** to get this. With an older companion, copies keep their usual names, and Settings lists the feature under what an update adds.
+
+### Added
+
+- **A trimmed copy is named after what it says** while Mimic transcripts are on, like **Save + retranscribe** in Voice Replay Studio. Trim "Mimic 21.04.17" down to the funny bit and the copy is called, for example, "no way that worked (trimmed)", so the board's search finds it by its words.
+  - It applies to plain trims of up to 30 s with the Name box left empty. A typed name always wins.
+  - Effects (Chipmunk, Echo, speed changes) keep their effect names, because they garble speech for recognition.
+  - Recognition runs on the host PC with the same speech model as the live transcript. Nothing is uploaded. If it hears no words, or takes over 20 s, the copy keeps the usual name.
+  - Edit copy says when this will happen ("left unnamed, it is named after its words"), and the Name box shows "Its words (trimmed)".
+  - Previews are never transcribed.
+
+### Tests
+
+- New C# test: with transcripts off, the usual name is used and the engine is never asked. With them on, a plain trim is named after its words. Silence, effects and typed names keep their names, and previews are not transcribed.
+- New e2e test: with transcripts on, Edit copy shows the hint (not for Echo), and the saved trim is named after the stand-in engine's words.
+- Unit tests list the new feature for older companions.
+
 ## 2.23.0 — Loop the preview while you tune the cut
 
 Website only; Loop needs a companion with Preview (2.20+). The companion reports 2.23.0 in this release, with no other change.
