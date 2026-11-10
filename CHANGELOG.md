@@ -2,6 +2,10 @@
 
 Notable changes to Soundpad Web. Versions follow the website's `package.json`; the Windows companion is versioned separately and only needs updating when a release says so.
 
+## Unreleased
+
+- **Tests:** a new permanent accessibility test scans the controls added in 2.15–2.18 with axe, in Chromium and WebKit, on desktop and phone width. It covers Temp's **Clear all temporary audio**, Edit copy's **Any speed** and **Keep pitch**, Mimic's **Effect** menu and the **From Voice Replay Studio** list. The first run found no violations of any level.
+
 ## 2.18.1 — Quick effects for fresh Mimic clips
 
 Website only; works with companion 2.9 and newer. "Slow, same voice" needs 2.17. The companion reports 2.18.1 in this release.

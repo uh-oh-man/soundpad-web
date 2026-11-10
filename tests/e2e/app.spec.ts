@@ -2053,6 +2053,54 @@ test('Mimic: a fresh clip can be played with a quick effect', async ({ page, har
     .toBe(true);
 });
 
+test('accessibility: no serious or critical axe violations in the newer controls', async ({
+  page,
+  harness,
+}) => {
+  // Temp's Clear button, Edit copy's speed and Keep pitch, Mimic's Effect menu and Voice Replay Studio list (2.15–2.18).
+  const problems: string[] = [];
+  async function scan(screen: string) {
+    const { violations } = await new AxeBuilder({ page }).analyze();
+    for (const v of violations)
+      if (v.impact === 'serious' || v.impact === 'critical')
+        problems.push(`${screen}: ${v.id} (${v.nodes.map((n) => n.target.join(' ')).join(', ')})`);
+  }
+  await host(page, harness);
+  await page
+    .getByLabel('Add session audio', { exact: true })
+    .setInputFiles({ name: 'Scan tone.wav', mimeType: 'audio/wav', buffer: sessionWave() });
+  await expect(
+    page.getByRole('button', { name: 'Play from start: Scan tone', exact: true }),
+  ).toBeEnabled({ timeout: 25000 });
+  await page.locator('#temp-manager > summary').click();
+  await scan('temp with clear button');
+  await page
+    .locator('.temp-source', { hasText: 'Scan tone' })
+    .getByRole('button', { name: 'Edit copy' })
+    .click();
+  const form = page.getByRole('form', { name: 'Edit a copy of Scan tone' });
+  await form.getByRole('combobox').selectOption('speed');
+  await form.getByLabel('Keep pitch').check();
+  await scan('edit copy at any speed');
+  await form.getByRole('button', { name: 'Cancel' }).click();
+  await page.getByRole('button', { name: 'Mimic', exact: true }).click();
+  const dialog = page.getByRole('dialog', { name: 'Mimic' });
+  await dialog.getByRole('button', { name: 'Start listening' }).click();
+  await page.waitForTimeout(2600);
+  await page.keyboard.press('5');
+  await dialog.getByLabel('Clip name').fill('Scan clip');
+  await page.keyboard.press('Enter');
+  await expect(dialog.getByRole('region', { name: 'Just mimicked' })).toBeVisible();
+  await dialog.getByText('From Voice Replay Studio').click();
+  await expect(
+    dialog.getByRole('list', { name: 'Voice Replay Studio clips' }).getByRole('listitem'),
+  ).toHaveCount(2);
+  await scan('mimic effects and library');
+  await page.setViewportSize({ width: 390, height: 844 });
+  await scan('mimic on a phone');
+  expect(problems).toEqual([]);
+});
+
 test('Mimic fits a phone: header keeps Settings on screen and long clip names do not widen the window', async ({
   page,
   harness,
