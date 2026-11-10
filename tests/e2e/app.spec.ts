@@ -1047,6 +1047,13 @@ test('live Nostr/WebRTC: compact invites, guest upload, shared organization and 
       .getByLabel('Add session audio', { exact: true })
       .setInputFiles({ name: 'Guest tone.wav', mimeType: 'audio/wav', buffer: sessionWave() });
     await expect(g1.locator('.notification-stack')).toContainText('Added to Temp for this session');
+    // The guest gets Undo for their own upload (2.33): the new source's id reaches them over the relay.
+    await expect(
+      g1
+        .getByRole('status')
+        .filter({ hasText: 'Added to Temp for this session' })
+        .getByRole('button', { name: 'Undo' }),
+    ).toBeVisible();
     await expect(g1.getByLabel('Add session audio', { exact: true })).toBeEnabled();
     for (const participant of [page, g1, g2])
       await expect(
@@ -2029,6 +2036,27 @@ test('Edit copy: Undo right after Save & play stops the copy, then removes it', 
     page.getByRole('button', { name: 'Play from start: Undo me (echo)', exact: true }),
   ).toHaveCount(0, { timeout: TEMP_READY });
   await expect(page.getByText('Stop playback before removing', { exact: false })).toHaveCount(0);
+});
+
+test('Undo on the upload notice takes the wrong file straight back out', async ({
+  page,
+  harness,
+}) => {
+  await host(page, harness);
+  await page
+    .getByLabel('Add session audio', { exact: true })
+    .setInputFiles({ name: 'Wrong file.wav', mimeType: 'audio/wav', buffer: sessionWave(2) });
+  const sound = page.getByRole('button', { name: 'Play from start: Wrong file', exact: true });
+  await expect(sound).toBeEnabled({ timeout: TEMP_READY });
+  await page
+    .getByRole('status')
+    .filter({ hasText: 'Added to Temp for this session.' })
+    .getByRole('button', { name: 'Undo' })
+    .click();
+  await expect(page.getByText('Upload removed from Temp.')).toBeVisible({ timeout: 15000 });
+  await expect(sound).toHaveCount(0, { timeout: TEMP_READY });
+  await page.locator('#temp-manager > summary').click();
+  await expect(page.locator('.temp-source', { hasText: 'Wrong file' })).toHaveCount(0);
 });
 
 test('Edit copy can make a copy at any speed', async ({ page, harness }) => {

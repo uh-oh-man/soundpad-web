@@ -2,6 +2,20 @@
 
 Notable changes to Soundpad Web. Versions follow the website's `package.json`; the Windows companion is versioned separately and only needs updating when a release says so.
 
+## 2.33.0 — Undo an upload
+
+Website only. The host can use it with every companion; guests need companion 2.32 or newer (the one that allows guest Undo). The companion reports 2.33.0 in this release, with no other change.
+
+### Added
+
+- **Undo on the "Added to Temp for this session" notice** after **Add session audio**: the wrong file comes straight back out of Temp and Soundpad. The host gets it for any upload, and a guest for their own (the companion checks ownership, as for 2.32's guest Undo).
+  - Like the other Undos, it stops the upload first only if it's the sound playing, and never stops another sound.
+
+### Tests
+
+- New e2e test: upload a file, press Undo on its notice, and it leaves the board and Temp.
+- The live-relay guest test now checks that a guest's own upload notice offers Undo, so the new source's id reaches guests over the relay.
+
 ## 2.32.0 — Undo for guests
 
 **Update the Windows companion** to get this. With an older companion, guests see no Undo, exactly as before.

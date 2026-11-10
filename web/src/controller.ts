@@ -20,7 +20,7 @@ import {
   type Invite,
 } from './network/identity';
 import { notify, type NoticeAction, type NoticeKind } from './notifications';
-import { companionAtLeast } from './version';
+import { companionAtLeast, supports } from './version';
 import type { SharedLayout, Organization } from './shared-layout';
 type View = {
   layouts: SharedLayout[];
@@ -323,11 +323,27 @@ export class Controller {
         );
       else if (this.view.mode === 'guest') result = await this.session!.upload(bytes, file.name);
       else throw Error('Connect first.');
+      // Undo (2.33): the wrong file goes straight back out, for the host and (companion 2.32+) for the
+      // guest who uploaded it. The remove step is loaded on demand; it imports this controller.
+      const assetId = (result as { assetId?: unknown })?.assetId;
+      const undo =
+        typeof assetId === 'string' &&
+        (this.view.mode === 'host' || supports(this.view.state.companionVersion, 'guestUndo'))
+          ? {
+              label: 'Undo',
+              run: () =>
+                void import('./remove-temp')
+                  .then((m) => m.removeNewTempAudio(assetId))
+                  .then(() => this.notify('Upload removed from Temp.', 'success'))
+                  .catch(() => {}),
+            }
+          : undefined;
       this.notify(
         (result as { state?: string })?.state === 'waiting-soundpad'
           ? 'Audio prepared. Open Soundpad to finish its Temp entry.'
           : 'Added to Temp for this session. Only the host can keep it permanently.',
         'success',
+        undo,
       );
     } catch (e) {
       this.notify(errorMessage(e, 'Upload failed.'), 'error');
