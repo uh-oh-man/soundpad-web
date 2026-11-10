@@ -30,7 +30,7 @@ The host chooses an app (for example Discord) or an output device. The companion
 
 - open **Mimic**, see that audio as a live waveform with an optional transcript, and select a moment by dragging, clicking a transcript line, or pressing **3**, **5** or **0**;
 - **Mimic it** to save it as a Temp sound, or **Mimic & play** it through Soundpad. The host can **Preview** it privately first;
-- replay, reverse, trim or add an effect afterwards (Chipmunk, Slow-mo, Echo).
+- from **Just mimicked**: replay, reverse, play with an effect (Chipmunk, Slow-mo, Echo, Slow same voice), or open the clip in **Edit copy** with one press. The host can also **Keep** a clip permanently from there, or **Undo** one made by mistake from its notice.
 
 The host can also press a hotkey **in any app** to save the last few seconds mid-game: F6 by default, or F7–F10 if a game already uses F6. The waveform zooms to the last 30, 10 or 5 seconds for picking short moments. Mimic is off until the host starts it, never records a microphone, and everyone is told when it listens. Clips you saved in the Voice Replay Studio desktop app can be imported into the session from the Mimic window too. Full guide: [docs/MIMIC.md](docs/MIMIC.md).
 
@@ -44,7 +44,7 @@ The host can also press a hotkey **in any app** to save the last few seconds mid
 - Host-controlled permissions for playback, the Kick counter, seeking, Spotify, uploads, reverse and Mimic; guests default to playback enabled and counter editing disabled.
 - Authoritative persistent Kick counter with duplicate-request protection.
 - Five personal views, real local waveform analysis, epoch-checked seeking, pause/resume, cues, regions and zoom.
-- **Temp:** session uploads, reversed variants, trimmed or effect copies (including any speed from 0.05× to 20×, optionally keeping the pitch), and **Keep permanently** with host confirmation. **Edit copy** works like Voice Replay Studio's editor: drag on the waveform to choose the part, **Zoom to selection** for fine edges, and (host) **Preview** it with **Loop** before saving. With Mimic transcripts on, a plain trim is named after its own words. A search appears once Temp has more than six sources. Everything temporary is removed from Soundpad and from disk when hosting ends, even if you close the companion window, or any time with **Clear all temporary audio**.
+- **Temp:** session uploads, reversed variants, trimmed or effect copies (including any speed from 0.05× to 20×, optionally keeping the pitch), and **Keep permanently** with host confirmation. **Edit copy** works like Voice Replay Studio's editor: drag on the waveform to choose the part, **Zoom to selection** for fine edges, and (host) **Preview** it with **Loop** before saving. **Save & play** makes the copy and plays it at once, and the host can **Undo** it from the notice that follows. With Mimic transcripts on, a plain trim is named after its own words. A search appears once Temp has more than six sources. Everything temporary is removed from Soundpad and from disk when hosting ends, even if you close the companion window, or any time with **Clear all temporary audio**.
 - Browser-personal nested layouts, favorites, hidden sounds and validated layout exports/imports.
 - Named guests, durable web statistics and guarded read-only native Soundpad statistics.
 - Large-photo PNG/JPEG cropping, dedicated 96-pixel icon storage, and safe V1 metadata migration.
