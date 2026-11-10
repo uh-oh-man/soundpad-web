@@ -6,6 +6,7 @@ import { flattenCategories, type Snapshot } from '../protocol';
 import { TrimWave } from './TrimWave';
 import { usePreviewAudio } from '../preview-audio';
 import { Headphones } from 'lucide-react';
+import { onEditCopyRequest } from '../edit-copy';
 const variant = z.object({
   id: z.string(),
   soundId: z.string().nullable(),
@@ -104,6 +105,16 @@ export function TempManager({
     keepPitch: boolean;
   }>();
   const [refresh, setRefresh] = useState(0);
+  // A clip whose Edit copy was asked for from Mimic (2.21), opened once Temp lists it.
+  const [wantEdit, setWantEdit] = useState<string>();
+  useEffect(
+    () =>
+      onEditCopyRequest((id) => {
+        setOpen(true);
+        setWantEdit(id);
+      }),
+    [],
+  );
   useEffect(() => {
     if (!connected) return;
     let live = true;
@@ -190,6 +201,28 @@ export function TempManager({
   /** Length of a source's normal variant, from the native library entry Soundpad reports. */
   const durationOf = (a: { normal?: { soundId?: string | null } | null }) =>
     state.library.sounds.find((s) => s.id === a.normal?.soundId)?.durationMs ?? undefined;
+  useEffect(() => {
+    if (!wantEdit || pending) return;
+    const a = data?.manager.assets.find((x) => x.id === wantEdit);
+    const length = a && durationOf(a);
+    if (length === undefined) return; // not listed yet: try again when Temp refreshes
+    setWantEdit(undefined);
+    setTrimming({
+      id: wantEdit,
+      from: 0,
+      to: length / 1000,
+      name: '',
+      effect: 'none',
+      speed: 1,
+      keepPitch: false,
+    });
+    // After the Mimic window has closed and handed focus back, bring the form into view and focus Start.
+    setTimeout(() => {
+      const start = document.querySelector<HTMLInputElement>('#temp-manager form.temp-trim input');
+      start?.scrollIntoView({ block: 'center' });
+      start?.focus({ preventScroll: true });
+    }, 50);
+  });
   const categories = flattenCategories(state.library.categories).filter(
     (c) => c.category.id !== undefined,
   );

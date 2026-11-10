@@ -2139,6 +2139,32 @@ test('Mimic: a fresh clip can be played with a quick effect', async ({ page, har
     .toBe(true);
 });
 
+test('Mimic: Edit on a fresh clip opens its Edit copy in Temp', async ({ page, harness }) => {
+  await host(page, harness);
+  await page.getByRole('button', { name: 'Mimic', exact: true }).click();
+  const dialog = page.getByRole('dialog', { name: 'Mimic' });
+  await dialog.getByRole('button', { name: 'Start listening' }).click();
+  await page.waitForTimeout(2600);
+  await page.keyboard.press('5');
+  await dialog.getByLabel('Clip name').fill('Trim me');
+  await page.keyboard.press('Enter');
+  const recent = dialog.getByRole('region', { name: 'Just mimicked' });
+  await expect(recent.getByRole('button', { name: /Replay Trim me/ })).toBeVisible();
+  // Like Voice Replay Studio opening a new capture in its editor: one press, Mimic closes, Temp opens
+  // with Edit copy for this clip, and Start has the keyboard focus.
+  await recent.getByRole('button', { name: 'Edit a copy of Trim me' }).click();
+  await expect(dialog).toBeHidden();
+  const form = page.getByRole('form', { name: 'Edit a copy of Trim me' });
+  await expect(form).toBeVisible({ timeout: 15000 });
+  await expect(form.getByLabel('Start (s)')).toBeFocused();
+  await expect(form.getByLabel('Start (s)')).toHaveValue('0');
+  await form.getByLabel('Start (s)').fill('1');
+  await form.getByRole('button', { name: 'Save copy' }).click();
+  await expect(
+    page.getByRole('button', { name: 'Play from start: Trim me (trimmed)', exact: true }),
+  ).toBeEnabled({ timeout: 25000 });
+});
+
 test('accessibility: no serious or critical axe violations in the newer controls', async ({
   page,
   harness,

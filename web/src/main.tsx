@@ -37,6 +37,7 @@ import { Sidebar } from './components/Sidebar';
 import { SettingsDialog } from './components/SettingsDialog';
 import { WhatsNew } from './components/WhatsNew';
 import { MimicPanel } from './components/MimicPanel';
+import { requestEditCopy } from './edit-copy';
 import { useAppearance } from './appearance';
 import { GuestName } from './components/GuestName';
 import { organization } from './shared-layout';
@@ -790,7 +791,16 @@ function App() {
       )}
       {mimicOpen && mode !== 'landing' && (
         <Modal label="Mimic" onClose={() => setMimicOpen(false)}>
-          <MimicPanel state={state} host={host} connected={connected} canPlay={canPlay} />
+          <MimicPanel
+            state={state}
+            host={host}
+            connected={connected}
+            canPlay={canPlay}
+            onEditCopy={(assetId) => {
+              setMimicOpen(false);
+              requestEditCopy(assetId);
+            }}
+          />
         </Modal>
       )}
       {mode === 'landing' && <ProjectFooter />}

@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Play, Rewind } from 'lucide-react';
+import { Play, Rewind, Scissors } from 'lucide-react';
 import { z } from 'zod';
 import { controller } from '../../controller';
 import type { Snapshot } from '../../protocol';
@@ -19,10 +19,12 @@ export function MimicRecent({
   state,
   host,
   canPlay,
+  onEditCopy,
 }: {
   state: Snapshot;
   host: boolean;
   canPlay: boolean;
+  onEditCopy?: (assetId: string) => void;
 }) {
   const [making, setMaking] = useState('');
   // Skip clips already removed from Temp.
@@ -38,6 +40,11 @@ export function MimicRecent({
     supports(state.companionVersion, 'effects') &&
     (host || state.permissions.guestUploads !== false);
   const keepPitch = supports(state.companionVersion, 'keepPitch');
+  // Edit copy: same rules as Temp's own button (the host, or guests the host lets add audio).
+  const canEdit =
+    !!onEditCopy &&
+    supports(state.companionVersion, 'trim') &&
+    (host || state.permissions.guestUploads !== false);
   async function playWithEffect(assetId: string, effect: QuickEffect) {
     if (making) return;
     setMaking(assetId);
@@ -79,6 +86,16 @@ export function MimicRecent({
           >
             <Rewind size={14} />
           </button>
+          {canEdit && (
+            <button
+              className="icon-button"
+              aria-label={`Edit a copy of ${clip.name}`}
+              title="Edit a copy: trim it, add an effect, change its speed"
+              onClick={() => onEditCopy?.(clip.assetId)}
+            >
+              <Scissors size={14} />
+            </button>
+          )}
           {canEffect && (
             <select
               className="mimic-recent-effect"

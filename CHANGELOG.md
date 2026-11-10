@@ -2,6 +2,20 @@
 
 Notable changes to Soundpad Web. Versions follow the website's `package.json`; the Windows companion is versioned separately and only needs updating when a release says so.
 
+## 2.21.0 — Edit a fresh Mimic clip in one press
+
+Website only; works with any companion that has Edit copy. The companion reports 2.21.0 in this release, with no other change.
+
+### Added
+
+- **An Edit button (scissors) on every clip in Mimic's "Just mimicked" list.** Voice Replay Studio opens a new capture straight in its editor. Now one press closes the Mimic window and opens **Temp → Edit copy** for that clip, with **Start** focused. Trim it on the waveform, preview it, add an effect, and save the copy.
+  - Before, this took four steps: close Mimic, open Temp, find the clip, press Edit copy.
+  - Shown to the host, and to guests whom the host allows to add audio (the same rule as Edit copy).
+
+### Tests
+
+- New e2e test: make a clip, press Edit. Mimic closes, Edit copy for that clip opens with Start focused, and the trimmed copy saves.
+
 ## 2.20.0 — Preview an edited copy before saving it
 
 **Update the Windows companion** to get this. With an older companion, the website hides the button, and Settings lists it under what an update adds.
