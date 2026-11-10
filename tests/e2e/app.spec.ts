@@ -1942,7 +1942,11 @@ test('Mimic hotkey: the host browser remembers its key and length across compani
   await expect(dialog.getByLabel('F7 hotkey')).toBeChecked();
   // A remembered key that another app now owns (the harness pretends F9 is) is reported, and the
   // hotkey still turns on with the current key.
-  await dialog.getByLabel('F7 hotkey').uncheck();
+  // Each toggle runs a command; a press while it runs is ignored (aria-disabled), so wait it out.
+  const f7 = dialog.getByLabel('F7 hotkey');
+  await expect(f7).not.toHaveAttribute('aria-disabled');
+  await f7.uncheck();
+  await expect(f7).not.toHaveAttribute('aria-disabled');
   await page.evaluate(() =>
     localStorage.setItem('soundpad-mimic-hotkey', JSON.stringify({ key: 'F9', seconds: 15 })),
   );

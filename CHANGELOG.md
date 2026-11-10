@@ -2,6 +2,12 @@
 
 Notable changes to Soundpad Web. Versions follow the website's `package.json`; the Windows companion is versioned separately and only needs updating when a release says so.
 
+## Unreleased
+
+### Tests
+
+- The Mimic hotkey test now waits for each on/off command to finish before toggling again. The page ignores a toggle while the previous one is still running, so a slow run could fail. It failed once in a full local run and did not reproduce in 24 stress runs, before or after the change.
+
 ## 2.18.2 — "What's new" after an update
 
 Website only; the companion is unchanged apart from its version number (it reports 2.18.2).
