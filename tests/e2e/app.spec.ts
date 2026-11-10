@@ -2300,7 +2300,8 @@ test('accessibility: no serious or critical axe violations in the newer controls
   page,
   harness,
 }) => {
-  // Temp's Clear button, Edit copy's speed and Keep pitch, Mimic's Effect menu and Voice Replay Studio list (2.15–2.18).
+  // Temp's Clear button, Edit copy's speed and Keep pitch, Mimic's Effect menu and Voice Replay Studio list (2.15–2.18);
+  // Edit copy's waveform, Zoom, Preview and Loop, and Mimic's Edit button (2.19–2.23).
   const problems: string[] = [];
   async function scan(screen: string) {
     const { violations } = await new AxeBuilder({ page }).analyze();
@@ -2311,7 +2312,7 @@ test('accessibility: no serious or critical axe violations in the newer controls
   await host(page, harness);
   await page
     .getByLabel('Add session audio', { exact: true })
-    .setInputFiles({ name: 'Scan tone.wav', mimeType: 'audio/wav', buffer: sessionWave() });
+    .setInputFiles({ name: 'Scan tone.wav', mimeType: 'audio/wav', buffer: sessionWave(10) });
   await expect(
     page.getByRole('button', { name: 'Play from start: Scan tone', exact: true }),
   ).toBeEnabled({ timeout: 25000 });
@@ -2325,6 +2326,16 @@ test('accessibility: no serious or critical axe violations in the newer controls
   await form.getByRole('combobox').selectOption('speed');
   await form.getByLabel('Keep pitch').check();
   await scan('edit copy at any speed');
+  await form.getByRole('combobox').selectOption('none');
+  await form.getByLabel('Start (s)').fill('2');
+  await form.getByLabel('End (s)').fill('5');
+  await form.getByLabel('Loop').check();
+  await form.getByRole('button', { name: 'Zoom to selection' }).click();
+  await expect(form.getByRole('button', { name: 'Show whole sound' })).toBeVisible();
+  await scan('edit copy zoomed, with preview and loop');
+  await page.setViewportSize({ width: 390, height: 844 });
+  await scan('edit copy on a phone');
+  await page.setViewportSize({ width: 1280, height: 720 });
   await form.getByRole('button', { name: 'Cancel' }).click();
   await page.getByRole('button', { name: 'Mimic', exact: true }).click();
   const dialog = page.getByRole('dialog', { name: 'Mimic' });
@@ -2334,6 +2345,7 @@ test('accessibility: no serious or critical axe violations in the newer controls
   await dialog.getByLabel('Clip name').fill('Scan clip');
   await page.keyboard.press('Enter');
   await expect(dialog.getByRole('region', { name: 'Just mimicked' })).toBeVisible();
+  await expect(dialog.getByRole('button', { name: 'Edit a copy of Scan clip' })).toBeVisible();
   await dialog.getByText('From Voice Replay Studio').click();
   await expect(
     dialog.getByRole('list', { name: 'Voice Replay Studio clips' }).getByRole('listitem'),

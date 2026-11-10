@@ -6,6 +6,7 @@ Notable changes to Soundpad Web. Versions follow the website's `package.json`; t
 
 ### Tests
 
+- The permanent accessibility (axe) test now also covers Edit copy's waveform, Zoom to selection, Preview and Loop (on a desktop and a phone screen) and Mimic's Edit button (2.19–2.23). No serious or critical problems were found, in Chromium or WebKit. Edit copy was also checked at phone width: nothing overflows, and every control scrolls clear of the player bar.
 - New harness tool `--trim-words <wav> <fromMs> <toMs>` shows the name a trimmed copy gets from real Whisper (2.24). On the owner's PC, three cuts of the JFK sample were named "And so my fellow Americans.", "not what your country can do for you." and "Ask what you can do for your country.", in about 1.7 s each.
 
 ## 2.24.0 — Trimmed copies named after their words
