@@ -2,6 +2,20 @@
 
 Notable changes to Soundpad Web. Versions follow the website's `package.json`; the Windows companion is versioned separately and only needs updating when a release says so.
 
+## 2.27.0 — Save & play in Edit copy
+
+Website only; works with every companion that has Edit copy. The companion reports 2.27.0 in this release, with no other change.
+
+### Added
+
+- **Save & play** next to Edit copy's **Save copy**, like **Mimic & play**: it makes the copy and plays it through Soundpad straight away, so everyone hears the edit without hunting for the new sound.
+  - Shown to the host, and to guests allowed to play sounds remotely (the same rule as Mimic & play).
+  - Enter in the form still means **Save copy**.
+
+### Tests
+
+- New e2e test (Chromium and WebKit): a chipmunk copy made with Save & play appears in Temp, Soundpad is asked to play it, and the form closes.
+
 ## 2.26.0 — Keep a fresh Mimic clip in one press
 
 Website only; works with every companion. The companion reports 2.26.0 in this release, with no other change.

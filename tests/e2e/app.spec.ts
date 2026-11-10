@@ -1891,6 +1891,37 @@ test('Temp: a search appears once there are more than six sources', async ({ pag
   await expect(page.locator('.temp-source')).toHaveCount(7);
 });
 
+test('Edit copy: Save & play makes the copy and plays it through Soundpad', async ({
+  page,
+  harness,
+}) => {
+  await host(page, harness);
+  await page
+    .getByLabel('Add session audio', { exact: true })
+    .setInputFiles({ name: 'Play me.wav', mimeType: 'audio/wav', buffer: sessionWave(2) });
+  await expect(
+    page.getByRole('button', { name: 'Play from start: Play me', exact: true }),
+  ).toBeEnabled({ timeout: 25000 });
+  await page.locator('#temp-manager > summary').click();
+  await page
+    .locator('.temp-source', { hasText: 'Play me' })
+    .getByRole('button', { name: 'Edit copy' })
+    .click();
+  const form = page.getByRole('form', { name: 'Edit a copy of Play me' });
+  await form.getByLabel('Start (s)').fill('0.5');
+  await form.getByRole('combobox').selectOption('chipmunk');
+  const playsBefore = harness.plays.length;
+  await form.getByRole('button', { name: 'Save & play' }).click();
+  await expect(
+    page.getByRole('button', { name: 'Play from start: Play me (chipmunk)', exact: true }),
+  ).toBeEnabled({ timeout: 25000 });
+  await expect
+    .poll(() => harness.plays.slice(playsBefore).some((p) => p.startsWith('DoPlaySound(')))
+    .toBe(true);
+  await expect(page.getByText('Copy added to Temp and playing.', { exact: false })).toBeVisible();
+  await expect(form).toHaveCount(0);
+});
+
 test('Edit copy can make a copy at any speed', async ({ page, harness }) => {
   await host(page, harness);
   await page

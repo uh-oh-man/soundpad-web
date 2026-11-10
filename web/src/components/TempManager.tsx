@@ -5,7 +5,7 @@ import { supports } from '../version';
 import { flattenCategories, type Snapshot } from '../protocol';
 import { TrimWave } from './TrimWave';
 import { usePreviewAudio } from '../preview-audio';
-import { Headphones } from 'lucide-react';
+import { Headphones, Play } from 'lucide-react';
 import { onTempRequest, type TempRequest } from '../edit-copy';
 const variant = z.object({
   id: z.string(),
@@ -151,6 +151,7 @@ export function TempManager({
       | 'clearTemp'
       | 'trimAudio',
     fields: Parameters<typeof controller.run>[1] = {},
+    { play = false } = {},
   ) {
     // Busy buttons stay enabled (aria-disabled) so they keep keyboard focus; ignore presses until done.
     if (pending) return;
@@ -178,7 +179,15 @@ export function TempManager({
       }
       if (op === 'trimAudio') {
         setTrimming(undefined);
-        controller.notify('Copy added to Temp. The original is unchanged.', 'success');
+        // Save & play (2.27), like Mimic & play: the new copy plays through Soundpad straight away.
+        const copy = z.object({ assetId: z.string().max(64) }).safeParse(result);
+        if (play && copy.success) {
+          await controller.run('audioPlay', { assetId: copy.data.assetId, orientation: 'normal' });
+          controller.notify(
+            'Copy added to Temp and playing. The original is unchanged.',
+            'success',
+          );
+        } else controller.notify('Copy added to Temp. The original is unchanged.', 'success');
       }
       setRefresh((n) => n + 1);
     } catch (e) {
@@ -416,10 +425,17 @@ export function TempManager({
                   onSubmit={(e) => {
                     e.preventDefault();
                     stopPreview();
-                    void run('trimAudio', {
-                      ...trimFields(a.id, durationOf(a)!, trimming),
-                      ...(trimming.name.trim() && { name: trimming.name.trim() }),
-                    });
+                    // The submitter says which button: Save copy, or Save & play.
+                    const play =
+                      (e.nativeEvent as SubmitEvent).submitter?.getAttribute('value') === 'play';
+                    void run(
+                      'trimAudio',
+                      {
+                        ...trimFields(a.id, durationOf(a)!, trimming),
+                        ...(trimming.name.trim() && { name: trimming.name.trim() }),
+                      },
+                      { play },
+                    );
                   }}
                 >
                   {a.normal?.soundId && (
@@ -566,6 +582,19 @@ export function TempManager({
                   >
                     Save copy
                   </button>
+                  {(host || state.permissions.remotePlayback) && (
+                    <button
+                      type="submit"
+                      value="play"
+                      title="Make the copy and play it through Soundpad straight away"
+                      disabled={
+                        trimming.to - trimming.from < 0.1 || trimming.from < 0 || !state.available
+                      }
+                      aria-disabled={!!pending || undefined}
+                    >
+                      <Play size={15} /> Save &amp; play
+                    </button>
+                  )}
                   {host && supports(state.companionVersion, 'trimPreview') && (
                     <button
                       type="button"
