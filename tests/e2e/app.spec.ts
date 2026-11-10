@@ -3,7 +3,7 @@ import AxeBuilder from '@axe-core/playwright';
 import { spawn } from 'node:child_process';
 import { resolve } from 'node:path';
 import { readFile, mkdir, writeFile } from 'node:fs/promises';
-type Harness = { launch: string; plays: string[] };
+type Harness = { launch: string; plays: string[]; log: () => string };
 // How long to wait for an upload, reverse or edited copy to be ready in Temp. On a slow CI runner one
 // took over 25 s (v2.29.0's tag run), and a failed tag run publishes no EXE, so CI gets more room.
 const TEMP_READY = process.env.CI ? 45000 : 25000;
@@ -27,7 +27,7 @@ async function startHarness(origin = 'http://127.0.0.1:5173', count = 4) {
       if (code) reject(Error('Test harness exited: ' + code));
     });
     proc.stdout.on('data', (chunk) => {
-      output += chunk.toString();
+      output = (output + chunk.toString()).slice(-20000);
       const ready = /TEST_READY (\{[^\n]+\})/.exec(output);
       if (ready) {
         clearTimeout(timeout);
@@ -42,6 +42,13 @@ async function startHarness(origin = 'http://127.0.0.1:5173', count = 4) {
   return {
     launch: `${origin}/#host=${address.port}.${address.token}`,
     plays,
+    // The companion's own console log (it notes refusals and errors), for failure diagnostics.
+    log: () =>
+      output
+        .split(/\r?\n/)
+        .filter((l) => l && !l.startsWith('TEST_'))
+        .slice(-15)
+        .join(' | '),
     stop: async () => {
       proc.stdin.write('exit\n');
       await new Promise<void>((r) => {
@@ -57,7 +64,7 @@ async function startHarness(origin = 'http://127.0.0.1:5173', count = 4) {
     },
   };
 }
-const test = base.extend<{ harness: Harness }>({
+const test = base.extend<{ harness: Harness; diagnostics: void }>({
   harness: async ({}, use) => {
     const harness = await startHarness();
     try {
@@ -66,6 +73,40 @@ const test = base.extend<{ harness: Harness }>({
       await harness.stop();
     }
   },
+  // When a test fails, add what the page and companion were saying to the failure. CI's traces and
+  // logs need a login to read, but failure messages are public, so a flaky run explains itself.
+  diagnostics: [
+    async ({ page, harness }, use, testInfo) => {
+      const consoleErrors: string[] = [];
+      page.on('console', (m) => {
+        if (m.type() === 'error') consoleErrors.push(m.text().slice(0, 200));
+      });
+      page.on('pageerror', (e) => consoleErrors.push(e.message.slice(0, 200)));
+      await use();
+      if (testInfo.status === testInfo.expectedStatus) return;
+      const visible = await page
+        .evaluate(() => {
+          const text = (selector: string) =>
+            (document.querySelector(selector) as HTMLElement | null)?.innerText.trim() ?? '';
+          return {
+            notices: text('.notification-stack'),
+            status: text('header'),
+            url: location.pathname + location.search,
+          };
+        })
+        .catch(() => null);
+      throw Error(
+        [
+          'Diagnostics for the failure above:',
+          `page notices: ${JSON.stringify(visible?.notices ?? '(page closed)')}`,
+          `page header: ${JSON.stringify(visible?.status.slice(0, 300) ?? '')}`,
+          `console errors: ${JSON.stringify(consoleErrors.slice(-5))}`,
+          `companion log: ${harness.log()}`,
+        ].join('\n'),
+      );
+    },
+    { auto: true },
+  ],
 });
 async function host(page: Page, harness: Harness) {
   await page.goto(harness.launch);
@@ -1626,9 +1667,21 @@ test('a guest whose browser has no WebRTC is told why at once', async ({
     await guest.goto(url);
     // A fresh browser context loads the whole app, which a slow CI runner can take a while to do (the
     // other guest tests allow 60 s too). Once loaded, the message appears at once.
-    await expect(guest.getByText('WebRTC is turned off or not supported')).toBeVisible({
-      timeout: 60000,
-    });
+    try {
+      await expect(guest.getByText('WebRTC is turned off or not supported')).toBeVisible({
+        timeout: 60000,
+      });
+    } catch (e) {
+      // Flaky on CI only (3 of 7 runs before 2.34.1): say what the guest page showed instead.
+      const shown = await guest
+        .evaluate(() => ({
+          url: location.href.replace(/#.*/, '#…'),
+          ready: document.readyState,
+          body: document.body.innerText.slice(0, 400),
+        }))
+        .catch((err: Error) => ({ error: err.message }));
+      throw Error(`${(e as Error).message}\nGuest page: ${JSON.stringify(shown)}`, { cause: e });
+    }
     await expect(guest.getByText('WebRTC blocked', { exact: true })).toBeVisible(); // header
   } finally {
     await context.close();

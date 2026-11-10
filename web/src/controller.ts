@@ -313,16 +313,30 @@ export class Controller {
     try {
       if (!file.size || file.size > 16 * 1024 * 1024) throw Error('Choose audio up to 16 MiB.');
       const bytes = new Uint8Array(await file.arrayBuffer());
+      const send = () => {
+        if (this.view.mode === 'host' && this.live)
+          return this.bridge!.upload(
+            bytes,
+            file.name,
+            this.view.profile.name === 'Guest' ? 'Host' : this.view.profile.name,
+            true,
+          );
+        if (this.view.mode === 'guest') return this.session!.upload(bytes, file.name);
+        throw Error('Connect first.');
+      };
+      // The companion refuses an upload while two other audio jobs wait ("busy; retry shortly"), e.g.
+      // during a reverse. Retry a few times instead of making the person do it (2.34.1).
       let result: unknown;
-      if (this.view.mode === 'host' && this.live)
-        result = await this.bridge!.upload(
-          bytes,
-          file.name,
-          this.view.profile.name === 'Guest' ? 'Host' : this.view.profile.name,
-          true,
-        );
-      else if (this.view.mode === 'guest') result = await this.session!.upload(bytes, file.name);
-      else throw Error('Connect first.');
+      for (let attempt = 0; ; attempt++) {
+        try {
+          result = await send();
+          break;
+        } catch (e) {
+          if (attempt >= 5 || !(e instanceof Error) || !/busy; retry shortly/i.test(e.message))
+            throw e;
+          await new Promise((r) => setTimeout(r, 1500));
+        }
+      }
       // Undo (2.33): the wrong file goes straight back out, for the host and (companion 2.32+) for the
       // guest who uploaded it. The remove step is loaded on demand; it imports this controller.
       const assetId = (result as { assetId?: unknown })?.assetId;

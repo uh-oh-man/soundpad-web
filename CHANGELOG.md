@@ -2,6 +2,19 @@
 
 Notable changes to Soundpad Web. Versions follow the website's `package.json`; the Windows companion is versioned separately and only needs updating when a release says so.
 
+## 2.34.1 — Uploads wait their turn
+
+Website only; works with every companion. The companion reports 2.34.1 in this release, with no other change.
+
+### Fixed
+
+- **An upload made while the companion was busy with other audio (for example a reverse) failed with "Audio processing is busy; retry shortly."** The website now retries it for you, up to six times over about 8 seconds, and only shows the message if it still can't get in.
+
+### Tests
+
+- **Failures on CI now explain themselves.** Several browser tests were flaky on GitHub's runners, passing only on their retry: uploads that never appeared, a guest without WebRTC, Loop, phone focus, Temp search and Zoom. CI's traces and logs need a login, but failure messages are public. So a failed test now adds what the page showed (its notices and status line) and the browser's console errors to its message, and the no-WebRTC test adds what the guest's page showed. The next flaky run will show its cause.
+- Some of those flaky upload failures may have been this busy refusal; the retry above should settle them if so.
+
 ## 2.34.0 — Undo a Voice Replay Studio import
 
 Website only; works with every companion that imports from Voice Replay Studio (2.15+). The companion reports 2.34.0 in this release, with no other change.
