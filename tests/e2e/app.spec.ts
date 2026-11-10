@@ -1524,6 +1524,14 @@ test('live Nostr/WebRTC: guests see Mimic only when allowed and can clip from it
     // Making a clip must not trip the host's per-guest rate limit (2.15.6: Temp refreshes once, not 9 times).
     await guest.waitForTimeout(1500);
     await expect(guest.getByText('Too many requests', { exact: false })).toHaveCount(0);
+    // Guests with upload permission can play their clip with a quick effect (2.18.1).
+    await dialog
+      .getByRole('region', { name: 'Just mimicked' })
+      .getByLabel('Play Guest mimic with an effect')
+      .selectOption('echo');
+    await expect(
+      page.getByRole('button', { name: 'Play from start: Guest mimic (echo)', exact: true }),
+    ).toBeEnabled({ timeout: 30000 });
     await expect(
       dialog
         .getByRole('region', { name: 'Just mimicked' })
@@ -2019,6 +2027,30 @@ test.describe('on a touch phone', () => {
     await expect(dialog.getByText('tap a transcript line', { exact: false })).toBeVisible();
     await expect(dialog.getByText('or press', { exact: false })).toBeHidden();
   });
+});
+
+test('Mimic: a fresh clip can be played with a quick effect', async ({ page, harness }) => {
+  await host(page, harness);
+  await page.getByRole('button', { name: 'Mimic', exact: true }).click();
+  const dialog = page.getByRole('dialog', { name: 'Mimic' });
+  await dialog.getByRole('button', { name: 'Start listening' }).click();
+  await page.waitForTimeout(2600);
+  await page.keyboard.press('5');
+  await dialog.getByLabel('Clip name').fill('Effect me');
+  await page.keyboard.press('Enter');
+  const recent = dialog.getByRole('region', { name: 'Just mimicked' });
+  await expect(recent.getByRole('button', { name: /Replay Effect me/ })).toBeVisible();
+  const playsBefore = harness.plays.length;
+  await recent.getByLabel('Play Effect me with an effect').selectOption('slow-voice');
+  await expect(
+    page.getByRole('button', {
+      name: 'Play from start: Effect me (0.5x speed, same pitch)',
+      exact: true,
+    }),
+  ).toBeEnabled({ timeout: 25000 });
+  await expect
+    .poll(() => harness.plays.slice(playsBefore).some((p) => p.startsWith('DoPlaySound(')))
+    .toBe(true);
 });
 
 test('Mimic fits a phone: header keeps Settings on screen and long clip names do not widen the window', async ({

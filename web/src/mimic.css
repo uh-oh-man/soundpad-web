@@ -340,3 +340,9 @@
     display: block;
   }
 }
+/* Just mimicked: quick effect menu (2.18.1). */
+.mimic-recent-effect {
+  font-size: 12px;
+  padding: 4px 6px;
+  max-width: 9rem;
+}

@@ -46,7 +46,7 @@ The companion's console window logs these events with the time, including who ma
 3. The host can press **Preview** to hear the selection on their own PC only. It plays in the host's browser tab, never through Soundpad or to guests, and saves nothing.
 4. Optionally type a name; otherwise the transcript's words, or the time, are used. Then press **Mimic it** (or **Enter**) to add the clip to Temp, or **Mimic & play** (**Shift+Enter**) to also play it through Soundpad. **Esc** clears the selection; press it again to close the window.
 
-Everyone gets a short notice when anyone makes a clip, F6 included. **Just mimicked** lists the session's last 5 clips, with who made them, a **Replay** button and a **Reverse** button to hear it backwards.
+Everyone gets a short notice when anyone makes a clip, F6 included. **Just mimicked** lists the session's last 5 clips, with who made them, a **Replay** button, a **Reverse** button to hear it backwards, and an **Effect** menu (2.18.1+): Chipmunk, Slow-mo, Echo or Slow, same voice. The effect menu makes that copy and plays it at once; guests need the host's permission to add audio.
 
 ### From Voice Replay Studio
 

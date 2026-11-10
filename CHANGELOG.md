@@ -2,6 +2,21 @@
 
 Notable changes to Soundpad Web. Versions follow the website's `package.json`; the Windows companion is versioned separately and only needs updating when a release says so.
 
+## 2.18.1 — Quick effects for fresh Mimic clips
+
+Website only; works with companion 2.9 and newer. "Slow, same voice" needs 2.17. The companion reports 2.18.1 in this release.
+
+### Added
+
+- **An Effect menu on every clip in Mimic's "Just mimicked" list.** Pick **Chipmunk**, **Slow-mo**, **Echo** or **Slow, same voice** (0.5× with Keep pitch). It makes that copy of the whole clip and plays it through Soundpad straight away, so "grab what they just said and play it back silly" takes one click.
+  - Available to the host, and to guests whom the host allows to add audio (the same permission as Edit copy).
+  - The copy lands in Temp like any edited copy, for example "Effect me (echo)", and is cleared with the rest of Temp.
+
+### Tests
+
+- New e2e test: make a clip, choose "Slow, same voice", and the "(0.5x speed, same pitch)" copy appears and Soundpad is asked to play it.
+- The weekly live-relay guest test now has the real guest apply Echo to their clip over public relays, and the host sees "Guest mimic (echo)". It passed locally.
+
 ## 2.18.0 — Clear all temporary audio, any time
 
 **Update the Windows companion** to get this. With an older companion, the website hides the button, and Settings lists it under what an update adds.
