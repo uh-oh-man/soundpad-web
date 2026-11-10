@@ -1,9 +1,10 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Headphones, Play, Scissors, X } from 'lucide-react';
 import { z } from 'zod';
 import { controller } from '../controller';
 import type { Snapshot } from '../protocol';
 import { supports } from '../version';
+import { usePreviewAudio } from '../preview-audio';
 import {
   ago,
   lastSeconds,
@@ -110,41 +111,11 @@ export function MimicPanel({
       ...(peek.ringId && { sourceId: peek.ringId }),
     };
 
-  // Host-only private preview: the companion hands the selection to this tab over loopback and the
-  // browser plays it on this PC's output. It never goes through Soundpad or to guests.
-  const preview = useRef<HTMLAudioElement | null>(null);
-  const [previewing, setPreviewing] = useState(false);
-  const stopPreview = useCallback(() => {
-    if (!preview.current) return;
-    preview.current.pause();
-    URL.revokeObjectURL(preview.current.src);
-    preview.current = null;
-    setPreviewing(false);
-  }, []);
-  useEffect(() => stopPreview, [stopPreview]);
-  async function playPreview() {
+  // Host-only private preview: heard on this PC only, never through Soundpad or by guests.
+  const { previewing, play: preview, stop: stopPreview } = usePreviewAudio();
+  function playPreview() {
     const fields = selected();
-    if (!fields) return;
-    stopPreview();
-    try {
-      const result = z
-        .object({ wav: z.string().max(8_000_000) })
-        .parse(await controller.run('mimicPreview', fields));
-      const bytes = Uint8Array.from(atob(result.wav), (c) => c.charCodeAt(0));
-      const audio = new Audio(URL.createObjectURL(new Blob([bytes], { type: 'audio/wav' })));
-      audio.onended = stopPreview;
-      preview.current = audio;
-      setPreviewing(true);
-      try {
-        await audio.play();
-      } catch {
-        // The browser refused to play (no output device, or it decided the click was too long ago).
-        stopPreview();
-        controller.notify('This browser blocked the preview sound. Press Preview again.', 'error');
-      }
-    } catch {
-      stopPreview(); // the controller already shows command errors
-    }
+    if (fields) void preview('mimicPreview', fields);
   }
 
   async function clip(play: boolean) {
@@ -277,7 +248,7 @@ export function MimicPanel({
               {host && supports(state.companionVersion, 'preview') && (
                 <button
                   title="Hear the selection on this PC only; nobody else hears it"
-                  onClick={() => (previewing ? stopPreview() : void playPreview())}
+                  onClick={() => (previewing ? stopPreview() : playPreview())}
                 >
                   <Headphones size={15} /> {previewing ? 'Stop preview' : 'Preview'}
                 </button>

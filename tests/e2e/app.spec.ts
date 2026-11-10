@@ -1688,7 +1688,11 @@ test('Temp offers to remove duplicate Temp categories that old companions create
   await expect(page.getByText('Removed 0 duplicate Temp categories from Soundpad.')).toBeVisible();
 });
 
-test('Edit copy: dragging on the waveform sets Start and End', async ({ page, harness }) => {
+test('Edit copy: dragging on the waveform sets Start and End, and the host can preview', async ({
+  page,
+  harness,
+  browserName,
+}) => {
   await host(page, harness);
   await page
     .getByLabel('Add session audio', { exact: true })
@@ -1726,6 +1730,17 @@ test('Edit copy: dragging on the waveform sets Start and End', async ({ page, ha
   // The typed boxes still move the drawn range.
   await start.fill('0.5');
   await expect(wave.locator('.trim-wave-edge').first()).toHaveAttribute('x1', '400');
+  // Preview (2.20) plays the copy in this tab only: Soundpad plays nothing and Temp gains nothing.
+  // Hosts run on Windows, where Safari doesn't exist; headless WebKit often refuses to play.
+  if (browserName !== 'webkit') {
+    const playsBefore = harness.plays.length;
+    const sources = await page.locator('.temp-source').count();
+    await form.getByRole('button', { name: 'Preview' }).click();
+    await expect(form.getByRole('button', { name: 'Stop preview' })).toBeVisible();
+    await expect(form.getByRole('button', { name: 'Preview' })).toBeVisible({ timeout: 8000 });
+    expect(harness.plays.length).toBe(playsBefore);
+    await expect(page.locator('.temp-source')).toHaveCount(sources);
+  }
   await form.getByRole('button', { name: 'Save copy' }).click();
   await expect(
     page.getByRole('button', { name: /^Play from start: Drag tone \(/ }).first(),

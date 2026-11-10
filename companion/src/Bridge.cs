@@ -78,6 +78,7 @@ public sealed partial class Bridge(ISoundpad pipe, StateStore store) : IDisposab
     {
         if (IsMimic(c.Op)) return await ExecuteMimic(c, actor, participant, requester, audience);
         if (c.Op == "trimAudio") return await TrimAudio(c, actor, participant, requester, audience);
+        if (c.Op == "trimPreview") return await TrimAudio(c, actor, participant, requester, audience, preview: true);
         if (c.Op == "endSession" && actor == "host") { StopMimic(); Publish(); }
         var query = await Query(c, actor); if (query != null) return query;
         var intent = ReservePlaybackIntent(c, actor, requester, audience);

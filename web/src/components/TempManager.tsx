@@ -4,6 +4,8 @@ import { controller } from '../controller';
 import { supports } from '../version';
 import { flattenCategories, type Snapshot } from '../protocol';
 import { TrimWave } from './TrimWave';
+import { usePreviewAudio } from '../preview-audio';
+import { Headphones } from 'lucide-react';
 const variant = z.object({
   id: z.string(),
   soundId: z.string().nullable(),
@@ -172,6 +174,19 @@ export function TempManager({
       setPending('');
     }
   }
+  // Host-only Preview of an edited copy (2.20): heard on this PC only, never through Soundpad.
+  const { previewing, play: preview, stop: stopPreview } = usePreviewAudio();
+  /** What Save copy and Preview send: the chosen part, clamped to the sound, and its effect. */
+  const trimFields = (assetId: string, length: number, t: NonNullable<typeof trimming>) => ({
+    assetId,
+    positionMs: Math.round(Math.min(Math.max(0, t.from * 1000), length)),
+    endMs: Math.round(Math.min(Math.max(0, t.to * 1000), length)),
+    action: t.effect,
+    ...(t.effect === 'speed' && { speed: clampSpeed(t.speed) }),
+    ...(t.effect === 'speed' &&
+      t.keepPitch &&
+      supports(state.companionVersion, 'keepPitch') && { keepPitch: true }),
+  });
   /** Length of a source's normal variant, from the native library entry Soundpad reports. */
   const durationOf = (a: { normal?: { soundId?: string | null } | null }) =>
     state.library.sounds.find((s) => s.id === a.normal?.soundId)?.durationMs ?? undefined;
@@ -276,16 +291,9 @@ export function TempManager({
                     noValidate
                     onSubmit={(e) => {
                       e.preventDefault();
-                      const length = durationOf(a)!;
+                      stopPreview();
                       void run('trimAudio', {
-                        assetId: a.id,
-                        positionMs: Math.round(Math.min(Math.max(0, trimming.from * 1000), length)),
-                        endMs: Math.round(Math.min(Math.max(0, trimming.to * 1000), length)),
-                        action: trimming.effect,
-                        ...(trimming.effect === 'speed' && { speed: clampSpeed(trimming.speed) }),
-                        ...(trimming.effect === 'speed' &&
-                          trimming.keepPitch &&
-                          supports(state.companionVersion, 'keepPitch') && { keepPitch: true }),
+                        ...trimFields(a.id, durationOf(a)!, trimming),
                         ...(trimming.name.trim() && { name: trimming.name.trim() }),
                       });
                     }}
@@ -432,7 +440,30 @@ export function TempManager({
                     >
                       Save copy
                     </button>
-                    <button type="button" onClick={() => setTrimming(undefined)}>
+                    {host && supports(state.companionVersion, 'trimPreview') && (
+                      <button
+                        type="button"
+                        title="Hear the copy on this PC only (its first 20 s); nobody else hears it"
+                        disabled={trimming.to - trimming.from < 0.1 || trimming.from < 0}
+                        onClick={() =>
+                          previewing
+                            ? stopPreview()
+                            : void preview(
+                                'trimPreview',
+                                trimFields(a.id, durationOf(a)!, trimming),
+                              )
+                        }
+                      >
+                        <Headphones size={15} /> {previewing ? 'Stop preview' : 'Preview'}
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        stopPreview();
+                        setTrimming(undefined);
+                      }}
+                    >
                       Cancel
                     </button>
                   </form>

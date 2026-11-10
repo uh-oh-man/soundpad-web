@@ -123,18 +123,28 @@ describe('feature gates for older companions', () => {
       'any speed for edited copies (0.05× to 20×)',
       'Keep pitch when changing speed',
       'clearing all temporary audio during a session',
+      'previewing an edited copy before saving it',
     ]);
     expect(missingFeatures('2.15.9')).toEqual([
       'any speed for edited copies (0.05× to 20×)',
       'Keep pitch when changing speed',
       'clearing all temporary audio during a session',
+      'previewing an edited copy before saving it',
     ]);
     expect(missingFeatures('2.16.2')).toEqual([
       'Keep pitch when changing speed',
       'clearing all temporary audio during a session',
+      'previewing an edited copy before saving it',
     ]);
-    expect(missingFeatures('2.17.0')).toEqual(['clearing all temporary audio during a session']);
-    expect(missingFeatures('2.18.0')).toEqual([]);
+    expect(missingFeatures('2.17.0')).toEqual([
+      'clearing all temporary audio during a session',
+      'previewing an edited copy before saving it',
+    ]);
+    expect(missingFeatures('2.19.0')).toEqual(['previewing an edited copy before saving it']);
+    expect(supports('2.19.0', 'trimPreview')).toBe(false);
+    expect(supports('2.20.0', 'trimPreview')).toBe(true);
+    expect(missingFeatures('2.18.0')).toEqual(['previewing an edited copy before saving it']);
+    expect(missingFeatures('2.20.0')).toEqual([]);
     expect(supports('2.15.9', 'speed')).toBe(false);
     expect(supports('2.16.0', 'speed')).toBe(true);
     expect(missingFeatures(null)).toEqual([]);

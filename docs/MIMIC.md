@@ -64,7 +64,8 @@ A clip is a normal Temp sound, so reverse, **Keep permanently** (with host confi
 1. Open **Temp**.
 2. Press **Edit copy** and choose the part to copy: drag across the waveform, or drag its start or end edge, like Voice Replay Studio's handles (2.19+). You can also type the start and end in seconds.
 3. Optionally pick an **Effect**: Chipmunk (1.5× faster and higher), Slow-mo (0.7×, deeper), Echo, or **Any speed** (companion 2.16+): any speed from 0.05× (20 times slower) to 20× (20 times faster), set with a slider or an exact number. The form shows how long the copy will be. Like a tape, pitch moves with speed: slower is deeper, faster is higher. Tick **Keep pitch** (companion 2.17+) to change speed while voices keep their pitch.
-4. Press **Save copy**.
+4. Optional (host, companion 2.20+): press **Preview** to hear the copy on your own PC first, exactly as it will be saved (its first 20 s). Nobody else hears it and nothing is saved.
+5. Press **Save copy**.
 
 Like Voice Replay Studio's trim, it saves a new Temp sound and never changes the original. Everything in Temp is removed from Soundpad and from disk when hosting ends, or when the companion window is closed (2.16+). The host can also press **Clear all temporary audio** in Temp to do that at any time without ending the session (2.18+). Guests can edit copies when the host allows uploads. Temp holds at most 16 MiB per sound, so long copies are made mono and then given a lower sample rate (never below 16 kHz) to fit. Anything still too long is refused before any work is done, with the longest length that would fit.
 
@@ -104,6 +105,10 @@ The website always serves the newest version and hides anything the host's compa
 | Private preview (host) | 2.12 |
 | Hotkey key choice (F6–F10) | 2.14 |
 | Import from Voice Replay Studio (host) | 2.15 |
+| Any speed for Edit copy | 2.16 |
+| Keep pitch | 2.17 |
+| Clear all temporary audio (host) | 2.18 |
+| Preview an edited copy (host) | 2.20 |
 
 ## Protocol
 

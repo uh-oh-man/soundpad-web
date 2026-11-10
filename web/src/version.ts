@@ -33,6 +33,7 @@ export const FEATURES = {
   speed: [2, 16],
   keepPitch: [2, 17],
   clearTemp: [2, 18],
+  trimPreview: [2, 20],
 } as const satisfies Record<string, readonly [number, number]>;
 
 /** True when the website changed version since this browser last used it (and it had used it before). */
@@ -56,6 +57,7 @@ const FEATURE_NAMES: Record<keyof typeof FEATURES, string> = {
   speed: 'any speed for edited copies (0.05× to 20×)',
   keepPitch: 'Keep pitch when changing speed',
   clearTemp: 'clearing all temporary audio during a session',
+  trimPreview: 'previewing an edited copy before saving it',
 };
 
 /**

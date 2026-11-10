@@ -4,6 +4,8 @@ namespace SoundpadWeb;
 public sealed partial class Bridge
 {
     public const int TrimMinimumMs = 100;
+    /// <summary>How much of the finished copy a host preview plays (2.20): enough to judge the cut and effect.</summary>
+    public const int TrimPreviewSeconds = 20;
     // Temp's per-sound limit. It is also recorded in the audio journal, so raising it would make older
     // companions reject that journal and break rolling back; long copies are reduced to fit instead.
     private const int UploadLimit = 16777216, MinimumCopyRate = 16000;
@@ -35,9 +37,11 @@ public sealed partial class Bridge
     /// <summary>
     /// Saves part of a Temp source, optionally with a voice effect (<c>action</c>), as a new Temp sound, as
     /// Voice Replay Studio's trim saved a new version: the original stays untouched. Guests need the same
-    /// permission as uploading.
+    /// permission as uploading. With <paramref name="preview"/> (op <c>trimPreview</c>, host only, 2.20) it makes
+    /// the same copy but returns its first <see cref="TrimPreviewSeconds"/> s as WAV to the host's own browser
+    /// tab, like Mimic's Preview, and saves nothing.
     /// </summary>
-    private async Task<Reply> TrimAudio(Command c, string actor, Participant? participant, string? requester, string? audience)
+    private async Task<Reply> TrimAudio(Command c, string actor, Participant? participant, string? requester, string? audience, bool preview = false)
     {
         try
         {
@@ -47,6 +51,8 @@ public sealed partial class Bridge
                 throw new InvalidDataException($"Choose a start and end at least {TrimMinimumMs / 1000.0:0.0} s apart.");
             // Check the guest before any decoding: this work is heavy and must not be free to trigger.
             var owner = requester ?? participant?.Id ?? actor;
+            // Preview audio goes only to the host's own tab over loopback, never to guests or Soundpad.
+            if (preview && actor != "host") throw new InvalidDataException("Only the host can preview.");
             if (!sessionAccepting) throw new InvalidDataException("Hosting has ended.");
             if (actor != "host" && (!disk.Permissions.GuestUploads || (audioAudience != null && audience != audioAudience) || revokedAudioPeers.ContainsKey(owner)))
                 throw new InvalidDataException("The host has not allowed guests to edit audio.");
@@ -73,11 +79,14 @@ public sealed partial class Bridge
             {
                 if (from >= audio.Duration.TotalMilliseconds) throw new InvalidDataException("The start is past the end of the sound.");
                 rate = audio.Rate; channels = audio.Channels;
-                long skip = from * rate / 1000 * channels, keep = (Math.Min(to, (long)audio.Duration.TotalMilliseconds) - from) * rate / 1000 * channels;
-                // Even mono at the lowest quality must fit Temp's 16 MiB per-sound limit; say so before decoding.
                 double stretch = AudioEffects.Stretch(effect, speed);
+                long end = Math.Min(to, (long)audio.Duration.TotalMilliseconds);
+                // A preview needs only the source that makes its first seconds (plus a second for the effect's edges).
+                if (preview) end = Math.Min(end, from + (long)Math.Ceiling((TrimPreviewSeconds / stretch + 1) * 1000));
+                long skip = from * rate / 1000 * channels, keep = (end - from) * rate / 1000 * channels;
+                // Even mono at the lowest quality must fit Temp's 16 MiB per-sound limit; say so before decoding.
                 double seconds = keep / (double)channels / rate * stretch + (effect == "echo" ? 0.5 : 0);
-                if (seconds * MinimumCopyRate * 2 + 44 > UploadLimit)
+                if (!preview && seconds * MinimumCopyRate * 2 + 44 > UploadLimit)
                     throw new InvalidDataException($"That copy is too long for Temp. Choose at most {Math.Floor((UploadLimit - 44) / (2.0 * MinimumCopyRate) / stretch)} s of this sound{(effect == "speed" ? " at this speed, or a faster speed" : "")}.");
                 var samples = new List<float>((int)keep);
                 var buffer = new float[channels * 4096];
@@ -94,7 +103,14 @@ public sealed partial class Bridge
             }
             bool keepPitch = effect == "speed" && c.KeepPitch;
             var processed = AudioEffects.Apply(cut, channels, rate, effect, speed, keepPitch);
-            (processed, rate, channels) = FitForTemp(processed, rate, channels);
+            if (preview)
+            {
+                // At most 20 s, and at most about 5.5 MB of WAV so the reply stays as small as Mimic's preview
+                // (a 96 kHz stereo source previews about 14 s).
+                long most = Math.Min((long)TrimPreviewSeconds * rate * channels, 2_750_000);
+                if (processed.Length > most) processed = processed[..(int)most];
+            }
+            else (processed, rate, channels) = FitForTemp(processed, rate, channels);
             byte[] wav;
             using (var output = new MemoryStream())
             {
@@ -102,6 +118,7 @@ public sealed partial class Bridge
                     foreach (var sample in processed) writer.WriteSample(Math.Clamp(sample, -1f, 1f));
                 wav = output.ToArray();
             }
+            if (preview) return new("ack", c.Id, true, Data: new { wav = Convert.ToBase64String(wav), seconds = processed.Length / (double)channels / rate });
             var label = effect switch { "none" => "trimmed", "speed" => $"{speed.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture)}x speed{(keepPitch ? ", same pitch" : "")}", _ => AudioEffects.Names[effect] };
             var name = string.IsNullOrWhiteSpace(c.Name) ? $"{original} ({label})" : c.Name.Trim();
             if (name.Length > 100) name = name[..99].TrimEnd() + "\u2026";

@@ -415,6 +415,37 @@ public sealed class MimicTests : IDisposable
     }
 
     [Fact]
+    public async Task TrimPreviewPlaysTheCopyToTheHostAndSavesNothing()
+    {
+        await using var mock = new MockSoundpad(); using var pipe = new SoundpadPipe(mock.Name, true); using var bridge = new Bridge(pipe, new StateStore(folder)); await bridge.Poll(true);
+        Assert.True((await bridge.Execute(Cmd("beginSession"), "host")).Ok);
+        var tone = Enumerable.Range(0, 16000 * 30).Select(i => 0.3f * MathF.Sin(i * 0.2f)).ToArray(); // 30 s at 16 kHz
+        Assert.True((await bridge.Upload(MimicRing.Wav(tone, 16000), "Long take.wav", "Alice")).Ok);
+        var journal = () => JsonSerializer.Deserialize<AudioJournal>(File.ReadAllText(Path.Combine(folder, "managed-audio", "journal.json")), Json.Options)!;
+        var original = journal().Assets.Single();
+        double Seconds(Reply r)
+        {
+            Assert.True(r.Ok, r.Error);
+            var wav = Convert.FromBase64String(JsonSerializer.SerializeToElement(r.Data, Json.Options).GetProperty("wav").GetString()!);
+            using var reader = new NAudio.Wave.WaveFileReader(new MemoryStream(wav));
+            return reader.TotalTime.TotalSeconds;
+        }
+        // The cut itself, with the same effect rules as Save copy: 1 s at half speed lasts 2 s.
+        Assert.InRange(Seconds(await bridge.Execute(Cmd("trimPreview") with { AssetId = original.Id, PositionMs = 500, EndMs = 1500 }, "host")), 0.99, 1.01);
+        Assert.InRange(Seconds(await bridge.Execute(Cmd("trimPreview") with { AssetId = original.Id, PositionMs = 0, EndMs = 1000, Action = "speed", Speed = 0.5, KeepPitch = true }, "host")), 1.99, 2.01);
+        // A long cut previews only its first 20 s, even when slowed down a lot.
+        Assert.InRange(Seconds(await bridge.Execute(Cmd("trimPreview") with { AssetId = original.Id, PositionMs = 0, EndMs = 30000 }, "host")), 19.99, 20.01);
+        Assert.InRange(Seconds(await bridge.Execute(Cmd("trimPreview") with { AssetId = original.Id, PositionMs = 0, EndMs = 30000, Action = "speed", Speed = 0.05 }, "host")), 19.99, 20.01);
+        // Guests never get preview audio, and the same checks as Save copy apply.
+        Assert.False((await bridge.Execute(Cmd("trimPreview") with { AssetId = original.Id, PositionMs = 0, EndMs = 1000 }, "guest")).Ok);
+        Assert.False((await bridge.Execute(Cmd("trimPreview") with { AssetId = original.Id, PositionMs = 0, EndMs = 50 }, "host")).Ok);
+        Assert.False((await bridge.Execute(Cmd("trimPreview") with { AssetId = original.Id, PositionMs = 0, EndMs = 1000, Action = "robot" }, "host")).Ok);
+        // A preview saves nothing.
+        Assert.Single(journal().Assets);
+        Assert.Single(bridge.Snapshot.Library.Sounds, s => s.Temporary);
+    }
+
+    [Fact]
     public async Task EditedCopiesCanCarryAVoiceEffect()
     {
         await using var mock = new MockSoundpad(); using var pipe = new SoundpadPipe(mock.Name, true); using var bridge = new Bridge(pipe, new StateStore(folder)); await bridge.Poll(true);

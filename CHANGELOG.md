@@ -2,6 +2,27 @@
 
 Notable changes to Soundpad Web. Versions follow the website's `package.json`; the Windows companion is versioned separately and only needs updating when a release says so.
 
+## 2.20.0 — Preview an edited copy before saving it
+
+**Update the Windows companion** to get this. With an older companion, the website hides the button, and Settings lists it under what an update adds.
+
+### Added
+
+- **Preview in Edit copy** (host): hear the copy before saving it, like **Play Selection** in Voice Replay Studio's editor.
+  - It plays the chosen part with the chosen effect, speed and Keep pitch, exactly as **Save copy** would make it.
+  - It plays in the host's browser tab on this PC only. Soundpad plays nothing, guests hear nothing, and nothing is added to Temp.
+  - It plays the first 20 s of the copy, so even a long, slowed-down copy starts quickly. The companion decodes only the part it needs.
+  - Press it again (**Stop preview**) to stop; **Save copy** and **Cancel** stop it too.
+
+### Changed
+
+- Mimic's Preview and the new one share the same playback code; Mimic's Preview works as before.
+
+### Tests
+
+- New C# test: a preview has the same length as the copy would (1 s cut; 2 s at half speed with Keep pitch), stops at 20 s for long or very slow copies, is refused for guests and for invalid cuts, and saves nothing.
+- The Edit copy e2e test now also previews: Soundpad plays nothing and Temp gains nothing.
+
 ## 2.19.0 — Drag to choose what Edit copy keeps
 
 Website only; works with any companion that has Edit copy. The companion reports 2.19.0 in this release, with no other change.

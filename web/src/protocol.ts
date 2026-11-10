@@ -43,6 +43,7 @@ export const commandSchema = z
       'mimicLibrary',
       'mimicLibraryImport',
       'trimAudio',
+      'trimPreview',
     ]),
     assetId: z.uuid().optional(),
     variantId: z.uuid().optional(),
@@ -266,6 +267,7 @@ export const slowOps: readonly Command['op'][] = [
   'mimicClip',
   'mimicLibraryImport',
   'trimAudio',
+  'trimPreview',
 ];
 export function isGuestAllowed(c: Command, s: Snapshot) {
   if (c.op === 'mimicPeek' || c.op === 'mimicClip') return s.permissions.guestMimic === true;
