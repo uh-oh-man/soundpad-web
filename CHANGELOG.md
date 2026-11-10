@@ -2,6 +2,24 @@
 
 Notable changes to Soundpad Web. Versions follow the website's `package.json`; the Windows companion is versioned separately and only needs updating when a release says so.
 
+## 2.29.0 — Undo a Mimic clip
+
+Website only; works with every companion. The companion reports 2.29.0 in this release, with no other change.
+
+### Added
+
+- **Undo on the "… mimicked …" notice** (host): a clip grabbed by mistake (the wrong moment, a stray F6, a guest's clip that shouldn't stay) comes straight back out of Temp and Soundpad with one press, like Undo after Edit copy (2.28).
+  - A clip still playing after **Mimic & play** is stopped first, because the companion never removes temporary audio while it plays.
+  - The clip leaves "Just mimicked" too. Guests' notices have no Undo, because only the host can remove Temp audio.
+
+### Changed
+
+- Edit copy's Undo and the new one share the same remove step.
+
+### Tests
+
+- New e2e test: a clip made with Mimic & play is removed by Undo on its notice while it plays, leaves Just mimicked, and shows no "Stop playback" error.
+
 ## 2.28.0 — Undo an edited copy
 
 Website only; works with every companion. The companion reports 2.28.0 in this release, with no other change.

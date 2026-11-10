@@ -2400,6 +2400,29 @@ test('Mimic: Edit on a fresh clip opens its Edit copy in Temp', async ({ page, h
   ).toBeEnabled({ timeout: 25000 });
 });
 
+test('Mimic: Undo on the clip notice takes a clip made by mistake back out (host)', async ({
+  page,
+  harness,
+}) => {
+  await host(page, harness);
+  await page.getByRole('button', { name: 'Mimic', exact: true }).click();
+  const dialog = page.getByRole('dialog', { name: 'Mimic' });
+  await dialog.getByRole('button', { name: 'Start listening' }).click();
+  await page.waitForTimeout(2600);
+  await page.keyboard.press('5');
+  await dialog.getByLabel('Clip name', { exact: true }).fill('Oops');
+  // Mimic & play: the clip is playing when Undo is pressed, so Undo stops it first.
+  await page.keyboard.press('Shift+Enter');
+  const clip = page.getByRole('button', { name: 'Play from start: Oops', exact: true });
+  await expect(clip).toBeEnabled({ timeout: 25000 });
+  const notice = page.getByRole('status').filter({ hasText: 'mimicked “Oops”' });
+  await notice.getByRole('button', { name: 'Undo' }).click();
+  await expect(page.getByText('Clip removed from Temp.')).toBeVisible({ timeout: 15000 });
+  await expect(clip).toHaveCount(0, { timeout: 25000 });
+  await expect(dialog.getByRole('region', { name: 'Just mimicked' })).toHaveCount(0);
+  await expect(page.getByText('Stop playback before removing', { exact: false })).toHaveCount(0);
+});
+
 test('Mimic: Keep on a fresh clip opens Keep permanently for it in Temp (host)', async ({
   page,
   harness,

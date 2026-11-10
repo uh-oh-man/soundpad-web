@@ -7,6 +7,7 @@ import { TrimWave } from './TrimWave';
 import { usePreviewAudio } from '../preview-audio';
 import { Headphones, Play } from 'lucide-react';
 import { onTempRequest, type TempRequest } from '../edit-copy';
+import { removeNewTempAudio } from '../remove-temp';
 const variant = z.object({
   id: z.string(),
   soundId: z.string().nullable(),
@@ -209,20 +210,7 @@ export function TempManager({
    */
   async function undoCopy(assetId: string) {
     try {
-      const { state: now } = controller.getSnapshot();
-      const sound = now.library.sounds.find((s) => s.assetId === assetId);
-      if (sound && now.playback.soundId === sound.id && now.playback.status !== 'STOPPED')
-        await controller.run('stop');
-      for (let attempt = 0; ; attempt++) {
-        try {
-          await controller.run('removeAudio', { assetId });
-          break;
-        } catch (e) {
-          // Soundpad may report the stop a moment late; try again briefly before giving up.
-          if (attempt >= 4 || !(e instanceof Error) || !/Stop playback/i.test(e.message)) throw e;
-          await new Promise((r) => setTimeout(r, 400));
-        }
-      }
+      await removeNewTempAudio(assetId);
       controller.notify('Copy removed from Temp.', 'success');
       setRefresh((n) => n + 1);
     } catch {

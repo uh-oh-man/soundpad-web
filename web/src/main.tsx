@@ -38,6 +38,7 @@ import { SettingsDialog } from './components/SettingsDialog';
 import { WhatsNew } from './components/WhatsNew';
 import { MimicPanel } from './components/MimicPanel';
 import { requestTemp } from './edit-copy';
+import { removeNewTempAudio } from './remove-temp';
 import { useAppearance } from './appearance';
 import { GuestName } from './components/GuestName';
 import { organization } from './shared-layout';
@@ -277,9 +278,23 @@ function App() {
     if (seenClip.current === null) seenClip.current = at;
     else if (newestClip && at > seenClip.current) {
       seenClip.current = at;
-      controller.notify(`${newestClip.by} mimicked \u201c${newestClip.name}\u201d`, 'success');
+      // The host can take a clip straight back out (2.29), like Undo after Edit copy.
+      const clipId = newestClip.assetId;
+      controller.notify(
+        `${newestClip.by} mimicked \u201c${newestClip.name}\u201d`,
+        'success',
+        host
+          ? {
+              label: 'Undo',
+              run: () =>
+                void removeNewTempAudio(clipId)
+                  .then(() => controller.notify('Clip removed from Temp.', 'success'))
+                  .catch(() => {}),
+            }
+          : undefined,
+      );
     }
-  }, [mode, newestClip]);
+  }, [mode, newestClip, host]);
 
   // Mimic records other people's voices, so everyone is told when it starts, changes source or
   // stops, and anyone joining while it is on is told right away.
