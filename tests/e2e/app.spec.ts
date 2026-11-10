@@ -1734,6 +1734,18 @@ test('Edit copy: dragging on the waveform sets Start and End, and the host can p
   // The typed boxes still move the drawn range.
   await start.fill('0.5');
   await expect(wave.locator('.trim-wave-edge').first()).toHaveAttribute('x1', '400');
+  // The waveform also takes the keyboard, like Mimic's (2.31): Shift+Left moves the start, Left the
+  // end, Ctrl for whole seconds.
+  await wave.focus();
+  await page.keyboard.press('Shift+ArrowLeft');
+  await expect(start).toHaveValue('0.4');
+  await page.keyboard.press('ArrowLeft');
+  await expect(end).toHaveValue('0.9');
+  await page.keyboard.press('Control+Shift+ArrowLeft');
+  await expect(start).toHaveValue('0');
+  await expect(wave).toHaveAttribute('aria-valuetext', 'From 0.00 s to 0.90 s of 1.00 s');
+  await start.fill('0.5');
+  await end.fill('1');
   // Preview (2.20) plays the copy in this tab only: Soundpad plays nothing and Temp gains nothing.
   // Hosts run on Windows, where Safari doesn't exist; headless WebKit often refuses to play.
   if (browserName !== 'webkit') {

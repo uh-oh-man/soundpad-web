@@ -3,13 +3,15 @@ import type { Snapshot } from '../protocol';
 import { useWaveformData } from '../waveform-cache';
 import { trimDrag, trimGrab, zoomView, type TrimGrab } from '../trim';
 import { wavePath } from './Waveform';
+import { NUDGE_MS, nudgeSelection } from '../mimic/selection';
 
 const WIDTH = 800;
 
 /**
  * The source's waveform above Edit copy's Start and End boxes (2.19.0), like Voice Replay Studio's
  * clip editor: drag across it to choose the part to copy, or drag an edge to adjust it. The number
- * boxes stay the exact, keyboard-friendly controls, so this strip is a pointer aid only.
+ * boxes stay the exact controls. Like Mimic's waveform, it also takes the keyboard (2.31): Left/Right move
+ * the end, Shift+Left/Right the start, Ctrl for 1 second steps.
  * "Zoom to selection" (2.22.0) shows just the chosen part, so edges on a long sound can be set finely.
  */
 export function TrimWave({
@@ -50,7 +52,29 @@ export function TrimWave({
   return (
     <div className="trim-wave">
       <svg
-        aria-hidden="true"
+        role="slider"
+        tabIndex={0}
+        aria-label="Part to copy. Drag to choose; drag an edge to adjust it. Arrow keys move the end, Shift+arrows the start, Ctrl for 1 second steps."
+        aria-valuemin={0}
+        aria-valuemax={Number(length.toFixed(2))}
+        aria-valuenow={Number(Math.max(from, to).toFixed(2))}
+        aria-valuetext={`From ${Math.min(from, to).toFixed(2)} s to ${Math.max(from, to).toFixed(2)} s of ${length.toFixed(2)} s`}
+        onKeyDown={(e) => {
+          if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
+          e.preventDefault();
+          // Mimic's own nudge rules, in milliseconds.
+          const next = nudgeSelection(
+            { from: Math.min(from, to) * 1000, to: Math.max(from, to) * 1000 },
+            e.key,
+            e.shiftKey,
+            lengthMs,
+            e.ctrlKey ? 1000 : NUDGE_MS,
+          );
+          onChange({
+            from: Math.round(next.from / 10) / 100,
+            to: Math.round(next.to / 10) / 100,
+          });
+        }}
         viewBox={`0 0 ${WIDTH} 64`}
         preserveAspectRatio="none"
         data-testid="trim-wave"

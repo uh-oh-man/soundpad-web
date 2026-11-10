@@ -2,6 +2,19 @@
 
 Notable changes to Soundpad Web. Versions follow the website's `package.json`; the Windows companion is versioned separately and only needs updating when a release says so.
 
+## 2.31.0 — Keyboard on Edit copy's waveform
+
+Website only; works with every companion. The companion reports 2.31.0 in this release, with no other change.
+
+### Added
+
+- **Edit copy's waveform takes the keyboard, like Mimic's.** Tab to it, then **Left/Right** moves the end, **Shift+Left/Right** the start, and **Ctrl** makes 1-second steps. Start and End follow. Screen readers hear it as a slider that says which part is chosen ("From 0.40 s to 0.90 s of 1.00 s"). It shows a focus ring.
+  - It uses Mimic's own nudge rules, so both waveforms behave the same. This also settles the review's note that Edit copy duplicated Mimic's selection logic.
+
+### Tests
+
+- The Edit copy waveform e2e test now also nudges with Shift+Left, Left and Ctrl+Shift+Left and checks Start, End and what a screen reader hears. The accessibility scan of the newer controls passes with it.
+
 ## 2.30.1 — "See what's new" always opens
 
 Website only; works with every companion. The companion reports 2.30.1 in this release, with no other change.

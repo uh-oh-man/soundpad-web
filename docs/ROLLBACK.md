@@ -6,6 +6,7 @@ Every release stays on GitHub permanently, so any earlier version can be restore
 
 | Version | What it is | Git tag | Download |
 | --- | --- | --- | --- |
+| 2.31.0 | Keyboard on Edit copy's waveform | `v2.31.0` | [Release](https://github.com/uh-oh-man/soundpad-web/releases/tag/v2.31.0) |
 | 2.30.1 | "See what's new" always opens | `v2.30.1` | [Release](https://github.com/uh-oh-man/soundpad-web/releases/tag/v2.30.1) |
 | 2.30.0 | Undo decided by the companion (companion update) | `v2.30.0` | [Release](https://github.com/uh-oh-man/soundpad-web/releases/tag/v2.30.0) |
 | 2.29.3 | Fixes from a review of 2.19–2.29 (companion update for two naming and preview fixes) | `v2.29.3` | [Release](https://github.com/uh-oh-man/soundpad-web/releases/tag/v2.29.3) |
