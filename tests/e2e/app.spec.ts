@@ -2309,6 +2309,44 @@ test('Mimic: Edit on a fresh clip opens its Edit copy in Temp', async ({ page, h
   ).toBeEnabled({ timeout: 25000 });
 });
 
+test('Mimic: Keep on a fresh clip opens Keep permanently for it in Temp (host)', async ({
+  page,
+  harness,
+}) => {
+  await host(page, harness);
+  const openMimic = async () => {
+    await page.getByRole('button', { name: 'Mimic', exact: true }).click();
+    return page.getByRole('dialog', { name: 'Mimic' });
+  };
+  let dialog = await openMimic();
+  await dialog.getByRole('button', { name: 'Start listening' }).click();
+  await page.waitForTimeout(2600);
+  await page.keyboard.press('5');
+  await dialog.getByLabel('Clip name').fill('Keeper');
+  await page.keyboard.press('Enter');
+  const recent = () => dialog.getByRole('region', { name: 'Just mimicked' });
+  await expect(recent().getByRole('button', { name: /Replay Keeper/ })).toBeVisible();
+  // Like Voice Replay Studio's library: one press, Mimic closes, Temp asks where to keep it.
+  await recent().getByRole('button', { name: 'Keep Keeper permanently' }).click();
+  await expect(dialog).toBeHidden();
+  const confirm = page.getByRole('region', { name: 'Confirm permanent audio save' });
+  await expect(confirm).toBeVisible({ timeout: 15000 });
+  await expect(confirm.getByRole('heading')).toHaveText('Keep Keeper (normal)');
+  await expect(confirm.getByLabel('Permanent folder (host only)')).toBeFocused();
+  await confirm.getByRole('button', { name: 'Confirm permanent save', exact: true }).click();
+  await expect(page.locator('.temp-save')).toHaveCount(0);
+  await expect(
+    page.locator('.temp-source', { hasText: 'Keeper' }).getByText('normal · permanent'),
+  ).toBeVisible({ timeout: 15000 });
+  // Pressing Keep again only says it is already kept.
+  dialog = await openMimic();
+  await recent().getByRole('button', { name: 'Keep Keeper permanently' }).click();
+  await expect(page.getByText('Keeper is already kept permanently.')).toBeVisible({
+    timeout: 15000,
+  });
+  await expect(page.locator('.temp-save')).toHaveCount(0);
+});
+
 test('Edit copy: with transcripts on, a plain trim is named after its words', async ({
   page,
   harness,

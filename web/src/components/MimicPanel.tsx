@@ -46,14 +46,14 @@ export function MimicPanel({
   host,
   connected,
   canPlay,
-  onEditCopy,
+  onTempRequest,
 }: {
   state: Snapshot;
   host: boolean;
   connected: boolean;
   canPlay: boolean;
-  /** Closes this window and opens Temp's Edit copy for a clip (2.21). */
-  onEditCopy?: (assetId: string) => void;
+  /** Closes this window and opens Temp's Edit copy (2.21) or Keep permanently (2.26) for a clip. */
+  onTempRequest?: (kind: 'edit' | 'keep', assetId: string) => void;
 }) {
   const mimic = state.mimic;
   const active = !!mimic?.active;
@@ -287,7 +287,7 @@ export function MimicPanel({
         <p className="muted">Loading the live buffer…</p>
       )}
       {allowed && (
-        <MimicRecent state={state} host={host} canPlay={canPlay} onEditCopy={onEditCopy} />
+        <MimicRecent state={state} host={host} canPlay={canPlay} onTempRequest={onTempRequest} />
       )}
       {host && supports(state.companionVersion, 'voiceReplayLibrary') && (
         <MimicLibrary connected={connected} canPlay={canPlay} />

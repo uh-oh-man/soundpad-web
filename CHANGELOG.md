@@ -2,6 +2,26 @@
 
 Notable changes to Soundpad Web. Versions follow the website's `package.json`; the Windows companion is versioned separately and only needs updating when a release says so.
 
+## 2.26.0 — Keep a fresh Mimic clip in one press
+
+Website only; works with every companion. The companion reports 2.26.0 in this release, with no other change.
+
+### Added
+
+- **A Keep button (bookmark) on every clip in Mimic's "Just mimicked" list** (host). Voice Replay Studio keeps every capture in its library. Here, one press closes the Mimic window and opens Temp's **Keep permanently** step for that clip, with the folder field focused. Choose a folder and category, or keep the defaults, and confirm.
+  - Before, this took four steps: close Mimic, open Temp, find the clip, press Keep normal permanently.
+  - Nothing is kept until you confirm, exactly as in Temp.
+  - Pressing it for a clip that is already kept just says so.
+  - Guests don't see it: only the host can keep audio.
+
+### Changed
+
+- Mimic's Edit (2.21) and Keep buttons share one way of opening Temp at the right step.
+
+### Tests
+
+- New e2e test: make a clip and press Keep. Mimic closes, the confirmation for that clip opens with the folder field focused, confirming keeps it, and pressing Keep again says it is already kept.
+
 ## 2.25.0 — Search Temp
 
 Website only; works with every companion. The companion reports 2.25.0 in this release, with no other change.

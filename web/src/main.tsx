@@ -37,7 +37,7 @@ import { Sidebar } from './components/Sidebar';
 import { SettingsDialog } from './components/SettingsDialog';
 import { WhatsNew } from './components/WhatsNew';
 import { MimicPanel } from './components/MimicPanel';
-import { requestEditCopy } from './edit-copy';
+import { requestTemp } from './edit-copy';
 import { useAppearance } from './appearance';
 import { GuestName } from './components/GuestName';
 import { organization } from './shared-layout';
@@ -796,9 +796,9 @@ function App() {
             host={host}
             connected={connected}
             canPlay={canPlay}
-            onEditCopy={(assetId) => {
+            onTempRequest={(kind, assetId) => {
               setMimicOpen(false);
-              requestEditCopy(assetId);
+              requestTemp(kind, assetId);
             }}
           />
         </Modal>

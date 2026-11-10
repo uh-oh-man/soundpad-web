@@ -6,7 +6,7 @@ import { flattenCategories, type Snapshot } from '../protocol';
 import { TrimWave } from './TrimWave';
 import { usePreviewAudio } from '../preview-audio';
 import { Headphones } from 'lucide-react';
-import { onEditCopyRequest } from '../edit-copy';
+import { onTempRequest, type TempRequest } from '../edit-copy';
 const variant = z.object({
   id: z.string(),
   soundId: z.string().nullable(),
@@ -107,13 +107,13 @@ export function TempManager({
   const [refresh, setRefresh] = useState(0);
   // Search (2.25), like the Voice Replay Studio list: a long session's Temp holds many sources.
   const [find, setFind] = useState('');
-  // A clip whose Edit copy was asked for from Mimic (2.21), opened once Temp lists it.
-  const [wantEdit, setWantEdit] = useState<string>();
+  // A clip whose Edit copy (2.21) or Keep (2.26) was asked for from Mimic, opened once Temp lists it.
+  const [wanted, setWanted] = useState<TempRequest>();
   useEffect(
     () =>
-      onEditCopyRequest((id) => {
+      onTempRequest((request) => {
         setOpen(true);
-        setWantEdit(id);
+        setWanted(request);
       }),
     [],
   );
@@ -216,13 +216,41 @@ export function TempManager({
   const durationOf = (a: { normal?: { soundId?: string | null } | null }) =>
     state.library.sounds.find((s) => s.id === a.normal?.soundId)?.durationMs ?? undefined;
   useEffect(() => {
-    if (!wantEdit || pending) return;
-    const a = data?.manager.assets.find((x) => x.id === wantEdit);
+    if (!wanted || pending) return;
+    const a = data?.manager.assets.find((x) => x.id === wanted.assetId);
+    if (wanted.kind === 'keep') {
+      // The clip's own (normal) version, once Soundpad lists it, exactly as its "Keep normal
+      // permanently" button in Temp would offer it.
+      const v = a?.variants.find(
+        (x) =>
+          x.orientation === 'normal' &&
+          x.current &&
+          !x.permanent &&
+          x.state === 'ready' &&
+          x.nativeLabel,
+      );
+      if (a?.variants.some((x) => x.orientation === 'normal' && x.current && x.permanent)) {
+        setWanted(undefined);
+        controller.notify(`${a.name} is already kept permanently.`);
+        return;
+      }
+      if (!a || !v) return; // not ready yet: try again when Temp refreshes
+      setWanted(undefined);
+      setSaving({ asset: a, variant: v });
+      setCategory('');
+      setDirectory('');
+      setTimeout(() => {
+        const first = document.querySelector<HTMLElement>('#temp-manager .temp-save input');
+        first?.scrollIntoView({ block: 'center' });
+        first?.focus({ preventScroll: true });
+      }, 50);
+      return;
+    }
     const length = a && durationOf(a);
     if (length === undefined) return; // not listed yet: try again when Temp refreshes
-    setWantEdit(undefined);
+    setWanted(undefined);
     setTrimming({
-      id: wantEdit,
+      id: wanted.assetId,
       from: 0,
       to: length / 1000,
       name: '',

@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Play, Rewind, Scissors } from 'lucide-react';
+import { BookmarkPlus, Play, Rewind, Scissors } from 'lucide-react';
 import { z } from 'zod';
 import { controller } from '../../controller';
 import type { Snapshot } from '../../protocol';
@@ -19,12 +19,12 @@ export function MimicRecent({
   state,
   host,
   canPlay,
-  onEditCopy,
+  onTempRequest,
 }: {
   state: Snapshot;
   host: boolean;
   canPlay: boolean;
-  onEditCopy?: (assetId: string) => void;
+  onTempRequest?: (kind: 'edit' | 'keep', assetId: string) => void;
 }) {
   const [making, setMaking] = useState('');
   // Skip clips already removed from Temp.
@@ -42,7 +42,7 @@ export function MimicRecent({
   const keepPitch = supports(state.companionVersion, 'keepPitch');
   // Edit copy: same rules as Temp's own button (the host, or guests the host lets add audio).
   const canEdit =
-    !!onEditCopy &&
+    !!onTempRequest &&
     supports(state.companionVersion, 'trim') &&
     (host || state.permissions.guestUploads !== false);
   async function playWithEffect(assetId: string, effect: QuickEffect) {
@@ -91,9 +91,20 @@ export function MimicRecent({
               className="icon-button"
               aria-label={`Edit a copy of ${clip.name}`}
               title="Edit a copy: trim it, add an effect, change its speed"
-              onClick={() => onEditCopy?.(clip.assetId)}
+              onClick={() => onTempRequest?.('edit', clip.assetId)}
             >
               <Scissors size={14} />
+            </button>
+          )}
+          {/* Voice Replay Studio keeps every capture; here the host keeps the ones worth it (2.26). */}
+          {host && onTempRequest && (
+            <button
+              className="icon-button"
+              aria-label={`Keep ${clip.name} permanently`}
+              title="Keep permanently: save it to your Soundpad library for good"
+              onClick={() => onTempRequest('keep', clip.assetId)}
+            >
+              <BookmarkPlus size={14} />
             </button>
           )}
           {canEffect && (
