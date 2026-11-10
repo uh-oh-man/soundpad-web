@@ -1842,14 +1842,28 @@ test('Edit copy: Loop repeats the preview and replays it when the cut changes', 
   await form.getByLabel('Start (s)').fill('1');
   await expect.poll(async () => (await previews()).length, { timeout: 8000 }).toBe(2);
   expect((await previews())[1].loop).toBe(true);
+  // Quick changes while a slow preview (same pitch at a slow speed) is being made wait their turn instead
+  // of colliding with it (2.29.3: "Another copy is being made" stopped the loop).
+  await form.getByRole('combobox').selectOption('speed');
+  await form.getByLabel('Keep pitch').check();
+  for (const speed of ['0.3', '0.4', '0.5', '0.6']) {
+    await form.getByLabel('Exact speed (×)').fill(speed);
+    await page.waitForTimeout(450);
+  }
+  await expect.poll(async () => (await previews()).length, { timeout: 15000 }).toBeGreaterThan(2);
+  await page.waitForTimeout(1500);
+  await expect(page.getByText('Another copy is being made', { exact: false })).toHaveCount(0);
+  await expect(form.getByRole('button', { name: 'Stop preview' })).toBeVisible();
+  await form.getByRole('combobox').selectOption('none');
   // Unticking Loop lets the current one finish and stop by itself; Soundpad never played anything.
   await form.getByLabel('Loop').uncheck();
   await expect(form.getByRole('button', { name: 'Preview' })).toBeVisible({ timeout: 8000 });
   expect(harness.plays.length).toBe(playsBefore);
   // Without Loop, changing the cut doesn't start anything.
+  const started = (await previews()).length;
   await form.getByLabel('End (s)').fill('2.5');
   await page.waitForTimeout(1000);
-  expect((await previews()).length).toBe(2);
+  expect((await previews()).length).toBe(started);
 });
 
 test('Temp: a search appears once there are more than six sources', async ({ page, harness }) => {

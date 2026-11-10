@@ -450,6 +450,43 @@ public sealed class MimicTests : IDisposable
     }
 
     [Fact]
+    public async Task CopyNamesKeepEveryWordAndStayPlain()
+    {
+        // 2.29.3: a '/' in a copy's name cut it short ("24/7" -> "7"), and Whisper's curly quotes and dashes
+        // are not plain ASCII.
+        await using var mock = new MockSoundpad(); using var pipe = new SoundpadPipe(mock.Name, true); using var bridge = new Bridge(pipe, new StateStore(folder)); await bridge.Poll(true);
+        Assert.True((await bridge.Execute(Cmd("beginSession"), "host")).Ok);
+        var tone = Enumerable.Range(0, 32000).Select(i => 0.3f * MathF.Sin(i * 0.2f)).ToArray();
+        Assert.True((await bridge.Upload(MimicRing.Wav(tone, 16000), "Song.wav", "Alice")).Ok);
+        var journal = () => JsonSerializer.Deserialize<AudioJournal>(File.ReadAllText(Path.Combine(folder, "managed-audio", "journal.json")), Json.Options)!;
+        var original = journal().Assets.Single();
+        Assert.True((await bridge.Execute(Cmd("trimAudio") with { AssetId = original.Id, PositionMs = 0, EndMs = 1500, Name = @"Open 24/7 AC\DC" }, "host")).Ok);
+        Assert.Single(journal().Assets, a => a.Name == "Open 24-7 AC-DC");
+        Assert.Equal("don't stop - it's \"fine\"...", Bridge.PlainWords("don’t stop — it’s “fine”…"));
+    }
+
+    [Fact]
+    public async Task TrimPreviewEndsOnAWholeFrame()
+    {
+        // 2.29.3: the size cap on a preview could end mid-frame for sources whose channel count does not
+        // divide it (6 channels here).
+        await using var mock = new MockSoundpad(); using var pipe = new SoundpadPipe(mock.Name, true); using var bridge = new Bridge(pipe, new StateStore(folder)); await bridge.Poll(true);
+        Assert.True((await bridge.Execute(Cmd("beginSession"), "host")).Ok);
+        const int rate = 48000, channels = 6; // 10 s is 2.88 million samples, over the 2.75 million cap
+        using var stream = new MemoryStream();
+        using (var writer = new NAudio.Wave.WaveFileWriter(stream, new NAudio.Wave.WaveFormat(rate, 16, channels)))
+            for (int i = 0; i < rate * 10 * channels; i++) writer.WriteSample(0.2f * MathF.Sin(i / channels * 0.2f));
+        Assert.True((await bridge.Upload(stream.ToArray(), "Surround.wav", "Alice")).Ok);
+        var journal = JsonSerializer.Deserialize<AudioJournal>(File.ReadAllText(Path.Combine(folder, "managed-audio", "journal.json")), Json.Options)!;
+        var reply = await bridge.Execute(Cmd("trimPreview") with { AssetId = journal.Assets.Single().Id, PositionMs = 0, EndMs = 10000 }, "host");
+        Assert.True(reply.Ok, reply.Error);
+        var wav = Convert.FromBase64String(JsonSerializer.SerializeToElement(reply.Data, Json.Options).GetProperty("wav").GetString()!);
+        using var read = new NAudio.Wave.WaveFileReader(new MemoryStream(wav));
+        Assert.Equal(channels, read.WaveFormat.Channels);
+        Assert.Equal(0, read.Length % read.WaveFormat.BlockAlign);
+    }
+
+    [Fact]
     public async Task TrimPreviewPlaysTheCopyToTheHostAndSavesNothing()
     {
         await using var mock = new MockSoundpad(); using var pipe = new SoundpadPipe(mock.Name, true); using var bridge = new Bridge(pipe, new StateStore(folder)); await bridge.Poll(true);

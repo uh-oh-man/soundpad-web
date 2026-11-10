@@ -109,12 +109,13 @@ export function TempManager({
   // Search (2.25), like the Voice Replay Studio list: a long session's Temp holds many sources.
   const [find, setFind] = useState('');
   // A clip whose Edit copy (2.21) or Keep (2.26) was asked for from Mimic, opened once Temp lists it.
-  const [wanted, setWanted] = useState<TempRequest>();
+  // It is dropped if it can't be met within 20 s (2.29.3), so it never opens long after the press.
+  const [wanted, setWanted] = useState<TempRequest & { at: number }>();
   useEffect(
     () =>
       onTempRequest((request) => {
         setOpen(true);
-        setWanted(request);
+        setWanted({ ...request, at: Date.now() });
       }),
     [],
   );
@@ -247,6 +248,10 @@ export function TempManager({
     state.library.sounds.find((s) => s.id === a.normal?.soundId)?.durationMs ?? undefined;
   useEffect(() => {
     if (!wanted || pending) return;
+    if (Date.now() - wanted.at > 20000) {
+      setWanted(undefined);
+      return;
+    }
     const a = data?.manager.assets.find((x) => x.id === wanted.assetId);
     if (wanted.kind === 'keep') {
       // The clip's own (normal) version, once Soundpad lists it, exactly as its "Keep normal

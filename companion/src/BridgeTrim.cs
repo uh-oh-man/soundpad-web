@@ -37,6 +37,14 @@ public sealed partial class Bridge
     private int editing;
 
     /// <summary>
+    /// Recognised words as a plain-ASCII name (2.29.3): Whisper writes curly quotes and long dashes, which
+    /// Soundpad's ANSI code page may not hold; app-made names stay ASCII.
+    /// </summary>
+    public static string PlainWords(string words) => words
+        .Replace('‘', '\'').Replace('’', '\'').Replace('“', '"').Replace('”', '"')
+        .Replace('–', '-').Replace('—', '-').Replace("…", "...");
+
+    /// <summary>
     /// Saves part of a Temp source, optionally with a voice effect (<c>action</c>), as a new Temp sound, as
     /// Voice Replay Studio's trim saved a new version: the original stays untouched. Guests need the same
     /// permission as uploading. With <paramref name="preview"/> (op <c>trimPreview</c>, host only, 2.20) it makes
@@ -109,7 +117,7 @@ public sealed partial class Bridge
             {
                 // At most 20 s, and at most about 5.5 MB of WAV so the reply stays as small as Mimic's preview
                 // (a 96 kHz stereo source previews about 14 s).
-                long most = Math.Min((long)TrimPreviewSeconds * rate * channels, 2_750_000);
+                long most = Math.Min((long)TrimPreviewSeconds * rate * channels, 2_750_000 / channels * channels); // whole frames
                 if (processed.Length > most) processed = processed[..(int)most];
             }
             else (processed, rate, channels) = FitForTemp(processed, rate, channels);
@@ -134,7 +142,10 @@ public sealed partial class Bridge
                 }
                 catch (Exception ex) when (ex is not OutOfMemoryException) { words = null; }
             }
-            var name = !string.IsNullOrWhiteSpace(c.Name) ? c.Name.Trim() : words != null ? $"{words} ({label})" : $"{original} ({label})";
+            var name = !string.IsNullOrWhiteSpace(c.Name) ? c.Name.Trim() : words != null ? $"{PlainWords(words)} ({label})" : $"{original} ({label})";
+            // The name becomes a file name first, so a path separator would cut it short ("24/7" -> "7"), as for
+            // Voice Replay Studio imports (2.29.3).
+            name = name.Replace('/', '-').Replace('\\', '-');
             if (name.Length > 100) name = name[..99].TrimEnd() + "\u2026";
             return (await Upload(wav, name + ".wav", Person(actor, participant).Name, actor == "host", owner, audience)) with { Id = c.Id };
             }

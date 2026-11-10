@@ -2,6 +2,25 @@
 
 Notable changes to Soundpad Web. Versions follow the website's `package.json`; the Windows companion is versioned separately and only needs updating when a release says so.
 
+## 2.29.3 — Fixes from a review of 2.19–2.29
+
+A code review of everything since 2.18.2 found these. The website fixes work with any companion. The two naming and preview fixes marked (companion) need this release's companion.
+
+### Fixed
+
+- **Undo no longer stops an unrelated sound.** Soundpad removes nothing while any sound plays, so 2.29.2's Undo stopped whatever was playing, such as someone's music, before removing the clip. Now it stops only the clip being removed. If something else is playing, it leaves that sound alone and says to stop playback first. It still waits briefly for the playback report, so Undo right after "& play" keeps working.
+- **Loop no longer breaks when the cut changes quickly.** The companion makes one copy at a time. A new preview requested while a slow one (for example, same pitch at a slow speed) was still being made was refused with "Another copy is being made", which also ended the loop. Previews now wait their turn, only the latest change is made, and no work is wasted on previews nobody will hear.
+- **(companion) A '/' or '\' in a copy's name no longer cuts it short.** Recognised words like "open 24/7" named the copy just "7 (trimmed)", because the name becomes a file name first. They become "-", as Voice Replay Studio imports already did.
+- **(companion) Names made from recognised words stay plain ASCII.** Whisper's curly quotes, long dashes and "…" become ' " - and ..., which Soundpad shows correctly whatever the PC's code page.
+- **(companion) A preview of a surround (for example 6-channel) sound ends on a whole frame.** Its size cap could end it partway through a frame, which some players reject.
+- A Mimic Edit or Keep request that Temp can't carry out within 20 s (for example, the clip was undone meanwhile) is dropped, instead of opening the form much later.
+
+### Tests
+
+- Unit tests for Undo: a different sound playing is never stopped, and a late playback report for the clip itself still stops and removes it.
+- New C# tests: typed and recognised names keep every word ("Open 24/7 AC\DC" becomes "Open 24-7 AC-DC"), words become plain ASCII, and a 6-channel preview ends on a whole frame (it fails on 2.29.2).
+- The Loop e2e test now changes the speed four times while same-pitch previews are made, with no "Another copy" error and the loop still playing.
+
 ## 2.29.2 — Undo right after Mimic & play is reliable
 
 Website only; works with every companion. The companion reports 2.29.2 in this release, with no other change.
