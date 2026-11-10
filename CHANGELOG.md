@@ -2,6 +2,12 @@
 
 Notable changes to Soundpad Web. Versions follow the website's `package.json`; the Windows companion is versioned separately and only needs updating when a release says so.
 
+## Unreleased
+
+### Tests
+
+- New harness tool `--trim-words <wav> <fromMs> <toMs>` shows the name a trimmed copy gets from real Whisper (2.24). On the owner's PC, three cuts of the JFK sample were named "And so my fellow Americans.", "not what your country can do for you." and "Ask what you can do for your country.", in about 1.7 s each.
+
 ## 2.24.0 — Trimmed copies named after their words
 
 **Update the Windows companion** to get this. With an older companion, copies keep their usual names, and Settings lists the feature under what an update adds.

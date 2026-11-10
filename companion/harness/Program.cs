@@ -93,6 +93,29 @@ if (args.FirstOrDefault() == "--stretch" && args.Length == 5)
     Console.WriteLine($"{samples.Count / decoded.Channels / (double)decoded.Rate:0.00} s -> {result.Length / decoded.Channels / (double)decoded.Rate:0.00} s");
     return;
 }
+if (args.FirstOrDefault() == "--trim-words" && args.Length == 4)
+{
+    // --trim-words <in.wav> <fromMs> <toMs>: the name Edit copy would give that trim with transcripts on (2.24),
+    // using the real speech model on this PC (read-only). Touches neither Soundpad nor the companion's data.
+    var models = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "SoundpadWeb", "models");
+    using var engine = new WhisperEngine(Path.Combine(models, "ggml-base.en.bin"), null, Path.Combine(Path.GetTempPath(), "soundpad-web-trim-words-native"));
+    using var words = new MimicTranscriber(engine);
+    await words.Enable(() => null, false);
+    using var decoded = new DecodedAudio(args[1]);
+    long from = long.Parse(args[2]), to = long.Parse(args[3]);
+    var cut = new List<float>(); var block = new float[decoded.Channels * 4096]; int got;
+    long skip = from * decoded.Rate / 1000 * decoded.Channels, keep = (to - from) * decoded.Rate / 1000 * decoded.Channels;
+    while (keep > 0 && (got = decoded.Read(block)) > 0)
+    {
+        int offset = (int)Math.Min(skip, got); skip -= offset;
+        int take = (int)Math.Min(got - offset, keep); cut.AddRange(block.AsSpan(offset, take)); keep -= take;
+    }
+    var clock = System.Diagnostics.Stopwatch.StartNew();
+    var said = await words.Words(cut.ToArray(), decoded.Rate, decoded.Channels, default);
+    Console.WriteLine($"{from / 1000.0:0.0}-{to / 1000.0:0.0} s -> \"{said ?? "(no words: keeps the usual name)"} (trimmed)\" in {clock.Elapsed.TotalSeconds:0.0} s");
+    words.Disable();
+    return;
+}
 if (args.FirstOrDefault() == "--refresh-bench")
 {
     // Read-only timing of library refreshes on this PC's Soundpad, with a throwaway data folder (never the companion's).
