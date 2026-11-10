@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Download, Library, Play, RefreshCw } from 'lucide-react';
 import { z } from 'zod';
 import { controller } from '../../controller';
+import { removeNewTempAudio } from '../../remove-temp';
 import { formatTime } from '../Waveform';
 
 const librarySchema = z.object({
@@ -52,7 +53,22 @@ export function MimicLibrary({ connected, canPlay }: { connected: boolean; canPl
       const result = z
         .object({ assetId: z.string().max(64) })
         .safeParse(await controller.run('mimicLibraryImport', { sourceId: clip.id }));
-      controller.notify(`Imported “${clip.title}” into Temp.`, 'success');
+      // Undo (2.34), like after an upload: takes the copy back out of Temp. Voice Replay Studio's own
+      // clip is never touched either way.
+      const id = result.success ? result.data.assetId : null;
+      controller.notify(
+        `Imported “${clip.title}” into Temp.`,
+        'success',
+        id
+          ? {
+              label: 'Undo',
+              run: () =>
+                void removeNewTempAudio(id)
+                  .then(() => controller.notify('Import removed from Temp.', 'success'))
+                  .catch(() => {}),
+            }
+          : undefined,
+      );
       // Like "Mimic & play": play it through Soundpad straight away.
       if (play && result.success)
         await controller.run('audioPlay', { assetId: result.data.assetId, orientation: 'normal' });

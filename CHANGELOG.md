@@ -2,6 +2,20 @@
 
 Notable changes to Soundpad Web. Versions follow the website's `package.json`; the Windows companion is versioned separately and only needs updating when a release says so.
 
+## 2.34.0 — Undo a Voice Replay Studio import
+
+Website only; works with every companion that imports from Voice Replay Studio (2.15+). The companion reports 2.34.0 in this release, with no other change.
+
+### Added
+
+- **Undo on the "Imported … into Temp" notice** (host) after **Import** or **Import & play** from Voice Replay Studio. Every way into Temp now has Undo: Mimic clips, Edit copies, uploads and imports.
+  - It removes only the copy in Temp. Voice Replay Studio's own clip and library are never touched, as always.
+  - If the import is still playing after Import & play, it's stopped first, never another sound.
+
+### Tests
+
+- The Voice Replay Studio e2e test now presses Undo after Import & play: the playing import leaves Temp, and the other import stays.
+
 ## 2.33.0 — Undo an upload
 
 Website only. The host can use it with every companion; guests need companion 2.32 or newer (the one that allows guest Undo). The companion reports 2.33.0 in this release, with no other change.

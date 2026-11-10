@@ -2365,6 +2365,19 @@ test('Mimic: the host imports a clip from Voice Replay Studio into Temp', async 
   await expect
     .poll(() => harness.plays.slice(playsBefore).some((p) => p.startsWith('DoPlaySound(')))
     .toBe(true);
+  // Undo on the import notice takes it back out of Temp (2.34), stopping it first since it is playing.
+  await page
+    .getByRole('status')
+    .filter({ hasText: 'Imported “Fixture see you later” into Temp.' })
+    .getByRole('button', { name: 'Undo' })
+    .click();
+  await expect(page.getByText('Import removed from Temp.')).toBeVisible({ timeout: 15000 });
+  await expect(
+    page.getByRole('button', { name: 'Play from start: Fixture see you later', exact: true }),
+  ).toHaveCount(0, { timeout: TEMP_READY });
+  await expect(
+    page.getByRole('button', { name: 'Play from start: Fixture hello there', exact: true }),
+  ).toBeEnabled();
 });
 
 test('an older companion: Settings names what an update adds, and those controls stay hidden', async ({
