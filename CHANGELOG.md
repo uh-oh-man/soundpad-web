@@ -2,6 +2,23 @@
 
 Notable changes to Soundpad Web. Versions follow the website's `package.json`; the Windows companion is versioned separately and only needs updating when a release says so.
 
+## 2.32.0 — Undo for guests
+
+**Update the Windows companion** to get this. With an older companion, guests see no Undo, exactly as before.
+
+### Added
+
+- **Guests can Undo their own mistakes.** Until now only the host could take a clip or edited copy back out of Temp. Now the guest who made it gets **Undo** too: on the "… mimicked …" notice for their own Mimic clip, and on the "Copy added" notice after their own Edit copy.
+  - Only their own: the companion checks that the guest added that audio. Anyone else's, the host's, and anything kept permanently are refused.
+  - Only while the host lets guests add audio (Session & access, uploads). Turning that off turns guest Undo off too.
+  - As for the host, Undo stops the clip first if it is the one playing, and never stops another sound. If something else is playing, it asks to stop playback first.
+
+### Tests
+
+- New C# test: a guest can't remove another guest's or the host's audio, can't remove without a session identity or while guest uploads are off, and can remove their own.
+- The host website's guest-command filter test now expects removals to pass only while guest uploads are on (the companion decides the rest).
+- The live-relay guest test (it runs for every release tag) now has a real guest make a clip and Undo it, and the host sees it leave Temp.
+
 ## 2.31.0 — Keyboard on Edit copy's waveform
 
 Website only; works with every companion. The companion reports 2.31.0 in this release, with no other change.

@@ -46,7 +46,7 @@ The companion's console window logs these events with the time, including who ma
 3. The host can press **Preview** to hear the selection on their own PC only. It plays in the host's browser tab, never through Soundpad or to guests, and saves nothing.
 4. Optionally type a name; otherwise the transcript's words, or the time, are used. Then press **Mimic it** (or **Enter**) to add the clip to Temp, or **Mimic & play** (**Shift+Enter**) to also play it through Soundpad. **Esc** clears the selection; press it again to close the window.
 
-Everyone gets a short notice when anyone makes a clip, F6 included. The host's notice has **Undo** (2.29+), which takes the clip straight back out of Temp (stopping it first if it is playing). **Just mimicked** lists the session's last 5 clips, with who made them, a **Replay** button, a **Reverse** button to hear it backwards, and an **Effect** menu (2.18.1+): Chipmunk, Slow-mo, Echo or Slow, same voice. The effect menu makes that copy and plays it at once; guests need the host's permission to add audio. The **Edit** button (scissors, 2.21+) closes the window and opens that clip's **Edit copy** in Temp, as Voice Replay Studio opens a new capture in its editor. The host's **Keep** button (bookmark, 2.26+) opens Temp's **Keep permanently** confirmation for that clip, since Voice Replay Studio keeps every capture in its library.
+Everyone gets a short notice when anyone makes a clip, F6 included. The host's notice has **Undo** (2.29+), which takes the clip straight back out of Temp (stopping it first if it is playing). Since 2.32 the guest who made a clip gets Undo on its notice too, for their own clips only, while the host lets guests add audio. **Just mimicked** lists the session's last 5 clips, with who made them, a **Replay** button, a **Reverse** button to hear it backwards, and an **Effect** menu (2.18.1+): Chipmunk, Slow-mo, Echo or Slow, same voice. The effect menu makes that copy and plays it at once; guests need the host's permission to add audio. The **Edit** button (scissors, 2.21+) closes the window and opens that clip's **Edit copy** in Temp, as Voice Replay Studio opens a new capture in its editor. The host's **Keep** button (bookmark, 2.26+) opens Temp's **Keep permanently** confirmation for that clip, since Voice Replay Studio keeps every capture in its library.
 
 ### From Voice Replay Studio
 
@@ -111,6 +111,7 @@ The website always serves the newest version and hides anything the host's compa
 | Preview an edited copy (host) | 2.20 |
 | Trimmed copies named after their words | 2.24 |
 | Undo that stops only its own clip | 2.30 |
+| Undo for guests on their own clips and copies | 2.32 |
 
 ## Protocol
 

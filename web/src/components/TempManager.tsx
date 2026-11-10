@@ -187,7 +187,7 @@ export function TempManager({
           await controller.run('audioPlay', { assetId: copy.data.assetId, orientation: 'normal' });
         // Undo (2.28, host): like Voice Replay Studio's Undo trim, take a copy made by mistake straight back out.
         const undo =
-          host && copy.success
+          (host || supports(state.companionVersion, 'guestUndo')) && copy.success
             ? { label: 'Undo', run: () => void undoCopy(copy.data.assetId) }
             : undefined;
         controller.notify(

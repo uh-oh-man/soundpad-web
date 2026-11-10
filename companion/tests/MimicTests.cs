@@ -450,6 +450,37 @@ public sealed class MimicTests : IDisposable
     }
 
     [Fact]
+    public async Task GuestsCanUndoOnlyTheirOwnTemporaryAudio()
+    {
+        // 2.32: a guest may remove temporary audio they added (Undo), never anyone else's.
+        await using var mock = new MockSoundpad(); using var pipe = new SoundpadPipe(mock.Name, true); using var bridge = new Bridge(pipe, new StateStore(folder)); await bridge.Poll(true);
+        Assert.True((await bridge.Execute(Cmd("beginSession"), "host")).Ok);
+        float[] Tone(float step) => Enumerable.Range(0, 16000).Select(i => 0.3f * MathF.Sin(i * step)).ToArray();
+        Assert.True((await bridge.Upload(MimicRing.Wav(Tone(0.2f), 16000), "Alice clip.wav", "Alice", false, "peer-alice")).Ok);
+        Assert.True((await bridge.Upload(MimicRing.Wav(Tone(0.3f), 16000), "Bob clip.wav", "Bob", false, "peer-bob")).Ok);
+        Assert.True((await bridge.Upload(MimicRing.Wav(Tone(0.4f), 16000), "Host clip.wav", "Host", true, "host")).Ok);
+        var journal = () => JsonSerializer.Deserialize<AudioJournal>(File.ReadAllText(Path.Combine(folder, "managed-audio", "journal.json")), Json.Options)!;
+        string Id(string name) => journal().Assets.Single(a => a.Name == name).Id;
+        Task<Reply> Remove(string name, string peer) => bridge.Execute(Cmd("removeAudio") with { AssetId = Id(name), Action = "stopIfPlaying" }, "guest", null, peer);
+        bool Gone(string name) => journal().Assets.Single(a => a.Name == name).Variants.All(v => v.Retired || v.State == "removed");
+        // Someone else's, or the host's: refused, and nothing is removed.
+        var bob = await Remove("Bob clip", "peer-alice");
+        Assert.False(bob.Ok); Assert.Contains("only temporary audio they added", bob.Error);
+        Assert.False((await Remove("Host clip", "peer-alice")).Ok);
+        Assert.False(Gone("Bob clip")); Assert.False(Gone("Host clip"));
+        // Without a known requester (no session identity), refused too.
+        Assert.False((await bridge.Execute(Cmd("removeAudio") with { AssetId = Id("Alice clip") }, "guest")).Ok);
+        // Once the host stops guests adding audio, they can't remove it either.
+        Assert.True((await bridge.Execute(Cmd("permissions") with { Permissions = new(GuestUploads: false) }, "host")).Ok);
+        Assert.False((await Remove("Alice clip", "peer-alice")).Ok);
+        Assert.True((await bridge.Execute(Cmd("permissions") with { Permissions = new(GuestUploads: true) }, "host")).Ok);
+        // Their own: removed.
+        var own = await Remove("Alice clip", "peer-alice");
+        Assert.True(own.Ok, own.Error);
+        Assert.True(Gone("Alice clip")); Assert.False(Gone("Bob clip")); Assert.False(Gone("Host clip"));
+    }
+
+    [Fact]
     public async Task UndoStopsOnlyItsOwnPlayingSource()
     {
         // 2.30: removeAudio with "stopIfPlaying" stops playback only when the companion itself started this

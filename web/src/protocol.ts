@@ -273,6 +273,8 @@ export const slowOps: readonly Command['op'][] = [
 export function isGuestAllowed(c: Command, s: Snapshot) {
   if (c.op === 'mimicPeek' || c.op === 'mimicClip') return s.permissions.guestMimic === true;
   if (c.op === 'trimAudio') return s.permissions.guestUploads !== false;
+  // Undo of a guest's own clip or copy (2.32): the companion checks the guest added it.
+  if (c.op === 'removeAudio') return s.permissions.guestUploads !== false;
   if (c.op === 'spotify')
     return (
       c.action !== 'enable' &&

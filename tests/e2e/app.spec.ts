@@ -1563,6 +1563,25 @@ test('live Nostr/WebRTC: guests see Mimic only when allowed and can clip from it
         .getByRole('region', { name: 'Just mimicked' })
         .getByRole('button', { name: 'Replay Guest mimic' }),
     ).toBeVisible();
+    // A guest can Undo their own clip from its notice (2.32); the host sees it leave Temp.
+    await dialog.getByRole('button', { name: 'Last 3 s' }).click();
+    await dialog.getByLabel('Clip name', { exact: true }).fill('Guest oops');
+    await dialog.getByRole('button', { name: 'Mimic it' }).click();
+    const oops = page.getByRole('button', { name: 'Play from start: Guest oops', exact: true });
+    await expect(oops).toBeEnabled({ timeout: 30000 });
+    // The echo copy above may still be playing; Undo never stops another sound, so stop it first.
+    await page.getByRole('button', { name: 'Stop', exact: true }).click();
+    await guest
+      .getByRole('status')
+      .filter({ hasText: 'Mimic Alice mimicked “Guest oops”' })
+      .getByRole('button', { name: 'Undo' })
+      .click();
+    await expect(guest.getByText('Clip removed from Temp.')).toBeVisible({ timeout: 30000 });
+    await expect(oops).toHaveCount(0, { timeout: 30000 });
+    // The host's own clip notices offer the guest no Undo.
+    await expect(
+      page.getByRole('button', { name: 'Play from start: Guest mimic', exact: true }),
+    ).toBeEnabled();
     // Guests only exist over real relays, so the guest view's accessibility is checked here.
     const { violations } = await new AxeBuilder({ page: guest }).analyze();
     expect(

@@ -45,6 +45,17 @@ public sealed partial class Bridge
     {
         long now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
         if (command.V is not (1 or 2) || !Guid.TryParseExact(command.Id, "D", out _) || Math.Abs(now - command.At) > 90000) throw new InvalidDataException("Invalid or expired audio command.");
+        if (actor != "host" && command.Op == "removeAudio")
+        {
+            // Undo for guests (2.32): a guest may take back only temporary audio they added themselves (an
+            // upload, edited copy or Mimic clip), while the host still allows guests to add audio.
+            if (requester == null || !disk.Permissions.GuestUploads || (audioAudience != null && (!sessionAccepting || audience != audioAudience)) || revokedAudioPeers.ContainsKey(requester))
+                throw new InvalidDataException("The host has not allowed guests to add or remove audio.");
+            var asset = Audio.AssetById(command.AssetId ?? "");
+            if (asset.UploaderId != requester || asset.State == "permanent" || asset.Promotion != null || asset.Variants.Any(v => v.Permanent || v.LegacyApproval))
+                throw new InvalidDataException("Guests can remove only temporary audio they added themselves.");
+            return;
+        }
         if (actor != "host")
         {
             if (command.Op is not ("reverse" or "audioPlay" or "play" or "startAt" or "region")) throw new InvalidDataException("Host permission required.");
@@ -101,11 +112,11 @@ public sealed partial class Bridge
                 else if (c.Op == "removeAudio")
                 {
                     var assetId = c.AssetId ?? throw new InvalidDataException("Choose a managed source.");
-                    // Undo (2.30, host): "stopIfPlaying" stops the sound first only when it is this source that
+                    // Undo (2.30; guests 2.32, for their own audio): "stopIfPlaying" stops the sound first only when it is this source that
                     // the companion itself started (Save & play, Mimic & play). Soundpad can't say what is
                     // playing, but the companion knows what it last played. Anything else keeps playing, and
                     // Remove then refuses as before.
-                    if (c.Action == "stopIfPlaying" && actor == "host" && playback.SoundId is string current
+                    if (c.Action == "stopIfPlaying" && (actor == "host" || disk.Permissions.RemotePlayback) && playback.SoundId is string current
                         && parsed.Public.Sounds.FirstOrDefault(s => s.Id == current)?.AssetId == assetId
                         && await pipe.Request("GetPlayStatus()") != "STOPPED")
                     {

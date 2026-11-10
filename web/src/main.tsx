@@ -278,12 +278,18 @@ function App() {
     if (seenClip.current === null) seenClip.current = at;
     else if (newestClip && at > seenClip.current) {
       seenClip.current = at;
-      // The host can take a clip straight back out (2.29), like Undo after Edit copy.
+      // The host can take a clip straight back out (2.29), like Undo after Edit copy, and so can the
+      // guest who made it (2.32; the companion checks it really is theirs).
       const clipId = newestClip.assetId;
+      const mine =
+        !host &&
+        newestClip.by === view.profile.name &&
+        state.permissions.guestUploads !== false &&
+        supports(state.companionVersion, 'guestUndo');
       controller.notify(
         `${newestClip.by} mimicked \u201c${newestClip.name}\u201d`,
         'success',
-        host
+        host || mine
           ? {
               label: 'Undo',
               run: () =>

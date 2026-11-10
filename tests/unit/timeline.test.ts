@@ -30,15 +30,19 @@ describe('managed audio identity and authority', () => {
     expect(soundKeys(sound)).toEqual([old, id]);
     expect(toggleFavorite(w, old, soundKeys(sound)).favorites).toEqual([]);
   });
-  it('never permits guest promotion/removal or cleanup and honors generation permission', () => {
-    for (const op of [
-      'keepAudio',
-      'removeAudio',
-      'retryCleanup',
-      'beginSession',
-      'revokePeer',
-    ] as const)
+  it('never permits guest promotion or cleanup and honors generation permission', () => {
+    for (const op of ['keepAudio', 'retryCleanup', 'beginSession', 'revokePeer'] as const)
       expect(isGuestAllowed(command(op), EMPTY)).toBe(false);
+    // Removal reaches the companion only while guests may add audio (2.32: Undo of their own clip or
+    // copy); the companion then refuses anything the guest did not add (C# test
+    // GuestsCanUndoOnlyTheirOwnTemporaryAudio), and older companions refuse it outright.
+    expect(isGuestAllowed(command('removeAudio'), EMPTY)).toBe(true);
+    expect(
+      isGuestAllowed(command('removeAudio'), {
+        ...EMPTY,
+        permissions: { ...EMPTY.permissions, guestUploads: false },
+      }),
+    ).toBe(false);
     expect(
       isGuestAllowed(command('reverse'), {
         ...EMPTY,
