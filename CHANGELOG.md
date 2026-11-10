@@ -2,6 +2,20 @@
 
 Notable changes to Soundpad Web. Versions follow the website's `package.json`; the Windows companion is versioned separately and only needs updating when a release says so.
 
+## 2.29.2 — Undo right after Mimic & play is reliable
+
+Website only; works with every companion. The companion reports 2.29.2 in this release, with no other change.
+
+### Fixed
+
+- **Undo pressed right after Mimic & play (or Save & play) could fail with "Stop playback before removing temporary audio."** Undo stopped the sound only if this page already knew it was playing. Pressed quickly, the page hadn't heard yet, so the companion refused, and Undo retried without stopping. Now Undo stops the sound when the companion says it is playing, then removes it.
+- That expected refusal no longer flashes as an error notice. Only a real failure is shown, once.
+
+### Tests
+
+- New unit tests for Undo's remove step: it stops a sound the page knows is playing; it stops and retries when the companion reports playback first, with no error shown; and it reports any other refusal once. Two of the three fail on 2.29.1.
+- On CI, browser tests now allow up to 45 s for an upload or copy to be ready (25 s locally) and 90 s per test (45 s locally). v2.29.0's tag run was about twice as slow as usual, and a failed tag run publishes no EXE.
+
 ## 2.29.1 — 2.29.0, released
 
 Website only. The app is identical to 2.29.0 apart from the version number, so everything in 2.29.0 below arrives with this release.

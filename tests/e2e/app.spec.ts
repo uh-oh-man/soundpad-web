@@ -4,6 +4,9 @@ import { spawn } from 'node:child_process';
 import { resolve } from 'node:path';
 import { readFile, mkdir, writeFile } from 'node:fs/promises';
 type Harness = { launch: string; plays: string[] };
+// How long to wait for an upload, reverse or edited copy to be ready in Temp. On a slow CI runner one
+// took over 25 s (v2.29.0's tag run), and a failed tag run publishes no EXE, so CI gets more room.
+const TEMP_READY = process.env.CI ? 45000 : 25000;
 async function startHarness(origin = 'http://127.0.0.1:5173', count = 4) {
   const proc = spawn(
     resolve(
@@ -931,7 +934,7 @@ test('session uploads use temp, reverse immediately, and only approved files sur
     .setInputFiles({ name: 'Session tone.wav', mimeType: 'audio/wav', buffer: sessionWave() });
   const sound = page.getByRole('button', { name: 'Play from start: Session tone', exact: true });
   // Decoding the upload in the browser can take over 10 s on a slow CI runner (seen in WebKit).
-  await expect(sound).toBeEnabled({ timeout: 25000 });
+  await expect(sound).toBeEnabled({ timeout: TEMP_READY });
   await expect(
     page
       .getByRole('navigation', { name: 'Sound categories' })
@@ -1247,7 +1250,7 @@ test('polished tile and Temp review screenshots in both themes and mobile', asyn
     .setInputFiles({ name: 'Session review.wav', mimeType: 'audio/wav', buffer: sessionWave() });
   await expect(
     page.getByRole('button', { name: 'Play from start: Session review', exact: true }),
-  ).toBeEnabled({ timeout: 25000 }); // decoding an upload can be slow on CI
+  ).toBeEnabled({ timeout: TEMP_READY }); // decoding an upload can be slow on CI
   await page.getByRole('button', { name: 'Reverse and play Session review', exact: true }).click();
   await expect(page.locator('.player-track')).toContainText('Session review (reversed)');
   await page.getByRole('button', { name: 'Stop', exact: true }).click();
@@ -1700,7 +1703,7 @@ test('Edit copy: dragging on the waveform sets Start and End, and the host can p
     .setInputFiles({ name: 'Drag tone.wav', mimeType: 'audio/wav', buffer: sessionWave() });
   await expect(
     page.getByRole('button', { name: 'Play from start: Drag tone', exact: true }),
-  ).toBeEnabled({ timeout: 25000 });
+  ).toBeEnabled({ timeout: TEMP_READY });
   await page.locator('#temp-manager > summary').click();
   await page
     .locator('.temp-source', { hasText: 'Drag tone' })
@@ -1745,7 +1748,7 @@ test('Edit copy: dragging on the waveform sets Start and End, and the host can p
   await form.getByRole('button', { name: 'Save copy' }).click();
   await expect(
     page.getByRole('button', { name: /^Play from start: Drag tone \(/ }).first(),
-  ).toBeEnabled({ timeout: 25000 });
+  ).toBeEnabled({ timeout: TEMP_READY });
 });
 
 test('Edit copy: Zoom to selection shows just the chosen part for fine dragging', async ({
@@ -1758,7 +1761,7 @@ test('Edit copy: Zoom to selection shows just the chosen part for fine dragging'
     .setInputFiles({ name: 'Zoom tone.wav', mimeType: 'audio/wav', buffer: sessionWave(10) });
   await expect(
     page.getByRole('button', { name: 'Play from start: Zoom tone', exact: true }),
-  ).toBeEnabled({ timeout: 25000 });
+  ).toBeEnabled({ timeout: TEMP_READY });
   await page.locator('#temp-manager > summary').click();
   await page
     .locator('.temp-source', { hasText: 'Zoom tone' })
@@ -1820,7 +1823,7 @@ test('Edit copy: Loop repeats the preview and replays it when the cut changes', 
     .setInputFiles({ name: 'Loop tone.wav', mimeType: 'audio/wav', buffer: sessionWave(3) });
   await expect(
     page.getByRole('button', { name: 'Play from start: Loop tone', exact: true }),
-  ).toBeEnabled({ timeout: 25000 });
+  ).toBeEnabled({ timeout: TEMP_READY });
   await page.locator('#temp-manager > summary').click();
   await page
     .locator('.temp-source', { hasText: 'Loop tone' })
@@ -1860,7 +1863,7 @@ test('Temp: a search appears once there are more than six sources', async ({ pag
       .setInputFiles({ name: `${name}.wav`, mimeType: 'audio/wav', buffer: sessionWave(i + 1) });
     await expect(
       page.getByRole('button', { name: `Play from start: ${name}`, exact: true }),
-    ).toBeEnabled({ timeout: 25000 });
+    ).toBeEnabled({ timeout: TEMP_READY });
     if (i === 5) {
       // Six sources: no search yet.
       await page.locator('#temp-manager > summary').click();
@@ -1902,7 +1905,7 @@ test('Edit copy: Save & play makes the copy and plays it through Soundpad', asyn
     .setInputFiles({ name: 'Play me.wav', mimeType: 'audio/wav', buffer: sessionWave(2) });
   await expect(
     page.getByRole('button', { name: 'Play from start: Play me', exact: true }),
-  ).toBeEnabled({ timeout: 25000 });
+  ).toBeEnabled({ timeout: TEMP_READY });
   await page.locator('#temp-manager > summary').click();
   await page
     .locator('.temp-source', { hasText: 'Play me' })
@@ -1915,7 +1918,7 @@ test('Edit copy: Save & play makes the copy and plays it through Soundpad', asyn
   await form.getByRole('button', { name: 'Save & play' }).click();
   await expect(
     page.getByRole('button', { name: 'Play from start: Play me (chipmunk)', exact: true }),
-  ).toBeEnabled({ timeout: 25000 });
+  ).toBeEnabled({ timeout: TEMP_READY });
   await expect
     .poll(() => harness.plays.slice(playsBefore).some((p) => p.startsWith('DoPlaySound(')))
     .toBe(true);
@@ -1933,7 +1936,7 @@ test('Edit copy: Undo on the notice takes the new copy back out (host)', async (
     .setInputFiles({ name: 'Undo me.wav', mimeType: 'audio/wav', buffer: sessionWave(2) });
   await expect(
     page.getByRole('button', { name: 'Play from start: Undo me', exact: true }),
-  ).toBeEnabled({ timeout: 25000 });
+  ).toBeEnabled({ timeout: TEMP_READY });
   await page.locator('#temp-manager > summary').click();
   await page
     .locator('.temp-source', { hasText: 'Undo me' })
@@ -1943,11 +1946,11 @@ test('Edit copy: Undo on the notice takes the new copy back out (host)', async (
   await form.getByRole('combobox').selectOption('echo');
   await form.getByRole('button', { name: 'Save copy' }).click();
   const copy = page.getByRole('button', { name: 'Play from start: Undo me (echo)', exact: true });
-  await expect(copy).toBeEnabled({ timeout: 25000 });
+  await expect(copy).toBeEnabled({ timeout: TEMP_READY });
   const notice = page.getByRole('status').filter({ hasText: 'Copy added to Temp.' });
   await notice.getByRole('button', { name: 'Undo' }).click();
   await expect(page.getByText('Copy removed from Temp.')).toBeVisible();
-  await expect(copy).toHaveCount(0, { timeout: 25000 });
+  await expect(copy).toHaveCount(0, { timeout: TEMP_READY });
   // The original is untouched.
   await expect(
     page.getByRole('button', { name: 'Play from start: Undo me', exact: true }),
@@ -1965,7 +1968,7 @@ test('Edit copy: Undo right after Save & play stops the copy, then removes it', 
     .setInputFiles({ name: 'Undo me.wav', mimeType: 'audio/wav', buffer: sessionWave(3) });
   await expect(
     page.getByRole('button', { name: 'Play from start: Undo me', exact: true }),
-  ).toBeEnabled({ timeout: 25000 });
+  ).toBeEnabled({ timeout: TEMP_READY });
   await page.locator('#temp-manager > summary').click();
   await page
     .locator('.temp-source', { hasText: 'Undo me' })
@@ -1979,7 +1982,7 @@ test('Edit copy: Undo right after Save & play stops the copy, then removes it', 
   await expect(page.getByText('Copy removed from Temp.')).toBeVisible({ timeout: 15000 });
   await expect(
     page.getByRole('button', { name: 'Play from start: Undo me (echo)', exact: true }),
-  ).toHaveCount(0, { timeout: 25000 });
+  ).toHaveCount(0, { timeout: TEMP_READY });
   await expect(page.getByText('Stop playback before removing', { exact: false })).toHaveCount(0);
 });
 
@@ -1990,7 +1993,7 @@ test('Edit copy can make a copy at any speed', async ({ page, harness }) => {
     .setInputFiles({ name: 'Speed tone.wav', mimeType: 'audio/wav', buffer: sessionWave() });
   await expect(
     page.getByRole('button', { name: 'Play from start: Speed tone', exact: true }),
-  ).toBeEnabled({ timeout: 25000 });
+  ).toBeEnabled({ timeout: TEMP_READY });
   await page.locator('#temp-manager > summary').click();
   await page
     .locator('.temp-source', { hasText: 'Speed tone' })
@@ -2011,7 +2014,7 @@ test('Edit copy can make a copy at any speed', async ({ page, harness }) => {
   await form.getByRole('button', { name: 'Save copy' }).click();
   await expect(
     page.getByRole('button', { name: 'Play from start: Speed tone (0.5x speed)', exact: true }),
-  ).toBeEnabled({ timeout: 25000 });
+  ).toBeEnabled({ timeout: TEMP_READY });
   // Keep pitch (2.17): same speed, voices keep their pitch; the copy's name says so.
   await page
     .locator('.temp-source', { hasText: 'Speed tone' })
@@ -2033,7 +2036,7 @@ test('Edit copy can make a copy at any speed', async ({ page, harness }) => {
       name: 'Play from start: Speed tone (0.5x speed, same pitch)',
       exact: true,
     }),
-  ).toBeEnabled({ timeout: 25000 });
+  ).toBeEnabled({ timeout: TEMP_READY });
 });
 
 test('the host can clear all temporary audio mid-session and keep hosting', async ({
@@ -2045,7 +2048,7 @@ test('the host can clear all temporary audio mid-session and keep hosting', asyn
     .getByLabel('Add session audio', { exact: true })
     .setInputFiles({ name: 'Clear me.wav', mimeType: 'audio/wav', buffer: sessionWave() });
   const sound = page.getByRole('button', { name: 'Play from start: Clear me', exact: true });
-  await expect(sound).toBeEnabled({ timeout: 25000 });
+  await expect(sound).toBeEnabled({ timeout: TEMP_READY });
   await page.locator('#temp-manager > summary').click();
   page.once('dialog', (dialog) => void dialog.accept());
   await page.getByRole('button', { name: 'Clear all temporary audio' }).click();
@@ -2155,7 +2158,7 @@ test('accessibility: no serious or critical axe violations in the dialogs, views
     .setInputFiles({ name: 'Scan tone.wav', mimeType: 'audio/wav', buffer: sessionWave() });
   await expect(
     page.getByRole('button', { name: 'Play from start: Scan tone', exact: true }),
-  ).toBeEnabled({ timeout: 25000 }); // decoding an upload can be slow on CI
+  ).toBeEnabled({ timeout: TEMP_READY }); // decoding an upload can be slow on CI
   await page.locator('#temp-manager > summary').click();
   await page
     .locator('.temp-source', { hasText: 'Scan tone' })
@@ -2369,7 +2372,7 @@ test('Mimic: a fresh clip can be played with a quick effect', async ({ page, har
       name: 'Play from start: Effect me (0.5x speed, same pitch)',
       exact: true,
     }),
-  ).toBeEnabled({ timeout: 25000 });
+  ).toBeEnabled({ timeout: TEMP_READY });
   await expect
     .poll(() => harness.plays.slice(playsBefore).some((p) => p.startsWith('DoPlaySound(')))
     .toBe(true);
@@ -2398,7 +2401,7 @@ test('Mimic: Edit on a fresh clip opens its Edit copy in Temp', async ({ page, h
   await form.getByRole('button', { name: 'Save copy' }).click();
   await expect(
     page.getByRole('button', { name: 'Play from start: Trim me (trimmed)', exact: true }),
-  ).toBeEnabled({ timeout: 25000 });
+  ).toBeEnabled({ timeout: TEMP_READY });
 });
 
 test('Mimic: Undo on the clip notice takes a clip made by mistake back out (host)', async ({
@@ -2415,11 +2418,11 @@ test('Mimic: Undo on the clip notice takes a clip made by mistake back out (host
   // Mimic & play: the clip is playing when Undo is pressed, so Undo stops it first.
   await page.keyboard.press('Shift+Enter');
   const clip = page.getByRole('button', { name: 'Play from start: Oops', exact: true });
-  await expect(clip).toBeEnabled({ timeout: 25000 });
+  await expect(clip).toBeEnabled({ timeout: TEMP_READY });
   const notice = page.getByRole('status').filter({ hasText: 'mimicked “Oops”' });
   await notice.getByRole('button', { name: 'Undo' }).click();
   await expect(page.getByText('Clip removed from Temp.')).toBeVisible({ timeout: 15000 });
-  await expect(clip).toHaveCount(0, { timeout: 25000 });
+  await expect(clip).toHaveCount(0, { timeout: TEMP_READY });
   await expect(dialog.getByRole('region', { name: 'Just mimicked' })).toHaveCount(0);
   await expect(page.getByText('Stop playback before removing', { exact: false })).toHaveCount(0);
 });
@@ -2489,7 +2492,7 @@ test('Edit copy: with transcripts on, a plain trim is named after its words', as
   await form.getByRole('button', { name: 'Save copy' }).click();
   await expect(
     page.getByRole('button', { name: /^Play from start: Fixture tone \d+.* \(trimmed\)$/ }).first(),
-  ).toBeEnabled({ timeout: 25000 });
+  ).toBeEnabled({ timeout: TEMP_READY });
 });
 
 test('accessibility: no serious or critical axe violations in the newer controls', async ({
@@ -2511,7 +2514,7 @@ test('accessibility: no serious or critical axe violations in the newer controls
     .setInputFiles({ name: 'Scan tone.wav', mimeType: 'audio/wav', buffer: sessionWave(10) });
   await expect(
     page.getByRole('button', { name: 'Play from start: Scan tone', exact: true }),
-  ).toBeEnabled({ timeout: 25000 });
+  ).toBeEnabled({ timeout: TEMP_READY });
   await page.locator('#temp-manager > summary').click();
   await scan('temp with clear button');
   await page
@@ -2592,7 +2595,7 @@ test('on a phone, keyboard focus is never hidden behind the player bar', async (
     .setInputFiles({ name: 'Focus tone.wav', mimeType: 'audio/wav', buffer: sessionWave(2) });
   await expect(
     page.getByRole('button', { name: 'Play from start: Focus tone', exact: true }),
-  ).toBeEnabled({ timeout: 25000 });
+  ).toBeEnabled({ timeout: TEMP_READY });
   await page.locator('#temp-manager > summary').click();
   await page
     .locator('.temp-source', { hasText: 'Focus tone' })

@@ -12,11 +12,17 @@ export async function removeNewTempAudio(assetId: string) {
     await controller.run('stop');
   for (let attempt = 0; ; attempt++) {
     try {
-      await controller.run('removeAudio', { assetId });
+      // Quiet: an expected "Stop playback" refusal is retried below; only a final failure is shown.
+      await controller.run('removeAudio', { assetId }, { quiet: true });
       return;
     } catch (e) {
-      // Soundpad may report the stop a moment late; try again briefly before giving up.
-      if (attempt >= 4 || !(e instanceof Error) || !/Stop playback/i.test(e.message)) throw e;
+      if (attempt >= 4 || !(e instanceof Error) || !/Stop playback/i.test(e.message)) {
+        controller.notify(e instanceof Error ? e.message : 'Could not remove it.', 'error');
+        throw e;
+      }
+      // The companion says it is playing even if this page hadn't heard yet (Undo pressed right after
+      // Mimic & play): stop it, then try again once Soundpad reports the stop.
+      if (attempt === 0) await controller.run('stop');
       await new Promise((r) => setTimeout(r, 400));
     }
   }

@@ -8,7 +8,8 @@ const device =
       : 'Desktop Chrome';
 export default defineConfig({
   testDir: 'tests/e2e',
-  timeout: 45000,
+  // CI runners are sometimes twice as slow as usual (v2.29.0's tag run took 6.5 min against about 3).
+  timeout: process.env.CI ? 90000 : 45000,
   expect: { timeout: 10000 },
   workers: 1,
   fullyParallel: false,

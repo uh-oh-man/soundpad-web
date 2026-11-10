@@ -264,7 +264,8 @@ export class Controller {
       this.starting = false;
     }
   }
-  async run(op: Command['op'], fields: Partial<Command> = {}) {
+  /** Runs a command; a refusal is shown as an error notice unless `quiet` (the caller reports it). */
+  async run(op: Command['op'], fields: Partial<Command> = {}, { quiet = false } = {}) {
     const c = command(op, fields);
     if ((this.view.state.protocol ?? 1) < 2) c.v = 1;
     const previousPermissions = this.view.state.permissions;
@@ -286,7 +287,7 @@ export class Controller {
           },
         });
       }
-      this.notify(errorMessage(e, 'Command failed.'), 'error');
+      if (!quiet) this.notify(errorMessage(e, 'Command failed.'), 'error');
       throw e;
     }
   }

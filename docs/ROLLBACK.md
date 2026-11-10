@@ -6,6 +6,7 @@ Every release stays on GitHub permanently, so any earlier version can be restore
 
 | Version | What it is | Git tag | Download |
 | --- | --- | --- | --- |
+| 2.29.2 | Undo right after Mimic & play is reliable | `v2.29.2` | [Release](https://github.com/uh-oh-man/soundpad-web/releases/tag/v2.29.2) |
 | 2.29.1 | 2.29.0, released (test fix only) | `v2.29.1` | [Release](https://github.com/uh-oh-man/soundpad-web/releases/tag/v2.29.1) |
 | 2.29.0 | Undo a Mimic clip | `v2.29.0` | No release: its tag CI failed on a slow runner (a guest-load timeout, not this change). Source only (`https://github.com/uh-oh-man/soundpad-web/archive/refs/tags/v2.29.0.zip`); the app is identical to 2.29.1. |
 | 2.28.0 | Undo an edited copy | `v2.28.0` | [Release](https://github.com/uh-oh-man/soundpad-web/releases/tag/v2.28.0) |
