@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { arrangeSounds, boardTitle, type BoardSelection } from '../../web/src/arrange';
-import { companionAtLeast, missingFeatures, supports } from '../../web/src/version';
+import { companionAtLeast, missingFeatures, supports, updatedSince } from '../../web/src/version';
 import { wheelGoesToPage, WHEEL_ZOOM_DELAY_MS } from '../../web/src/timeline';
 import { blankWorkspace, type Workspace } from '../../web/src/workspace';
 import { EMPTY, type Snapshot, type Sound } from '../../web/src/protocol';
@@ -147,5 +147,13 @@ describe('waveform wheel delay', () => {
     expect(wheelGoesToPage(5000, 4500, 0)).toBe(true); // arrived half a second ago
     expect(wheelGoesToPage(5000, 1000, 4800)).toBe(true); // the page scrolled just now
     expect(wheelGoesToPage(5000, 1000, 3900)).toBe(false); // rested over a second: zoom
+  });
+});
+
+describe('what is new after an update', () => {
+  it('shows only when this browser used an older version before', () => {
+    expect(updatedSince(null, '2.18.2')).toBe(false); // first visit
+    expect(updatedSince('2.18.2', '2.18.2')).toBe(false);
+    expect(updatedSince('2.18.1', '2.18.2')).toBe(true);
   });
 });

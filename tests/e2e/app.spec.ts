@@ -92,6 +92,29 @@ test('landing page has an honest disconnected state', async ({ page }) => {
   expect(await page.getByRole('button', { name: /Play / }).count()).toBe(0);
 });
 
+test('after the website updates, a one-time line links the new version notes', async ({
+  page,
+  harness,
+}) => {
+  const version = JSON.parse(await readFile('package.json', 'utf8')).version as string;
+  // First visit: nothing to announce.
+  await host(page, harness);
+  await expect(page.getByText('Soundpad Web updated to')).toHaveCount(0);
+  // As if this browser last used an older version.
+  await page.evaluate(() => localStorage.setItem('soundpad-web:last-version', '2.0.0'));
+  await page.reload();
+  const line = page.getByRole('status').filter({ hasText: 'Soundpad Web updated to' });
+  await expect(line).toContainText(`v${version}`);
+  await expect(line.getByRole('link', { name: "See what's new" })).toHaveAttribute(
+    'href',
+    `https://github.com/uh-oh-man/soundpad-web/releases/tag/v${version}`,
+  );
+  await line.getByRole('button', { name: "Dismiss what's new" }).click();
+  await expect(line).toHaveCount(0);
+  await page.reload();
+  await expect(page.getByText('Soundpad Web updated to')).toHaveCount(0);
+});
+
 test('the host sees connected guests at the top of the board, above the sounds', async ({
   page,
   harness,

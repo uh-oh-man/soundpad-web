@@ -2,7 +2,22 @@
 
 Notable changes to Soundpad Web. Versions follow the website's `package.json`; the Windows companion is versioned separately and only needs updating when a release says so.
 
-## Unreleased
+## 2.18.2 — "What's new" after an update
+
+Website only; the companion is unchanged apart from its version number (it reports 2.18.2).
+
+### Added
+
+- **The website says when it has updated.** The website updates itself, so nobody saw which version they were on or what changed. Now, the first time a browser opens a newer version than it last used, one line above the board says "Soundpad Web updated to **vX.Y.Z**. See what's new", linking that version's release notes on GitHub.
+  - It shows once per version, for hosts and guests, until dismissed or followed.
+  - A first-ever visit shows nothing.
+  - Nothing is sent anywhere: the last version seen is kept in this browser only.
+
+### Tests
+
+- New e2e test: a first visit shows nothing. A browser that last used an older version sees the line, with the link to `/releases/tag/vX.Y.Z`. Dismissing it keeps it gone after a reload.
+- Unit test for the version comparison.
+
 
 - **Tests:** a new permanent accessibility test scans the controls added in 2.15–2.18 with axe, in Chromium and WebKit, on desktop and phone width. It covers Temp's **Clear all temporary audio**, Edit copy's **Any speed** and **Keep pitch**, Mimic's **Effect** menu and the **From Voice Replay Studio** list. The first run found no violations of any level.
 

@@ -35,6 +35,7 @@ import { SessionUpload } from './components/SessionUpload';
 import { Modal, dialogOpen } from './components/Modal';
 import { Sidebar } from './components/Sidebar';
 import { SettingsDialog } from './components/SettingsDialog';
+import { WhatsNew } from './components/WhatsNew';
 import { MimicPanel } from './components/MimicPanel';
 import { useAppearance } from './appearance';
 import { GuestName } from './components/GuestName';
@@ -435,6 +436,7 @@ function App() {
               manage={() => setManaging(true)}
             />
             <main className="soundboard">
+              <WhatsNew projectUrl={repositoryUrl || PROJECT_URL} />
               {connected && (protocol < 2 || needsCompanionUpdate) && (
                 <aside className="companion-update" role="status">
                   <strong>

@@ -35,6 +35,10 @@ export const FEATURES = {
   clearTemp: [2, 18],
 } as const satisfies Record<string, readonly [number, number]>;
 
+/** True when the website changed version since this browser last used it (and it had used it before). */
+export const updatedSince = (last: string | null | undefined, current: string) =>
+  !!last && last !== current;
+
 export const supports = (version: string | null | undefined, feature: keyof typeof FEATURES) =>
   companionAtLeast(version, FEATURES[feature][0], FEATURES[feature][1]);
 

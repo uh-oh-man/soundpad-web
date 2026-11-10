@@ -6,6 +6,7 @@ Every release stays on GitHub permanently, so any earlier version can be restore
 
 | Version | What it is | Git tag | Download |
 | --- | --- | --- | --- |
+| 2.18.2 | "What's new" after an update | `v2.18.2` | [Release](https://github.com/uh-oh-man/soundpad-web/releases/tag/v2.18.2) |
 | 2.18.1 | Quick effects for fresh Mimic clips | `v2.18.1` | [Release](https://github.com/uh-oh-man/soundpad-web/releases/tag/v2.18.1) |
 | 2.18.0 | Clear all temporary audio, any time | `v2.18.0` | [Release](https://github.com/uh-oh-man/soundpad-web/releases/tag/v2.18.0) |
 | 2.17.0 | Keep pitch when changing speed | `v2.17.0` | [Release](https://github.com/uh-oh-man/soundpad-web/releases/tag/v2.17.0) |

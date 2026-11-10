@@ -844,3 +844,16 @@ body,
   gap: 6px;
   flex-direction: row;
 }
+/* After the website updated itself: one dismissible line linking that version's notes (2.18.2). */
+.whats-new {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 12px;
+  padding: 8px 12px;
+  border: 1px solid color-mix(in srgb, var(--accent) 40%, transparent);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+  font-size: 13px;
+}
