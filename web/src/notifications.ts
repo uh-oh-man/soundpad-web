@@ -10,13 +10,31 @@ export type Notice = {
   action?: NoticeAction;
 };
 let notices: Notice[] = [];
+/** Notices with a button that the pointer or keyboard focus is on (2.34.2): they don't expire meanwhile. */
+const held = new Set<string>();
 const listeners = new Set<() => void>();
 const emit = () => {
   for (const listener of listeners) listener();
 };
 export function dismissNotice(id: string) {
+  held.delete(id);
   notices = notices.filter((n) => n.id !== id);
   emit();
+}
+/**
+ * Holds a notice that has a button while the pointer is over it or focus is inside it, so its button
+ * can't vanish as someone reaches it (WCAG timing). On release it stays at least 3 more seconds.
+ */
+export function holdNotice(id: string, on: boolean) {
+  const notice = notices.find((n) => n.id === id);
+  if (!notice?.action) return;
+  if (on) held.add(id);
+  else if (held.delete(id)) {
+    notices = notices.map((n) =>
+      n.id === id ? { ...n, expires: Math.max(n.expires, Date.now() + 3000) } : n,
+    );
+    emit();
+  }
 }
 export function notify(message: string, kind: NoticeKind = 'info', action?: NoticeAction) {
   if (!message) return;
@@ -42,12 +60,14 @@ export function useNotices() {
   const value = useSyncExternalStore(subscribe, () => notices);
   useEffect(() => {
     if (!value.length) return;
+    const timed = value.filter((n) => !held.has(n.id));
+    if (!timed.length) return;
     const timer = setTimeout(
       () => {
-        notices = notices.filter((n) => n.expires > Date.now());
+        notices = notices.filter((n) => held.has(n.id) || n.expires > Date.now());
         emit();
       },
-      Math.max(0, Math.min(...value.map((n) => n.expires)) - Date.now()) + 10,
+      Math.max(0, Math.min(...timed.map((n) => n.expires)) - Date.now()) + 10,
     );
     return () => clearTimeout(timer);
   }, [value]);

@@ -2,6 +2,18 @@
 
 Notable changes to Soundpad Web. Versions follow the website's `package.json`; the Windows companion is versioned separately and only needs updating when a release says so.
 
+## 2.34.2 — Undo notices wait for you
+
+Website only; works with every companion. The companion reports 2.34.2 in this release, with no other change.
+
+### Fixed
+
+- **A notice with an Undo button no longer disappears while you're reaching for it.** It stays as long as the pointer is over it or keyboard focus is inside it, then for at least 3 more seconds. Before, it left after 10 seconds regardless, which is too short for some people to read and act on (WCAG's timing guidance). Notices without a button keep their usual timing.
+
+### Tests
+
+- New e2e test: with the pointer on an upload's Undo notice for 12 s, past its usual 10 s, it is still there; moving away, it leaves within 5 s. It fails on 2.34.1.
+
 ## 2.34.1 — Uploads wait their turn
 
 Website only; works with every companion. The companion reports 2.34.1 in this release, with no other change.

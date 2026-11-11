@@ -1,5 +1,5 @@
 import { Check, Info, TriangleAlert, X } from 'lucide-react';
-import { dismissNotice, useNotices } from '../notifications';
+import { dismissNotice, holdNotice, useNotices } from '../notifications';
 export function Notifications() {
   const notices = useNotices();
   return (
@@ -9,6 +9,13 @@ export function Notifications() {
           className={`toast notice-${notice.kind}`}
           key={notice.id}
           role={notice.kind === 'error' ? 'alert' : 'status'}
+          onPointerEnter={() => holdNotice(notice.id, true)}
+          onPointerLeave={() => holdNotice(notice.id, false)}
+          onFocus={() => holdNotice(notice.id, true)}
+          onBlur={(e) => {
+            if (!e.currentTarget.contains(e.relatedTarget as Node | null))
+              holdNotice(notice.id, false);
+          }}
         >
           {notice.kind === 'error' ? (
             <TriangleAlert size={17} />

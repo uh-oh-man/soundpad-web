@@ -2112,6 +2112,24 @@ test('Undo on the upload notice takes the wrong file straight back out', async (
   await expect(page.locator('.temp-source', { hasText: 'Wrong file' })).toHaveCount(0);
 });
 
+test('a notice with Undo stays while the pointer is on it, then leaves', async ({
+  page,
+  harness,
+}) => {
+  // 2.34.2: its button must not vanish as someone reaches it (it normally lasts 10 s).
+  await host(page, harness);
+  await page
+    .getByLabel('Add session audio', { exact: true })
+    .setInputFiles({ name: 'Hold me.wav', mimeType: 'audio/wav', buffer: sessionWave(2) });
+  const notice = page.getByRole('status').filter({ hasText: 'Added to Temp for this session.' });
+  await expect(notice.getByRole('button', { name: 'Undo' })).toBeVisible({ timeout: TEMP_READY });
+  await notice.hover();
+  await page.waitForTimeout(12000);
+  await expect(notice).toBeVisible();
+  await page.mouse.move(5, 5);
+  await expect(notice).toHaveCount(0, { timeout: 5000 });
+});
+
 test('Edit copy can make a copy at any speed', async ({ page, harness }) => {
   await host(page, harness);
   await page
