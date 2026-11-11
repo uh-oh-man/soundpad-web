@@ -1,5 +1,6 @@
 using SoundpadWeb;
 using SoundpadWeb.Testing;
+if (args.FirstOrDefault() == "--word-timing-eval" && args.Length >= 2) { await WordTimingEval.Run(args); return; } // see WordTimingEval.cs
 if (args.FirstOrDefault() == "--mock-only")
 {
     await using var isolated = new MockSoundpad(); isolated.DurationMs = 600000;
