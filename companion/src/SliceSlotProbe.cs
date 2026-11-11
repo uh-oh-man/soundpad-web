@@ -1,3 +1,4 @@
+using System.Diagnostics;
 namespace SoundpadWeb;
 
 public enum SlotProbeOutcome
@@ -24,8 +25,6 @@ public sealed record SlotProbeOptions
     public int ToleranceMs { get; init; } = 60;
     /// <summary>Time between two looks at the player.</summary>
     public int PollMs { get; init; } = 50;
-    /// <summary>How long to wait after a play for the player to report the expected duration.</summary>
-    public int SettleMs { get; init; } = 1500;
     /// <summary>How long to wait, beyond the silence's own length, for the player to be stopped again.</summary>
     public int StopTimeoutMs { get; init; } = 4000;
     public int Rate { get; init; } = 48000;
@@ -41,8 +40,17 @@ public sealed record SlotProbeResult(SlotProbeOutcome Outcome, string Detail)
     public string? StatusBefore { get; init; }
     public long FirstWrittenMs { get; init; }
     public long SecondWrittenMs { get; init; }
+    /// <summary>The duration the player reported for each play (the verdict is based on these).</summary>
     public long? FirstReportedMs { get; init; }
     public long? SecondReportedMs { get; init; }
+    /// <summary>
+    /// A second, independent sign: how long the player stayed busy, from the play command until it was seen
+    /// stopped again (so it includes up to one poll interval). Null when it was never seen playing or never
+    /// stopped. A player could report a remembered duration yet play the new audio, or the other way round;
+    /// these numbers show which.
+    /// </summary>
+    public long? FirstPlayedMs { get; init; }
+    public long? SecondPlayedMs { get; init; }
     /// <summary>Open attempts each write needed (more than 1 means the player was holding the file for a while).</summary>
     public int FirstWriteAttempts { get; init; }
     public int SecondWriteAttempts { get; init; }
@@ -59,7 +67,7 @@ public sealed record SlotProbeResult(SlotProbeOutcome Outcome, string Detail)
 public static class SlotProbe
 {
     /// <param name="playPath">Asks the player to play the library entry registered for this path (the slot must already be registered).</param>
-    /// <param name="readDurationMs">The duration the player reports for what it is playing, or null when it reports none.</param>
+    /// <param name="readDurationMs">The duration the player reports for what it is playing, or null (or 0) when it reports none.</param>
     /// <param name="readStatus">The player's status text; "STOPPED" (any case) means idle.</param>
     /// <param name="slotPath">Full path of the slot file, named like <see cref="SlotPool.FileName"/>.</param>
     public static async Task<SlotProbeResult> Run(Func<string, Task> playPath, Func<Task<long?>> readDurationMs, Func<Task<string>> readStatus, string slotPath, SlotProbeOptions? options = null, CancellationToken cancel = default)
@@ -84,21 +92,21 @@ public static class SlotProbe
         result = result with { FirstWriteAttempts = write.Attempts };
         if (!write.Ok) return result with { Outcome = SlotProbeOutcome.WriteBlocked, Detail = "The first write failed: " + write.Error };
         await playPath(slotPath).ConfigureAwait(false);
-        result = result with { FirstReportedMs = await Reported(readDurationMs, options.FirstMs, options, cancel).ConfigureAwait(false) };
-        if (!await WaitStopped(readStatus, options.FirstMs, options, cancel).ConfigureAwait(false))
-            return result with { Detail = "The player did not return to STOPPED after the first play." };
+        var seen = await Observe(readDurationMs, readStatus, options.FirstMs, options, cancel).ConfigureAwait(false);
+        result = result with { FirstReportedMs = seen.ReportedMs, FirstPlayedMs = seen.PlayedMs };
+        if (!seen.Stopped) return result with { Detail = "The player did not return to STOPPED after the first play." };
 
         write = await SlotPool.WriteInPlace(slotPath, second, options.WriteAttempts, options.RetryDelayMs, cancel).ConfigureAwait(false);
         result = result with { SecondWriteAttempts = write.Attempts };
         if (!write.Ok) return result with { Outcome = SlotProbeOutcome.WriteBlocked, Detail = "The second write failed, so the player still had the file open after playing it: " + write.Error };
         await playPath(slotPath).ConfigureAwait(false);
-        result = result with { SecondReportedMs = await Reported(readDurationMs, options.SecondMs, options, cancel).ConfigureAwait(false) };
-        bool stopped = await WaitStopped(readStatus, options.SecondMs, options, cancel).ConfigureAwait(false);
+        seen = await Observe(readDurationMs, readStatus, options.SecondMs, options, cancel).ConfigureAwait(false);
+        result = result with { SecondReportedMs = seen.ReportedMs, SecondPlayedMs = seen.PlayedMs };
 
         bool Near(long? reported, int written) => reported is long value && Math.Abs(value - written) <= options.ToleranceMs;
+        string tail = $" Busy for {Show(result.FirstPlayedMs)}, then {Show(result.SecondPlayedMs)}." + (seen.Stopped ? "" : " The player had not returned to STOPPED when the probe ended.");
         if (!Near(result.FirstReportedMs, options.FirstMs))
-            return result with { Detail = $"The first play reported {Show(result.FirstReportedMs)} for {options.FirstMs} ms of silence, so the duration cannot be used as evidence." };
-        string tail = stopped ? "" : " The player had not returned to STOPPED when the probe ended.";
+            return result with { Detail = $"The first play reported {Show(result.FirstReportedMs)} for {options.FirstMs} ms of silence, so the duration cannot be used as evidence." + tail };
         if (Near(result.SecondReportedMs, options.SecondMs))
             return result with { Outcome = SlotProbeOutcome.Reread, Detail = $"The reported duration followed the file ({Show(result.FirstReportedMs)}, then {Show(result.SecondReportedMs)}): the player re-reads a changed file." + tail };
         if (Near(result.SecondReportedMs, options.FirstMs))
@@ -107,31 +115,29 @@ public static class SlotProbe
     }
 
     private static bool Stopped(string? status) => string.Equals(status?.Trim(), "STOPPED", StringComparison.OrdinalIgnoreCase);
-    private static string Show(long? ms) => ms is long value ? value + " ms" : "no duration";
+    private static string Show(long? ms) => ms is long value ? value + " ms" : "no value";
+
+    private readonly record struct Observation(long? ReportedMs, long? PlayedMs, bool Stopped);
 
     /// <summary>
-    /// The duration the player reports after a play. It can lag (still showing the previous sound), so this looks
-    /// until the expected value appears or the settle time runs out, and then returns the last value seen.
+    /// Watches one play until the player is stopped again. The reported duration can lag (still showing the
+    /// previous sound), so it is read on every look until it matches what was written; otherwise the last value
+    /// seen is kept. A player that never shows as playing may simply have been quicker than the polling, so it is
+    /// given the silence's own length before "stopped" is believed.
     /// </summary>
-    private static async Task<long?> Reported(Func<Task<long?>> readDurationMs, int expected, SlotProbeOptions options, CancellationToken cancel)
+    private static async Task<Observation> Observe(Func<Task<long?>> readDurationMs, Func<Task<string>> readStatus, int writtenMs, SlotProbeOptions options, CancellationToken cancel)
     {
-        long? last = null; long deadline = Environment.TickCount64 + options.SettleMs;
+        var clock = Stopwatch.StartNew();
+        long? reported = null; bool matched = false, sawPlaying = false;
         while (true)
         {
-            var value = await readDurationMs().ConfigureAwait(false);
-            if (value is long ms) { last = ms; if (Math.Abs(ms - expected) <= options.ToleranceMs) return ms; }
-            if (Environment.TickCount64 >= deadline) return last;
-            await Task.Delay(Math.Max(1, options.PollMs), cancel).ConfigureAwait(false);
-        }
-    }
-
-    private static async Task<bool> WaitStopped(Func<Task<string>> readStatus, int playingMs, SlotProbeOptions options, CancellationToken cancel)
-    {
-        long deadline = Environment.TickCount64 + playingMs + options.StopTimeoutMs;
-        while (true)
-        {
-            if (Stopped(await readStatus().ConfigureAwait(false))) return true;
-            if (Environment.TickCount64 >= deadline) return false;
+            bool stopped = Stopped(await readStatus().ConfigureAwait(false));
+            long elapsed = clock.ElapsedMilliseconds;
+            if (!matched && await readDurationMs().ConfigureAwait(false) is long ms && ms > 0) { reported = ms; matched = Math.Abs(ms - writtenMs) <= options.ToleranceMs; }
+            if (stopped && sawPlaying) return new(reported, elapsed, true);
+            if (stopped && elapsed >= writtenMs + options.ToleranceMs) return new(reported, null, true);
+            if (!stopped) sawPlaying = true;
+            if (elapsed >= writtenMs + options.StopTimeoutMs) return new(reported, null, false);
             await Task.Delay(Math.Max(1, options.PollMs), cancel).ConfigureAwait(false);
         }
     }

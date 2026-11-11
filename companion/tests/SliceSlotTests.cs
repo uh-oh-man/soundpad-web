@@ -193,7 +193,7 @@ public sealed class SliceSlotProbeTests : IDisposable
     public SliceSlotProbeTests() => Directory.CreateDirectory(folder);
     public void Dispose() { player.Held?.Dispose(); Directory.Delete(folder, true); }
 
-    private static readonly SlotProbeOptions Fast = new() { PollMs = 1, SettleMs = 40, StopTimeoutMs = 2000, WriteAttempts = 2, RetryDelayMs = 1 };
+    private static readonly SlotProbeOptions Fast = new() { PollMs = 1, StopTimeoutMs = 2000, WriteAttempts = 2, RetryDelayMs = 1 };
     private readonly FakePlayer player = new();
     private string Slot => Path.Combine(folder, "slot-1.wav");
 
@@ -204,8 +204,11 @@ public sealed class SliceSlotProbeTests : IDisposable
     private sealed class FakePlayer
     {
         private readonly Dictionary<string, long> remembered = new(StringComparer.OrdinalIgnoreCase);
+        private readonly System.Diagnostics.Stopwatch playing = new();
+        private long playingForMs;
         private int playingPolls;
-        public bool Rereads = true, HoldsFile, ReportsDuration = true;
+        /// <summary>RealTime: busy for as long as the audio it loaded lasts, instead of for three looks.</summary>
+        public bool Rereads = true, HoldsFile, ReportsDuration = true, RealTime;
         public string Idle = "STOPPED";
         public int Plays, StatusReads;
         public long? Duration;
@@ -221,12 +224,17 @@ public sealed class SliceSlotProbeTests : IDisposable
             long ms = (long)Math.Round(info.DurationMs);
             if (!Rereads) { if (!remembered.TryGetValue(path, out long first)) remembered[path] = first = ms; ms = first; }
             Duration = ReportsDuration ? ms : null;
-            playingPolls = 3;
+            playingPolls = 3; playingForMs = ms; playing.Restart();
             if (HoldsFile) Held ??= new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read);
             return Task.CompletedTask;
         }
         public Task<long?> ReadDuration() => Task.FromResult(Duration);
-        public Task<string> ReadStatus() { StatusReads++; return Task.FromResult(playingPolls-- > 0 ? "PLAYING" : Idle); }
+        public Task<string> ReadStatus()
+        {
+            StatusReads++;
+            if (RealTime) return Task.FromResult(playing.IsRunning && playing.ElapsedMilliseconds < playingForMs ? "PLAYING" : Idle);
+            return Task.FromResult(playingPolls-- > 0 ? "PLAYING" : Idle);
+        }
     }
 
     private Task<SlotProbeResult> Run(string? path = null) => SlotProbe.Run(player.Play, player.ReadDuration, player.ReadStatus, path ?? Slot, Fast);
@@ -282,8 +290,24 @@ public sealed class SliceSlotProbeTests : IDisposable
         Assert.Equal(SlotProbeOutcome.Refused, result.Outcome);
         Assert.Equal(audio, File.ReadAllBytes(sound)); Assert.Equal(0, player.Plays); Assert.Equal(0, player.StatusReads);
         Assert.Equal(SlotProbeOutcome.Refused, (await Run("slot-1.wav")).Outcome); // not a full path
-        Assert.Equal("stopped", (await SlotProbe.Run(player.Play, player.ReadDuration, () => Task.FromResult(" stopped\r\n"), Slot, Fast)).StatusBefore!.Trim()); // status text is matched loosely
+        Assert.Equal("stopped", (await SlotProbe.Run(player.Play, player.ReadDuration, () => Task.FromResult(" stopped\r\n"), Slot, Fast with { FirstMs = 40, SecondMs = 200, ToleranceMs = 20 })).StatusBefore!.Trim()); // status text is matched loosely
         await Assert.ThrowsAsync<ArgumentException>(() => SlotProbe.Run(player.Play, player.ReadDuration, player.ReadStatus, Slot, Fast with { SecondMs = 450 }));
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task HowLongThePlayerStayedBusyIsRecordedAsASecondSign(bool rereads)
+    {
+        // The duration a player reports could come from what it remembers about the entry; how long it actually
+        // stays busy cannot. Here the stand-in is busy for exactly as long as the audio it loaded.
+        player.Rereads = rereads; player.RealTime = true;
+        var result = await SlotProbe.Run(player.Play, player.ReadDuration, player.ReadStatus, Slot, Fast with { FirstMs = 60, SecondMs = 600, ToleranceMs = 20 });
+        Assert.Equal(rereads ? SlotProbeOutcome.Reread : SlotProbeOutcome.NotReread, result.Outcome);
+        Assert.InRange(result.FirstPlayedMs!.Value, 40, 500);
+        if (rereads) Assert.InRange(result.SecondPlayedMs!.Value, 580, 5000); // the full 600 ms of the new file
+        else Assert.InRange(result.SecondPlayedMs!.Value, 40, 500);           // still the 60 ms it remembered
+        Assert.Contains("Busy for", result.Detail);
     }
 
     [Fact]
