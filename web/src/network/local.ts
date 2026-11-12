@@ -12,6 +12,8 @@ import {
 import { z } from 'zod';
 import type { SharedLayout } from '../shared-layout';
 import type { HostIdentity } from './identity';
+import type { LobbyRequest } from './session';
+import type { SessionPolicy } from './policy';
 export type BridgeAddress = { port: number; token: string };
 
 /**
@@ -19,7 +21,12 @@ export type BridgeAddress = { port: number; token: string };
  * names one of them the session owner, which runs the guest room; the others are views. Its window
  * page carries the launch's owner key. Older companions send none of these messages.
  */
-export type HostRole = { role: 'owner' | 'view'; identity: HostIdentity | null };
+export type HostRole = {
+  role: 'owner' | 'view';
+  identity: HostIdentity | null;
+  /** The session settings an owner sent earlier in this launch (2.37); read with `readPolicy`. */
+  settings?: unknown;
+};
 /** What the owner tells every view about the session, relayed by the companion. */
 export type SessionInfo = {
   invite: string;
@@ -28,6 +35,13 @@ export type SessionInfo = {
   layouts: SharedLayout[];
   /** True when the owner is the companion window (absent if a companion drops it: then a window). */
   ownerWindow?: boolean;
+  /** The lobby, settings and each guest's connection (2.37), for a view to show. */
+  control?: {
+    requests: LobbyRequest[];
+    /** Read with `readPolicy`. */
+    policy: unknown;
+    links: Record<string, 'direct' | 'relay'>;
+  };
 };
 export type OwnerAction = { action: 'rotate' } | { action: 'disconnect'; peer: string };
 export type DesktopEvents = {
@@ -51,6 +65,8 @@ const roleSchema = z.object({
   type: z.literal('role'),
   role: z.enum(['owner', 'view']),
   identity: identitySchema.nullable().optional(),
+  // Checked by the controller (readPolicy), which falls back to the defaults.
+  settings: z.unknown().optional(),
 });
 const peerId = z.string().min(1).max(100);
 const soundIds = z.array(z.string().regex(/^[a-f0-9]{64}$/)).max(50000);
@@ -83,6 +99,23 @@ const sessionInfoSchema = z.object({
     )
     .max(32),
   ownerWindow: z.boolean().optional(),
+  control: z
+    .object({
+      requests: z
+        .array(
+          z.object({
+            id: z.uuid(),
+            name: z.string().max(40),
+            kind: z.enum(['admit', 'extra']),
+            at: z.number(),
+            expiresAt: z.number(),
+          }),
+        )
+        .max(64),
+      policy: z.unknown(),
+      links: z.record(peerId, z.enum(['direct', 'relay'])),
+    })
+    .optional(),
 });
 const ownerActionSchema = z.union([
   z.object({ type: z.literal('ownerAction'), action: z.literal('rotate') }),
@@ -91,6 +124,7 @@ const ownerActionSchema = z.union([
 /** What a host page sends about the desktop session (2.36); only to a companion that sent a role. */
 export type DesktopMessage =
   | { type: 'identity'; identity: HostIdentity }
+  | { type: 'sessionSettings'; settings: SessionPolicy }
   | ({ type: 'session' } & SessionInfo)
   | ({ type: 'ownerAction' } & OwnerAction);
 export class LocalBridge {
@@ -174,7 +208,11 @@ export class LocalBridge {
           // A role this page cannot read would leave it not knowing whether to host: a mismatch.
           const role = roleSchema.parse(data);
           this.desktopSession = true;
-          this.desktop?.role({ role: role.role, identity: role.identity ?? null });
+          this.desktop?.role({
+            role: role.role,
+            identity: role.identity ?? null,
+            settings: role.settings ?? undefined,
+          });
           return;
         }
         if (data.type === 'session' || data.type === 'ownerAction') {
@@ -182,8 +220,8 @@ export class LocalBridge {
           if (data.type === 'session') {
             const info = sessionInfoSchema.safeParse(data);
             if (info.success) {
-              const { invite, guests, people, layouts, ownerWindow } = info.data;
-              this.desktop?.session({ invite, guests, people, layouts, ownerWindow });
+              const { invite, guests, people, layouts, ownerWindow, control } = info.data;
+              this.desktop?.session({ invite, guests, people, layouts, ownerWindow, control });
             }
           } else {
             const action = ownerActionSchema.safeParse(data);

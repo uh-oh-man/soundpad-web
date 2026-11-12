@@ -1,4 +1,6 @@
 import type { joinRoom, JsonValue } from 'trystero';
+import { createRelayLink, type WebSocketLike } from './relay';
+import type { RelayFactory } from './session';
 
 /**
  * Dev server and e2e tests only (2.35): a stand-in for the part of Trystero's room that `session.ts`
@@ -210,3 +212,70 @@ const transport = {
   id: crypto.randomUUID().replaceAll('-', '').slice(0, 20),
 };
 export const broadcastTransport = () => transport;
+
+/**
+ * Dev server and e2e tests only (2.37): the relay link over a BroadcastChannel instead of public Nostr
+ * relays. The real link code runs end to end (encryption, chunking, pairing); only the relay itself is
+ * this stand-in, which speaks just enough NIP-01 (REQ, EVENT, OK, EOSE) to every page of this browser.
+ */
+const RELAY_URL = 'wss://broadcast-relay.invalid';
+type RelayFrame = { id: string; kind: number; tags: string[][] };
+type Filter = { kinds?: number[]; '#x'?: string[] };
+function relaySocket(): WebSocketLike {
+  const channel = new BroadcastChannel(`${TEST_TRANSPORT}:relay`);
+  const subs = new Map<string, Filter>();
+  const deliver = (event: RelayFrame) => {
+    for (const [id, filter] of subs) {
+      const topics = event.tags.filter((t) => t[0] === 'x').map((t) => t[1]);
+      if (filter.kinds && !filter.kinds.includes(event.kind)) continue;
+      if (filter['#x'] && !filter['#x'].some((t) => topics.includes(t))) continue;
+      socket.onmessage?.({ data: JSON.stringify(['EVENT', id, event]) });
+    }
+  };
+  const socket: WebSocketLike & { readyState: number } = {
+    readyState: 0,
+    bufferedAmount: 0,
+    onopen: null,
+    onmessage: null,
+    onclose: null,
+    onerror: null,
+    send(data: string) {
+      const frame = JSON.parse(data) as unknown[];
+      if (frame[0] === 'REQ') {
+        subs.set(frame[1] as string, frame[2] as Filter);
+        setTimeout(() => socket.onmessage?.({ data: JSON.stringify(['EOSE', frame[1]]) }), 1);
+      } else if (frame[0] === 'CLOSE') subs.delete(frame[1] as string);
+      else if (frame[0] === 'EVENT') {
+        const event = frame[1] as RelayFrame;
+        setTimeout(() => {
+          socket.onmessage?.({ data: JSON.stringify(['OK', event.id, true, '']) });
+          // A relay sends an event to its publisher's own subscriptions too.
+          deliver(event);
+        }, 1);
+        channel.postMessage(event);
+      }
+    },
+    close() {
+      if (socket.readyState === 3) return;
+      socket.readyState = 3;
+      channel.close();
+      setTimeout(() => socket.onclose?.({}), 0);
+    },
+  };
+  channel.onmessage = (message: MessageEvent<RelayFrame>) => {
+    if (socket.readyState === 1) deliver(message.data);
+  };
+  setTimeout(() => {
+    if (socket.readyState !== 0) return;
+    socket.readyState = 1;
+    socket.onopen?.({});
+  }, 5);
+  return socket;
+}
+export const broadcastRelay = (): RelayFactory => (options) =>
+  createRelayLink({
+    ...options,
+    relays: [RELAY_URL],
+    minRelays: 1,
+    webSocketFactory: () => relaySocket(),
+  });

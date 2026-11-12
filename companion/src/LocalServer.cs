@@ -41,6 +41,12 @@ public sealed class LocalServer(Bridge bridge, string origin, string? ownerKey =
     // The owner's HostIdentity and latest session summary live in memory only, for this launch: a reloaded, restarted
     // or promoted owner gets the same identity back, so guests' invitations keep working. A new launch starts afresh.
     private JsonElement? identity;
+    // The owner's session settings (2.37: admission, guest places, per-guest permissions, turned-away guests), kept
+    // exactly like the identity: memory only, owner only, handed to the next owner, forgotten on End hosting. The
+    // companion never reads inside it; the owner page enforces it.
+    private JsonElement? settings;
+    /// <summary>Largest session settings message kept (2.37). Larger ones are ignored, and the owner page keeps its own copy.</summary>
+    public const int MaxSessionSettingsBytes = 65536;
     private string? session;
     private long sessionVersion;
 
@@ -280,9 +286,9 @@ public sealed class LocalServer(Bridge bridge, string origin, string? ownerKey =
     /// <summary>Sends a page its role (when it changed) and, to a view, the latest session summary. Never runs twice at once for one page.</summary>
     private async Task Flush(HostClient client, Func<string, Task> send)
     {
-        string role; JsonElement? remembered; string? summary; long version;
-        lock (roles) { role = client.Owner ? "owner" : "view"; remembered = client.Owner ? identity : null; summary = session; version = sessionVersion; }
-        if (role != client.RoleSent) { await send(Json.Write(new { type = "role", role, identity = remembered })); client.RoleSent = role; }
+        string role; JsonElement? remembered; JsonElement? kept; string? summary; long version;
+        lock (roles) { role = client.Owner ? "owner" : "view"; remembered = client.Owner ? identity : null; kept = client.Owner ? settings : null; summary = session; version = sessionVersion; }
+        if (role != client.RoleSent) { await send(Json.Write(new { type = "role", role, identity = remembered, settings = kept })); client.RoleSent = role; }
         if (role == "view" && summary != null && client.SessionSent != version) { await send(summary); client.SessionSent = version; }
     }
 
@@ -298,7 +304,7 @@ public sealed class LocalServer(Bridge bridge, string origin, string? ownerKey =
             if (owner != from) return;
             from.Ended = ended;
             if (!ended) return;
-            identity = null;
+            identity = null; settings = null;
             session = Json.Write(new { type = "session", invite = "", guests = Array.Empty<string>(), people = new { }, layouts = Array.Empty<object>() }); sessionVersion++;
             foreach (var view in hosts) if (view != from) view.Signal.Writer.TryWrite(0);
         }
@@ -313,6 +319,11 @@ public sealed class LocalServer(Bridge bridge, string origin, string? ownerKey =
                 // Kept for this launch only, from the owner only: a demoted page's late message must not replace it.
                 if (!root.TryGetProperty("identity", out var value) || value.ValueKind != JsonValueKind.Object || value.GetRawText().Length > 16384) return;
                 lock (roles) if (owner == from && !from.Ended) identity = value.Clone();
+                return;
+            case "sessionSettings":
+                // 2.37: the same rules as the identity. Only the owner's own decisions about its guests, at most 64 KiB.
+                if (!root.TryGetProperty("settings", out var kept) || kept.ValueKind != JsonValueKind.Object || Encoding.UTF8.GetByteCount(kept.GetRawText()) > MaxSessionSettingsBytes) return;
+                lock (roles) if (owner == from && !from.Ended) settings = kept.Clone();
                 return;
             case "session":
                 lock (roles)
