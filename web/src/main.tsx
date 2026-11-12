@@ -17,6 +17,7 @@ import {
   ChevronRight,
   Radio,
   Mic2,
+  OctagonPause,
 } from 'lucide-react';
 import { controller } from './controller';
 import { flattenCategories, type Sound } from './protocol';
@@ -39,6 +40,7 @@ import { WhatsNew } from './components/WhatsNew';
 import { MimicPanel } from './components/MimicPanel';
 import { requestTemp } from './edit-copy';
 import { removeNewTempAudio } from './remove-temp';
+import { guestHeld, HELD_BY_HOST, playback } from './playback';
 import { useAppearance } from './appearance';
 import { GuestName } from './components/GuestName';
 import { organization } from './shared-layout';
@@ -114,22 +116,55 @@ function useSpaceToggle() {
         (current.mode !== 'host' && !current.state.permissions.remotePlayback)
       )
         return;
-      const playback = current.state.playback;
-      if (!['PLAYING', 'PAUSED', 'SEEKING'].includes(playback.status)) return;
+      const playing = current.state.playback;
+      if (!['PLAYING', 'PAUSED', 'SEEKING'].includes(playing.status)) return;
       event.preventDefault();
       if (event.repeat) return;
       if (
-        playback.soundId &&
-        playback.epoch &&
+        playing.soundId &&
+        playing.epoch &&
         (current.mode === 'host' || current.state.permissions.guestSeeking !== false)
       )
-        void controller
-          .run('pause', { soundId: playback.soundId, epoch: playback.epoch })
-          .catch(() => {});
-      else if (playback.status !== 'PAUSED') void controller.run('stop').catch(() => {});
+        void playback.pause();
+      else if (playing.status !== 'PAUSED') void playback.stop();
     }
     document.addEventListener('keydown', space, true);
     return () => document.removeEventListener('keydown', space, true);
+  }, []);
+}
+
+/**
+ * Shift+Escape is the host's Panic (2.35) from anywhere on the page, dialogs included, except while
+ * typing in a field. It runs before a dialog or waveform would take the Escape for itself.
+ */
+function usePanicShortcut() {
+  useEffect(() => {
+    function key(event: KeyboardEvent) {
+      if (
+        event.key !== 'Escape' ||
+        !event.shiftKey ||
+        event.ctrlKey ||
+        event.altKey ||
+        event.metaKey
+      )
+        return;
+      const target = event.target;
+      if (
+        target instanceof HTMLElement &&
+        (target.isContentEditable ||
+          target.matches(
+            'select, textarea, input:not([type="checkbox"]):not([type="radio"]):not([type="button"]):not([type="range"])',
+          ))
+      )
+        return;
+      const current = controller.getSnapshot();
+      if (current.mode !== 'host' || !supports(current.state.companionVersion, 'intents')) return;
+      event.preventDefault();
+      event.stopPropagation();
+      if (!event.repeat) void playback.panic();
+    }
+    document.addEventListener('keydown', key, true);
+    return () => document.removeEventListener('keydown', key, true);
   }, []);
 }
 
@@ -244,9 +279,11 @@ function App() {
   const [statistics, setStatistics] = useState<Sound | null>(null);
   const [totals, setTotals] = useState<Totals>({});
   const [pending, setPending] = useState(0);
+  const [resuming, setResuming] = useState(false);
   const personal = useWorkspace(state.hostId);
   const w = personal.workspace;
   useSpaceToggle();
+  usePanicShortcut();
   useSearchShortcut();
   useEffect(() => {
     void controller.start();
@@ -267,6 +304,9 @@ function App() {
   const mimicSupported = supports(state.companionVersion, 'mimic');
   const canMimic = connected && mimicSupported && (host || state.permissions.guestMimic === true);
   const mimicListening = mode !== 'landing' && !!state.mimic?.active;
+  // After the host's Panic (2.35): guests cannot start audio until the host resumes; the host can.
+  const suspended = mode !== 'landing' && state.playbackSuspended === true;
+  const held = guestHeld(state, host);
 
   // Tell everyone when a Mimic clip is made (also by the host's F6 mid-game). Clips that existed
   // before this tab joined are not announced.
@@ -333,14 +373,19 @@ function App() {
   useEffect(() => {
     if (protocol < 2 || !connected) return;
     let live = true;
-    void controller
-      .run('statistics')
-      .then((raw) => {
-        if (live) setTotals(totalsSchema.parse(raw).totals);
-      })
-      .catch(() => {});
+    // Every accepted play bumps the version. Ask once a run of plays pauses (2.35), not once per
+    // play, and stay quiet when it fails: the counts are a detail and the next play asks again.
+    const timer = setTimeout(() => {
+      void controller
+        .run('statistics', {}, { quiet: true })
+        .then((raw) => {
+          if (live) setTotals(totalsSchema.parse(raw).totals);
+        })
+        .catch(() => {});
+    }, 250);
     return () => {
       live = false;
+      clearTimeout(timer);
     };
   }, [state.statisticsVersion, protocol, connected]);
 
@@ -385,7 +430,9 @@ function App() {
   }
 
   return (
-    <div className={`app-shell ${mode === 'landing' ? 'is-landing' : 'is-connected'}`}>
+    <div
+      className={`app-shell ${mode === 'landing' ? 'is-landing' : 'is-connected'} ${held ? 'playback-held' : ''}`}
+    >
       <header className="topbar">
         <a href={location.pathname} className="brand">
           <span className="brand-icon">
@@ -551,6 +598,37 @@ function App() {
                   </span>
                 </div>
               )}
+              {suspended && (
+                // Stays on screen until the host resumes (2.35); a notice would time out.
+                <div className="playback-suspended" role="status">
+                  <OctagonPause size={18} aria-hidden="true" />
+                  {host ? (
+                    <>
+                      <span>
+                        <strong>Guest playback is paused.</strong> You can still play; guests cannot
+                        until you resume.
+                      </span>
+                      <button
+                        className="primary"
+                        disabled={!connected}
+                        aria-disabled={resuming || undefined}
+                        onClick={() => {
+                          if (resuming) return;
+                          setResuming(true);
+                          void playback.resume().finally(() => setResuming(false));
+                        }}
+                      >
+                        Resume guest playback
+                      </button>
+                    </>
+                  ) : (
+                    <span>
+                      <strong>{HELD_BY_HOST}</strong>. Play buttons work again when the host resumes
+                      it.
+                    </span>
+                  )}
+                </div>
+              )}
               {!!view.layouts.length && (
                 <section className="shared-layouts" aria-label="Shared guest layouts">
                   <small>Shared layouts · updates automatically</small>
@@ -638,11 +716,13 @@ function App() {
                   </select>
                 </label>
                 <span className="grid-caption">
-                  {canPlay
-                    ? 'CLICK TO PLAY'
-                    : !state.available
-                      ? 'WAITING FOR SOUNDPAD'
-                      : 'PLAYBACK DISABLED'}
+                  {held
+                    ? 'PAUSED BY HOST'
+                    : canPlay
+                      ? 'CLICK TO PLAY'
+                      : !state.available
+                        ? 'WAITING FOR SOUNDPAD'
+                        : 'PLAYBACK DISABLED'}
                 </span>
               </div>
               <div className="view-toolbar">
@@ -767,6 +847,8 @@ function App() {
           </div>
           <Player
             state={state}
+            host={host}
+            connected={connected}
             disabled={!canPlay}
             canSeek={canSeek}
             workspace={w}

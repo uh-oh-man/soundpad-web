@@ -8,6 +8,7 @@ import { usePreviewAudio } from '../preview-audio';
 import { Headphones, Play } from 'lucide-react';
 import { onTempRequest, type TempRequest } from '../edit-copy';
 import { removeNewTempAudio } from '../remove-temp';
+import { guestHeld, HELD_BY_HOST, intentKey, playback, usePendingIntent } from '../playback';
 const variant = z.object({
   id: z.string(),
   soundId: z.string().nullable(),
@@ -111,6 +112,10 @@ export function TempManager({
   // A clip whose Edit copy (2.21) or Keep (2.26) was asked for from Mimic, opened once Temp lists it.
   // It is dropped if it can't be met within 20 s (2.29.3), so it never opens long after the press.
   const [wanted, setWanted] = useState<TempRequest & { at: number }>();
+  // Play buttons answer to the playback path, not to `pending` (2.35): a slow Save copy or Keep must
+  // not hold up playing something.
+  const intent = usePendingIntent();
+  const held = guestHeld(state, host);
   useEffect(
     () =>
       onTempRequest((request) => {
@@ -144,7 +149,6 @@ export function TempManager({
   }, [connected, state.managedAudioVersion, refresh]);
   async function run(
     op:
-      | 'audioPlay'
       | 'keepAudio'
       | 'removeAudio'
       | 'retryAudio'
@@ -160,7 +164,13 @@ export function TempManager({
     setPending(fields.assetId ?? 'manager');
     setError('');
     try {
-      const result = await controller.run(op, fields);
+      // Save & play (2.27), like Mimic & play: the copy plays through Soundpad as soon as it is made.
+      // With a 2.35 companion that is one command, and the copy plays only if nothing newer was asked
+      // for while it was being made (2.35).
+      const { data: result, played } =
+        op === 'trimAudio' && play
+          ? await playback.make(op, fields, `make:${fields.assetId}`)
+          : { data: await controller.run(op, fields), played: false };
       if (op === 'clearTemp') {
         const cleared = z.object({ cleared: z.number().int() }).safeParse(result);
         controller.notify(
@@ -181,17 +191,15 @@ export function TempManager({
       }
       if (op === 'trimAudio') {
         setTrimming(undefined);
-        // Save & play (2.27), like Mimic & play: the new copy plays through Soundpad straight away.
         const copy = z.object({ assetId: z.string().max(64) }).safeParse(result);
-        if (play && copy.success)
-          await controller.run('audioPlay', { assetId: copy.data.assetId, orientation: 'normal' });
         // Undo (2.28, host): like Voice Replay Studio's Undo trim, take a copy made by mistake straight back out.
         const undo =
           (host || supports(state.companionVersion, 'guestUndo')) && copy.success
             ? { label: 'Undo', run: () => void undoCopy(copy.data.assetId) }
             : undefined;
+        // Says "playing" only when it did start; a copy that lost to a newer click is just added.
         controller.notify(
-          play && copy.success
+          played
             ? 'Copy added to Temp and playing. The original is unchanged.'
             : 'Copy added to Temp. The original is unchanged.',
           'success',
@@ -401,23 +409,35 @@ export function TempManager({
                 </small>
               </div>
               <div className="temp-actions">
-                {(['normal', 'reversed'] as const).map((orientation) => (
-                  <button
-                    key={orientation}
-                    aria-disabled={!!pending || undefined}
-                    disabled={
-                      !state.available ||
-                      !connected ||
-                      (!host && !state.permissions.remotePlayback) ||
-                      (!host &&
-                        !a[orientation]?.ready &&
-                        state.permissions.guestTransforms === false)
-                    }
-                    onClick={() => void run('audioPlay', { assetId: a.id, orientation })}
-                  >
-                    Play {orientation}
-                  </button>
-                ))}
+                {(['normal', 'reversed'] as const).map((orientation) => {
+                  const starting = intent === intentKey.asset(a.id, orientation);
+                  return (
+                    <button
+                      key={orientation}
+                      // Busy only while its own start is unanswered; held while the host's Panic lasts.
+                      aria-disabled={starting || held || undefined}
+                      aria-busy={starting || undefined}
+                      data-intent={starting ? 'pending' : undefined}
+                      title={held ? HELD_BY_HOST : undefined}
+                      disabled={
+                        !state.available ||
+                        !connected ||
+                        (!host && !state.permissions.remotePlayback) ||
+                        (!host &&
+                          !a[orientation]?.ready &&
+                          state.permissions.guestTransforms === false)
+                      }
+                      onClick={() => {
+                        if (starting || held) return;
+                        void playback
+                          .audioPlay(a.id, orientation)
+                          .then(() => setRefresh((n) => n + 1));
+                      }}
+                    >
+                      Play {orientation}
+                    </button>
+                  );
+                })}
                 {(host || state.permissions.guestUploads !== false) &&
                   durationOf(a) !== undefined &&
                   supports(state.companionVersion, 'trim') && (
@@ -455,6 +475,7 @@ export function TempManager({
                     // The submitter says which button: Save copy, or Save & play.
                     const play =
                       (e.nativeEvent as SubmitEvent).submitter?.getAttribute('value') === 'play';
+                    if (play && held) return;
                     void run(
                       'trimAudio',
                       {
@@ -613,11 +634,15 @@ export function TempManager({
                     <button
                       type="submit"
                       value="play"
-                      title="Make the copy and play it through Soundpad straight away"
+                      title={
+                        held
+                          ? HELD_BY_HOST
+                          : 'Make the copy and play it through Soundpad straight away'
+                      }
                       disabled={
                         trimming.to - trimming.from < 0.1 || trimming.from < 0 || !state.available
                       }
-                      aria-disabled={!!pending || undefined}
+                      aria-disabled={!!pending || held || undefined}
                     >
                       <Play size={15} /> Save &amp; play
                     </button>

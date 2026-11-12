@@ -31,7 +31,8 @@ public sealed class V2Tests : IDisposable
         Assert.True((await bridge.Execute(Cmd("play", id, lib.Version), "guest")).Ok); var epoch = bridge.Snapshot.Playback.Epoch;
         var seeks = await Task.WhenAll(bridge.Execute(Cmd("seek", id, position: 25, epoch: epoch), "guest"), bridge.Execute(Cmd("seek", id, position: 50, epoch: epoch), "guest")); Assert.All(seeks, r => Assert.True(r.Ok));
         await Task.WhenAll(bridge.Execute(Cmd("seek", id, position: 100, epoch: epoch), "guest"), bridge.Execute(Cmd("play", lib.Sounds[1].Id, lib.Version), "guest"));
-        Assert.Equal(lib.Sounds[1].Id, bridge.Snapshot.Playback.SoundId); Assert.False((await bridge.Execute(Cmd("seek", id, position: 200, epoch: epoch), "guest")).Ok);
+        // 2.35: a seek for the epoch that was replaced is answered quietly as stale (it used to be an error) and is still never sent.
+        Assert.Equal(lib.Sounds[1].Id, bridge.Snapshot.Playback.SoundId); Assert.True(Stale(await bridge.Execute(Cmd("seek", id, position: 200, epoch: epoch), "guest"))); Assert.DoesNotContain("DoSeekMs(200)", mock.Commands);
         Assert.True(mock.Commands.FindLastIndex(c => c.StartsWith("DoSeekMs(")) < mock.Commands.FindLastIndex(c => c == "DoPlaySound(2)"));
     }
     [Fact]
@@ -47,6 +48,8 @@ public sealed class V2Tests : IDisposable
     private StateStore Store => new(folder);
     public V2Tests() { Directory.CreateDirectory(folder); }
     public void Dispose() { Directory.Delete(folder, true); }
+    /// <summary>The quiet answer to a seek or pause whose playback is gone (2.35): ok, marked superseded, reason "stale".</summary>
+    private static bool Stale(Reply reply) { if (!reply.Ok || reply.Data == null) return false; using var data = JsonDocument.Parse(Json.Write(reply.Data)); return data.RootElement.TryGetProperty("superseded", out var superseded) && superseded.GetBoolean() && data.RootElement.GetProperty("reason").GetString() == "stale"; }
     private static Command Cmd(string op, string? id = null, string? version = null, long? position = null, string? epoch = null, long? end = null, bool repeat = false) => new(2, Guid.NewGuid().ToString(), DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(), op, id, version, PositionMs: position, Epoch: epoch, EndMs: end, Repeat: repeat);
     private static void WriteWave(string path, int milliseconds = 1000) { using var output = new BinaryWriter(File.Create(path)); int frames = 48000 * milliseconds / 1000; output.Write("RIFF"u8); output.Write(36 + frames * 4); output.Write("WAVEfmt "u8); output.Write(16); output.Write((short)1); output.Write((short)2); output.Write(48000); output.Write(48000 * 4); output.Write((short)4); output.Write((short)16); output.Write("data"u8); output.Write(frames * 4); for (int i = 0; i < frames; i++) { short sample = i < frames / 4 ? (short)0 : (short)(Math.Sin(i * 2 * Math.PI * 440 / 48000) * 25000); output.Write(sample); output.Write((short)-sample); } }
     [Fact]
@@ -104,7 +107,7 @@ public sealed class V2Tests : IDisposable
         Assert.True((await bridge.Execute(Cmd("seek", id, position: 1000, epoch: epoch), "guest")).Ok); Assert.Contains("DoSeekMs(1000)", mock.Commands);
         Assert.True((await bridge.Execute(Cmd("pause", id, epoch: epoch), "guest")).Ok); Assert.Equal("PAUSED", bridge.Snapshot.Playback.Status);
         var stats = await bridge.Execute(Cmd("statistics", id), "guest"); using (var json = JsonDocument.Parse(Json.Write(stats.Data))) Assert.Equal(1, json.RootElement.GetProperty("statistics").GetProperty("total").GetInt64());
-        Assert.True((await bridge.Execute(Cmd("play", library.Sounds[1].Id, library.Version), "host")).Ok); Assert.False((await bridge.Execute(Cmd("seek", id, position: 100, epoch: epoch), "guest")).Ok);
+        Assert.True((await bridge.Execute(Cmd("play", library.Sounds[1].Id, library.Version), "host")).Ok); Assert.True(Stale(await bridge.Execute(Cmd("seek", id, position: 100, epoch: epoch), "guest"))); Assert.DoesNotContain("DoSeekMs(100)", mock.Commands); // 2.35: quiet, not an error
         await bridge.Execute(Cmd("permissions") with { Permissions = new(true, false, false) }, "host"); Assert.False((await bridge.Execute(Cmd("seek", bridge.Snapshot.Playback.SoundId, position: 100, epoch: bridge.Snapshot.Playback.Epoch), "guest")).Ok);
     }
     [Fact] public async Task RegionEndsAndCompetingPlayCancelsOldBoundary() { await using var mock = new MockSoundpad(); using var pipe = new SoundpadPipe(mock.Name); using var bridge = new Bridge(pipe, Store); await bridge.Poll(true); var lib = bridge.Snapshot.Library; Assert.True((await bridge.Execute(Cmd("region", lib.Sounds[0].Id, lib.Version, 100, end: 250), "host")).Ok); await Task.Delay(200); await bridge.Poll(false); Assert.Equal("STOPPED", bridge.Snapshot.Playback.Status); Assert.True((await bridge.Execute(Cmd("region", lib.Sounds[0].Id, lib.Version, 100, end: 250), "host")).Ok); Assert.True((await bridge.Execute(Cmd("play", lib.Sounds[1].Id, lib.Version), "host")).Ok); await Task.Delay(200); await bridge.Poll(false); Assert.Equal(lib.Sounds[1].Id, bridge.Snapshot.Playback.SoundId); }
@@ -116,7 +119,7 @@ public sealed class V2Tests : IDisposable
         Assert.True((await bridge.Execute(Cmd("play", id, lib.Version), "host")).Ok); var epoch = bridge.Snapshot.Playback.Epoch;
         Assert.True((await bridge.Execute(Cmd("seek", id, position: 100, epoch: epoch), "host")).Ok); Assert.Equal(1, bridge.Snapshot.Playback.PositionRevision);
         mock.DurationMs = 5000; await bridge.Poll(false); Assert.Null(bridge.Snapshot.Playback.SoundId); Assert.Equal("unknown", bridge.Snapshot.Playback.IdentitySource);
-        Assert.False((await bridge.Execute(Cmd("seek", id, position: 200, epoch: epoch), "host")).Ok);
+        Assert.True(Stale(await bridge.Execute(Cmd("seek", id, position: 200, epoch: epoch), "host"))); Assert.DoesNotContain("DoSeekMs(200)", mock.Commands); // 2.35: quiet, not an error
     }
     [Fact]
     public async Task RegionRepeatsDoNotCountAgainAndStatisticsSurviveRestart()
@@ -124,6 +127,7 @@ public sealed class V2Tests : IDisposable
         await using var mock = new MockSoundpad(); using var pipe = new SoundpadPipe(mock.Name); using var bridge = new Bridge(pipe, Store); await bridge.Poll(true); var lib = bridge.Snapshot.Library; var id = lib.Sounds[0].Id;
         Assert.True((await bridge.Execute(Cmd("region", id, lib.Version, 100, end: 250, repeat: true), "guest", new(Guid.NewGuid().ToString(), "Alice"))).Ok);
         await Task.Delay(200); await bridge.Poll(false); Assert.Equal("PLAYING", bridge.Snapshot.Playback.Status); Assert.True(bridge.Snapshot.Playback.PositionRevision >= 2);
+        await bridge.FlushState(); // 2.35: play statistics are written a moment after the play, or at a clean exit; this is that write
         using var restarted = new Bridge(pipe, Store); var reply = await restarted.Execute(Cmd("statistics", id), "guest"); using var json = JsonDocument.Parse(Json.Write(reply.Data)); Assert.Equal(1, json.RootElement.GetProperty("statistics").GetProperty("total").GetInt64());
         Assert.True((await restarted.Execute(Cmd("counter") with { Delta = 1 }, "host")).Ok); Assert.True((await restarted.Execute(Cmd("clearStatistics"), "host")).Ok); Assert.Equal(1, restarted.Snapshot.Counter);
     }

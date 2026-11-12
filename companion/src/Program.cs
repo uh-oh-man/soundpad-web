@@ -64,9 +64,8 @@ try
         try
         {
             // Cleanup never removes anything while audio plays; stop it first, but only if it's a Temp sound.
-            var snapshot = bridge.Snapshot;
-            if (snapshot.Playback.Status is "PLAYING" or "PAUSED" or "SEEKING" && snapshot.Library.Sounds.Any(s => s.Id == snapshot.Playback.SoundId && s.Temporary))
-                pipe.Request("DoStopSound()").Wait(TimeSpan.FromSeconds(1));
+            // The Bridge does it (2.35), so the stop also cancels every start still pending and updates the record.
+            bridge.StopTemporaryPlayback().Wait(TimeSpan.FromSeconds(1));
             bridge.CleanupSession().Wait(TimeSpan.FromSeconds(3.5));
         }
         catch (Exception) { /* finished on next start */ }
@@ -78,15 +77,19 @@ try
     var url = clean + "#host=" + server.Port + "." + server.Token;
     if (!args.Contains("--no-browser")) Process.Start(new ProcessStartInfo(url) { UseShellExecute = true });
     Console.WriteLine($"Soundpad Web is running on loopback port {server.Port}.\nKeep this window and your host browser tab open. Enter or Ctrl+C stops the companion.\nAudio devices and Soundpad settings are unchanged.");
-    long nextLibrary = 0;
+    long nextLibrary = 0; int pollFailures = 0;
     using var wake = new SemaphoreSlim(0, 1);
-    bridge.CommandAccepted += () => { if (wake.CurrentCount == 0) wake.Release(); };
+    // Commands finish on several threads at once (a Stop does not wait for the gate, 2.35): two may both see the
+    // semaphore empty, and the second Release must not turn an accepted command into a failure.
+    bridge.CommandAccepted += () => { try { if (wake.CurrentCount == 0) wake.Release(); } catch (SemaphoreFullException) { } };
     try { while (!shutdown.IsCancellationRequested)
     {
         var now = Environment.TickCount64;
         bool refresh = now >= nextLibrary;
         if (refresh) nextLibrary = now + 30000;
-        await bridge.Poll(refresh);
+        // The poll loop must never end the companion (2.35): whatever one poll runs into, the next one tries again.
+        try { await bridge.Poll(refresh); }
+        catch (Exception ex) when (ex is not OutOfMemoryException) { if (pollFailures++ == 0) Console.WriteLine($"[{DateTime.Now:HH:mm:ss}] A status check failed and will be retried: {ex.Message}"); }
         await wake.WaitAsync(TimeSpan.FromMilliseconds(bridge.Snapshot.Playback.Status is "PLAYING" or "SEEKING" ? 250 : bridge.Snapshot.Playback.Status == "PAUSED" ? 500 : 1500), shutdown.Token);
     } } finally { try { await bridge.CleanupSession(); } catch (Exception) { Console.WriteLine("Temporary entries retained for cleanup on next launch."); } }
 }

@@ -20,48 +20,72 @@ public sealed partial class Bridge
         return null;
     }
     private async Task Success(string command) { if (!(await Pipe.Request(command)).StartsWith("R-200", StringComparison.Ordinal)) throw new InvalidDataException("Soundpad rejected this action or its API does not support it."); }
-    private async Task SamplePlayback()
+    /// <summary>
+    /// Reads Soundpad's play status, position and duration into the playback record. The caller holds the gate.
+    /// With <paramref name="starting"/> (the start that is taking this sample) it stops early as soon as that
+    /// start should yield, so a newer play never waits for an older play's sampling (2.35).
+    /// </summary>
+    private async Task SamplePlayback(Intent? starting = null)
     {
+        long seen; lock (playbackSync) seen = playbackVersion;
         var status = await Pipe.Request("GetPlayStatus()"); long? position = null, duration = null;
         if (status is "PLAYING" or "PAUSED" or "SEEKING")
         {
+            if (starting != null && ShouldYield(starting)) return;
             if (long.TryParse(await Pipe.Request("GetPlaybackPositionInMs()"), out var p) && p >= 0) position = p;
+            if (starting != null && ShouldYield(starting)) return;
             if (long.TryParse(await Pipe.Request("GetPlaybackDurationInMs()"), out var d) && d > 0) duration = d;
         }
-        bool known = playback.SoundId != null; long elapsed = playback.Status == "PLAYING" ? Environment.TickCount64 - sampledTick : 0;
-        // RC can report the pre-seek position or a transient stop while an accepted seek settles.
-        // Trust only our short, epoch-bound transition window; a changed duration still invalidates identity.
-        bool sameDuration = playback.DurationMs is not > 0 || duration is not > 0 || Math.Abs(playback.DurationMs.Value - duration.Value) <= 150;
-        bool positionJump = known && position.HasValue && playback.PositionMs.HasValue && Math.Abs(position.Value - (playback.PositionMs.Value + elapsed)) > 1200;
-        if (known && Environment.TickCount64 < seekSettlesUntil && sameDuration &&
-            (status is "STOPPED" or "SEEKING" || status.StartsWith("R-") || positionJump || !position.HasValue))
+        long? loopTo = null; bool ended = false;
+        lock (playbackSync)
         {
-            status = playback.Status == "PAUSED" ? "PAUSED" : "SEEKING";
-            position = playback.PositionMs; duration ??= playback.DurationMs;
+            // A Stop, Panic or start replaced the record while this sample was on its way (Stop does not wait for
+            // the gate): what was read describes the playback before it, so it is dropped (2.35).
+            if (seen != playbackVersion) return;
+            bool known = playback.SoundId != null; long elapsed = playback.Status == "PLAYING" ? Environment.TickCount64 - sampledTick : 0;
+            // RC can report the pre-seek position or a transient stop while an accepted seek settles.
+            // Trust only our short, epoch-bound transition window; a changed duration still invalidates identity.
+            bool sameDuration = playback.DurationMs is not > 0 || duration is not > 0 || Math.Abs(playback.DurationMs.Value - duration.Value) <= 150;
+            bool positionJump = known && position.HasValue && playback.PositionMs.HasValue && Math.Abs(position.Value - (playback.PositionMs.Value + elapsed)) > 1200;
+            if (known && Environment.TickCount64 < seekSettlesUntil && sameDuration &&
+                (status is "STOPPED" or "SEEKING" || status.StartsWith("R-") || positionJump || !position.HasValue))
+            {
+                status = playback.Status == "PAUSED" ? "PAUSED" : "SEEKING";
+                position = playback.PositionMs; duration ??= playback.DurationMs;
+            }
+            // No vendor current-ID getter exists. Clear on contradictory observations; same-duration
+            // native replacement cannot always be detected and is documented as a vendor limitation.
+            if (status == "STOPPED" || status.StartsWith("R-") ||
+                (known && playback.DurationMs is > 0 && duration is > 0 && Math.Abs(playback.DurationMs.Value - duration.Value) > 150) ||
+                (known && position.HasValue && playback.PositionMs.HasValue && Math.Abs(position.Value - (playback.PositionMs.Value + elapsed)) > 1200)) known = false;
+            playback = playback with
+            {
+                Status = status is "PLAYING" or "PAUSED" or "SEEKING" or "STOPPED" ? status : "UNKNOWN",
+                PositionMs = position,
+                DurationMs = duration,
+                SoundId = known ? playback.SoundId : null,
+                Epoch = known ? playback.Epoch : null,
+                Requester = known ? playback.Requester : null,
+                IdentitySource = known ? "web" : "unknown",
+                SampledAt = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
+                RegionEndMs = known ? playback.RegionEndMs : null,
+                Repeat = known && playback.Repeat
+            };
+            sampledTick = Environment.TickCount64;
+            if (playback.Status == "PLAYING" && playback.RegionEndMs is long end && position >= end)
+            {
+                if (playback.Repeat && regionStart.HasValue) loopTo = regionStart.Value; else ended = true;
+            }
         }
-        // No vendor current-ID getter exists. Clear on contradictory observations; same-duration
-        // native replacement cannot always be detected and is documented as a vendor limitation.
-        if (status == "STOPPED" || status.StartsWith("R-") ||
-            (known && playback.DurationMs is > 0 && duration is > 0 && Math.Abs(playback.DurationMs.Value - duration.Value) > 150) ||
-            (known && position.HasValue && playback.PositionMs.HasValue && Math.Abs(position.Value - (playback.PositionMs.Value + elapsed)) > 1200)) known = false;
-        playback = playback with
+        if (loopTo is long from)
         {
-            Status = status is "PLAYING" or "PAUSED" or "SEEKING" or "STOPPED" ? status : "UNKNOWN",
-            PositionMs = position,
-            DurationMs = duration,
-            SoundId = known ? playback.SoundId : null,
-            Epoch = known ? playback.Epoch : null,
-            Requester = known ? playback.Requester : null,
-            IdentitySource = known ? "web" : "unknown",
-            SampledAt = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
-            RegionEndMs = known ? playback.RegionEndMs : null,
-            Repeat = known && playback.Repeat
-        };
-        sampledTick = Environment.TickCount64;
-        if (playback.Status == "PLAYING" && playback.RegionEndMs is long end && position >= end)
+            await Success($"DoSeekMs({from})");
+            lock (playbackSync) { if (seen == playbackVersion) { seekSettlesUntil = Environment.TickCount64 + 1500; playback = playback with { PositionMs = from, PositionRevision = playback.PositionRevision + 1 }; sampledTick = Environment.TickCount64; } }
+        }
+        else if (ended)
         {
-            if (playback.Repeat && regionStart.HasValue) { await Success($"DoSeekMs({regionStart.Value})"); seekSettlesUntil = Environment.TickCount64 + 1500; playback = playback with { PositionMs = regionStart.Value, PositionRevision = playback.PositionRevision + 1 }; sampledTick = Environment.TickCount64; }
-            else { await Success("DoStopSound()"); playback = new("STOPPED", SampledAt: DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()); regionStart = null; }
+            await Success("DoStopSound()");
+            lock (playbackSync) { if (seen == playbackVersion) { playbackVersion++; playback = new("STOPPED", SampledAt: DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()); regionStart = null; } }
         }
     }
     private static Participant Person(string actor, Participant? input)
@@ -69,42 +93,93 @@ public sealed partial class Bridge
         var name = new string((input?.Name ?? (actor == "host" ? "Host" : "Guest")).Where(c => !char.IsControl(c)).Take(40).ToArray()).Trim();
         var id = Guid.TryParse(input?.Id, out var guid) ? guid.ToString() : actor == "host" ? "host" : "anonymous"; return new(id, string.IsNullOrEmpty(name) ? "Guest" : name);
     }
-    private async Task StartPlayback(Command c, string actor, Participant? participant, int index)
+    /// <summary>
+    /// Starts a sound at its current index. The caller holds the gate and has just looked the index up.
+    /// Returns the new playback's epoch, or null when a newer intent replaced this one before the play reached
+    /// Soundpad (nothing is counted or recorded then). Once Soundpad has accepted the play it counts as played;
+    /// the sampling and cue seek that follow are cut short if a newer intent is about to take over (2.35).
+    /// </summary>
+    private async Task<string?> StartPlayback(Command c, string actor, Participant? participant, int index, Intent intent)
     {
         if (c.Op != "play" && (c.PositionMs is null or < 0 or > 1800000 || (c.Op == "region" && (c.EndMs is null or > 1800000 || c.EndMs <= c.PositionMs)))) throw new InvalidDataException("Invalid cue or region boundaries.");
         var statisticsId = managed?.Annotation(c.SoundId!)?.WorkspaceId ?? c.SoundId!;
         if (disk.Statistics.Count >= 50000 && !disk.Statistics.ContainsKey(statisticsId)) throw new InvalidDataException("Statistics storage limit reached.");
-        bool started = false;
+        if (!IsNewest(intent)) return null;
+        // The pipe checks once more, immediately before it writes: a play replaced while it queued there is not sent.
+        string answer;
+        try { answer = await Pipe.Request($"DoPlaySound({index})", intent.Withdrawn.Token); }
+        catch (OperationCanceledException) when (intent.Withdrawn.IsCancellationRequested) { return null; }
+        if (!answer.StartsWith("R-200", StringComparison.Ordinal)) throw new InvalidDataException("Soundpad rejected this action or its API does not support it.");
+        var now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(); var person = Person(actor, participant); var epoch = Guid.NewGuid().ToString();
+        lock (playbackSync)
+        {
+            // A Stop or Panic that arrived while the play was on the wire was sent after it and has already
+            // recorded the stop: that record stands, and this play (heard for an instant at most) is not counted.
+            if (playbackOwner > intent.Revision) return null;
+            playbackOwner = intent.Revision; playbackVersion++;
+            playback = new("PLAYING", 0, null, c.SoundId, epoch, person.Name, now, "web"); sampledTick = Environment.TickCount64; regionStart = null; seekSettlesUntil = Environment.TickCount64 + 1500;
+        }
         try
         {
-            await Success($"DoPlaySound({index})"); started = true; seekSettlesUntil = Environment.TickCount64 + 1500;
-            var now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(); var person = Person(actor, participant);
-            playback = new("PLAYING", 0, null, c.SoundId, Guid.NewGuid().ToString(), person.Name, now, "web"); sampledTick = Environment.TickCount64; regionStart = null;
-            await SamplePlayback();
-            if (c.Op != "play")
+            await SamplePlayback(intent);
+            if (c.Op != "play" && !ShouldYield(intent))
             {
-                for (int attempt = 0; playback.DurationMs is not > 0 && attempt < 3; attempt++) { await Task.Delay(50); await SamplePlayback(); }
-                if (playback.DurationMs is not > 0) throw new InvalidDataException("Soundpad did not provide a duration for seeking.");
-                long start = Math.Clamp(c.PositionMs!.Value, 0, playback.DurationMs.Value - 1);
-                await Success($"DoSeekMs({start})"); seekSettlesUntil = Environment.TickCount64 + 1500; playback = playback with { PositionMs = start, PositionRevision = playback.PositionRevision + 1, SampledAt = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(), RegionEndMs = c.Op == "region" ? Math.Min(c.EndMs!.Value, playback.DurationMs.Value) : null, Repeat = c.Op == "region" && c.Repeat };
-                sampledTick = Environment.TickCount64; regionStart = c.Op == "region" ? start : null;
+                for (int attempt = 0; playback.DurationMs is not > 0 && attempt < 3 && !ShouldYield(intent); attempt++) { await Task.Delay(50); await SamplePlayback(intent); }
+                Playback current; bool mine;
+                lock (playbackSync) { current = playback; mine = playbackOwner == intent.Revision; }
+                if (mine && !ShouldYield(intent))
+                {
+                    if (current.DurationMs is not > 0) throw new InvalidDataException("Soundpad did not provide a duration for seeking.");
+                    long start = Math.Clamp(c.PositionMs!.Value, 0, current.DurationMs.Value - 1), length = current.DurationMs.Value;
+                    await Success($"DoSeekMs({start})");
+                    lock (playbackSync)
+                    {
+                        if (playbackOwner == intent.Revision)
+                        {
+                            seekSettlesUntil = Environment.TickCount64 + 1500; playback = playback with { PositionMs = start, PositionRevision = playback.PositionRevision + 1, SampledAt = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(), RegionEndMs = c.Op == "region" ? Math.Min(c.EndMs!.Value, length) : null, Repeat = c.Op == "region" && c.Repeat };
+                            sampledTick = Environment.TickCount64; regionStart = c.Op == "region" ? start : null;
+                        }
+                    }
+                }
             }
             var stats = disk.Statistics.GetValueOrDefault(statisticsId) ?? new SoundStatistics(); stats.Total++; stats.LastPlayedAt = now;
             var key = stats.Participants.Count < 32 || stats.Participants.ContainsKey(person.Id) ? person.Id : "other";
             stats.Participants[key] = new(key == "other" ? "Other participants" : person.Name, (stats.Participants.GetValueOrDefault(key)?.Count ?? 0) + 1);
             disk.Statistics[statisticsId] = stats; disk.StatisticsVersion++;
             disk.Activity.Add(new(c.Id, c.SoundId!, now, person.Id, person.Name, actor == "host" ? "host" : "guest")); if (disk.Activity.Count > 100) disk.Activity.RemoveRange(0, disk.Activity.Count - 100);
+            return epoch;
         }
-        catch { if (started) { try { await Success("DoStopSound()"); } catch (Exception) { } playback = new("STOPPED"); } throw; }
+        catch
+        {
+            // The play started but its cue could not be set: stop it rather than leave it playing from the top.
+            // No newer play can have started meanwhile (this holds the gate), so the stop hits only this sound.
+            try { await Success("DoStopSound()"); } catch (Exception) { }
+            lock (playbackSync) { if (playbackOwner == intent.Revision) { playbackVersion++; playback = new("STOPPED"); } }
+            throw;
+        }
     }
-    private async Task ControlPlayback(Command c)
+    /// <summary>
+    /// Seek or Pause for one playback (its sound and epoch). The caller holds the gate. False when that playback is
+    /// no longer the current one, or is about to be replaced: the control is stale and is answered quietly (2.35).
+    /// </summary>
+    private async Task<bool> ControlPlayback(Command c)
     {
-        if (!available || playback.SoundId == null || c.SoundId != playback.SoundId || c.Epoch != playback.Epoch) throw new InvalidDataException("Playback changed. This control belongs to an older sound.");
+        if (!available || playback.SoundId == null || c.SoundId != playback.SoundId || c.Epoch != playback.Epoch) return false;
         await SamplePlayback();
-        if (playback.SoundId != c.SoundId || playback.Epoch != c.Epoch || playback.Status is not ("PLAYING" or "PAUSED" or "SEEKING")) throw new InvalidDataException("Playback identity is unknown or changed.");
-        if (c.Op == "pause") { await Success("DoTogglePause()"); playback = playback with { Status = playback.Status == "PAUSED" ? "PLAYING" : "PAUSED" }; }
-        else { if (c.PositionMs is null or < 0 || playback.DurationMs is not > 0) throw new InvalidDataException("Invalid seek target or unknown duration."); var target = Math.Min(c.PositionMs.Value, playback.DurationMs.Value - 1); await Success($"DoSeekMs({target})"); seekSettlesUntil = Environment.TickCount64 + 1500; playback = playback with { PositionMs = target, PositionRevision = playback.PositionRevision + 1, RegionEndMs = null, Repeat = false }; regionStart = null; }
-        playback = playback with { SampledAt = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() }; sampledTick = Environment.TickCount64;
+        var current = playback;
+        if (current.SoundId != c.SoundId || current.Epoch != c.Epoch || current.Status is not ("PLAYING" or "PAUSED" or "SEEKING") || AboutToChange()) return false;
+        if (c.Op == "pause")
+        {
+            await Success("DoTogglePause()");
+            lock (playbackSync) { if (playback.Epoch == c.Epoch) { playback = playback with { Status = playback.Status == "PAUSED" ? "PLAYING" : "PAUSED", SampledAt = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() }; sampledTick = Environment.TickCount64; } }
+        }
+        else
+        {
+            if (c.PositionMs is null or < 0 || current.DurationMs is not > 0) throw new InvalidDataException("Invalid seek target or unknown duration.");
+            var target = Math.Min(c.PositionMs.Value, current.DurationMs.Value - 1); await Success($"DoSeekMs({target})");
+            lock (playbackSync) { if (playback.Epoch == c.Epoch) { seekSettlesUntil = Environment.TickCount64 + 1500; playback = playback with { PositionMs = target, PositionRevision = playback.PositionRevision + 1, RegionEndMs = null, Repeat = false, SampledAt = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() }; regionStart = null; sampledTick = Environment.TickCount64; } }
+        }
+        return true;
     }
     private string[] StatisticsKeys(string soundId)
     {

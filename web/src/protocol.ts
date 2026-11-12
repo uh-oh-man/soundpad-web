@@ -44,6 +44,8 @@ export const commandSchema = z
       'mimicLibraryImport',
       'trimAudio',
       'trimPreview',
+      // Host only (2.35): stops Soundpad at once and holds guest playback until the host resumes it.
+      'panic',
     ]),
     assetId: z.uuid().optional(),
     variantId: z.uuid().optional(),
@@ -67,6 +69,9 @@ export const commandSchema = z
     endMs: z.number().int().min(0).max(1800000).optional(),
     epoch: z.uuid().optional(),
     repeat: z.boolean().optional(),
+    // With trimAudio, mimicClip or mimicLibraryImport (2.35): play the new clip when it is ready, but
+    // only if nothing newer was asked for meanwhile. The companion decides, in arrival order.
+    autoplay: z.boolean().optional(),
     action: z
       .enum([
         'status',
@@ -199,6 +204,8 @@ export const snapshotSchema = z.object({
     guestTransforms: z.boolean().optional(),
     guestMimic: z.boolean().optional(),
   }),
+  // True after the host's Panic until they resume guest playback (2.35). Older companions omit it.
+  playbackSuspended: z.boolean().nullish(),
   mimic: z
     .object({
       active: z.boolean(),
@@ -232,6 +239,11 @@ const lightSnapshotSchema = snapshotSchema.omit({ library: true });
 export function parseSnapshot(raw: unknown, library?: Snapshot['library']): Snapshot {
   return library ? { ...lightSnapshotSchema.parse(raw), library } : snapshotSchema.parse(raw);
 }
+/**
+ * Why a command could not be sent or answered: the companion or the host is not connected (2.35). The
+ * page already shows the connection state, so playback clicks that fail this way add no notice.
+ */
+export class Disconnected extends Error {}
 export type Ack = { type: 'ack'; id: string; ok: boolean; error?: string };
 export const ackSchema = z.object({
   type: z.literal('ack'),
@@ -270,7 +282,25 @@ export const slowOps: readonly Command['op'][] = [
   'trimAudio',
   'trimPreview',
 ];
+/**
+ * Playback and transport commands (2.35). They are answered quickly and a burst of them is normal use
+ * (two people alternating clicks), so they get their own rate budget in the host tab and are never
+ * held back by the cap on commands still waiting for an answer.
+ */
+export const controlOps: readonly Command['op'][] = [
+  'play',
+  'startAt',
+  'region',
+  'stop',
+  'seek',
+  'pause',
+  'audioPlay',
+  'reverse',
+  'panic',
+];
 export function isGuestAllowed(c: Command, s: Snapshot) {
+  // "Make it and play it" (2.35) needs the same permission as playing it afterwards did.
+  if (c.autoplay && !s.permissions.remotePlayback) return false;
   if (c.op === 'mimicPeek' || c.op === 'mimicClip') return s.permissions.guestMimic === true;
   if (c.op === 'trimAudio') return s.permissions.guestUploads !== false;
   // Undo of a guest's own clip or copy (2.32): the companion checks the guest added it.

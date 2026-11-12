@@ -1,5 +1,7 @@
 import {
   ackSchema,
+  controlOps,
+  Disconnected,
   parseSnapshot,
   type Command,
   type Snapshot,
@@ -22,8 +24,23 @@ export class LocalBridge {
       resolve: (data: unknown) => void;
       reject: (e: Error) => void;
       timer: ReturnType<typeof setTimeout>;
+      control: boolean;
+      owner: string;
     }
   >();
+  /** Unanswered commands other than playback and transport ones; only these count toward the cap. */
+  private waiting = 0;
+  /** Unanswered control commands per sender, so a guest's backlog never crowds out the host's Stop (2.35). */
+  private controls = new Map<string, number>();
+  private settle(id: string) {
+    const p = this.pending.get(id);
+    if (!p) return undefined;
+    clearTimeout(p.timer);
+    this.pending.delete(id);
+    if (!p.control) this.waiting--;
+    else this.controls.set(p.owner, (this.controls.get(p.owner) ?? 1) - 1);
+    return p;
+  }
   constructor(
     private address: BridgeAddress,
     private state: (s: Snapshot) => void,
@@ -59,10 +76,8 @@ export class LocalBridge {
           this.state(s);
         } else {
           const ack = ackSchema.parse(data);
-          const p = this.pending.get(ack.id);
+          const p = this.settle(ack.id);
           if (p) {
-            clearTimeout(p.timer);
-            this.pending.delete(ack.id);
             if (ack.ok) p.resolve(ack.data);
             else p.reject(Error(ack.error || 'Command rejected.'));
           }
@@ -80,9 +95,11 @@ export class LocalBridge {
       clearTimeout(timeout);
       for (const p of this.pending.values()) {
         clearTimeout(p.timer);
-        p.reject(Error('Companion disconnected.'));
+        p.reject(new Disconnected('Companion disconnected.'));
       }
       this.pending.clear();
+      this.waiting = 0;
+      this.controls.clear();
       if (!this.stopped) {
         this.status('Companion disconnected. Reconnecting…');
         this.retry = setTimeout(() => this.connect(), 2500);
@@ -92,16 +109,25 @@ export class LocalBridge {
   send(command: Command, actor = 'host', participant?: Participant, requester?: string) {
     return new Promise<unknown>((resolve, reject) => {
       if (this.socket?.readyState !== WebSocket.OPEN) {
-        reject(Error('Companion is unavailable.'));
+        reject(new Disconnected('Companion is unavailable.'));
         return;
       }
-      if (this.pending.size >= 20) {
+      // Slow work (the host's own and every guest's) shares 20 places. A Play or Stop must never wait
+      // for one (2.35): control commands are answered quickly and skip the cap, up to a bound that
+      // only a runaway sender reaches.
+      const control = controlOps.includes(command.op);
+      const owner = actor === 'host' ? 'host' : (requester ?? 'guest');
+      if (
+        control
+          ? (this.controls.get(owner) ?? 0) >= (owner === 'host' ? 512 : 64)
+          : this.waiting >= 20
+      ) {
         reject(Error('Too many pending commands.'));
         return;
       }
       const timer = setTimeout(
         () => {
-          this.pending.delete(command.id);
+          this.settle(command.id);
           reject(Error('Command timed out. Playback is never retried automatically.'));
         },
         // Removing hundreds of duplicate categories one by one can take minutes (2.15.9).
@@ -113,7 +139,11 @@ export class LocalBridge {
               ? 45000
               : 12000,
       );
-      this.pending.set(command.id, { resolve, reject, timer });
+      // A repeated id replaces its earlier request, so the count above stays exact.
+      this.settle(command.id)?.reject(Error('Command sent again.'));
+      this.pending.set(command.id, { resolve, reject, timer, control, owner });
+      if (!control) this.waiting++;
+      else this.controls.set(owner, (this.controls.get(owner) ?? 0) + 1);
       this.socket.send(
         JSON.stringify({ actor, command, participant, requester, audience: this.audience }),
       );

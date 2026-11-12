@@ -2,6 +2,55 @@
 
 Notable changes to Soundpad Web. Versions follow the website's `package.json`; the Windows companion is versioned separately and only needs updating when a release says so.
 
+## 2.35.0 — The newest click wins
+
+**Update the companion** for this one: the playback changes and Panic live in it. The website still works with older companions, which behave as before.
+
+This is the first step of a larger overhaul: making rapid back-and-forth between two people reliable.
+
+### Added
+
+- **Panic** (host). A separate button beside Stop, and **Shift+Escape** anywhere on the page except while typing. It stops what is playing at once, cancels anything still about to start, and pauses guest playback until you press **Resume guest playback**. It does not end the session, Mimic or Temp, and you can still play sounds yourself. Guests see a calm note that the host paused playback; their play buttons are held, not broken.
+- **A clicked sound shows that it is on its way** until the companion answers. "Playing" still appears only when the companion reports it.
+
+### Changed
+
+- **Only the newest click plays.** Every Play, cue, region, Temp play, reverse, Stop and Panic is put in order as it arrives at the companion (never by anyone's clock). An older click that a newer one replaced is dropped quietly: it never plays late, is not counted in statistics, and shows no error.
+- **Stop is immediate.** It no longer waits behind a library refresh, audio being prepared or queued plays, and nothing that was asked for before a Stop can start after it.
+- **Save & play, Mimic & play, quick effects and Import & play** are one request now. If you or a friend play something else (or press Stop) while the clip is being made, the clip is still added to Temp but does not interrupt.
+- **Rapid playing of Temp and kept sounds** no longer answers "Audio preparation is busy". A sound that is already prepared plays as directly as a normal one.
+- **Playing no longer waits for the disk.** Play statistics are saved a moment later in the background. The Kick counter and settings are still saved before they are confirmed.
+- **A guest who clicks fast is never disconnected for it.** With an updated companion, playback controls have their own generous allowance, separate from the limits that protect against abuse and heavy requests (with an older companion the 2.34 limits stay, because it has one shared budget). A guest whose page is newer than the host's page is told so instead of being dropped.
+- **A flood cannot get in the host's way.** Many Stops arriving together share one request to Soundpad, a newer seek replaces one that is still waiting, and the host's own Stop and Panic never compete with guests' clicks for room. A page that floods another guest is still cut off.
+- Clicks made while disconnected are dropped, not sent late. Old clicks (over 5 seconds) are ignored quietly. A guest's clock changing mid-session no longer makes every play expire.
+- Play buttons in Temp stay usable while a copy is being saved.
+
+### Fixed
+
+- The companion could close by itself if Soundpad refused the stop at the end of a region.
+- A refused command no longer makes the companion re-read its settings file, and the icon folder is only tidied when an icon changes.
+- Clicking a waveform just after someone else started a sound now starts it where you clicked, instead of doing nothing. A sound that was paused after you clicked its waveform stays paused.
+
+### Measured
+
+With the test Soundpad answering in 5 ms, two controllers alternating plays, cues, regions and stops for 20 seconds while waveforms, statistics, the counter and uploads ran:
+
+| | 2.34.2 | 2.35.0 |
+| --- | --- | --- |
+| Click to Soundpad starting it (median / slowest) | 1333 ms / 1833 ms | 31 ms / 118 ms |
+| Stop: sent to answered (median / slowest) | 1126 ms / 1761 ms | 21 ms / 31 ms |
+| Plays that started after a newer click had already arrived | 239 of 241 | 0 of 250 |
+| Error answers to playback | 175 | 0 |
+
+These are from the test harness (`--playback-bench`), not from the real Soundpad or a real second PC.
+
+### Tests
+
+- 22 new companion tests (ordering, Stop and Panic, floods of Stops and seeks, quiet answers, prepared Temp sounds, deferred saving, the poll loop surviving a refused command).
+- A review of the change (concurrency, the website, security and compatibility) found seven problems, all fixed above before release.
+- 33 new website unit tests (the playback path, guest limits with new and older companions, clock drift, older host pages).
+- New browser tests with **two pages in one browser** (a host and a guest joined without any relay): competing controllers, Stop after a burst, Panic and Shift+Escape, a newer Play during Save & play and Mimic & play, the pending mark, and an older companion.
+
 ## 2.34.2 — Undo notices wait for you
 
 Website only; works with every companion. The companion reports 2.34.2 in this release, with no other change.

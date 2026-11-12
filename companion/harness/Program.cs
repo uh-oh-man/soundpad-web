@@ -7,6 +7,13 @@ if (args.FirstOrDefault() == "--mock-only")
     while (Console.ReadLine() is string line) { if (line == "play") isolated.BeginFixturePlayback(); else if (line == "exit") break; }
     return;
 }
+if (args.FirstOrDefault() == "--playback-bench")
+{
+    // --playback-bench [--latency-ms N] [--seconds S] [--seed N] [--out file.json] (2.35): two clients alternating
+    // plays against a mock Soundpad under background load; reports latency, obsolete plays and error answers.
+    await PlaybackBench.Run(args);
+    return;
+}
 if (args.FirstOrDefault() == "--spotify-status")
 {
     var status = await new SpotifyControl().Request("status");
@@ -422,6 +429,10 @@ if (args.Length > 1 && int.TryParse(args[1], out var count) && count is > 4 and 
 }
 foreach (var element in all.Descendants("Sound").Concat(categories.Descendants("Sound"))) { var original = (string?)element.Attribute("url"); if (original == null) continue; var path = Path.Combine(directory, Path.GetFileName(original)); if (!File.Exists(path)) AudioFixtures.Wave(path); element.SetAttributeValue("url", path); element.SetAttributeValue("duration", "00:02.500"); }
 mock.AllXml = all.ToString(); mock.CategoryXml = categories.ToString();
+// After the origin and the sound count (2.35), for e2e tests of playback under delay: --latency-ms N makes every
+// Soundpad request take N ms; --slow-add-ms N makes only an import into Soundpad (DoAddSound) take N ms longer.
+int Option(string name) { int at = Array.IndexOf(args, name); return at >= 0 && at + 1 < args.Length && int.TryParse(args[at + 1], out int value) && value is >= 0 and <= 3000 ? value : 0; }
+mock.LatencyMs = Option("--latency-ms"); mock.SlowMs = Option("--slow-add-ms"); mock.SlowPrefix = "DoAddSound(";
 using var pipe = new SoundpadPipe(mock.Name, true);
 using var bridge = new Bridge(pipe, new StateStore(directory));
 bridge.UseMimicCapture(new MimicFixture());

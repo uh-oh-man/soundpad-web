@@ -1,9 +1,8 @@
 import { useState } from 'react';
 import { BookmarkPlus, Play, Rewind, Scissors } from 'lucide-react';
-import { z } from 'zod';
-import { controller } from '../../controller';
 import type { Snapshot } from '../../protocol';
 import { supports } from '../../version';
+import { guestHeld, HELD_BY_HOST, intentKey, playback, usePendingIntent } from '../../playback';
 
 /** Quick effects for a fresh clip (2.18.1): each makes an Edit copy of the whole clip and plays it at once. */
 const quickEffects = [
@@ -27,13 +26,17 @@ export function MimicRecent({
   onTempRequest?: (kind: 'edit' | 'keep', assetId: string) => void;
 }) {
   const [making, setMaking] = useState('');
+  // The replay this page asked for and has not heard back about (2.35).
+  const intent = usePendingIntent();
   // Skip clips already removed from Temp.
   const recent = (state.mimic?.recent ?? []).filter((clip) =>
     state.library.sounds.some((s) => s.assetId === clip.assetId),
   );
   if (!recent.length) return null;
+  // Held by the host's Panic (2.35): play controls look unavailable, keep focus and ignore presses.
+  const held = guestHeld(state, host);
   const play = (assetId: string, orientation: 'normal' | 'reversed') =>
-    void controller.run('audioPlay', { assetId, orientation }).catch(() => {});
+    !held && void playback.audioPlay(assetId, orientation);
   // Edit copy needs the companion's effects and, for guests, the host's upload permission.
   const canEffect =
     canPlay &&
@@ -46,20 +49,23 @@ export function MimicRecent({
     supports(state.companionVersion, 'trim') &&
     (host || state.permissions.guestUploads !== false);
   async function playWithEffect(assetId: string, effect: QuickEffect) {
-    if (making) return;
+    if (making || held) return;
     setMaking(assetId);
     try {
-      const result = z.object({ assetId: z.string().max(64) }).safeParse(
-        await controller.run('trimAudio', {
+      // Made and played through the playback path (2.35): if something newer was asked for while
+      // the copy was being made, the copy is still added but does not cut in.
+      await playback.make(
+        'trimAudio',
+        {
           assetId,
           positionMs: 0,
           endMs: 1800000, // the companion trims this to the clip's real end
           ...(effect === 'slow-voice'
             ? { action: 'speed', speed: 0.5, keepPitch: true }
             : { action: effect }),
-        }),
+        },
+        `make:${assetId}`,
       );
-      if (result.success) play(result.data.assetId, 'normal');
     } catch {
       /* The controller shows the error. */
     } finally {
@@ -71,7 +77,13 @@ export function MimicRecent({
       <small>Just mimicked</small>
       {recent.map((clip) => (
         <div className="mimic-recent-item" key={clip.assetId}>
-          <button disabled={!canPlay} onClick={() => play(clip.assetId, 'normal')}>
+          <button
+            disabled={!canPlay}
+            aria-disabled={held || undefined}
+            data-intent={intent === intentKey.asset(clip.assetId, 'normal') ? 'pending' : undefined}
+            title={held ? HELD_BY_HOST : undefined}
+            onClick={() => play(clip.assetId, 'normal')}
+          >
             {/* The spoken name keeps the visible text: "Replay <name> · <who>". */}
             <Play size={13} aria-hidden="true" /> <span className="sr-only">Replay </span>
             <span className="mimic-recent-name">{clip.name}</span> <small>· {clip.by}</small>
@@ -80,8 +92,12 @@ export function MimicRecent({
           <button
             className="icon-button"
             disabled={!canPlay || (!host && state.permissions.guestTransforms === false)}
+            aria-disabled={held || undefined}
+            data-intent={
+              intent === intentKey.asset(clip.assetId, 'reversed') ? 'pending' : undefined
+            }
             aria-label={`Play ${clip.name} reversed`}
-            title="Play reversed"
+            title={held ? HELD_BY_HOST : 'Play reversed'}
             onClick={() => play(clip.assetId, 'reversed')}
           >
             <Rewind size={14} />
@@ -112,7 +128,8 @@ export function MimicRecent({
               className="mimic-recent-effect"
               aria-label={`Play ${clip.name} with an effect`}
               aria-busy={making === clip.assetId || undefined}
-              aria-disabled={!!making || undefined}
+              aria-disabled={!!making || held || undefined}
+              title={held ? HELD_BY_HOST : undefined}
               value=""
               onChange={(e) => void playWithEffect(clip.assetId, e.target.value as QuickEffect)}
             >

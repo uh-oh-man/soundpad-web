@@ -49,9 +49,10 @@ public sealed partial class Bridge
     /// Voice Replay Studio's trim saved a new version: the original stays untouched. Guests need the same
     /// permission as uploading. With <paramref name="preview"/> (op <c>trimPreview</c>, host only, 2.20) it makes
     /// the same copy but returns its first <see cref="TrimPreviewSeconds"/> s as WAV to the host's own browser
-    /// tab, like Mimic's Preview, and saves nothing.
+    /// tab, like Mimic's Preview, and saves nothing. With <c>autoplay</c> (2.35) the new copy is played when it is
+    /// ready, but only if <paramref name="intent"/>, reserved when the command arrived, is still the newest.
     /// </summary>
-    private async Task<Reply> TrimAudio(Command c, string actor, Participant? participant, string? requester, string? audience, bool preview = false)
+    private async Task<Reply> TrimAudio(Command c, string actor, Participant? participant, string? requester, string? audience, bool preview = false, Intent? intent = null)
     {
         try
         {
@@ -70,7 +71,7 @@ public sealed partial class Bridge
             try
             {
             string? path; string original;
-            await audioGate.WaitAsync();
+            await audioGate.EnterAsync(PriorityGate.Lane.Normal);
             try
             {
                 var asset = Audio.AssetById(c.AssetId);
@@ -147,7 +148,8 @@ public sealed partial class Bridge
             // Voice Replay Studio imports (2.29.3).
             name = name.Replace('/', '-').Replace('\\', '-');
             if (name.Length > 100) name = name[..99].TrimEnd() + "\u2026";
-            return (await Upload(wav, name + ".wav", Person(actor, participant).Name, actor == "host", owner, audience)) with { Id = c.Id };
+            var saved = (await Upload(wav, name + ".wav", Person(actor, participant).Name, actor == "host", owner, audience)) with { Id = c.Id };
+            return c.Autoplay ? await Autoplay(saved, c, actor, participant, requester, audience, intent) : saved;
             }
             finally { Interlocked.Decrement(ref editing); }
         }

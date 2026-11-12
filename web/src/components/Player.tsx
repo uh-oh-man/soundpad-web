@@ -1,13 +1,26 @@
 import { useEffect, useState, useRef } from 'react';
-import { AudioLines, Play, Pause, Square, RotateCcw, ChevronUp, ChevronDown } from 'lucide-react';
+import {
+  AudioLines,
+  Play,
+  Pause,
+  Square,
+  RotateCcw,
+  ChevronUp,
+  ChevronDown,
+  OctagonX,
+} from 'lucide-react';
 import { hasSound } from '../protocol';
-import { controller } from '../controller';
 import type { Snapshot } from '../protocol';
 import type { Workspace } from '../workspace';
 import { Waveform, formatTime, usePlayhead } from './Waveform';
-import { seekQueue } from '../seek';
+import { guestHeld, HELD_BY_HOST, intentKey, playback, usePendingIntent } from '../playback';
+import { supports } from '../version';
+/** Panic's accessible name; its title adds the shortcut. */
+export const PANIC_LABEL = 'Panic: stop audio and pause guest playback';
 export function Player({
   state,
+  host,
+  connected,
   disabled,
   canSeek,
   workspace,
@@ -15,6 +28,9 @@ export function Player({
   children,
 }: {
   state: Snapshot;
+  host: boolean;
+  /** Connected to the companion (host) or the host (guest), whether or not Soundpad is available. */
+  connected: boolean;
   disabled: boolean;
   canSeek: boolean;
   workspace: Workspace | null;
@@ -42,45 +58,30 @@ export function Player({
   useEffect(() => {
     if (state.playback.soundId) setLastId(state.playback.soundId);
   }, [state.playback.soundId]);
-  const playback = state.playback,
-    known = !!playback.soundId,
-    sound = state.library.sounds.find((s) => s.id === (playback.soundId ?? lastId)),
-    position = usePlayhead(playback);
-  async function action(op: 'pause' | 'seek' | 'stop', at?: number) {
-    try {
-      if (op === 'seek' && playback.soundId && playback.epoch && at !== undefined) {
-        await seekQueue.seek(playback.soundId, playback.epoch, at);
-        return;
-      }
-      await controller.run(op, {
-        soundId: playback.soundId ?? undefined,
-        epoch: playback.epoch ?? undefined,
-        positionMs: at,
-      });
-    } catch {
-      /* Controller reports failure. */
-    }
-  }
-  async function replay() {
+  const current = state.playback,
+    known = !!current.soundId,
+    sound = state.library.sounds.find((s) => s.id === (current.soundId ?? lastId)),
+    position = usePlayhead(current);
+  // A click this page sent and the companion has not answered yet (2.35). "Playing" is the report.
+  const pending = usePendingIntent();
+  const held = guestHeld(state, host);
+  const canPanic = host && supports(state.companionVersion, 'intents');
+  function replay() {
     const cue = workspace?.lastCue;
     if (!cue) return;
     const target = state.library.sounds.find((s) => hasSound([cue.soundId], s));
     if (!target) return;
-    try {
-      await controller.run(cue.end ? 'region' : 'startAt', {
-        soundId: target.id,
-        libraryVersion: state.library.version,
-        positionMs: cue.at,
-        endMs: cue.end,
-        repeat: cue.repeat,
-      });
-    } catch {
-      /* The controller reports command errors; browser storage is optional for display names. */
-    }
+    void (cue.end
+      ? playback.region(target.id, cue.at, cue.end, cue.repeat)
+      : playback.startAt(target.id, cue.at));
   }
   return (
-    <footer ref={root} className={`player player-v2 ${expanded ? 'expanded' : ''}`}>
-      <div className="player-track">
+    <footer
+      ref={root}
+      className={`player player-v2 ${expanded ? 'expanded' : ''} ${pending ? 'intent-pending' : ''}`}
+      data-intent={pending ? 'pending' : undefined}
+    >
+      <div className="player-track" aria-busy={!!pending}>
         <span className="playback-icon">
           {sound?.icon ? <img src={sound.icon} alt="" /> : <AudioLines size={22} />}
         </span>
@@ -90,15 +91,15 @@ export function Player({
               ? known
                 ? sound.name
                 : `Last selection: ${sound.name}`
-              : playback.status === 'PLAYING' || playback.status === 'PAUSED'
+              : current.status === 'PLAYING' || current.status === 'PAUSED'
                 ? 'Soundpad playback · sound unknown'
-                : playback.status === 'STOPPED'
+                : current.status === 'STOPPED'
                   ? 'Ready to make some noise'
                   : 'Playback status unavailable'}
           </strong>
           <small>
             {sound && known
-              ? `Requested by ${playback.requester ?? 'Host'} · ${playback.status.toLowerCase()}`
+              ? `Requested by ${current.requester ?? 'Host'} · ${current.status.toLowerCase()}`
               : 'Direct Soundpad playback remains independent.'}
           </small>
         </div>
@@ -117,20 +118,21 @@ export function Player({
             compact
             sound={sound}
             state={state}
-            disabled={disabled || !canSeek || !known || !playback.epoch}
+            disabled={disabled || !canSeek || !known || !current.epoch}
+            held={held}
             workspace={workspace}
             update={update}
-            choose={(at) => action('seek', at)}
+            choose={(at) => playback.seek(at)}
           />
         ) : (
           <div className="unknown-progress">
-            {playback.durationMs ? (
-              <progress aria-label="Playback progress" max={playback.durationMs} value={position} />
+            {current.durationMs ? (
+              <progress aria-label="Playback progress" max={current.durationMs} value={position} />
             ) : (
               <span>Play a sound to see its waveform</span>
             )}
             <small>
-              {formatTime(playback.positionMs)} / {formatTime(playback.durationMs)}
+              {formatTime(current.positionMs)} / {formatTime(current.durationMs)}
             </small>
           </div>
         )}
@@ -138,26 +140,49 @@ export function Player({
       <div className="transport">
         <button
           className="icon-button"
-          aria-label={playback.status === 'PAUSED' ? 'Resume playback' : 'Pause playback'}
-          disabled={disabled || !canSeek || !sound || !playback.epoch}
-          onClick={() => void action('pause')}
+          aria-label={current.status === 'PAUSED' ? 'Resume playback' : 'Pause playback'}
+          disabled={disabled || !canSeek || !sound || !current.epoch}
+          // Held by the host's Panic: aria-disabled keeps focus, and the press is ignored.
+          aria-disabled={held || undefined}
+          title={held ? HELD_BY_HOST : undefined}
+          onClick={() => !held && void playback.pause()}
         >
-          {playback.status === 'PAUSED' ? <Play size={18} /> : <Pause size={18} />}
+          {current.status === 'PAUSED' ? <Play size={18} /> : <Pause size={18} />}
         </button>
-        <button className="stop" disabled={disabled} onClick={() => void action('stop')}>
+        <button
+          className="stop"
+          disabled={disabled}
+          aria-disabled={held || undefined}
+          title={held ? HELD_BY_HOST : undefined}
+          onClick={() => !held && void playback.stop()}
+        >
           <Square size={15} fill="currentColor" /> Stop
         </button>
+        {canPanic && (
+          // Apart from Stop on purpose (2.35): Stop ends one sound, Panic also holds guest playback.
+          <button
+            className="panic"
+            aria-label={PANIC_LABEL}
+            title={`${PANIC_LABEL} (Shift+Escape)`}
+            disabled={!connected}
+            aria-disabled={pending === intentKey.panic || undefined}
+            onClick={() => pending !== intentKey.panic && void playback.panic()}
+          >
+            <OctagonX size={15} aria-hidden="true" /> <span>Panic</span>
+          </button>
+        )}
         <button
           className="icon-button"
           aria-label="Replay last cue"
-          title="Replay last cue"
+          title={held ? HELD_BY_HOST : 'Replay last cue'}
+          aria-disabled={held || undefined}
           disabled={
             disabled ||
             !canSeek ||
             !workspace?.lastCue ||
             !state.library.sounds.some((s) => hasSound([workspace.lastCue!.soundId], s))
           }
-          onClick={() => void replay()}
+          onClick={() => !held && replay()}
         >
           <RotateCcw size={17} />
         </button>

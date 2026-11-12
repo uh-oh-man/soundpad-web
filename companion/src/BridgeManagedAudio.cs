@@ -7,11 +7,12 @@ public sealed partial class Bridge
 {
     private ManagedAudioStore? managed;
     private readonly object managerInitialization = new();
-    private readonly SemaphoreSlim audioGate = new(1);
+    // One managed-audio job at a time (journal and file work). A play that needs preparation waits here in the
+    // urgent lane and leaves the queue at once when a newer intent arrives (2.35).
+    private readonly PriorityGate audioGate = new();
     private readonly ConcurrentDictionary<string, Lazy<Task<Reply>>> audioRequests = new();
-    private readonly ConcurrentDictionary<string, (long Revision, long At)> playbackIntents = new();
     private readonly ConcurrentDictionary<string, byte> revokedAudioPeers = new();
-    private long playRevision, nextAudioRecovery;
+    private long nextAudioRecovery;
     private int audioWaiting;
     private volatile bool sessionAccepting;
     private volatile string? audioAudience;
@@ -24,20 +25,13 @@ public sealed partial class Bridge
                 if (managed != null) return managed;
                 managed = new(store.DirectoryPath, pipe, path => Convert.ToHexString(HMACSHA256.HashData(Convert.FromBase64String(disk.IdentityKey), Encoding.UTF8.GetBytes(path.Replace('/', '\\').ToUpperInvariant() + "\n0"))).ToLowerInvariant(), async work =>
                 {
-                    await gate.WaitAsync(); try { await work(); } finally { gate.Release(); }
+                    // Each batch is atomic under the gate (see the gate's note in Bridge.cs) and waits in the
+                    // background lane, so a play that is ready goes first.
+                    await gate.EnterAsync(PriorityGate.Lane.Background); try { await work(); } finally { gate.Release(); }
                 });
                 managed.Changed += Publish; return managed;
             }
         }
-    }
-    private static bool PlaybackOperation(string op) => op is "play" or "startAt" or "region" or "reverse" or "audioPlay" or "stop" or "pause" or "seek";
-    private long ReservePlaybackIntent(Command command, string actor, string? requester, string? audience)
-    {
-        if (!PlaybackOperation(command.Op) && command.Op != "endSession") return 0;
-        if (actor != "host" && (!GuestStillAllowed(actor, requester, audience) || !disk.Permissions.RemotePlayback || command.Op == "endSession" || (command.Op is "seek" or "pause" or "startAt" or "region") && !disk.Permissions.GuestSeeking)) return 0;
-        var now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
-        foreach (var entry in playbackIntents.Where(e => now - e.Value.At > 120000)) playbackIntents.TryRemove(entry.Key, out _);
-        return playbackIntents.GetOrAdd(command.Id, _ => (Interlocked.Increment(ref playRevision), now)).Revision;
     }
     private bool GuestStillAllowed(string actor, string? requester, string? audience) => actor == "host" ||
         (disk.Permissions.RemotePlayback && (audioAudience == null || sessionAccepting && audience == audioAudience) && (requester == null || !revokedAudioPeers.ContainsKey(requester)));
@@ -63,25 +57,143 @@ public sealed partial class Bridge
             if (command.Op is "startAt" or "region" && !disk.Permissions.GuestSeeking) throw new InvalidDataException("Guest seeking is disabled.");
         }
     }
-    private Task<Reply> ExecuteAudio(Command c, string actor, Participant? participant, long intent, string? requester, string? audience)
+    private Task<Reply> ExecuteAudio(Command c, string actor, Participant? participant, Intent? intent, string? requester, string? audience)
     {
         if (c.Op == "endSession" && actor == "host") sessionAccepting = false;
+        // Plays of managed sounds have their own path (2.35): never refused as busy, and a repeated command id is
+        // answered from its intent (see Execute), so they need no entry here.
+        if (StartOperation(c.Op)) return PlayManaged(c, actor, participant, intent, requester, audience);
         if (audioRequests.Count >= 64) foreach (var item in audioRequests.Where(e => e.Value.IsValueCreated && e.Value.Value.IsCompleted)) audioRequests.TryRemove(item.Key, out _);
         if (audioRequests.Count >= 128) return Task.FromResult(new Reply("ack", c.Id, false, "Audio processing is busy."));
-        return audioRequests.GetOrAdd(actor + ":" + requester + ":" + c.Id, _ => new(() => RunAudio(c, actor, participant, intent, requester, audience))).Value;
+        return audioRequests.GetOrAdd(actor + ":" + requester + ":" + c.Id, _ => new(() => RunAudio(c, actor, requester, audience))).Value;
     }
-    private async Task<Reply> RunAudio(Command c, string actor, Participant? participant, long intent, string? requester, string? audience)
+    /// <summary>
+    /// A play, cue start or region of a Temp or kept sound, "play this source" (audioPlay) or reverse (2.35).
+    /// When the variant is already prepared it takes the same short path as a library sound: the sound-list
+    /// check and DoPlaySound under the gate, with no wait for other audio work, no library refresh and no file
+    /// hashing (see <see cref="ManagedAudioStore.Ready"/> for what is checked instead). Otherwise it is prepared
+    /// first, one job at a time; while it waits for its turn a newer intent releases it with the quiet
+    /// superseded answer. Preparation that has begun finishes (its result is kept) and then plays only if its
+    /// intent is still the newest.
+    /// </summary>
+    private async Task<Reply> PlayManaged(Command c, string actor, Participant? participant, Intent? intent, string? requester, string? audience)
+    {
+        try
+        {
+            AudioPermission(c, actor, requester, audience);
+            if (intent == null) throw new InvalidDataException("Guest playback permission or session authorization changed.");
+            if (!sessionAccepting) throw new InvalidDataException("Hosting has ended.");
+            if (ReadyFor(c) is { } ready && await PlayReady(c, actor, participant, intent, ready) is { } played) return played;
+            string assetId, state; string? soundId;
+            if (!await EnterFor(audioGate, intent)) return Superseded(c, "newer");
+            try
+            {
+                AudioPermission(c, actor, requester, audience);
+                if (!sessionAccepting) throw new InvalidDataException("Hosting has ended.");
+                AudioAsset asset; string orientation;
+                if (c.Op == "audioPlay") { asset = Audio.Public.Assets.Any(a => a.Id == c.AssetId) ? Audio.AssetById(c.AssetId!) : throw new InvalidDataException("Unknown source."); orientation = c.Orientation ?? "normal"; }
+                else
+                {
+                    if (c.SoundId == null) throw new InvalidDataException("Choose a sound.");
+                    var existing = Audio.Resolve(c.SoundId);
+                    if (existing is { } known) { asset = known.Asset; orientation = c.Op == "reverse" ? known.Variant.Orientation == "normal" ? "reversed" : "normal" : known.Variant.Orientation; }
+                    else
+                    {
+                        string path, name;
+                        await gate.EnterAsync(PriorityGate.Lane.Normal);
+                        try
+                        {
+                            await RefreshInner();
+                            // The id comes from the file path and the mapping was just re-read, so a change elsewhere in the library
+                            // (a category, an icon) is no reason to refuse (2.15.9).
+                            if (!available || !parsed.Paths.TryGetValue(c.SoundId, out path!)) throw new InvalidDataException("That sound is no longer in Soundpad. Refresh and choose it again.");
+                            name = parsed.Public.Sounds.Single(s => s.Id == c.SoundId).Name;
+                        }
+                        finally { gate.Release(); }
+                        var source = await Audio.NativeSource(c.SoundId, path, name, Person(actor, participant).Name); asset = source.Asset; orientation = c.Op == "reverse" ? "reversed" : "normal";
+                    }
+                }
+                var prepared = await Audio.Prepare(asset.Id, orientation, actor == "host" || disk.Permissions.GuestTransforms);
+                assetId = asset.Id; state = asset.State; soundId = prepared.Variant.Native?.SoundId;
+            }
+            finally { audioGate.Release(); }
+            // In the urgent lane while it may still play; superseded meanwhile, only the bookkeeping is left.
+            if (!IsNewest(intent) || !await EnterFor(gate, intent)) await gate.EnterAsync(PriorityGate.Lane.Normal);
+            try
+            {
+                if (disk.Receipts.ContainsKey(c.Id)) return new("ack", c.Id, true);
+                await RefreshInner();
+                if (!available || soundId == null || !parsed.Indexes.TryGetValue(soundId, out int index)) throw new InvalidDataException("The prepared native entry is unavailable. Its source is preserved in Temp.");
+                string? epoch = null; bool allowed = sessionAccepting && GuestStillAllowed(actor, requester, audience) && (actor == "host" || !playbackSuspended && (c.Op is not ("startAt" or "region") || disk.Permissions.GuestSeeking));
+                if (IsNewest(intent) && allowed)
+                    epoch = await StartPlayback(c with { Op = c.Op is "startAt" or "region" ? c.Op : "play", SoundId = soundId }, actor, participant, index, intent);
+                RememberReceipt(c); SaveLater(); Publish(); CommandAccepted?.Invoke();
+                // Prepared but not played: the quiet answer, with what was prepared. ("suspended" also covers a
+                // guest whose permission to play ended while the sound was being prepared.)
+                return new("ack", c.Id, true, Data: epoch != null ? new { assetId, state, played = true, epoch } : new { assetId, state, played = false, superseded = true, reason = allowed ? "newer" : "suspended" });
+            }
+            finally { gate.Release(); }
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException) { return new("ack", c.Id, false, ex is InvalidDataException ? ex.Message : "Managed audio could not finish. Open Temp to inspect preserved recovery state."); }
+    }
+    /// <summary>The prepared variant this command would play, or null when it has to be prepared first.</summary>
+    private ReadyAudio? ReadyFor(Command c)
+    {
+        var audio = Audio;
+        if (c.Op == "audioPlay") return c.AssetId == null ? null : audio.Ready(c.AssetId, c.Orientation ?? "normal");
+        if (c.SoundId == null || audio.Annotation(c.SoundId) is not { } known) return null;
+        return audio.Ready(known.AssetId, c.Op == "reverse" ? known.Orientation == "normal" ? "reversed" : "normal" : known.Orientation);
+    }
+    /// <summary>
+    /// The short path for a prepared variant. Null when Soundpad turned out not to list it any more (removed by
+    /// hand, say): the caller then prepares it the long way, which imports it again.
+    /// </summary>
+    private async Task<Reply?> PlayReady(Command c, string actor, Participant? participant, Intent intent, ReadyAudio ready)
+    {
+        if (!await EnterFor(gate, intent)) return Superseded(c, "newer");
+        try
+        {
+            if (disk.Receipts.ContainsKey(c.Id)) return new("ack", c.Id, true);
+            var found = await FreshIndex(ready.SoundId, intent);
+            if (found.Result == Lookup.Withdrawn) return Superseded(c, "newer");
+            if (found.Result == Lookup.Missing) return null;
+            var epoch = await StartPlayback(c with { Op = c.Op is "startAt" or "region" ? c.Op : "play", SoundId = ready.SoundId }, actor, participant, found.Index, intent);
+            if (epoch == null) return Superseded(c, "newer");
+            RememberReceipt(c); SaveLater(); Publish(); CommandAccepted?.Invoke();
+            return new("ack", c.Id, true, Data: new { assetId = ready.AssetId, state = ready.State, played = true, epoch });
+        }
+        finally { gate.Release(); }
+    }
+    /// <summary>
+    /// "... and play" for a copy, clip or import that was just made (2.35): its intent was reserved when the
+    /// command arrived, and the new sound starts only if that intent is still the newest and the person may still
+    /// play. The answer is the save's own data plus <c>played</c> (and the epoch when it did play).
+    /// </summary>
+    private async Task<Reply> Autoplay(Reply saved, Command c, string actor, Participant? participant, string? requester, string? audience, Intent? intent)
+    {
+        if (!saved.Ok || Field(saved, "assetId") is not string assetId) return saved;
+        var state = Field(saved, "state"); string? epoch = null;
+        if (intent != null && IsNewest(intent) && sessionAccepting && GuestStillAllowed(actor, requester, audience) && (actor == "host" || !playbackSuspended))
+        {
+            // The same path as audioPlay, under the intent reserved on arrival.
+            var play = await PlayManaged(c with { Op = "audioPlay", At = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(), AssetId = assetId, Orientation = "normal", SoundId = null, PositionMs = null, EndMs = null }, actor, participant, intent, requester, audience);
+            if (play.Ok) epoch = Field(play, "epoch");
+        }
+        return saved with { Data = epoch != null ? new { assetId, state, played = true, epoch } : new { assetId, state, played = false } };
+    }
+    private static string? Field(Reply reply, string name) => reply.Data?.GetType().GetProperty(name)?.GetValue(reply.Data) as string;
+    private async Task<Reply> RunAudio(Command c, string actor, string? requester, string? audience)
     {
         bool entered = false;
         try
         {
             AudioPermission(c, actor, requester, audience);
             if (Interlocked.Increment(ref audioWaiting) > 2 && c.Op is not ("endSession" or "beginSession")) { Interlocked.Decrement(ref audioWaiting); return new("ack", c.Id, false, "Audio preparation is busy. Playback controls remain available; retry shortly."); }
-            entered = true; await audioGate.WaitAsync();
+            entered = true; await audioGate.EnterAsync(PriorityGate.Lane.Normal);
             try
             {
                 AudioPermission(c, actor, requester, audience);
-                await gate.WaitAsync(); try { if (disk.Receipts.ContainsKey(c.Id)) return new("ack", c.Id, true); } finally { gate.Release(); }
+                await gate.EnterAsync(PriorityGate.Lane.Normal); try { if (disk.Receipts.ContainsKey(c.Id)) return new("ack", c.Id, true); } finally { gate.Release(); }
                 if (c.Op == "beginSession")
                 {
                     if (!Audio.Public.Blocked) Audio.BeginSession(); sessionAccepting = true; audioAudience = c.AudienceId; revokedAudioPeers.Clear();
@@ -91,13 +203,12 @@ public sealed partial class Bridge
                 else if (c.Op == "clearTemp")
                 {
                     if (actor != "host") throw new InvalidDataException("Only the host can clear temporary audio.");
-                    // Cleanup never removes anything while audio plays; stop it first if it's a Temp sound.
-                    var current = playback.SoundId; Sound? playing = null;
-                    if (current != null && playback.Status is "PLAYING" or "PAUSED" or "SEEKING") playing = parsed.Public.Sounds.FirstOrDefault(s => s.Id == current);
-                    if (playing is { Temporary: true }) await pipe.Request("DoStopSound()");
+                    // Cleanup never removes anything while audio plays; stop it first if it's a Temp sound. The stop
+                    // goes through the same arbitration as Stop (2.35): no start asked for earlier plays after it.
+                    await StopTemporaryPlayback();
                     int cleared = await Audio.ClearTemporary();
                     Log($"Cleared {cleared} temporary audio file(s) and the Temp category");
-                    await gate.WaitAsync(); try { await RefreshInner(); SaveAudioReceipt(c); Publish(); } finally { gate.Release(); }
+                    await gate.EnterAsync(PriorityGate.Lane.Normal); try { await RefreshInner(); SaveAudioReceipt(c); Publish(); } finally { gate.Release(); }
                     return new("ack", c.Id, true, Data: new { cleared, pending = Audio.Public.Assets.Count(a => a.State == "cleanup-pending") });
                 }
                 else if (c.Op == "cleanupCategories")
@@ -106,7 +217,7 @@ public sealed partial class Bridge
                     int removed = await Audio.RemoveDuplicateCategories();
                     Log($"Removed {removed} duplicate Temp categories from Soundpad");
                     await Audio.Recover();
-                    await gate.WaitAsync(); try { await RefreshInner(); SaveAudioReceipt(c); Publish(); } finally { gate.Release(); }
+                    await gate.EnterAsync(PriorityGate.Lane.Normal); try { await RefreshInner(); SaveAudioReceipt(c); Publish(); } finally { gate.Release(); }
                     return new("ack", c.Id, true, Data: new { removed });
                 }
                 else if (c.Op == "removeAudio")
@@ -120,53 +231,17 @@ public sealed partial class Bridge
                         && parsed.Public.Sounds.FirstOrDefault(s => s.Id == current)?.AssetId == assetId
                         && await pipe.Request("GetPlayStatus()") != "STOPPED")
                     {
-                        await pipe.Request("DoStopSound()");
+                        // Through the same arbitration as Stop (2.35): the intent is taken first, so no start asked
+                        // for earlier can play this source after it was stopped, and the playback record follows.
+                        await StopNow(ReserveInternal(true));
                         for (int i = 0; i < 20 && await pipe.Request("GetPlayStatus()") != "STOPPED"; i++) await Task.Delay(100);
                     }
                     await Audio.Remove(assetId);
                 }
                 else if (c.Op == "retryAudio") await Audio.RetryAsset(c.AssetId ?? throw new InvalidDataException("Choose a managed source."));
                 else if (c.Op == "keepAudio") await Audio.Promote(c.AssetId ?? throw new InvalidDataException("Open Temp to confirm a permanent destination."), c.VariantId ?? throw new InvalidDataException("Choose the normal or reversed variant."), c.DestinationDirectory, c.CategoryId, c.CategoryName, c.Confirmed);
-                else
-                {
-                    if (!sessionAccepting) throw new InvalidDataException("Hosting has ended.");
-                    AudioAsset asset; string orientation;
-                    if (c.Op == "audioPlay") { asset = Audio.Public.Assets.Any(a => a.Id == c.AssetId) ? await FindAsset(c.AssetId!) : throw new InvalidDataException("Unknown source."); orientation = c.Orientation ?? "normal"; }
-                    else
-                    {
-                        if (c.SoundId == null) throw new InvalidDataException("Choose a sound.");
-                        var existing = Audio.Resolve(c.SoundId);
-                        if (existing is { } known) { asset = known.Asset; orientation = c.Op == "reverse" ? known.Variant.Orientation == "normal" ? "reversed" : "normal" : known.Variant.Orientation; }
-                        else
-                        {
-                            string path, name;
-                            await gate.WaitAsync();
-                            try
-                            {
-                                await RefreshInner();
-                                // The id comes from the file path and the mapping was just re-read, so a change elsewhere in the library
-                                // (a category, an icon) is no reason to refuse (2.15.9).
-                                if (!available || !parsed.Paths.TryGetValue(c.SoundId, out path!)) throw new InvalidDataException("That sound is no longer in Soundpad. Refresh and choose it again.");
-                                name = parsed.Public.Sounds.Single(s => s.Id == c.SoundId).Name;
-                            }
-                            finally { gate.Release(); }
-                            var source = await Audio.NativeSource(c.SoundId, path, name, Person(actor, participant).Name); asset = source.Asset; orientation = c.Op == "reverse" ? "reversed" : "normal";
-                        }
-                    }
-                    var prepared = await Audio.Prepare(asset.Id, orientation, actor == "host" || disk.Permissions.GuestTransforms);
-                    await gate.WaitAsync();
-                    try
-                    {
-                        await RefreshInner();
-                        var id = prepared.Variant.Native?.SoundId;
-                        if (!available || id == null || !parsed.Indexes.TryGetValue(id, out int index)) throw new InvalidDataException("The prepared native entry is unavailable. Its source is preserved in Temp.");
-                        if (intent == Volatile.Read(ref playRevision) && sessionAccepting && GuestStillAllowed(actor, requester, audience) && (actor == "host" || c.Op is not ("startAt" or "region") || disk.Permissions.GuestSeeking)) await StartPlayback(c with { Op = c.Op is "startAt" or "region" ? c.Op : "play", SoundId = id }, actor, participant, index);
-                        SaveAudioReceipt(c); Publish(); CommandAccepted?.Invoke();
-                        return new("ack", c.Id, true, Data: new { assetId = asset.Id, state = asset.State, played = playback.SoundId == id && intent == Volatile.Read(ref playRevision) });
-                    }
-                    finally { gate.Release(); }
-                }
-                await gate.WaitAsync(); try { await RefreshInner(); SaveAudioReceipt(c); Publish(); } finally { gate.Release(); }
+                else throw new InvalidDataException("Unsupported command.");
+                await gate.EnterAsync(PriorityGate.Lane.Normal); try { await RefreshInner(); SaveAudioReceipt(c); Publish(); } finally { gate.Release(); }
                 return new("ack", c.Id, true);
             }
             finally { audioGate.Release(); }
@@ -174,23 +249,18 @@ public sealed partial class Bridge
         catch (Exception ex) when (ex is not OutOfMemoryException) { return new("ack", c.Id, false, ex is InvalidDataException ? ex.Message : "Managed audio could not finish. Open Temp to inspect preserved recovery state."); }
         finally { if (entered) Interlocked.Decrement(ref audioWaiting); }
     }
-    private void SaveAudioReceipt(Command c)
-    {
-        var cutoff=DateTimeOffset.UtcNow.AddMinutes(-2).ToUnixTimeMilliseconds();
-        foreach(var id in disk.Receipts.Where(p=>p.Value<cutoff).Select(p=>p.Key).ToArray()) disk.Receipts.Remove(id);
-        disk.Receipts[c.Id]=c.At;store.Save(disk);
-    }
-    private Task<AudioAsset> FindAsset(string id) => Task.FromResult(Audio.AssetById(id));
+    /// <summary>The caller holds the gate. Managed-audio changes are durable before their answer, as before.</summary>
+    private void SaveAudioReceipt(Command c) { RememberReceipt(c); SaveNow(); }
     public async Task<Reply> Upload(byte[] bytes, string name, string by, bool host = false, string owner = "anonymous", string? audience = null, bool mimic = false)
     {
         if (!sessionAccepting || (!host && (!(mimic ? disk.Permissions.GuestMimic : disk.Permissions.GuestUploads) || (audioAudience != null && audience != audioAudience) || revokedAudioPeers.ContainsKey(owner)))) return new("ack", "upload", false, "Guest uploads are disabled or this session ended.");
         if (Interlocked.Increment(ref audioWaiting) > 2) { Interlocked.Decrement(ref audioWaiting); return new("ack", "upload", false, "Audio processing is busy; retry shortly."); }
-        await audioGate.WaitAsync();
+        await audioGate.EnterAsync(PriorityGate.Lane.Normal);
         try
         {
             if (!sessionAccepting || (!host && (!(mimic ? disk.Permissions.GuestMimic : disk.Permissions.GuestUploads) || (audioAudience != null && audience != audioAudience) || revokedAudioPeers.ContainsKey(owner)))) throw new InvalidDataException("Upload authorization changed.");
             var asset = await Audio.Upload(bytes, name, by, owner, host);
-            await gate.WaitAsync(); try { await RefreshInner(); Publish(); } finally { gate.Release(); }
+            await gate.EnterAsync(PriorityGate.Lane.Normal); try { await RefreshInner(); Publish(); } finally { gate.Release(); }
             return new("ack", "upload", true, Data: new { assetId = asset.Id, state = asset.State });
         }
         catch (Exception ex) when (ex is not OutOfMemoryException) { return new("ack", "upload", false, ex is InvalidDataException ? ex.Message : "Upload processing failed. The staged recovery record is available in Temp."); }
@@ -198,20 +268,27 @@ public sealed partial class Bridge
     }
     public async Task CleanupSession()
     {
-        StopMimic(); sessionAccepting = false; Interlocked.Increment(ref playRevision); await audioGate.WaitAsync();
-        try { if (!Audio.Public.Blocked) { Audio.RetireSession(); await Audio.Cleanup(); } recoveryPending = false; }
-        finally { audioGate.Release(); }
+        // Nothing asked for before this point may start any more (it sends no Stop itself).
+        StopMimic(); sessionAccepting = false; ReserveInternal(false);
+        try
+        {
+            await audioGate.EnterAsync(PriorityGate.Lane.Normal);
+            try { if (!Audio.Public.Blocked) { Audio.RetireSession(); await Audio.Cleanup(); } recoveryPending = false; }
+            finally { audioGate.Release(); }
+        }
+        // Statistics of the last plays reach the disk before a clean exit (2.35).
+        finally { await FlushState(); }
     }
     private async Task RecoverAudioIfDue(bool force)
     {
         if (!recoveryPending && (managed == null || !managed.Public.Assets.Any(a => a.State is "waiting-soundpad" or "promotion-pending" or "cleanup-pending"))) return;
-        if (!force && Environment.TickCount64 < nextAudioRecovery || !await audioGate.WaitAsync(0)) return;
+        if (!force && Environment.TickCount64 < nextAudioRecovery || !audioGate.TryEnter()) return;
         try
         {
             nextAudioRecovery = Environment.TickCount64 + 5000;
             if (Audio.Public.Blocked) return;
             await Audio.Recover(recoveryPending); recoveryPending = false;
-            await gate.WaitAsync(); try { await RefreshInner(); Publish(); } finally { gate.Release(); }
+            await gate.EnterAsync(PriorityGate.Lane.Background); try { await RefreshInner(); Publish(); } finally { gate.Release(); }
         }
         catch (Exception ex) when (ex is not OutOfMemoryException) { }
         finally { audioGate.Release(); }

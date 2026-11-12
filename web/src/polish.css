@@ -956,3 +956,78 @@ html {
   border: 1px solid color-mix(in srgb, var(--accent) 45%, var(--line));
   border-radius: 7px;
 }
+/* Playback intents (2.35). A click that was sent and not yet answered is "pending": a quiet cue on the
+   player (tiles reuse .pressed), apart from "playing", which only the host's report sets. */
+.player.intent-pending .playback-icon {
+  color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--line));
+  animation: intent-pulse 1.1s ease-in-out infinite;
+}
+@keyframes intent-pulse {
+  50% {
+    opacity: 0.55;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .player.intent-pending .playback-icon {
+    animation: none !important;
+  }
+}
+/* Panic (2.35) sits next to Stop but must not be mistaken for it: its own colour and a gap. */
+.panic {
+  margin-left: 8px;
+  padding: 10px 14px;
+  color: var(--warning);
+  border-color: color-mix(in srgb, var(--warning) 55%, var(--line));
+  background: color-mix(in srgb, var(--warning) 8%, transparent);
+}
+.panic:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--warning) 18%, transparent);
+  border-color: var(--warning);
+}
+@media (max-width: 700px) {
+  /* The phone's transport row has no room for a second word; the name stays on the button. */
+  .player-v2 .panic {
+    margin-left: 4px;
+    padding: 9px;
+  }
+  .player-v2 .panic span {
+    display: none;
+  }
+}
+/* While the host's Panic holds guest playback (2.35): stays in view above the board until resumed. */
+.playback-suspended {
+  position: sticky;
+  top: 0;
+  z-index: 4;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  margin-top: 16px;
+  padding: 10px 13px;
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--text-primary);
+  border: 1px solid color-mix(in srgb, var(--warning) 45%, var(--line));
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--warning) 9%, var(--surface-1));
+}
+.playback-suspended svg {
+  flex: none;
+  color: var(--warning);
+}
+.playback-suspended span {
+  flex: 1 1 220px;
+  min-width: 0;
+}
+.playback-suspended button {
+  flex: none;
+}
+/* A guest's play controls while held: unavailable, not busy. They keep focus (aria-disabled). */
+.playback-held :is(button, select, [role='slider'])[aria-disabled='true'] {
+  cursor: not-allowed;
+}
+.playback-held select[aria-disabled='true'] {
+  opacity: 0.4;
+}

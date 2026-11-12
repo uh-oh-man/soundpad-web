@@ -1,5 +1,6 @@
 import {
   command,
+  Disconnected,
   EMPTY,
   cleanName,
   participantSchema,
@@ -20,7 +21,7 @@ import {
   type Invite,
 } from './network/identity';
 import { notify, type NoticeAction, type NoticeKind } from './notifications';
-import { companionAtLeast, supports } from './version';
+import { APP_VERSION, companionAtLeast, supports } from './version';
 import type { SharedLayout, Organization } from './shared-layout';
 type View = {
   layouts: SharedLayout[];
@@ -104,6 +105,8 @@ export class Controller {
       : state;
   }
   private pendingInvite?: Invite;
+  /** Dev server only (2.35): an e2e test's stand-in for Trystero; see `start`. Always unset in a build. */
+  private transport?: ConstructorParameters<typeof Session>[7];
   subscribe = (listener: () => void) => {
     this.listeners.add(listener);
     return () => {
@@ -121,6 +124,18 @@ export class Controller {
     if (this.initialized) return;
     this.initialized = true;
     try {
+      // Dev server only (2.35): an e2e test can ask for a transport that needs no network, so a guest
+      // page joins a host page in the same browser. A build drops this branch and never has the module.
+      if (import.meta.env.DEV) {
+        let wanted: string | null = null;
+        try {
+          wanted = localStorage.getItem('soundpad-test-transport');
+        } catch {
+          /* No storage: the normal transport. */
+        }
+        if (wanted === 'broadcast')
+          this.transport = (await import('./network/test-transport')).broadcastTransport();
+      }
       const hash = new URLSearchParams(location.hash.slice(1));
       if (hash.has('join')) {
         const invite = await parseInvite(hash.get('join')!);
@@ -158,7 +173,7 @@ export class Controller {
   private connectGuest(invite: Invite) {
     // Guests reach the host over WebRTC. Without it (turned off by a setting or privacy extension, or an
     // old browser) say so at once instead of waiting for the generic "Host unavailable" after 25 s.
-    if (typeof RTCPeerConnection === 'undefined') {
+    if (typeof RTCPeerConnection === 'undefined' && !this.transport) {
       this.update({ mode: 'guest', status: NO_WEBRTC, needsName: false });
       return;
     }
@@ -171,7 +186,7 @@ export class Controller {
       (state) => this.update({ state }),
       (status) => this.update({ status }),
       () => {},
-      undefined,
+      this.transport,
       { get: () => this.view.profile, changed: () => {} },
       {
         layouts: (layouts) => this.update({ layouts }),
@@ -252,7 +267,7 @@ export class Controller {
         () => {},
         () => {},
         (guests) => this.update({ guests }),
-        undefined,
+        this.transport,
         { get: () => this.view.profile, changed: (people) => this.update({ people }) },
         {
           layouts: (layouts) => this.update({ layouts }),
@@ -291,16 +306,23 @@ export class Controller {
       throw e;
     }
   }
+  /**
+   * Website version of the host's tab, which relays a guest's commands: this page for the host, what
+   * the host's welcome reported for a guest ('' from a tab older than 2.35).
+   */
+  hostSite() {
+    return this.view.mode === 'host' ? APP_VERSION : (this.session?.hostSite ?? '');
+  }
   private dispatch(c: Command) {
     if (this.view.mode === 'host') {
-      if (!this.live) return Promise.reject(Error('Companion is disconnected.'));
+      if (!this.live) return Promise.reject(new Disconnected('Companion is disconnected.'));
       return this.bridge!.send(c, 'host', {
         ...this.view.profile,
         name: this.view.profile.name === 'Guest' ? 'Host' : this.view.profile.name,
       });
     } else if (this.view.mode === 'guest' && this.view.status === 'Connected')
       return this.session!.sendCommand(c);
-    return Promise.reject(Error('Connect to the host first.'));
+    return Promise.reject(new Disconnected('Connect to the host first.'));
   }
   /** Mimic's live view polls; failures are retried by the caller, so they are not notified. */
   peekMimic() {

@@ -7,6 +7,8 @@ import {
   flattenCategories,
   isGuestAllowed,
   command,
+  controlOps,
+  parseSnapshot,
 } from '../../web/src/protocol';
 import { createIdentity, sign, verify, parseInvite, encode } from '../../web/src/network/identity';
 const state = {
@@ -80,6 +82,45 @@ describe('validation and access', () => {
         permissions: { ...state.permissions, remotePlayback: false },
       }),
     ).toBe(false);
+  });
+  it('knows Panic, autoplay and the suspended flag, and works without them (2.35)', () => {
+    expect(commandSchema.safeParse(command('panic', { action: 'enable' })).success).toBe(true);
+    expect(commandSchema.safeParse(command('panic', { action: 'disable' })).success).toBe(true);
+    for (const op of ['trimAudio', 'mimicClip', 'mimicLibraryImport'] as const)
+      expect(commandSchema.safeParse(command(op, { autoplay: true })).success).toBe(true);
+    expect(commandSchema.safeParse({ ...command('trimAudio'), autoplay: 'yes' }).success).toBe(
+      false,
+    );
+    // Panic is the host's alone, and "make and play" needs what playing needs.
+    const noPlayback = {
+      ...state,
+      permissions: { ...state.permissions, remotePlayback: false },
+    };
+    expect(isGuestAllowed(command('panic', { action: 'enable' }), state)).toBe(false);
+    expect(isGuestAllowed(command('panic', { action: 'disable' }), state)).toBe(false);
+    expect(isGuestAllowed(command('trimAudio', { autoplay: true }), state)).toBe(true);
+    expect(isGuestAllowed(command('trimAudio', { autoplay: true }), noPlayback)).toBe(false);
+    expect(isGuestAllowed(command('trimAudio'), noPlayback)).toBe(true);
+    expect(isGuestAllowed(command('mimicClip', { autoplay: true }), state)).toBe(false);
+    // The flag is optional: companions before 2.35 send none, and a restart clears it.
+    expect(parseSnapshot(EMPTY).playbackSuspended).toBeUndefined();
+    expect(parseSnapshot({ ...EMPTY, playbackSuspended: true }).playbackSuspended).toBe(true);
+    expect(parseSnapshot({ ...EMPTY, playbackSuspended: false }).playbackSuspended).toBe(false);
+    expect(() => parseSnapshot({ ...EMPTY, playbackSuspended: 'yes' })).toThrow();
+    // The commands that get their own budget and never wait behind slow work.
+    expect([...controlOps].sort()).toEqual(
+      [
+        'audioPlay',
+        'panic',
+        'pause',
+        'play',
+        'region',
+        'reverse',
+        'seek',
+        'startAt',
+        'stop',
+      ].sort(),
+    );
   });
   it('allows bursts but bounds flooding', () => {
     const r = new RateLimit(3, 1000);

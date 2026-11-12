@@ -3,6 +3,7 @@ import { Download, Library, Play, RefreshCw } from 'lucide-react';
 import { z } from 'zod';
 import { controller } from '../../controller';
 import { removeNewTempAudio } from '../../remove-temp';
+import { playback } from '../../playback';
 import { formatTime } from '../Waveform';
 
 const librarySchema = z.object({
@@ -50,14 +51,20 @@ export function MimicLibrary({ connected, canPlay }: { connected: boolean; canPl
     if (importing) return;
     setImporting(clip.id);
     try {
-      const result = z
-        .object({ assetId: z.string().max(64) })
-        .safeParse(await controller.run('mimicLibraryImport', { sourceId: clip.id }));
+      // Import & play, like "Mimic & play": through the playback path (2.35), so the clip plays when
+      // it is ready only if nothing newer was asked for meanwhile.
+      const made = play
+        ? await playback.make('mimicLibraryImport', { sourceId: clip.id }, `make:${clip.id}`)
+        : {
+            data: await controller.run('mimicLibraryImport', { sourceId: clip.id }),
+            played: false,
+          };
+      const result = z.object({ assetId: z.string().max(64) }).safeParse(made.data);
       // Undo (2.34), like after an upload: takes the copy back out of Temp. Voice Replay Studio's own
       // clip is never touched either way.
       const id = result.success ? result.data.assetId : null;
       controller.notify(
-        `Imported “${clip.title}” into Temp.`,
+        `Imported “${clip.title}” into Temp.${made.played ? ' Playing it now.' : ''}`,
         'success',
         id
           ? {
@@ -69,9 +76,6 @@ export function MimicLibrary({ connected, canPlay }: { connected: boolean; canPl
             }
           : undefined,
       );
-      // Like "Mimic & play": play it through Soundpad straight away.
-      if (play && result.success)
-        await controller.run('audioPlay', { assetId: result.data.assetId, orientation: 'normal' });
     } catch {
       /* The controller shows the error. */
     } finally {

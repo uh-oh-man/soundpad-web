@@ -1,26 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { ImagePlus, Star, FolderPlus, BarChart3, ArrowUp, ArrowDown, Rewind } from 'lucide-react';
-import { controller } from '../controller';
 import { flattenCategories, soundKeys, hasSound, type Snapshot, type Sound } from '../protocol';
 import { moveSound, toggleFavorite, type Workspace } from '../workspace';
 import { Waveform, formatTime, usePlayhead } from './Waveform';
 import { SoundButton } from './SoundButton';
-import { seekQueue } from '../seek';
+import { guestHeld, HELD_BY_HOST, intentKey, playback, usePendingIntent } from '../playback';
 import type { Totals } from '../arrange';
-const resumes = new Map<string, Promise<unknown>>();
-async function resumeAfterSeek(soundId: string, epoch: string) {
-  const current = controller.getSnapshot().state.playback;
-  if (current.soundId !== soundId || current.epoch !== epoch || current.status !== 'PAUSED') return;
-  const key = epoch + ':' + (current.positionRevision ?? 0);
-  let task = resumes.get(key);
-  if (!task) {
-    task = controller.run('pause', { soundId, epoch });
-    resumes.set(key, task);
-    void task.catch(() => resumes.delete(key));
-    if (resumes.size > 128) resumes.delete(resumes.keys().next().value!);
-  }
-  await task;
-}
 type Props = {
   sounds: Sound[];
   state: Snapshot;
@@ -34,21 +19,6 @@ type Props = {
   folderId?: string;
   totals: Totals;
 };
-export async function choosePosition(sound: Sound, state: Snapshot, at: number) {
-  if (
-    state.playback.soundId === sound.id &&
-    state.playback.epoch &&
-    state.playback.status !== 'STOPPED'
-  ) {
-    await seekQueue.seek(sound.id, state.playback.epoch, at);
-    if (state.playback.status === 'PAUSED') await resumeAfterSeek(sound.id, state.playback.epoch);
-  } else
-    await controller.run('startAt', {
-      soundId: sound.id,
-      libraryVersion: state.library.version,
-      positionMs: at,
-    });
-}
 function ActiveProgress({ playback }: { playback: Snapshot['playback'] }) {
   const position = usePlayhead(playback);
   return <progress aria-label="Sound progress" max={playback.durationMs ?? 1} value={position} />;
@@ -67,21 +37,17 @@ export function SoundCollection({
   totals,
 }: Props) {
   const [limit, setLimit] = useState(120);
-  const [pending, setPending] = useState('');
+  // The click this page still waits on (2.35). A newer click anywhere takes the marker with it, so
+  // a tile never stays "preparing" for a start that lost.
+  const pending = usePendingIntent();
+  const held = guestHeld(state, host);
   const dragging = useRef(false);
   const mode = w?.view ?? 'icons';
   const personal = w?.layout === 'mine';
   useEffect(() => setLimit(mode === 'waveforms' ? 24 : 120), [mode, sounds.length, folderId]);
   async function play(sound: Sound) {
     if (dragging.current) return;
-    setPending(sound.id);
-    try {
-      await controller.run('play', { soundId: sound.id, libraryVersion: state.library.version });
-    } catch {
-      /* Controller reports failure. */
-    } finally {
-      setPending('');
-    }
+    await playback.play(sound.id);
   }
   function drop(id: string, before?: string) {
     if (!w || !state.library.sounds.some((s) => s.id === id)) return;
@@ -166,13 +132,17 @@ export function SoundCollection({
             state.playback.soundId === sound.id &&
             state.playback.identitySource === 'web' &&
             ['PLAYING', 'PAUSED', 'SEEKING'].includes(state.playback.status);
+          // Asked for but not yet answered: shown apart from "playing", which only a report sets.
+          const starting = pending === intentKey.play(sound.id);
+          const reversing = pending === intentKey.reverse(sound.id);
           // A details row is a table row, which an <article> may not be.
           const Entry = mode === 'details' ? 'div' : 'article';
           return (
             <Entry
               key={sound.id}
               role={mode === 'details' ? 'row' : undefined}
-              className={`sound-tile sound-entry ${active ? 'now-playing' : ''} ${pending === sound.id ? 'pressed' : ''}`}
+              className={`sound-tile sound-entry ${active ? 'now-playing' : ''} ${starting || reversing ? 'pressed intent-pending' : ''}`}
+              data-intent={starting || reversing ? 'pending' : undefined}
               draggable={personal}
               onDragStart={(e) => {
                 dragging.current = true;
@@ -200,10 +170,11 @@ export function SoundCollection({
                   canPlay={canPlay}
                   canSeek={host || state.permissions.guestSeeking !== false}
                   index={i}
-                  pending={pending === sound.id}
+                  pending={starting}
+                  held={held}
                   active={active}
                   play={() => play(sound)}
-                  choose={(at) => choosePosition(sound, state, at)}
+                  choose={(at) => playback.position(sound.id, at)}
                 />
                 {active && mode === 'details' && <ActiveProgress playback={state.playback} />}
               </div>
@@ -237,16 +208,11 @@ export function SoundCollection({
                 <button
                   className="icon-button"
                   aria-label={`Reverse and play ${sound.name}`}
-                  title="Reverse & play · temporary copy"
+                  title={held ? HELD_BY_HOST : 'Reverse & play · temporary copy'}
                   disabled={!canPlay || (!host && state.permissions.guestTransforms === false)}
-                  aria-disabled={pending === sound.id || undefined}
+                  aria-disabled={reversing || held || undefined}
                   onClick={() => {
-                    if (pending === sound.id) return;
-                    setPending(sound.id);
-                    void controller
-                      .run('reverse', { soundId: sound.id, libraryVersion: state.library.version })
-                      .catch(() => {})
-                      .finally(() => setPending(''));
+                    if (!reversing && !held) void playback.reverse(sound.id);
                   }}
                 >
                   <Rewind size={14} />
@@ -329,9 +295,10 @@ export function SoundCollection({
                   sound={sound}
                   state={state}
                   disabled={!canPlay || (state.permissions.guestSeeking === false && !host)}
+                  held={held}
                   workspace={w}
                   update={update}
-                  choose={(at) => choosePosition(sound, state, at)}
+                  choose={(at) => playback.position(sound.id, at)}
                 />
               )}
               {mode === 'details' && (

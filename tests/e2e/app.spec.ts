@@ -1,21 +1,29 @@
-import { test as base, expect, type Page } from '@playwright/test';
+import { test as base, expect, type Locator, type Page } from '@playwright/test';
 import AxeBuilder from '@axe-core/playwright';
 import { spawn } from 'node:child_process';
 import { resolve } from 'node:path';
 import { readFile, mkdir, writeFile } from 'node:fs/promises';
-type Harness = { launch: string; plays: string[]; log: () => string };
+type Harness = {
+  launch: string;
+  /** What reached Soundpad to play, seek or pause (TEST_PLAY lines), in order. */
+  plays: string[];
+  /** The same plus every stop (TEST_STOP lines, 2.35), in order: what Soundpad was told last. */
+  soundpad: string[];
+  log: () => string;
+};
 // How long to wait for an upload, reverse or edited copy to be ready in Temp. On a slow CI runner one
 // took over 25 s (v2.29.0's tag run), and a failed tag run publishes no EXE, so CI gets more room.
 const TEMP_READY = process.env.CI ? 45000 : 25000;
-async function startHarness(origin = 'http://127.0.0.1:5173', count = 4) {
+async function startHarness(origin = 'http://127.0.0.1:5173', count = 4, options: string[] = []) {
   const proc = spawn(
     resolve(
       'companion/harness/bin/Release/net10.0-windows10.0.19041.0/win-x64/SoundpadWeb.Harness.exe',
     ),
-    [origin, String(count)],
+    [origin, String(count), ...options],
     { windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] },
   );
   const plays: string[] = [];
+  const soundpad: string[] = [];
   let output = '';
   const address = await new Promise<{ port: number; token: string }>((resolve, reject) => {
     const timeout = setTimeout(
@@ -33,7 +41,10 @@ async function startHarness(origin = 'http://127.0.0.1:5173', count = 4) {
         clearTimeout(timeout);
         resolve(JSON.parse(ready[1]));
       }
-      for (const match of chunk.toString().matchAll(/TEST_PLAY ([^\r\n]+)/g)) plays.push(match[1]);
+      for (const match of chunk.toString().matchAll(/TEST_(PLAY|STOP) ([^\r\n]+)/g)) {
+        if (match[1] === 'PLAY') plays.push(match[2]);
+        soundpad.push(match[2]);
+      }
     });
     proc.stderr.on('data', (chunk) => {
       if (chunk.toString().includes('Unhandled')) reject(Error('Test harness error.'));
@@ -42,6 +53,7 @@ async function startHarness(origin = 'http://127.0.0.1:5173', count = 4) {
   return {
     launch: `${origin}/#host=${address.port}.${address.token}`,
     plays,
+    soundpad,
     // The companion's own console log (it notes refusals and errors), for failure diagnostics.
     log: () =>
       output
@@ -64,9 +76,12 @@ async function startHarness(origin = 'http://127.0.0.1:5173', count = 4) {
     },
   };
 }
-const test = base.extend<{ harness: Harness; diagnostics: void }>({
-  harness: async ({}, use) => {
-    const harness = await startHarness();
+const test = base.extend<{ harness: Harness; diagnostics: void; harnessOptions: string[] }>({
+  // Extra harness arguments for a group of tests (test.use), e.g. ['--latency-ms', '40'] for a
+  // Soundpad that takes 40 ms per request; see the end of companion/harness/Program.cs.
+  harnessOptions: [[], { option: true }],
+  harness: async ({ harnessOptions }, use) => {
+    const harness = await startHarness(undefined, undefined, harnessOptions);
     try {
       await use(harness);
     } finally {
@@ -2811,4 +2826,581 @@ test('Mimic fits a phone: header keeps Settings on screen and long clip names do
   );
   const settings = await page.getByRole('button', { name: 'Access settings' }).boundingBox();
   expect(settings!.x + settings!.width).toBeLessThanOrEqual(390);
+});
+
+// ---- Playback intents (2.35): the newest click wins, Stop and Panic, pending against playing ----
+
+const LONG_TITLE =
+  'An extremely long sound title that should wrap gracefully on every single phone screen without breaking the grid';
+const playButton = (page: Page, name: string, nth = 0) =>
+  page.getByRole('button', { name: `Play from start: ${name}`, exact: true }).nth(nth);
+/**
+ * Lets a guest page join the host page inside this browser context with no relay and no WebRTC: the
+ * dev server's BroadcastChannel transport (web/src/network/test-transport.ts) carries the session.
+ * Call before the host page loads. A production build has no such switch.
+ */
+async function useLocalGuests(page: Page) {
+  await page
+    .context()
+    .addInitScript(() => localStorage.setItem('soundpad-test-transport', 'broadcast'));
+}
+/** Opens the host's invitation in a second page of the same context and waits until it is connected. */
+async function joinGuest(hostPage: Page, name = 'Fixture Guest') {
+  // The invitation exists once the companion has begun the session, which a slow Soundpad delays.
+  await hostPage.getByRole('button', { name: 'Access settings' }).click();
+  await expect(hostPage.locator('#invite')).toHaveValue(/#join=/);
+  const link = await hostPage.locator('#invite').inputValue();
+  await hostPage.getByRole('button', { name: 'Close dialog' }).click();
+  const guest = await hostPage.context().newPage();
+  await guest.goto(link);
+  await finishGuestName(guest, name);
+  await expect(playButton(guest, 'Airhorn')).toBeEnabled();
+  await expect(guest.locator('header .status')).toHaveText('Connected');
+  await expect(
+    hostPage.locator('.board-heading').getByRole('status').filter({ hasText: 'connected guest' }),
+  ).toHaveText(/1 connected guest/);
+  return guest;
+}
+/** Records every error notice a page shows from now on (each leaves after 8 s); returns a reader. */
+async function recordErrors(page: Page) {
+  await page.evaluate(() => {
+    const seen: string[] = [];
+    (window as unknown as { errorNotices: string[] }).errorNotices = seen;
+    new MutationObserver(() => {
+      for (const notice of document.querySelectorAll('.notification-stack .notice-error')) {
+        const text = notice.textContent ?? '';
+        if (!seen.includes(text)) seen.push(text);
+      }
+    }).observe(document.body, { childList: true, subtree: true, characterData: true });
+  });
+  return () => page.evaluate(() => (window as unknown as { errorNotices: string[] }).errorNotices);
+}
+/** The playback status the page was last told: STOPPED, PLAYING and so on. */
+const reportedStatus = (page: Page) =>
+  page.evaluate(async () => {
+    const { controller } = await import(/* @vite-ignore */ '/src/' + 'controller.ts');
+    return controller.getSnapshot().state.playback.status as string;
+  });
+/** Sends one command from the page as its controller would, without the page's own checks. */
+const sendCommand = (page: Page, op: string, fields: Record<string, unknown> = {}) =>
+  page.evaluate(
+    async ([op, fields]) => {
+      const { controller } = await import(/* @vite-ignore */ '/src/' + 'controller.ts');
+      const { library } = controller.getSnapshot().state;
+      const play = { soundId: library.sounds[0].id, libraryVersion: library.version };
+      try {
+        return {
+          data: await controller.run(op, op === 'play' ? play : fields, { quiet: true }),
+        };
+      } catch (e) {
+        return { error: e instanceof Error ? e.message : String(e) };
+      }
+    },
+    [op, fields] as const,
+  );
+
+test('two controllers: host and guest alternate plays and waveform cues, and the last click wins', async ({
+  page,
+  harness,
+}) => {
+  await useLocalGuests(page);
+  await host(page, harness);
+  const guest = await joinGuest(page);
+  const hostErrors = await recordErrors(page),
+    guestErrors = await recordErrors(guest);
+  // A click on another sound's waveform starts it there: one play, then its cue.
+  const hostCue = page.getByRole('slider', { name: 'Cue Laugh waveform', exact: true }).nth(1),
+    guestCue = guest.getByRole('slider', { name: 'Cue Airhorn waveform', exact: true });
+  for (const cue of [hostCue, guestCue])
+    await expect(cue.locator('svg[viewBox="0 0 800 64"]')).toBeVisible();
+  const middle = async (cue: typeof hostCue) => {
+    const box = (await cue.boundingBox())!;
+    return { x: box.width / 2, y: Math.min(14, box.height / 3) };
+  };
+  const hostAt = await middle(hostCue),
+    guestAt = await middle(guestCue);
+  await hostCue.click({ position: hostAt });
+  await expect.poll(() => harness.plays.slice(0, 2).join()).toMatch(/^DoPlaySound\(3\),DoSeekMs\(/);
+
+  // 3 s of both people clicking as fast as they can at the same time: the host plays Airhorn and
+  // cues the second Laugh, the guest plays the first Laugh and cues Airhorn (the sound the host keeps
+  // starting). force: a press on a tile whose own start is still unanswered is ignored by the page,
+  // as it is for a person, instead of Playwright waiting for the tile.
+  const until = Date.now() + 3000;
+  const hammer = async (play: Locator, cue: Locator, at: { x: number; y: number }) => {
+    let clicks = 0;
+    for (; Date.now() < until; clicks++)
+      await (clicks % 3 === 2
+        ? cue.click({ force: true, position: at })
+        : play.click({ force: true }));
+    return clicks;
+  };
+  const counts = await Promise.all([
+    hammer(playButton(page, 'Airhorn'), hostCue, hostAt),
+    hammer(playButton(guest, 'Laugh'), guestCue, guestAt),
+  ]);
+  const clicks = counts[0] + counts[1];
+  // Then one more from the guest. It is the last click and the last to reach the companion: the
+  // host's clicks were already sent, and the guest's path (through the host's page) is the longer.
+  await playButton(guest, LONG_TITLE).click();
+  await expect.poll(() => harness.soundpad.at(-1)).toBe('DoPlaySound(4)');
+  // Both players agree on what is playing now, and on who asked for it.
+  for (const who of [page, guest]) {
+    await expect(who.locator('.player-track')).toContainText(LONG_TITLE.slice(0, 40));
+    await expect(who.locator('.player-track')).toContainText('Requested by Fixture Guest');
+  }
+  // Nothing older turns up afterwards: no late play, no cue of a sound that lost.
+  await page.waitForTimeout(1500);
+  expect(harness.soundpad.at(-1)).toBe('DoPlaySound(4)');
+  expect(harness.plays.filter((p) => p === 'DoPlaySound(4)')).toHaveLength(1);
+  test.info().annotations.push({
+    type: 'burst',
+    description: `${clicks} clicks in 3 s; Soundpad started ${harness.plays.filter((p) => p.startsWith('DoPlaySound(')).length} plays`,
+  });
+  // Both people got through during the burst.
+  expect(harness.plays).toContain('DoPlaySound(1)');
+  expect(harness.plays).toContain('DoPlaySound(2)');
+  // Nobody was shown an error, and the guest is still in the session.
+  expect(await hostErrors()).toEqual([]);
+  expect(await guestErrors()).toEqual([]);
+  await expect(guest.locator('header .status')).toHaveText('Connected');
+  await expect(
+    page.locator('.board-heading').getByRole('status').filter({ hasText: 'connected guest' }),
+  ).toHaveText(/1 connected guest/);
+  await expect(playButton(guest, 'Airhorn')).toBeEnabled();
+});
+
+test('Panic stops playback and holds guest playback until the host resumes; Shift+Escape does the same', async ({
+  page,
+  harness,
+}) => {
+  await useLocalGuests(page);
+  await host(page, harness);
+  const guest = await joinGuest(page);
+  const guestErrors = await recordErrors(guest),
+    hostErrors = await recordErrors(page);
+  const panic = page.getByRole('button', {
+    name: 'Panic: stop audio and pause guest playback',
+    exact: true,
+  });
+  const paused = (who: Page) => who.locator('.playback-suspended');
+  await expect(panic).toBeVisible();
+  await expect(guest.getByRole('button', { name: /^Panic/ })).toHaveCount(0);
+
+  await playButton(guest, 'Airhorn').click();
+  await expect.poll(() => harness.soundpad.at(-1)).toBe('DoPlaySound(1)');
+  await panic.click();
+  await expect.poll(() => harness.soundpad.at(-1)).toBe('DoStopSound()');
+  await expect(paused(page)).toContainText('Guest playback is paused.');
+  const resume = paused(page).getByRole('button', { name: 'Resume guest playback', exact: true });
+  await expect(resume).toBeVisible();
+  await expect.poll(() => reportedStatus(page)).toBe('STOPPED');
+
+  // The guest is told, its play controls say why, and its presses do nothing at all.
+  await expect(paused(guest)).toContainText('The host paused guest playback');
+  await expect(guest.locator('.grid-caption')).toHaveText('PAUSED BY HOST');
+  await expect(playButton(guest, 'Airhorn')).toHaveAttribute('aria-disabled', 'true');
+  await expect(playButton(guest, 'Airhorn')).toHaveAttribute(
+    'title',
+    'The host paused guest playback',
+  );
+  const before = harness.soundpad.length;
+  await playButton(guest, 'Airhorn').click({ force: true });
+  await playButton(guest, 'Laugh').click({ force: true });
+  await guest.getByRole('button', { name: 'Stop', exact: true }).click({ force: true });
+  // Even a command sent past the page's own check is refused quietly by the companion.
+  expect(await sendCommand(guest, 'play')).toEqual({
+    data: expect.objectContaining({ superseded: true, reason: 'suspended' }),
+  });
+  // Panic and Resume are the host's alone.
+  expect(await sendCommand(guest, 'panic', { action: 'disable' })).toEqual({
+    error: 'The host has disabled this action.',
+  });
+  await guest.waitForTimeout(700);
+  expect(harness.soundpad.slice(before)).toEqual([]);
+  expect(await guestErrors()).toEqual([]);
+  await expect(paused(guest)).toBeVisible();
+
+  // The host can still play, and the session goes on.
+  await playButton(page, 'Laugh').click();
+  await expect.poll(() => harness.soundpad.at(-1)).toBe('DoPlaySound(2)');
+  await expect(guest.locator('header .status')).toHaveText('Connected');
+
+  await resume.click();
+  await expect(paused(page)).toHaveCount(0);
+  await expect(paused(guest)).toHaveCount(0);
+  await expect(playButton(guest, 'Airhorn')).not.toHaveAttribute('aria-disabled');
+  await playButton(guest, LONG_TITLE).click();
+  await expect.poll(() => harness.soundpad.at(-1)).toBe('DoPlaySound(4)');
+
+  // Shift+Escape is Panic from the keyboard, except while typing.
+  const search = page.getByRole('textbox', { name: 'Search sounds' });
+  await search.fill('Laugh');
+  await search.press('Shift+Escape');
+  await page.waitForTimeout(500);
+  await expect(paused(page)).toHaveCount(0);
+  expect(harness.soundpad.at(-1)).toBe('DoPlaySound(4)');
+  await search.fill('');
+  await playButton(page, 'Airhorn').focus();
+  await page.keyboard.press('Shift+Escape');
+  await expect(paused(page)).toContainText('Guest playback is paused.');
+  await expect(paused(guest)).toContainText('The host paused guest playback');
+  await expect.poll(() => harness.soundpad.at(-1)).toBe('DoStopSound()');
+  await paused(page).getByRole('button', { name: 'Resume guest playback', exact: true }).click();
+  await expect(paused(guest)).toHaveCount(0);
+  expect(await hostErrors()).toEqual([]);
+  expect(await guestErrors()).toEqual([]);
+});
+
+test.describe('with a Soundpad that takes 40 ms to answer', () => {
+  test.use({ harnessOptions: ['--latency-ms', '40'] });
+  test('Stop wins: after a burst of plays Soundpad ends stopped, and nothing starts after the Stop', async ({
+    page,
+    harness,
+  }) => {
+    // Every play either person asks for travels to the companion over the host page's connection.
+    let asked = 0;
+    page.on('websocket', (socket) =>
+      socket.on('framesent', ({ payload }) => {
+        if (String(payload).includes('"op":"play"')) asked++;
+      }),
+    );
+    await useLocalGuests(page);
+    await host(page, harness);
+    const guest = await joinGuest(page);
+    const hostErrors = await recordErrors(page),
+      guestErrors = await recordErrors(guest);
+    const starts = () => harness.plays.filter((p) => p.startsWith('DoPlaySound(')).length;
+    const stops = () => harness.soundpad.filter((c) => c === 'DoStopSound()').length;
+    const burst = async (who: Page, sounds: [string, number][]) => {
+      for (let i = 0; i < 10; i++)
+        await playButton(who, ...sounds[i % sounds.length]).click({ force: true });
+    };
+    const stopBy = async (who: Page) => {
+      const before = stops();
+      await who.getByRole('button', { name: 'Stop', exact: true }).click();
+      await expect.poll(stops).toBe(before + 1);
+      // Plays that were still waiting when the Stop arrived must not start afterwards.
+      await page.waitForTimeout(1500);
+      expect(harness.soundpad.at(-1)).toBe('DoStopSound()');
+      for (const each of [page, guest])
+        await expect.poll(() => reportedStatus(each)).toBe('STOPPED');
+    };
+    // Something is playing; then both people hammer Play at once. A play costs this Soundpad at least
+    // 80 ms, so plays are still on their way when the guest presses Stop: the last click, and the last
+    // to arrive, since the host's were already sent.
+    await playButton(page, 'Airhorn').click();
+    await expect.poll(() => harness.soundpad.at(-1)).toBe('DoPlaySound(1)');
+    await Promise.all([
+      burst(page, [
+        ['Laugh', 1],
+        ['Airhorn', 0],
+      ]),
+      burst(guest, [
+        ['Laugh', 0],
+        [LONG_TITLE, 0],
+      ]),
+    ]);
+    await stopBy(guest);
+    expect(asked).toBe(21);
+    // The host alone: a run of plays, then Stop on the same connection.
+    await burst(page, [
+      ['Airhorn', 0],
+      ['Laugh', 0],
+      [LONG_TITLE, 0],
+    ]);
+    await stopBy(page);
+    expect(asked).toBe(31);
+    test.info().annotations.push({
+      type: 'burst',
+      description: `31 plays asked for; Soundpad started ${starts()} and stopped ${stops()} times`,
+    });
+    expect(await hostErrors()).toEqual([]);
+    expect(await guestErrors()).toEqual([]);
+    await expect(guest.locator('header .status')).toHaveText('Connected');
+  });
+});
+
+test.describe('with a Soundpad that takes 150 ms to answer', () => {
+  test.use({ harnessOptions: ['--latency-ms', '150'] });
+  test('a clicked tile shows pending until the companion answers, and playing only once it is reported', async ({
+    page,
+    harness,
+  }) => {
+    type Sample = {
+      at: number;
+      answered: boolean;
+      pending: boolean;
+      busy: boolean;
+      hint: string;
+      playing: boolean;
+      reported: boolean;
+    };
+    await useLocalGuests(page);
+    await host(page, harness);
+    const guest = await joinGuest(page);
+    for (const [who, name, index] of [
+      [page, 'Airhorn', 1],
+      [guest, LONG_TITLE, 4],
+    ] as const) {
+      // What the tile shows, next to whether the play was answered and what was reported: taken at
+      // every change to the page and every 20 ms, so no state of the tile goes unseen.
+      await who.evaluate(async (name) => {
+        const { controller } = await import(/* @vite-ignore */ '/src/' + 'controller.ts');
+        const id = controller
+          .getSnapshot()
+          .state.library.sounds.find((s: { name: string }) => s.name === name).id;
+        const watch = { samples: [] as Sample[], answered: false };
+        (window as unknown as { tileWatch: typeof watch }).tileWatch = watch;
+        const run = controller.run.bind(controller);
+        controller.run = async (...args: unknown[]) => {
+          try {
+            return await run(...args);
+          } finally {
+            if (args[0] === 'play') watch.answered = true;
+          }
+        };
+        const sample = () => {
+          const tile = document.querySelector(
+            `.sound-entry:has([aria-label="Play from start: ${name}"])`,
+          )!;
+          const reported = controller.getSnapshot().state.playback;
+          watch.samples.push({
+            at: performance.now(),
+            answered: watch.answered,
+            pending: tile.getAttribute('data-intent') === 'pending',
+            busy: tile.querySelector('.sound-button')?.getAttribute('aria-busy') === 'true',
+            hint: tile.querySelector('.sound-hint')?.textContent ?? '',
+            playing:
+              tile.classList.contains('now-playing') ||
+              !!tile.querySelector('.is-playing, .playing-dot'),
+            reported:
+              reported.soundId === id && ['PLAYING', 'PAUSED', 'SEEKING'].includes(reported.status),
+          });
+        };
+        new MutationObserver(sample).observe(document.body, {
+          attributes: true,
+          childList: true,
+          characterData: true,
+          subtree: true,
+        });
+        setInterval(sample, 20);
+      }, name);
+      const tile = who.locator('.sound-entry', { has: playButton(who, name) });
+      await playButton(who, name).click();
+      await expect(tile).toHaveAttribute('data-intent', 'pending');
+      await expect(who.locator('.player')).toHaveAttribute('data-intent', 'pending');
+      await expect(tile.locator('.sound-hint')).toHaveText('Preparing audio…');
+      await expect(playButton(who, name)).toHaveAttribute('aria-disabled', 'true');
+      await expect(tile).toHaveClass(/now-playing/);
+      await expect(tile).not.toHaveAttribute('data-intent');
+      await expect(who.locator('.player')).not.toHaveAttribute('data-intent');
+      expect(harness.plays.at(-1)).toBe(`DoPlaySound(${index})`);
+      const samples = await who.evaluate(
+        () => (window as unknown as { tileWatch: { samples: Sample[] } }).tileWatch.samples,
+      );
+      const pendingFrom = samples.findIndex((s) => s.pending),
+        answeredFrom = samples.findIndex((s) => s.answered);
+      expect(pendingFrom).toBeGreaterThanOrEqual(0);
+      // This Soundpad needs at least 300 ms for a play (two requests), so the wait is a real one.
+      expect(samples[answeredFrom].at - samples[pendingFrom].at).toBeGreaterThan(250);
+      // Pending for exactly as long as the answer is outstanding...
+      expect(
+        samples
+          .slice(pendingFrom, answeredFrom)
+          .filter((s) => !s.pending || !s.busy || s.hint !== 'Preparing audio…'),
+      ).toEqual([]);
+      expect(samples.slice(answeredFrom).filter((s) => s.pending)).toEqual([]);
+      // ...and "playing" only ever together with the companion's report of it.
+      expect(samples.filter((s) => s.playing && !s.reported)).toEqual([]);
+      expect(samples.some((s) => s.playing)).toBe(true);
+    }
+  });
+});
+
+test.describe('with a Soundpad that takes 1.5 s to import a file', () => {
+  test.use({ harnessOptions: ['--slow-add-ms', '1500'] });
+  test('Save & play: a newer Play made while the copy is prepared is not replaced by the copy', async ({
+    page,
+    harness,
+  }) => {
+    await host(page, harness);
+    const errors = await recordErrors(page);
+    await page
+      .getByLabel('Add session audio', { exact: true })
+      .setInputFiles({ name: 'Slow copy.wav', mimeType: 'audio/wav', buffer: sessionWave(2) });
+    await expect(playButton(page, 'Slow copy')).toBeEnabled({ timeout: TEMP_READY });
+    await page.locator('#temp-manager > summary').click();
+    await page
+      .locator('.temp-source', { hasText: 'Slow copy' })
+      .getByRole('button', { name: 'Edit copy' })
+      .click();
+    const form = page.getByRole('form', { name: 'Edit a copy of Slow copy' });
+    await form.getByRole('combobox').selectOption('chipmunk');
+    const before = harness.soundpad.length;
+    await form.getByRole('button', { name: 'Save & play' }).click();
+    await playButton(page, 'Airhorn').click();
+    // The copy is finished and added, but only the newer click is heard.
+    await expect(playButton(page, 'Slow copy (chipmunk)')).toBeEnabled({ timeout: TEMP_READY });
+    await expect(
+      page.getByText('Copy added to Temp. The original is unchanged.', { exact: true }),
+    ).toBeVisible();
+    await expect(page.getByText('Copy added to Temp and playing.', { exact: false })).toHaveCount(
+      0,
+    );
+    await expect.poll(() => harness.soundpad.slice(before)).toEqual(['DoPlaySound(1)']);
+    await page.waitForTimeout(1500);
+    expect(harness.soundpad.slice(before)).toEqual(['DoPlaySound(1)']);
+    await expect(page.locator('.player-track')).toContainText('Airhorn');
+    expect(await errors()).toEqual([]);
+  });
+
+  test('Mimic & play: a guest’s newer Play made while the clip is prepared is not replaced by the clip', async ({
+    page,
+    harness,
+  }) => {
+    await useLocalGuests(page);
+    await host(page, harness);
+    const guest = await joinGuest(page);
+    const hostErrors = await recordErrors(page),
+      guestErrors = await recordErrors(guest);
+    await page.getByRole('button', { name: 'Mimic', exact: true }).click();
+    const dialog = page.getByRole('dialog', { name: 'Mimic' });
+    await dialog.getByRole('button', { name: 'Start listening' }).click();
+    await expect(dialog.getByRole('status')).toContainText('Listening to Fixture: tone every 2 s');
+    await page.waitForTimeout(2600);
+    await dialog.getByRole('button', { name: 'Last 3 s' }).click();
+    await dialog.getByLabel('Clip name').fill('Late clip');
+    const before = harness.soundpad.length;
+    await dialog.getByRole('button', { name: 'Mimic & play' }).click();
+    await playButton(guest, 'Airhorn').click();
+    // The clip is finished and added, but only the guest's newer click is heard.
+    await expect(playButton(page, 'Late clip')).toBeEnabled({ timeout: TEMP_READY });
+    await expect.poll(() => harness.soundpad.slice(before)).toEqual(['DoPlaySound(1)']);
+    await page.waitForTimeout(1500);
+    expect(harness.soundpad.slice(before)).toEqual(['DoPlaySound(1)']);
+    // By now the 2.5 s sound may have ended; the player still names the last one that played.
+    for (const who of [page, guest])
+      await expect(who.locator('.player-track')).toContainText('Airhorn');
+    expect(await hostErrors()).toEqual([]);
+    expect(await guestErrors()).toEqual([]);
+  });
+});
+
+test('two pages in one browser: a guest joins without any relay, uploads, saves and plays a copy, and is disconnected by the host', async ({
+  page,
+  harness,
+}) => {
+  // The other two-page tests rely on this stand-in transport; this one checks the parts they do not
+  // touch: a request with a file and a name (an upload), its answer, and closing a peer.
+  // What the host's page passes on to the companion, to see how the guest's Save & play travels.
+  const relayed: { op: string; actor: string; autoplay?: boolean }[] = [];
+  page.on('websocket', (socket) =>
+    socket.on('framesent', ({ payload }) => {
+      const { actor, command } = JSON.parse(String(payload));
+      if (command) relayed.push({ op: command.op, actor, autoplay: command.autoplay });
+    }),
+  );
+  await useLocalGuests(page);
+  await host(page, harness);
+  const guest = await joinGuest(page, 'Upload Alice');
+  await guest
+    .getByLabel('Add session audio', { exact: true })
+    .setInputFiles({ name: 'Guest tone.wav', mimeType: 'audio/wav', buffer: sessionWave() });
+  await expect(guest.locator('.notification-stack')).toContainText(
+    'Added to Temp for this session',
+  );
+  for (const who of [page, guest])
+    await expect(playButton(who, 'Guest tone')).toBeEnabled({ timeout: TEMP_READY });
+  await playButton(guest, 'Guest tone').click();
+  await expect.poll(() => harness.plays).toContain('DoPlaySound(5)');
+  await expect(page.locator('.player-track')).toContainText('Requested by Upload Alice');
+  // A guest's Save & play is one command too (2.35): the host's page passes its autoplay mark on, and
+  // the companion plays the copy when it is ready.
+  await guest.locator('#temp-manager > summary').click();
+  await guest
+    .locator('.temp-source', { hasText: 'Guest tone' })
+    .getByRole('button', { name: 'Edit copy' })
+    .click();
+  const form = guest.getByRole('form', { name: 'Edit a copy of Guest tone' });
+  await form.getByRole('combobox').selectOption('chipmunk');
+  const before = harness.plays.length;
+  await form.getByRole('button', { name: 'Save & play' }).click();
+  for (const who of [page, guest])
+    await expect(playButton(who, 'Guest tone (chipmunk)')).toBeEnabled({ timeout: TEMP_READY });
+  await expect
+    .poll(() => harness.plays.slice(before).filter((p) => p.startsWith('DoPlaySound(')))
+    .toHaveLength(1);
+  await expect(guest.getByText('Copy added to Temp and playing.', { exact: false })).toBeVisible();
+  expect(relayed.filter((c) => c.op === 'trimAudio')).toEqual([
+    { op: 'trimAudio', actor: 'guest', autoplay: true },
+  ]);
+  expect(relayed.filter((c) => c.op === 'audioPlay')).toEqual([]);
+  await page.getByRole('button', { name: 'Access settings' }).click();
+  await page.getByRole('button', { name: 'Disconnect', exact: true }).click();
+  await expect(guest.getByText('Access revoked', { exact: true })).toBeVisible();
+  await expect(
+    page.locator('.board-heading').getByRole('status').filter({ hasText: 'connected guest' }),
+  ).toHaveText(/0 connected guests/);
+  // A reload is a new peer, and the invitation still stands.
+  await guest.reload();
+  await expect(playButton(guest, 'Guest tone')).toBeEnabled();
+  await expect(
+    page.locator('.board-heading').getByRole('status').filter({ hasText: 'connected guest' }),
+  ).toHaveText(/1 connected guest/);
+});
+
+test('a companion older than 2.35: no Panic, and Save & play still plays, as two commands', async ({
+  page,
+  harness,
+}) => {
+  // Make the harness look like companion 2.34.2, and note what the page sends it.
+  const sent: { op: string; autoplay?: boolean }[] = [];
+  await page.routeWebSocket(/ws:\/\/127\.0\.0\.1:\d+\/bridge/, (socket) => {
+    const server = socket.connectToServer();
+    socket.onMessage((message) => {
+      const { command } = JSON.parse(String(message));
+      if (command) sent.push({ op: command.op, autoplay: command.autoplay });
+      server.send(message);
+    });
+    server.onMessage((message) => {
+      const frame = JSON.parse(String(message));
+      if (frame.state?.companionVersion) frame.state.companionVersion = '2.34.2';
+      socket.send(JSON.stringify(frame));
+    });
+  });
+  await host(page, harness);
+  await expect(page.getByRole('button', { name: 'Stop', exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: /^Panic/ })).toHaveCount(0);
+  await playButton(page, 'Airhorn').click();
+  await expect.poll(() => harness.plays).toContain('DoPlaySound(1)');
+  await page.keyboard.press('Shift+Escape');
+  await page
+    .getByLabel('Add session audio', { exact: true })
+    .setInputFiles({ name: 'Old way.wav', mimeType: 'audio/wav', buffer: sessionWave(2) });
+  await expect(playButton(page, 'Old way')).toBeEnabled({ timeout: TEMP_READY });
+  await page.locator('#temp-manager > summary').click();
+  await page
+    .locator('.temp-source', { hasText: 'Old way' })
+    .getByRole('button', { name: 'Edit copy' })
+    .click();
+  const form = page.getByRole('form', { name: 'Edit a copy of Old way' });
+  await form.getByRole('combobox').selectOption('chipmunk');
+  const before = harness.plays.length;
+  await form.getByRole('button', { name: 'Save & play' }).click();
+  await expect(playButton(page, 'Old way (chipmunk)')).toBeEnabled({ timeout: TEMP_READY });
+  await expect
+    .poll(() => harness.plays.slice(before).some((p) => p.startsWith('DoPlaySound(')))
+    .toBe(true);
+  await expect(page.getByText('Copy added to Temp and playing.', { exact: false })).toBeVisible();
+  // The copy was made by one command and played by a second; neither Panic nor autoplay was sent.
+  const ops = sent.map((c) => c.op);
+  expect(ops.indexOf('audioPlay')).toBeGreaterThan(ops.indexOf('trimAudio'));
+  expect(sent.filter((c) => c.autoplay !== undefined || c.op === 'panic')).toEqual([]);
+  expect(harness.soundpad).not.toContain('DoStopSound()');
+  await expect(page.locator('.playback-suspended')).toHaveCount(0);
+  await page.getByRole('button', { name: 'Access settings' }).click();
+  await expect(page.getByRole('note')).toContainText(
+    'playback that follows the newest click, and Panic',
+  );
 });

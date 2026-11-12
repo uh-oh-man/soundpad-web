@@ -54,24 +54,39 @@ public sealed class SoundpadPipe(string name = "sp_remote_control", bool enableF
     }
     private readonly SemaphoreSlim gate = new(1);
     private NamedPipeClientStream? pipe;
+    private long lastAnswer;
+    /// <summary>
+    /// Sends one command and reads its answer (4 s limit). <paramref name="cancel"/> withdraws a request that has
+    /// not been sent yet (2.35): it is looked at once, immediately before the command is written, so a play that a
+    /// newer command replaced while it waited for the pipe never reaches Soundpad. Nothing is registered on the
+    /// token, so cancelling it runs no code. Once the command is written its answer is always read.
+    /// </summary>
     public async Task<string> Request(string command, CancellationToken cancel = default)
     {
-        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancel);
-        timeout.CancelAfter(TimeSpan.FromSeconds(4));
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(4));
         await gate.WaitAsync(timeout.Token);
+        bool sending = false;
         try
         {
+            byte[] request;
+            try { request = SoundpadText.Command.GetBytes(command); }
+            catch (EncoderFallbackException) { throw new InvalidDataException("This name or path has characters Soundpad can't receive on this PC. Rename it using plain letters, then retry."); }
+            // The official reference warns against two requests in the same millisecond. The pause is needed only
+            // right after another request (2.35): Windows stretches a 2 ms wait to about 15 ms, which every first
+            // request of a burst (a Play, a Stop) used to pay for nothing.
+            cancel.ThrowIfCancellationRequested(); // withdrawn while it queued: do not hold the pipe for the pause either
+            if (lastAnswer != 0 && System.Diagnostics.Stopwatch.GetElapsedTime(lastAnswer) < TimeSpan.FromMilliseconds(2)) await Task.Delay(2, timeout.Token);
+            cancel.ThrowIfCancellationRequested();
+            sending = true;
             if (pipe is not { IsConnected: true })
             {
                 pipe?.Dispose();
                 pipe = new NamedPipeClientStream(".", name, PipeDirection.InOut, PipeOptions.Asynchronous);
                 await pipe.ConnectAsync(timeout.Token);
                 pipe.ReadMode = PipeTransmissionMode.Message;
+                // Connecting can take a while; a request withdrawn meanwhile is still not sent.
+                if (cancel.IsCancellationRequested) { sending = false; cancel.ThrowIfCancellationRequested(); }
             }
-            byte[] request;
-            try { request = SoundpadText.Command.GetBytes(command); }
-            catch (EncoderFallbackException) { throw new InvalidDataException("This name or path has characters Soundpad can't receive on this PC. Rename it using plain letters, then retry."); }
-            await Task.Delay(2, timeout.Token); // official reference warns against same-ms requests
             await pipe.WriteAsync(request, timeout.Token);
             using var result = new MemoryStream();
             var buffer = new byte[8192];
@@ -82,9 +97,12 @@ public sealed class SoundpadPipe(string name = "sp_remote_control", bool enableF
                 result.Write(buffer, 0, read);
                 if (result.Length > 16 * 1024 * 1024) throw new InvalidDataException("Soundpad response too large.");
             } while (!pipe.IsMessageComplete);
+            lastAnswer = System.Diagnostics.Stopwatch.GetTimestamp();
             return new UTF8Encoding(false, true).GetString(result.ToArray()).TrimEnd('\0');
         }
-        catch { pipe?.Dispose(); pipe = null; throw; }
+        // A request withdrawn before it was written leaves the connection as it was; any other failure may have
+        // left half a message on it, so the next request reconnects.
+        catch when (sending) { pipe?.Dispose(); pipe = null; throw; }
         finally { gate.Release(); }
     }
     public void Dispose() { pipe?.Dispose(); gate.Dispose(); }

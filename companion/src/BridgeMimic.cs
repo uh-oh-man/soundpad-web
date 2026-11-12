@@ -123,7 +123,7 @@ public sealed partial class Bridge
     private bool GuestMimicAllowed(string? requester, string? audience) =>
         disk.Permissions.GuestMimic && (audioAudience == null || sessionAccepting && audience == audioAudience) && (requester == null || !revokedAudioPeers.ContainsKey(requester));
 
-    private async Task<Reply> ExecuteMimic(Command c, string actor, Participant? participant, string? requester, string? audience)
+    private async Task<Reply> ExecuteMimic(Command c, string actor, Participant? participant, string? requester, string? audience, Intent? intent = null)
     {
         try
         {
@@ -193,8 +193,9 @@ public sealed partial class Bridge
                 case "mimicClip":
                     {
                         var (ring, start, stop) = Selection(c);
-                        var result = await SaveMimic(ring, start, stop, c.Name, Person(actor, participant).Name, host, requester ?? participant?.Id ?? actor, audience);
-                        return result with { Id = c.Id };
+                        var result = (await SaveMimic(ring, start, stop, c.Name, Person(actor, participant).Name, host, requester ?? participant?.Id ?? actor, audience)) with { Id = c.Id };
+                        // "Mimic & play" as one command (2.35): plays only if nothing newer was asked for meanwhile.
+                        return c.Autoplay ? await Autoplay(result, c, actor, participant, requester, audience, intent) : result;
                     }
                 case "mimicPreview":
                     {
@@ -213,7 +214,7 @@ public sealed partial class Bridge
                         // The name becomes a file name first: keep path separators from cutting the title short ("AC/DC").
                         var reply = await Upload(wav, title.Replace('/', '-').Replace('\\', '-') + ".wav", "Host", true, "host", audioAudience);
                         if (reply.Ok) Log($"Imported \"{title}\" from Voice Replay Studio into Temp");
-                        return reply with { Id = c.Id };
+                        return c.Autoplay ? await Autoplay(reply with { Id = c.Id }, c, actor, participant, requester, audience, intent) : reply with { Id = c.Id };
                     }
                 default: throw new InvalidDataException("Unsupported command.");
             }

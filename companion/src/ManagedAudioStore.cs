@@ -13,6 +13,8 @@ public sealed partial class ManagedAudioStore
     private object[] hostLocations = [];
     private AudioManagerView published = new(0, [], [], null, null, false, 0);
     private Dictionary<string, AudioAnnotation> annotations = new(StringComparer.OrdinalIgnoreCase);
+    private Dictionary<string, ReadyAudio> ready = new(StringComparer.OrdinalIgnoreCase);
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<string, FileStamp> stamps = new();
     public event Action? Changed;
     public string Root => Path.Combine(directory, "managed-audio");
     private string Sessions => Path.Combine(Root, "sessions");
@@ -158,13 +160,51 @@ public sealed partial class ManagedAudioStore
             AudioVariantView View(AudioVariant v) => new(v.Id, v.Native?.SoundId, v.Orientation, v.Retired ? "cleanup-pending" : v.State, v.State == "ready" && v.Native is { VerifiedAt: > 0 } && !v.Retired, v.Permanent, v.OwnsFile ? Path.GetFileNameWithoutExtension(v.Path) : null, v.Current, v.LegacyApproval);
             assets.Add(new(asset.Id, asset.Name, asset.Origin, asset.Uploader, asset.State, asset.CreatedAt, normal == null ? null : View(normal), reversed == null ? null : View(reversed), asset.Variants.Where(v => v.State != "removed").Select(View).ToArray(), asset.Variants.Any(v => v.OwnsFile && !v.Permanent && !v.LegacyApproval && v.State != "removed")));
         }
+        // What Prepare would hand back without generating anything: per source and direction, the current ready
+        // variant made from the current source. Only one that is in Soundpad and not retired can be played at once.
+        var playable = new Dictionary<string, ReadyAudio>(StringComparer.OrdinalIgnoreCase);
+        foreach (var asset in journal.Assets)
+            foreach (var orientation in new[] { "normal", "reversed" })
+            {
+                var variant = asset.Variants.LastOrDefault(v => v.Current && v.Orientation == orientation && v.State == "ready" && v.SourceHash == asset.SourceHash);
+                if (variant is not { Retired: false, Native: { VerifiedAt: > 0, SoundId: not null } }) continue;
+                var source = asset.Origin == "native" ? asset.Variants.LastOrDefault(v => v.Current && v.Orientation == "normal" && !v.OwnsFile)?.Path : null;
+                playable[asset.Id + "|" + orientation] = new(asset.Id, asset.State, variant.Id, variant.Native.SoundId, variant.Path, variant.Bytes, source);
+            }
         var issues = journal.Issues.TakeLast(128).ToList();
         if (writeFailed) issues.Add(new("storage-write", null, "storage-write", "The recovery journal could not be saved. Managed mutations and cleanup are paused until local storage is writable.", Action: "retry"));
         var view = new AudioManagerView(journal.Revision, assets.ToArray(), issues.ToArray(), journal.TempCategory?.NativeId, journal.TempCategory?.Name, blocked || writeFailed, TemporaryBytes());
         Volatile.Write(ref hostLocations, journal.Assets.SelectMany(a => a.Variants.Where(v => v.OwnsFile && v.State != "removed").Select(v => (object)new { assetId = a.Id, variantId = v.Id, v.Path, v.Storage })).ToArray());
+        Volatile.Write(ref ready, playable);
         Volatile.Write(ref annotations, map); Volatile.Write(ref published, view); Changed?.Invoke();
     }
     public AudioAnnotation? Annotation(string soundId) => Volatile.Read(ref annotations).GetValueOrDefault(soundId);
+    /// <summary>
+    /// The variant a play of this source and direction would use, if it can be played right now without any
+    /// preparation (2.35); null when it must go through <see cref="Prepare"/> first. Safe to call from any thread.
+    /// <para>
+    /// Prepare verifies, on every call: the journal is writable; for a reverse of a library sound, that the
+    /// original is still in Soundpad and its content hash is unchanged (else the reverse is stale and retired);
+    /// the managed file's length and full SHA-256; and that Soundpad lists the file exactly once (else it is
+    /// imported again). This check keeps the guarantees that matter for a play without reading file contents:
+    /// the variant is the current one for the current source, is recorded as imported and not retired, Prepare
+    /// fully verified it earlier in this run, and since then neither the managed file nor the original has
+    /// changed in size or modified time. The caller still confirms from a fresh sound list that Soundpad lists the
+    /// file. Anything else (first play after a start, a changed file, a missing entry) takes the full Prepare.
+    /// Keep, Remove and clean-up are unaffected: they always verify by hash themselves.
+    /// </para>
+    /// </summary>
+    public ReadyAudio? Ready(string assetId, string orientation)
+    {
+        if (!Volatile.Read(ref ready).TryGetValue(assetId + "|" + orientation, out var found) || !stamps.TryGetValue(found.VariantId, out var stamp)) return null;
+        return FileStamp.Of(found.Path, found.SourcePath) is { } now && now == stamp && now.Bytes == found.Bytes ? found : null;
+    }
+    /// <summary>Remembers the files' size and time at the moment Prepare (or an upload) has fully verified a variant.</summary>
+    private void Stamp(AudioAsset asset, AudioVariant variant)
+    {
+        var source = asset.Origin == "native" ? asset.Variants.LastOrDefault(v => v.Current && v.Orientation == "normal" && !v.OwnsFile)?.Path : null;
+        if (FileStamp.Of(variant.Path, source) is { } stamp) stamps[variant.Id] = stamp; else stamps.TryRemove(variant.Id, out _);
+    }
     private long TemporaryBytes()
     {
         long Size(string path, long recorded) { try { return Math.Max(recorded, File.Exists(path) ? new FileInfo(path).Length : 0); } catch (IOException) { return Math.Max(recorded, 64L * 1024 * 1024); } }
@@ -211,5 +251,22 @@ public sealed partial class ManagedAudioStore
         Save();
     }
     public void RetryJournal() { if (blocked) { journal = new(); Load(); } RequireWritable(); }
+}
+/// <summary>A variant that can be played without preparation; see <see cref="ManagedAudioStore.Ready"/>.</summary>
+public sealed record ReadyAudio(string AssetId, string State, string VariantId, string SoundId, string Path, long Bytes, string? SourcePath);
+/// <summary>Size and modified time of a managed file, and of the library original it was made from (if any).</summary>
+internal readonly record struct FileStamp(long Bytes, long Written, long SourceBytes, long SourceWritten)
+{
+    public static FileStamp? Of(string path, string? source)
+    {
+        try
+        {
+            var file = new FileInfo(path); if (!file.Exists) return null;
+            if (source == null) return new(file.Length, file.LastWriteTimeUtc.Ticks, 0, 0);
+            var original = new FileInfo(source); if (!original.Exists) return null;
+            return new(file.Length, file.LastWriteTimeUtc.Ticks, original.Length, original.LastWriteTimeUtc.Ticks);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException) { return null; }
+    }
 }
 public record AudioAnnotation(string AssetId, string Name, string Uploader, string Orientation, bool Temporary, string Kind, bool InternalVariant, string? AliasOf, string WorkspaceId, string[] Aliases, bool Retired);

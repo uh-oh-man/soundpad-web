@@ -1,4 +1,3 @@
-import { controller } from './controller';
 type Job = { target?: number; task?: Promise<void>; lastStart: number };
 export class SeekQueue {
   private jobs = new Map<string, Job>();
@@ -34,6 +33,4 @@ export class SeekQueue {
     return job.task!;
   }
 }
-export const seekQueue = new SeekQueue((soundId, epoch, positionMs) =>
-  controller.run('seek', { soundId, epoch, positionMs }),
-);
+// The queue the app uses lives in playback.ts (2.35), so seeks share the playback path's quiet handling.

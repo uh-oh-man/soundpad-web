@@ -4,12 +4,14 @@ import type { Sound, Snapshot } from '../protocol';
 import { useWaveformData } from '../waveform-cache';
 import { formatTime, wavePath, usePlayhead } from './Waveform';
 import { useTimeline } from '../timeline';
+import { HELD_BY_HOST } from '../playback';
 export function SoundButton({
   sound,
   state,
   canPlay,
   canSeek,
   pending,
+  held = false,
   active,
   play,
   choose,
@@ -19,7 +21,10 @@ export function SoundButton({
   canPlay: boolean;
   canSeek: boolean;
   index: number;
+  /** This tile's start was asked for and not yet answered. Playing is `active`, from the host's report. */
   pending: boolean;
+  /** The host's Panic holds guest playback (2.35): looks unavailable, keeps focus, ignores presses. */
+  held?: boolean;
   active: boolean;
   play: () => Promise<void>;
   choose: (at: number) => Promise<void>;
@@ -31,7 +36,7 @@ export function SoundButton({
   const timeline = useTimeline({
     identity: sound.id,
     duration,
-    disabled: !canPlay || !canSeek,
+    disabled: !canPlay || !canSeek || held,
     commit: (at) => {
       void choose(at).catch(() => {});
     },
@@ -100,14 +105,16 @@ export function SoundButton({
       ref={root}
       className={`sound-button ${sound.icon ? 'has-art' : 'no-art'} ${active ? 'is-playing' : ''}`}
       aria-busy={pending}
+      data-intent={pending ? 'pending' : undefined}
     >
       {sound.icon ? (
         <button
           className="tile-art-button"
           disabled={!canPlay}
-          aria-disabled={pending || undefined}
+          aria-disabled={pending || held || undefined}
           aria-label={`Play artwork ${sound.name}`}
-          onClick={() => !pending && void play().catch(() => {})}
+          title={held ? HELD_BY_HOST : undefined}
+          onClick={() => !pending && !held && void play().catch(() => {})}
         >
           {content}
         </button>
@@ -118,12 +125,16 @@ export function SoundButton({
           role="slider"
           tabIndex={canPlay && canSeek && path ? 0 : -1}
           aria-label={`Cue ${sound.name} waveform`}
-          aria-disabled={!canPlay || !canSeek || !path}
+          aria-disabled={!canPlay || !canSeek || !path || held}
           aria-valuemin={0}
           aria-valuemax={duration}
           aria-valuenow={Math.round(timeline.preview ?? timeline.selected)}
           aria-valuetext={formatTime(timeline.preview ?? timeline.selected, 3)}
-          title="Click or drag to cue · Scroll to zoom · Shift-drag to pan · 0 to fit"
+          title={
+            held
+              ? HELD_BY_HOST
+              : 'Click or drag to cue · Scroll to zoom · Shift-drag to pan · 0 to fit'
+          }
           {...(path ? timeline.interactions : {})}
         >
           {content}
@@ -149,8 +160,9 @@ export function SoundButton({
         aria-label={`Play from start: ${sound.name}`}
         // Busy is aria-disabled, not disabled: Chrome drops focus from a button that becomes disabled.
         disabled={!canPlay}
-        aria-disabled={pending || undefined}
-        onClick={() => !pending && void play().catch(() => {})}
+        aria-disabled={pending || held || undefined}
+        title={held ? HELD_BY_HOST : undefined}
+        onClick={() => !pending && !held && void play().catch(() => {})}
       >
         {pending ? (
           <LoaderCircle size={13} className="spinning" />

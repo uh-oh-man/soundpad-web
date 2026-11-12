@@ -5,6 +5,7 @@ import { controller } from '../controller';
 import type { Snapshot } from '../protocol';
 import { supports } from '../version';
 import { usePreviewAudio } from '../preview-audio';
+import { guestHeld, HELD_BY_HOST, playback } from '../playback';
 import {
   ago,
   lastSeconds,
@@ -62,6 +63,7 @@ export function MimicPanel({
   const [selection, setSelection] = useState<Selection | null>(null);
   const [name, setName] = useState('');
   const [busy, setBusy] = useState(false);
+  const held = guestHeld(state, host);
   const lines = (peek?.transcript ?? []).filter((l) => l.endMs > 0);
   const suggestion = peek && selection ? transcriptFor(lines, selection) : '';
 
@@ -126,14 +128,16 @@ export function MimicPanel({
     if (!fields || busy) return;
     setBusy(true);
     try {
-      const result = (await controller.run('mimicClip', {
+      const named = {
         ...fields,
         ...((name.trim() || suggestion) && { name: name.trim() || suggestion }),
-      })) as { assetId?: string } | undefined;
+      };
+      // Mimic & play goes through the playback path (2.35): the clip plays when it is ready only if
+      // nothing newer was asked for meanwhile.
+      if (play) await playback.make('mimicClip', named, 'make:mimic');
+      else await controller.run('mimicClip', named);
       setSelection(null);
       setName('');
-      if (play && result?.assetId)
-        await controller.run('audioPlay', { assetId: result.assetId, orientation: 'normal' });
     } catch {
       /* Controller shows the error. */
     } finally {
@@ -262,8 +266,9 @@ export function MimicPanel({
               <button
                 className="primary"
                 disabled={!canPlay}
-                aria-disabled={busy || undefined}
-                onClick={() => !busy && void clip(true)}
+                aria-disabled={busy || held || undefined}
+                title={held ? HELD_BY_HOST : undefined}
+                onClick={() => !busy && !held && void clip(true)}
               >
                 <Play size={15} /> Mimic &amp; play
               </button>

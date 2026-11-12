@@ -20,6 +20,17 @@ public sealed class MockSoundpad : IAsyncDisposable
     /// <summary>Refuses the next DoAddSound, as Soundpad does when it can't add a file.</summary>
     public bool FailNextAddSound { get; set; }
     public bool FailOwnedRemovalOnce { get; set; }
+    /// <summary>Simulated cost of one pipe round trip, in ms (2.35). 0 (the default) answers at once, as before.</summary>
+    public int LatencyMs { get; set; }
+    /// <summary>While set, commands starting with this text are answered "R-500", as Soundpad refuses an action (2.35).</summary>
+    public string? RejectPrefix { get; set; }
+    /// <summary>Commands starting with <see cref="SlowPrefix"/> take this many ms more (2.35), e.g. "DoAddSound(" for an import that takes a while.</summary>
+    public int SlowMs { get; set; }
+    public string? SlowPrefix { get; set; }
+    /// <summary>Every command with the Stopwatch timestamp of its arrival, so a run can be analysed afterwards (2.35).</summary>
+    public List<(long Timestamp, string Command)> Timeline { get; } = [];
+    /// <summary>The index of the sound that is "playing": the last DoPlaySound, until it is stopped or ends (2.35).</summary>
+    public int? PlayingIndex { get; private set; }
     private int selectedCategory = 1, selectedIndex;
     private string CategoriesMetadata(bool withSounds = false)
     {
@@ -110,13 +121,19 @@ public sealed class MockSoundpad : IAsyncDisposable
                     // Real Soundpad decodes commands in the Windows ANSI code page (1252 on the owner's PC and CI), not
                     // UTF-8; decoding UTF-8 here hid the 2.15.8 bug where "·" arrived as "Â·".
                     var command = Ansi.GetString(buffer, 0, read); lock (Commands) Commands.Add(command);
-                    if (Status == "PLAYING" && Position >= DurationMs) Status = "STOPPED";
+                    lock (Timeline) Timeline.Add((System.Diagnostics.Stopwatch.GetTimestamp(), command));
+                    // Windows timers are too coarse (about 15 ms) for a few milliseconds, so the short part is spun.
+                    if (LatencyMs > 0) { long until = System.Diagnostics.Stopwatch.GetTimestamp() + LatencyMs * System.Diagnostics.Stopwatch.Frequency / 1000; if (LatencyMs > 20) await Task.Delay(LatencyMs - 16, cancel.Token); while (System.Diagnostics.Stopwatch.GetTimestamp() < until) Thread.SpinWait(64); }
+                    if (SlowMs > 0 && SlowPrefix is { } slow && command.StartsWith(slow)) await Task.Delay(SlowMs, cancel.Token);
+                    if (Status == "PLAYING" && Position >= DurationMs) { Status = "STOPPED"; PlayingIndex = null; }
+                    if (RejectPrefix is { } rejected && command.StartsWith(rejected)) { await server.WriteAsync(Encoding.UTF8.GetBytes("R-500"), cancel.Token); continue; }
                     string result = command switch { "GetSoundlist()" => AllXml, "GetCategories(true, true)" => CategoryXml, "GetCategories(false, false)" => CategoriesMetadata(), "GetCategories(true, false)" => CategoriesMetadata(true), "GetPlayStatus()" => ReportStatus(), "GetPlaybackPositionInMs()" => ReportPosition().ToString(), "GetPlaybackDurationInMs()" => DurationMs.ToString(), "IsAlive()" => "R-200", _ => command.StartsWith("Do") ? "R-200" : "R-404" };
                     if (command.StartsWith("FixtureRemoveOwnedEntry(") || command.StartsWith("DoAdd") || command.StartsWith("DoRemoveCategory(") || command.StartsWith("DoSelectCategory(") || command.StartsWith("DoSelectIndex(") || command.StartsWith("DoRemoveSelectedEntries(")) result = Manage(command);
-                    if (command.StartsWith("DoPlaySound(")) { BeginFixturePlayback(); Console.WriteLine("TEST_PLAY " + command); }
+                    if (command.StartsWith("DoPlaySound(")) { BeginFixturePlayback(); PlayingIndex = int.TryParse(command[12..^1], out int playing) ? playing : null; Console.WriteLine("TEST_PLAY " + command); }
                     if (command.StartsWith("DoSeekMs(")) { beforeSeek = Position; remainingLag = SeekLagSamples; remainingStops = TransientSeekStop ? 1 : 0; position = long.Parse(command[9..^1]); startedTick = Environment.TickCount64; Console.WriteLine("TEST_PLAY " + command); }
                     if (command == "DoTogglePause()") { Console.WriteLine("TEST_PLAY " + command); position = Position; Status = Status == "PLAYING" ? "PAUSED" : "PLAYING"; startedTick = Environment.TickCount64; }
-                    if (command == "DoStopSound()") { Status = "STOPPED"; position = 0; }
+                    // Its own prefix (2.35): e2e tests count TEST_PLAY lines, and a stop must not change those counts.
+                    if (command == "DoStopSound()") { Status = "STOPPED"; position = 0; PlayingIndex = null; Console.WriteLine("TEST_STOP " + command); }
                     await server.WriteAsync(Encoding.UTF8.GetBytes(result), cancel.Token);
                 }
             }

@@ -36,8 +36,9 @@ export function holdNotice(id: string, on: boolean) {
     emit();
   }
 }
+/** Shows a notice and returns its id (for `dismissNotice`); '' when there was nothing to show. */
 export function notify(message: string, kind: NoticeKind = 'info', action?: NoticeAction) {
-  if (!message) return;
+  if (!message) return '';
   const existing = notices.find((n) => n.message === message);
   const entry: Notice = {
     id: existing?.id ?? crypto.randomUUID(),
@@ -49,6 +50,7 @@ export function notify(message: string, kind: NoticeKind = 'info', action?: Noti
   };
   notices = [...notices.filter((n) => n.id !== entry.id), entry].slice(-4);
   emit();
+  return entry.id;
 }
 const subscribe = (listener: () => void) => {
   listeners.add(listener);

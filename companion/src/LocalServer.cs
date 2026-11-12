@@ -17,6 +17,8 @@ public sealed class LocalServer(Bridge bridge, string origin) : IAsyncDisposable
 {
     private WebApplication? app;
     private int connected;
+    /// <summary>Playback-control messages accepted per sliding second on the socket (all people together, 2.35).</summary>
+    public const int ControlPerSecond = 600;
     public string Token { get; } = Convert.ToHexString(RandomNumberGenerator.GetBytes(32)).ToLowerInvariant();
     public int Port { get; private set; }
     public async Task Start()
@@ -85,34 +87,59 @@ public sealed class LocalServer(Bridge bridge, string origin) : IAsyncDisposable
                         await Send(new { type = full ? "state" : "tick", state = full ? state : state with { Library = null! } }); sentLibrary = state.Library.Version;
                     }
                 });
-                var bucket = new Queue<long>();
+                // Two budgets per sliding second (2.35). Playback control is cheap and coalesces in the Bridge (a newer
+                // play releases the older one at once), so a burst of presses from several people must never be answered
+                // with "Too many requests"; its limit only stops a runaway sender. Queries and everything else
+                // (waveforms, statistics, Spotify, Mimic peeks, edits) keep the old, tighter limit.
+                var controlBucket = new Queue<long>(); var hostControlBucket = new Queue<long>(); var bucket = new Queue<long>();
                 using var queries = new SemaphoreSlim(16);
                 var running = new List<Task>();
+                // Answers one command when it is done. Nothing is awaited in the receive loop any more (2.35): a Stop
+                // that waits for Soundpad no longer holds up reading the next message.
+                async Task Answer(string id, Task<Reply> operation, SemaphoreSlim? slot)
+                {
+                    try
+                    {
+                        Reply reply;
+                        try { reply = await operation.WaitAsync(lifetime.Token); }
+                        catch (Exception ex) when (ex is not (OperationCanceledException or OutOfMemoryException)) { reply = new("ack", id, false, "Companion operation failed. Check Soundpad and local storage."); }
+                        await Send(reply);
+                    }
+                    catch (Exception ex) when (ex is WebSocketException or OperationCanceledException or TimeoutException or ObjectDisposedException) { }
+                    finally { slot?.Release(); }
+                }
                 try
                 {
                     while (socket.State == WebSocketState.Open)
                     {
                         var input = await Receive(socket, lifetime.Token);
                         var now = Environment.TickCount64;
-                        while (bucket.Count > 0 && bucket.Peek() < now - 1000) bucket.Dequeue();
                         using var doc = JsonDocument.Parse(input, new JsonDocumentOptions { MaxDepth = 24 });
                         var root = doc.RootElement;
                         var actor = root.GetProperty("actor").GetString() == "host" ? "host" : "guest";
                         var command = root.GetProperty("command").Deserialize<Command>(Json.Options) ?? throw new InvalidDataException();
-                        if (bucket.Count >= 32) { await Send(new Reply("ack", command.Id, false, "Too many requests. Try again shortly.")); continue; }
-                        bucket.Enqueue(now);
+                        running.RemoveAll(t => t.IsCompleted);
+                        bool control = command.Op is "play" or "startAt" or "region" or "stop" or "seek" or "pause" or "panic" or "audioPlay" or "reverse";
+                        // The host's own Stop and Panic never compete with relayed guest traffic for this budget (2.35).
+                        var budget = control ? (actor == "host" ? hostControlBucket : controlBucket) : bucket;
+                        while (budget.Count > 0 && budget.Peek() < now - 1000) budget.Dequeue();
+                        if (budget.Count >= (control ? ControlPerSecond : 32)) { running.Add(Answer(command.Id, Task.FromResult(new Reply("ack", command.Id, false, "Too many requests. Try again shortly.")), null)); continue; }
+                        budget.Enqueue(now);
                         Participant? person = root.TryGetProperty("participant", out var p) ? p.Deserialize<Participant>(Json.Options) : null;
                         string? requester = root.TryGetProperty("requester", out var requestPeer) ? requestPeer.GetString() : null;
                         string? audience = root.TryGetProperty("audience", out var requestAudience) ? requestAudience.GetString() : null;
                         if (requester?.Length > 128 || audience?.Length > 64) throw new InvalidDataException("Invalid request ownership.");
-                        if (command.Op is "mimicSources" or "mimicStart" or "mimicClip" or "mimicLibrary" or "mimicLibraryImport" or "mimicTranscribe" or "trimAudio" or "trimPreview" or "waveform" or "spotify" or "audioAssets" or "play" or "startAt" or "region" or "reverse" or "audioPlay" or "keepAudio" or "removeAudio" or "retryAudio" or "retryCleanup" or "cleanupCategories" or "clearTemp" or "beginSession" or "endSession")
+                        // Expensive work is admitted sixteen at a time. Playback control never counts against that.
+                        SemaphoreSlim? slot = null;
+                        if (command.Op is "mimicSources" or "mimicStart" or "mimicClip" or "mimicLibrary" or "mimicLibraryImport" or "mimicTranscribe" or "trimAudio" or "trimPreview" or "waveform" or "spotify" or "audioAssets" or "keepAudio" or "removeAudio" or "retryAudio" or "retryCleanup" or "cleanupCategories" or "clearTemp" or "beginSession" or "endSession")
                         {
-                            running.RemoveAll(t => t.IsCompleted);
-                            if (!await queries.WaitAsync(0)) { await Send(new Reply("ack", command.Id, false, "Too many background requests.")); continue; }
-                            var operation = bridge.Execute(command, actor, person, requester, audience);
-                            running.Add(Task.Run(async () => { try { await Send(await operation.WaitAsync(lifetime.Token)); } catch (Exception ex) when (ex is WebSocketException or OperationCanceledException or TimeoutException) { } finally { queries.Release(); } }));
+                            if (!await queries.WaitAsync(0)) { running.Add(Answer(command.Id, Task.FromResult(new Reply("ack", command.Id, false, "Too many background requests.")), null)); continue; }
+                            slot = queries;
                         }
-                        else await Send(await bridge.Execute(command, actor, person, requester, audience));
+                        // Execute is CALLED here, in arrival order, and runs up to its first real wait: that is where
+                        // playback intents get their order. Its answer is sent whenever it is ready.
+                        var operation = bridge.Execute(command, actor, person, requester, audience);
+                        running.Add(Answer(command.Id, operation, slot));
                     }
                 }
                 finally { bridge.Changed -= Changed; bridge.WaveformChanged -= WaveChanged; lifetime.Cancel(); try { await sender; await waveSender; await Task.WhenAll(running); } catch (Exception) { } }

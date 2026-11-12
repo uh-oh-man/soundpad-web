@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Plus, RotateCcw, Flag, Scissors, Play, Trash2, HelpCircle } from 'lucide-react';
 import { useWaveformData, clearWaveforms } from '../waveform-cache';
-import { controller } from '../controller';
+import { HELD_BY_HOST, playback as intents } from '../playback';
 import type { Snapshot, Sound, Waveform as WaveData } from '../protocol';
 import { useTimeline } from '../timeline';
 import type { Workspace } from '../workspace';
@@ -104,6 +104,8 @@ type Props = {
   update: (fn: (w: Workspace) => Workspace) => void;
   choose: (at: number) => Promise<void>;
   compact?: boolean;
+  /** The host's Panic holds guest playback (2.35): looks unavailable, keeps focus, ignores presses. */
+  held?: boolean;
 };
 export function Waveform({
   sound,
@@ -113,6 +115,7 @@ export function Waveform({
   update,
   choose,
   compact = false,
+  held = false,
 }: Props) {
   const root = useRef<HTMLDivElement>(null);
   const [visible, setVisible] = useState(compact),
@@ -153,7 +156,7 @@ export function Waveform({
     identity: sound.id,
     duration,
     initialZoom: workspace?.zoom[metadataId] ?? 1,
-    disabled,
+    disabled: disabled || held,
     commit: (at) => {
       void pick(at);
     },
@@ -199,10 +202,14 @@ export function Waveform({
             aria-valuemax={duration}
             aria-valuenow={Math.round(preview ?? (active ? position : selected))}
             aria-valuetext={formatTime(preview ?? (active ? position : selected), 3)}
-            aria-disabled={disabled}
+            aria-disabled={disabled || held}
             ref={timeline.surface}
             {...timeline.interactions}
-            title="Scroll to zoom · Shift-drag or middle-drag to pan · Pinch on touch · +/- zoom, Alt+arrows pan, 0 fit"
+            title={
+              held
+                ? HELD_BY_HOST
+                : 'Scroll to zoom · Shift-drag or middle-drag to pan · Pinch on touch · +/- zoom, Alt+arrows pan, 0 fit'
+            }
           >
             <svg viewBox="0 0 800 64" preserveAspectRatio="none" aria-hidden="true">
               <path d={path} />
@@ -345,8 +352,9 @@ export function Waveform({
                 </label>
                 <button
                   disabled={disabled}
+                  aria-disabled={held || undefined}
                   aria-label={`Seek here: selected position ${sound.name}`}
-                  onClick={() => void pick(selected)}
+                  onClick={() => !held && void pick(selected)}
                 >
                   Seek here
                 </button>
@@ -376,7 +384,8 @@ export function Waveform({
                 <div className="cue-edit" key={c.id}>
                   <button
                     disabled={disabled}
-                    onClick={() => void pick(c.at)}
+                    aria-disabled={held || undefined}
+                    onClick={() => !held && void pick(c.at)}
                     aria-label={`Play cue ${c.name}`}
                   >
                     <Play size={13} />
@@ -504,21 +513,15 @@ export function Waveform({
                 <div className="region-edit" key={r.id}>
                   <button
                     disabled={disabled}
+                    aria-disabled={held || undefined}
                     aria-label={`Play region ${r.name}`}
                     onClick={() => {
+                      if (held) return;
                       update((w) => ({
                         ...w,
                         lastCue: { soundId: metadataId, at: r.start, end: r.end, repeat: r.repeat },
                       }));
-                      void controller
-                        .run('region', {
-                          soundId: sound.id,
-                          libraryVersion: state.library.version,
-                          positionMs: r.start,
-                          endMs: r.end,
-                          repeat: r.repeat,
-                        })
-                        .catch(() => {});
+                      void intents.region(sound.id, r.start, r.end, r.repeat);
                     }}
                   >
                     <Play size={13} />

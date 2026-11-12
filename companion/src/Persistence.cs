@@ -54,24 +54,47 @@ public sealed class StateStore(string directory)
         }
         return icons;
     }
-    public void Save(DiskState state)
+    /// <summary>The state as it was at one moment, ready to write. A higher <see cref="Sequence"/> is newer.</summary>
+    public sealed record StateImage(long Sequence, byte[] Json, string[] IconFiles);
+    private readonly object writing = new();
+    private long captured, committed;
+    /// <summary>
+    /// Copies the state into bytes (2.35). The caller must be the only one changing <paramref name="state"/> at
+    /// that moment; the write itself (<see cref="Commit"/>) can then happen later and elsewhere.
+    /// </summary>
+    public StateImage Capture(DiskState state) => new(Interlocked.Increment(ref captured), JsonSerializer.SerializeToUtf8Bytes(state, Json.Options), [.. state.IconFiles.Values]);
+    /// <summary>
+    /// Writes an image durably (write-through, flush, rename), unless a newer image is already on disk: a deferred
+    /// write that lost the race with a later durable one must not put older state back (2.35). False when skipped.
+    /// <paramref name="createFolder"/> is off for deferred writes, so a data folder that was removed meanwhile is
+    /// not brought back. The icon folder is scanned for obsolete files only with <paramref name="pruneIcons"/>.
+    /// </summary>
+    public bool Commit(StateImage image, bool pruneIcons = true, bool createFolder = true)
     {
-        Directory.CreateDirectory(directory);
-        var temp = PathName + ".tmp";
-        using (var f = new FileStream(temp, FileMode.Create, FileAccess.Write, FileShare.None, 4096, FileOptions.WriteThrough))
+        lock (writing)
         {
-            JsonSerializer.Serialize(f, state, Json.Options); f.Flush(true);
+            if (image.Sequence <= committed) return false;
+            if (createFolder) Directory.CreateDirectory(directory); else if (!Directory.Exists(directory)) return false;
+            var temp = PathName + ".tmp";
+            using (var f = new FileStream(temp, FileMode.Create, FileAccess.Write, FileShare.None, 4096, FileOptions.WriteThrough))
+            {
+                f.Write(image.Json); f.Flush(true);
+            }
+            File.Move(temp, PathName, true);
+            committed = image.Sequence;
+            if (pruneIcons) { try { PruneIcons(image.IconFiles); } catch (IOException) { } catch (UnauthorizedAccessException) { } }
+            return true;
         }
-        File.Move(temp, PathName, true);
-        try { PruneIcons(state); } catch (IOException) { } catch (UnauthorizedAccessException) { }
     }
-    private void PruneIcons(DiskState state)
+    /// <summary>Writes the state durably before returning. Icons are pruned only when asked: nothing else changes them (2.35).</summary>
+    public void Save(DiskState state, bool pruneIcons = true) => Commit(Capture(state), pruneIcons);
+    private void PruneIcons(string[] iconFiles)
     {
         // Metadata is durable before obsolete, app-owned icon revisions are pruned.
         var iconFolder = Path.Combine(directory, "icons");
         if (Directory.Exists(iconFolder))
         {
-            var retained = state.IconFiles.Values.ToHashSet(StringComparer.OrdinalIgnoreCase);
+            var retained = iconFiles.ToHashSet(StringComparer.OrdinalIgnoreCase);
             foreach (var file in Directory.EnumerateFiles(iconFolder, "*.png"))
             {
                 var name = Path.GetFileName(file);

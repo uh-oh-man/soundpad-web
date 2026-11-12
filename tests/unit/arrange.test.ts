@@ -127,6 +127,7 @@ describe('feature gates for older companions', () => {
       'naming trimmed copies after their words',
       'Undo that stops only its own clip',
       'Undo for guests on their own clips and copies',
+      'playback that follows the newest click, and Panic',
     ]);
     expect(missingFeatures('2.15.9')).toEqual([
       'any speed for edited copies (0.05× to 20×)',
@@ -136,6 +137,7 @@ describe('feature gates for older companions', () => {
       'naming trimmed copies after their words',
       'Undo that stops only its own clip',
       'Undo for guests on their own clips and copies',
+      'playback that follows the newest click, and Panic',
     ]);
     expect(missingFeatures('2.16.2')).toEqual([
       'Keep pitch when changing speed',
@@ -144,6 +146,7 @@ describe('feature gates for older companions', () => {
       'naming trimmed copies after their words',
       'Undo that stops only its own clip',
       'Undo for guests on their own clips and copies',
+      'playback that follows the newest click, and Panic',
     ]);
     expect(missingFeatures('2.17.0')).toEqual([
       'clearing all temporary audio during a session',
@@ -151,12 +154,14 @@ describe('feature gates for older companions', () => {
       'naming trimmed copies after their words',
       'Undo that stops only its own clip',
       'Undo for guests on their own clips and copies',
+      'playback that follows the newest click, and Panic',
     ]);
     expect(missingFeatures('2.19.0')).toEqual([
       'previewing an edited copy before saving it',
       'naming trimmed copies after their words',
       'Undo that stops only its own clip',
       'Undo for guests on their own clips and copies',
+      'playback that follows the newest click, and Panic',
     ]);
     expect(supports('2.19.0', 'trimPreview')).toBe(false);
     expect(supports('2.20.0', 'trimPreview')).toBe(true);
@@ -165,22 +170,37 @@ describe('feature gates for older companions', () => {
       'naming trimmed copies after their words',
       'Undo that stops only its own clip',
       'Undo for guests on their own clips and copies',
+      'playback that follows the newest click, and Panic',
     ]);
     expect(missingFeatures('2.20.0')).toEqual([
       'naming trimmed copies after their words',
       'Undo that stops only its own clip',
       'Undo for guests on their own clips and copies',
+      'playback that follows the newest click, and Panic',
     ]);
     expect(missingFeatures('2.29.3')).toEqual([
       'Undo that stops only its own clip',
       'Undo for guests on their own clips and copies',
+      'playback that follows the newest click, and Panic',
     ]);
     expect(missingFeatures('2.24.0')).toEqual([
       'Undo that stops only its own clip',
       'Undo for guests on their own clips and copies',
+      'playback that follows the newest click, and Panic',
     ]);
-    expect(missingFeatures('2.30.0')).toEqual(['Undo for guests on their own clips and copies']);
-    expect(missingFeatures('2.32.0')).toEqual([]);
+    expect(missingFeatures('2.30.0')).toEqual([
+      'Undo for guests on their own clips and copies',
+      'playback that follows the newest click, and Panic',
+    ]);
+    expect(missingFeatures('2.32.0')).toEqual([
+      'playback that follows the newest click, and Panic',
+    ]);
+    expect(missingFeatures('2.34.2')).toEqual([
+      'playback that follows the newest click, and Panic',
+    ]);
+    expect(missingFeatures('2.35.0')).toEqual([]);
+    expect(supports('2.34.2', 'intents')).toBe(false);
+    expect(supports('2.35.0', 'intents')).toBe(true);
     expect(supports('2.15.9', 'speed')).toBe(false);
     expect(supports('2.16.0', 'speed')).toBe(true);
     expect(missingFeatures(null)).toEqual([]);

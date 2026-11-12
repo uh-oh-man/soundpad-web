@@ -6,6 +6,7 @@ Every release stays on GitHub permanently, so any earlier version can be restore
 
 | Version | What it is | Git tag | Download |
 | --- | --- | --- | --- |
+| 2.35.0 | The newest click wins | `v2.35.0` | [Release](https://github.com/uh-oh-man/soundpad-web/releases/tag/v2.35.0) |
 | 2.34.2 | Undo notices wait for you | `v2.34.2` | [Release](https://github.com/uh-oh-man/soundpad-web/releases/tag/v2.34.2) |
 | 2.34.1 | Uploads wait their turn | `v2.34.1` | [Release](https://github.com/uh-oh-man/soundpad-web/releases/tag/v2.34.1) |
 | 2.34.0 | Undo a Voice Replay Studio import | `v2.34.0` | [Release](https://github.com/uh-oh-man/soundpad-web/releases/tag/v2.34.0) |

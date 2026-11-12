@@ -13,6 +13,13 @@ export function companionAtLeast(version: string | null | undefined, major: numb
   return actualMajor > major || (actualMajor === major && actualMinor >= minor);
 }
 
+/**
+ * True when a host's open tab runs a website new enough to relay the 2.35 command fields ("autoplay").
+ * An older tab's strict command check would disconnect the guest who sent one, so guests ask first: the
+ * host tab reports its version in its welcome. Unknown (an older tab reports nothing) counts as old.
+ */
+export const siteRelaysIntents = (site: string | null | undefined) => companionAtLeast(site, 2, 35);
+
 /** Oldest companion that supports every feature of this website. */
 export const REQUIRED_COMPANION = { major: 2, minor: 3, label: '2.3' } as const;
 
@@ -37,6 +44,7 @@ export const FEATURES = {
   trimWords: [2, 24],
   undoStop: [2, 30],
   guestUndo: [2, 32],
+  intents: [2, 35],
 } as const satisfies Record<string, readonly [number, number]>;
 
 /** True when the website changed version since this browser last used it (and it had used it before). */
@@ -64,6 +72,7 @@ const FEATURE_NAMES: Record<keyof typeof FEATURES, string> = {
   trimWords: 'naming trimmed copies after their words',
   undoStop: 'Undo that stops only its own clip',
   guestUndo: 'Undo for guests on their own clips and copies',
+  intents: 'playback that follows the newest click, and Panic',
 };
 
 /**
