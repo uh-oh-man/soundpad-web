@@ -1,5 +1,7 @@
 using SoundpadWeb;
 using SoundpadWeb.Testing;
+if (args.FirstOrDefault() == "--real-slice-audio-probe") { Environment.ExitCode = await RealSliceAudioProbe.Run(); return; }
+if (args.FirstOrDefault() == "--real-slot-probe") { Environment.ExitCode = await RealSlotProbe.Run(); return; }
 if (args.FirstOrDefault() == "--mock-only")
 {
     await using var isolated = new MockSoundpad(); isolated.DurationMs = 600000;
