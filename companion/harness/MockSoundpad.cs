@@ -31,6 +31,27 @@ public sealed class MockSoundpad : IAsyncDisposable
     public List<(long Timestamp, string Command)> Timeline { get; } = [];
     /// <summary>The index of the sound that is "playing": the last DoPlaySound, until it is stopped or ends (2.35).</summary>
     public int? PlayingIndex { get; private set; }
+    /// <summary>One play of an exact-playback slot file (2.37): what the file held at the moment Soundpad was told to play it.</summary>
+    public sealed record SlotPlay(long Timestamp, int Index, string Path, long Frames, int Rate, int Channels, string Hash, byte[] Bytes);
+    /// <summary>Every play of a slot file (named slot-N.wav), with a copy of its contents as they were read for that play (2.37).</summary>
+    public List<SlotPlay> SlotPlays { get; } = [];
+    /// <summary>
+    /// When set, a play of any existing WAV lasts as long as that file (2.37). Slot files always do, as Soundpad
+    /// reads them again on every play; other sounds keep <see cref="DurationMs"/> unless this is set.
+    /// </summary>
+    public bool FollowFileLength { get; set; }
+    /// <summary>
+    /// Category removals that came while one of its sounds was playing or less than a second after it stopped (2.37).
+    /// The real Soundpad 4.0.35 exited once on exactly that; the companion must never do it.
+    /// </summary>
+    public int RiskyRemovals { get; private set; }
+    // The playing slot file is held open the way Soundpad holds it (measured 2.36: it cannot be rewritten while it
+    // plays, and is free at once after another play or Stop). Other files are never held, as before.
+    private readonly object held = new();
+    private FileStream? heldFile;
+    private long? playingFileMs;
+    private string? playingPath, lastAudioPath;
+    private long lastAudioEnded = long.MinValue / 2, playGeneration;
     private int selectedCategory = 1, selectedIndex;
     private string CategoriesMetadata(bool withSounds = false)
     {
@@ -71,6 +92,12 @@ public sealed class MockSoundpad : IAsyncDisposable
             if (target == null) return "R-404";
             // Measured on Soundpad 4.0.35 (2.16): a removed category's sounds leave the main list too (files stay on disk).
             var urls = target.Descendants("Sound").Select(e => (string?)e.Attribute("url")).ToHashSet(StringComparer.OrdinalIgnoreCase);
+            lock (held)
+            {
+                bool playing = Status is "PLAYING" or "PAUSED" && Position < CurrentDuration && playingPath != null && urls.Contains(playingPath);
+                bool justPlayed = lastAudioPath != null && urls.Contains(lastAudioPath) && Environment.TickCount64 - lastAudioEnded < 1000;
+                if (playing || justPlayed) { RiskyRemovals++; Console.WriteLine("TEST_RISK " + command + (playing ? " while one of its sounds plays" : " right after one of its sounds played")); }
+            }
             target.Remove();
             foreach (var e in cats.Descendants("Category").Where(e => (int)e.Attribute("index")! > removed)) e.SetAttributeValue("index", (int)e.Attribute("index")! - 1);
             if (urls.Count > 0)
@@ -104,6 +131,64 @@ public sealed class MockSoundpad : IAsyncDisposable
     private string ReportStatus() => remainingStops-- > 0 ? "STOPPED" : Status;
     private long Position => position + (Status == "PLAYING" ? Environment.TickCount64 - startedTick : 0);
     public void BeginFixturePlayback() { position = 0; startedTick = Environment.TickCount64; Status = "PLAYING"; }
+    private long CurrentDuration => playingFileMs ?? DurationMs;
+    /// <summary>The sound stopped, ended, or another took its place: its file is free and the "just played" clock starts.</summary>
+    private void EndAudio()
+    {
+        lock (held)
+        {
+            if (playingPath != null) { lastAudioPath = playingPath; lastAudioEnded = Environment.TickCount64; }
+            heldFile?.Dispose(); heldFile = null; playingPath = null; playingFileMs = null; playGeneration++;
+        }
+    }
+    private string? UrlOf(int index) => XDocument.Parse(AllXml).Root!.Elements("Sound").FirstOrDefault(e => (int?)e.Attribute("index") == index)?.Attribute("url")?.Value;
+    /// <summary>A play of the entry at <paramref name="index"/>: slot files are read, recorded and held open while they play.</summary>
+    private void StartAudio(int? index)
+    {
+        EndAudio();
+        // A library of 50,000 fixtures (the e2e size test) is not parsed on every play when nothing needs the file.
+        if (!FollowFileLength && !AllXml.Contains("slot-", StringComparison.OrdinalIgnoreCase)) return;
+        var path = index is int i ? UrlOf(i) : null;
+        if (path == null || !File.Exists(path)) return;
+        bool slot = SlotPool.IsSlotFile(path);
+        long? ms = null;
+        if (slot)
+        {
+            byte[] bytes;
+            try { bytes = File.ReadAllBytes(path); } catch (IOException) { return; }
+            if (SliceWav.TryRead(bytes, out var info))
+            {
+                ms = (long)Math.Round(info.DurationMs);
+                var hash = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(bytes)).ToLowerInvariant();
+                lock (SlotPlays) SlotPlays.Add(new(System.Diagnostics.Stopwatch.GetTimestamp(), index!.Value, path, info.Frames, info.SampleRate, info.Channels, hash, bytes));
+                Console.WriteLine($"TEST_SLOT DoPlaySound({index}) frames={info.Frames} rate={info.SampleRate} channels={info.Channels} sha256={hash}");
+            }
+        }
+        else if (FollowFileLength) { try { using var wave = new NAudio.Wave.WaveFileReader(path); ms = (long)wave.TotalTime.TotalMilliseconds; } catch (Exception) { /* not a WAV: keep DurationMs */ } }
+        long generation;
+        lock (held)
+        {
+            playingPath = path; playingFileMs = ms; generation = playGeneration;
+            if (slot) { try { heldFile = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read); } catch (IOException) { } }
+        }
+        if (ms is long length) _ = ReleaseWhenDone(generation, length);
+    }
+    /// <summary>Lets go of a played file once it has played to its end (checked again while paused).</summary>
+    private async Task ReleaseWhenDone(long generation, long length)
+    {
+        try
+        {
+            while (true)
+            {
+                long left = length - Position;
+                if (Status != "PAUSED" && left <= 0) break;
+                await Task.Delay((int)Math.Clamp(left, 5, 250), cancel.Token);
+                lock (held) if (playGeneration != generation) return;
+            }
+            lock (held) if (playGeneration == generation) { lastAudioPath = playingPath; lastAudioEnded = Environment.TickCount64; heldFile?.Dispose(); heldFile = null; }
+        }
+        catch (OperationCanceledException) { }
+    }
     private static readonly Encoding Ansi = CodePages();
     private static Encoding CodePages() { Encoding.RegisterProvider(CodePagesEncodingProvider.Instance); return Encoding.GetEncoding(1252); }
     public MockSoundpad(string? name = null) { if (name != null) Name = name; loop = Run(); }
@@ -125,20 +210,20 @@ public sealed class MockSoundpad : IAsyncDisposable
                     // Windows timers are too coarse (about 15 ms) for a few milliseconds, so the short part is spun.
                     if (LatencyMs > 0) { long until = System.Diagnostics.Stopwatch.GetTimestamp() + LatencyMs * System.Diagnostics.Stopwatch.Frequency / 1000; if (LatencyMs > 20) await Task.Delay(LatencyMs - 16, cancel.Token); while (System.Diagnostics.Stopwatch.GetTimestamp() < until) Thread.SpinWait(64); }
                     if (SlowMs > 0 && SlowPrefix is { } slow && command.StartsWith(slow)) await Task.Delay(SlowMs, cancel.Token);
-                    if (Status == "PLAYING" && Position >= DurationMs) { Status = "STOPPED"; PlayingIndex = null; }
+                    if (Status == "PLAYING" && Position >= CurrentDuration) { Status = "STOPPED"; PlayingIndex = null; EndAudio(); }
                     if (RejectPrefix is { } rejected && command.StartsWith(rejected)) { await server.WriteAsync(Encoding.UTF8.GetBytes("R-500"), cancel.Token); continue; }
-                    string result = command switch { "GetSoundlist()" => AllXml, "GetCategories(true, true)" => CategoryXml, "GetCategories(false, false)" => CategoriesMetadata(), "GetCategories(true, false)" => CategoriesMetadata(true), "GetPlayStatus()" => ReportStatus(), "GetPlaybackPositionInMs()" => ReportPosition().ToString(), "GetPlaybackDurationInMs()" => DurationMs.ToString(), "IsAlive()" => "R-200", _ => command.StartsWith("Do") ? "R-200" : "R-404" };
+                    string result = command switch { "GetSoundlist()" => AllXml, "GetCategories(true, true)" => CategoryXml, "GetCategories(false, false)" => CategoriesMetadata(), "GetCategories(true, false)" => CategoriesMetadata(true), "GetPlayStatus()" => ReportStatus(), "GetPlaybackPositionInMs()" => ReportPosition().ToString(), "GetPlaybackDurationInMs()" => CurrentDuration.ToString(), "IsAlive()" => "R-200", _ => command.StartsWith("Do") ? "R-200" : "R-404" };
                     if (command.StartsWith("FixtureRemoveOwnedEntry(") || command.StartsWith("DoAdd") || command.StartsWith("DoRemoveCategory(") || command.StartsWith("DoSelectCategory(") || command.StartsWith("DoSelectIndex(") || command.StartsWith("DoRemoveSelectedEntries(")) result = Manage(command);
-                    if (command.StartsWith("DoPlaySound(")) { BeginFixturePlayback(); PlayingIndex = int.TryParse(command[12..^1], out int playing) ? playing : null; Console.WriteLine("TEST_PLAY " + command); }
+                    if (command.StartsWith("DoPlaySound(")) { BeginFixturePlayback(); PlayingIndex = int.TryParse(command[12..^1], out int playing) ? playing : null; Console.WriteLine("TEST_PLAY " + command); StartAudio(PlayingIndex); }
                     if (command.StartsWith("DoSeekMs(")) { beforeSeek = Position; remainingLag = SeekLagSamples; remainingStops = TransientSeekStop ? 1 : 0; position = long.Parse(command[9..^1]); startedTick = Environment.TickCount64; Console.WriteLine("TEST_PLAY " + command); }
                     if (command == "DoTogglePause()") { Console.WriteLine("TEST_PLAY " + command); position = Position; Status = Status == "PLAYING" ? "PAUSED" : "PLAYING"; startedTick = Environment.TickCount64; }
                     // Its own prefix (2.35): e2e tests count TEST_PLAY lines, and a stop must not change those counts.
-                    if (command == "DoStopSound()") { Status = "STOPPED"; position = 0; PlayingIndex = null; Console.WriteLine("TEST_STOP " + command); }
+                    if (command == "DoStopSound()") { Status = "STOPPED"; position = 0; PlayingIndex = null; EndAudio(); Console.WriteLine("TEST_STOP " + command); }
                     await server.WriteAsync(Encoding.UTF8.GetBytes(result), cancel.Token);
                 }
             }
             catch (Exception ex) when (ex is IOException or OperationCanceledException) { }
         }
     }
-    public async ValueTask DisposeAsync() { cancel.Cancel(); await loop; cancel.Dispose(); }
+    public async ValueTask DisposeAsync() { cancel.Cancel(); await loop; EndAudio(); cancel.Dispose(); }
 }

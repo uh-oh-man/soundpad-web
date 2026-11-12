@@ -222,14 +222,17 @@ public sealed partial class Bridge
         try
         {
             if (!await SendStop()) return false;
+            NoteAudio(); SlotLease? free = null;
             lock (playbackSync)
             {
                 if (playbackOwner < intent.Revision)
                 {
                     playbackOwner = intent.Revision; playbackVersion++;
                     playback = new("STOPPED", SampledAt: DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()); regionStart = null; seekSettlesUntil = 0;
+                    free = DropSliceLocked(); // the slot is free at once after Stop (measured 2.36)
                 }
             }
+            Free(free);
             return true;
         }
         finally { intent.Settled = true; }
@@ -302,7 +305,9 @@ public sealed partial class Bridge
     public async Task StopTemporaryPlayback()
     {
         var current = playback;
-        if (current.Status is "PLAYING" or "PAUSED" or "SEEKING" && parsed.Public.Sounds.Any(s => s.Id == current.SoundId && s.Temporary)) await StopNow(ReserveInternal(true));
+        // An exact slice plays from the app's slot file, which lives in the Temp category too (2.37).
+        bool sliced; lock (playbackSync) sliced = slice != null;
+        if (current.Status is "PLAYING" or "PAUSED" or "SEEKING" && (sliced || parsed.Public.Sounds.Any(s => s.Id == current.SoundId && s.Temporary))) await StopNow(ReserveInternal(true));
     }
 
     /// <summary>

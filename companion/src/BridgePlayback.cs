@@ -31,52 +31,76 @@ public sealed partial class Bridge
         var status = await Pipe.Request("GetPlayStatus()"); long? position = null, duration = null;
         if (status is "PLAYING" or "PAUSED" or "SEEKING")
         {
+            NoteAudio();
             if (starting != null && ShouldYield(starting)) return;
             if (long.TryParse(await Pipe.Request("GetPlaybackPositionInMs()"), out var p) && p >= 0) position = p;
             if (starting != null && ShouldYield(starting)) return;
             if (long.TryParse(await Pipe.Request("GetPlaybackDurationInMs()"), out var d) && d > 0) duration = d;
         }
-        long? loopTo = null; bool ended = false;
+        long? loopTo = null; bool ended = false; ExactSlice? replay = null; SlotLease? free = null;
         lock (playbackSync)
         {
             // A Stop, Panic or start replaced the record while this sample was on its way (Stop does not wait for
             // the gate): what was read describes the playback before it, so it is dropped (2.35).
             if (seen != playbackVersion) return;
             bool known = playback.SoundId != null; long elapsed = playback.Status == "PLAYING" ? Environment.TickCount64 - sampledTick : 0;
-            // RC can report the pre-seek position or a transient stop while an accepted seek settles.
-            // Trust only our short, epoch-bound transition window; a changed duration still invalidates identity.
-            bool sameDuration = playback.DurationMs is not > 0 || duration is not > 0 || Math.Abs(playback.DurationMs.Value - duration.Value) <= 150;
-            bool positionJump = known && position.HasValue && playback.PositionMs.HasValue && Math.Abs(position.Value - (playback.PositionMs.Value + elapsed)) > 1200;
-            if (known && Environment.TickCount64 < seekSettlesUntil && sameDuration &&
-                (status is "STOPPED" or "SEEKING" || status.StartsWith("R-") || positionJump || !position.HasValue))
+            var cut = known ? slice : null; bool sliceEnded = false;
+            if (cut != null)
             {
-                status = playback.Status == "PAUSED" ? "PAUSED" : "SEEKING";
-                position = playback.PositionMs; duration ??= playback.DurationMs;
+                // Soundpad reports the slot file (2.37): the sound's position is the slot's plus where the slice
+                // starts, and the slot's own length stands for the sound's while it is the slice's length.
+                if (position.HasValue) position += cut.OffsetMs;
+                bool atEnd = Environment.TickCount64 - cut.StartedTick >= cut.SliceMs - 60;
+                if (duration is long slotMs && Math.Abs(slotMs - cut.SliceMs) <= 150) duration = cut.SourceMs;
+                // The slot ended while it was being read (its length is gone with it): it is at its end, and the next
+                // look sees it stopped. Not a sign that another sound took over.
+                else if (atEnd && status != "STOPPED") { position = cut.OffsetMs + cut.SliceMs; duration = cut.SourceMs; }
+                // Stopped after the slice's own length: the slot played to its end, which is exactly the end of the
+                // region (or of the sound). A repeating region plays the slot again; no seek is involved.
+                sliceEnded = status == "STOPPED" && atEnd;
+                if (sliceEnded && cut.Region && playback.Repeat) replay = cut;
             }
-            // No vendor current-ID getter exists. Clear on contradictory observations; same-duration
-            // native replacement cannot always be detected and is documented as a vendor limitation.
-            if (status == "STOPPED" || status.StartsWith("R-") ||
-                (known && playback.DurationMs is > 0 && duration is > 0 && Math.Abs(playback.DurationMs.Value - duration.Value) > 150) ||
-                (known && position.HasValue && playback.PositionMs.HasValue && Math.Abs(position.Value - (playback.PositionMs.Value + elapsed)) > 1200)) known = false;
-            playback = playback with
+            if (replay == null)
             {
-                Status = status is "PLAYING" or "PAUSED" or "SEEKING" or "STOPPED" ? status : "UNKNOWN",
-                PositionMs = position,
-                DurationMs = duration,
-                SoundId = known ? playback.SoundId : null,
-                Epoch = known ? playback.Epoch : null,
-                Requester = known ? playback.Requester : null,
-                IdentitySource = known ? "web" : "unknown",
-                SampledAt = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
-                RegionEndMs = known ? playback.RegionEndMs : null,
-                Repeat = known && playback.Repeat
-            };
-            sampledTick = Environment.TickCount64;
-            if (playback.Status == "PLAYING" && playback.RegionEndMs is long end && position >= end)
-            {
-                if (playback.Repeat && regionStart.HasValue) loopTo = regionStart.Value; else ended = true;
+                // RC can report the pre-seek position or a transient stop while an accepted seek settles.
+                // Trust only our short, epoch-bound transition window; a changed duration still invalidates identity.
+                bool sameDuration = playback.DurationMs is not > 0 || duration is not > 0 || Math.Abs(playback.DurationMs.Value - duration.Value) <= 150;
+                bool positionJump = known && position.HasValue && playback.PositionMs.HasValue && Math.Abs(position.Value - (playback.PositionMs.Value + elapsed)) > 1200;
+                if (known && !sliceEnded && Environment.TickCount64 < seekSettlesUntil && sameDuration &&
+                    (status is "STOPPED" or "SEEKING" || status.StartsWith("R-") || positionJump || !position.HasValue))
+                {
+                    status = playback.Status == "PAUSED" ? "PAUSED" : "SEEKING";
+                    position = playback.PositionMs; duration ??= playback.DurationMs;
+                }
+                // No vendor current-ID getter exists. Clear on contradictory observations; same-duration
+                // native replacement cannot always be detected and is documented as a vendor limitation.
+                if (status == "STOPPED" || status.StartsWith("R-") ||
+                    (known && playback.DurationMs is > 0 && duration is > 0 && Math.Abs(playback.DurationMs.Value - duration.Value) > 150) ||
+                    (known && position.HasValue && playback.PositionMs.HasValue && Math.Abs(position.Value - (playback.PositionMs.Value + elapsed)) > 1200)) known = false;
+                playback = playback with
+                {
+                    Status = status is "PLAYING" or "PAUSED" or "SEEKING" or "STOPPED" ? status : "UNKNOWN",
+                    PositionMs = position,
+                    DurationMs = duration,
+                    SoundId = known ? playback.SoundId : null,
+                    Epoch = known ? playback.Epoch : null,
+                    Requester = known ? playback.Requester : null,
+                    IdentitySource = known ? "web" : "unknown",
+                    SampledAt = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
+                    RegionEndMs = known ? playback.RegionEndMs : null,
+                    Repeat = known && playback.Repeat
+                };
+                sampledTick = Environment.TickCount64;
+                if (!known) free = DropSliceLocked();
+                // A slice ends by itself, exactly; only a sound played the old way has its region end found here.
+                if (cut == null && playback.Status == "PLAYING" && playback.RegionEndMs is long end && position >= end)
+                {
+                    if (playback.Repeat && regionStart.HasValue) loopTo = regionStart.Value; else ended = true;
+                }
             }
         }
+        Free(free);
+        if (replay != null) { await ReplaySlice(replay, seen); return; }
         if (loopTo is long from)
         {
             await Success($"DoSeekMs({from})");
@@ -99,30 +123,44 @@ public sealed partial class Bridge
     /// Soundpad (nothing is counted or recorded then). Once Soundpad has accepted the play it counts as played;
     /// the sampling and cue seek that follow are cut short if a newer intent is about to take over (2.35).
     /// </summary>
-    private async Task<string?> StartPlayback(Command c, string actor, Participant? participant, int index, Intent intent)
+    private async Task<string?> StartPlayback(Command c, string actor, Participant? participant, int index, Intent intent, ExactPlan? exact = null)
     {
         if (c.Op != "play" && (c.PositionMs is null or < 0 or > 1800000 || (c.Op == "region" && (c.EndMs is null or > 1800000 || c.EndMs <= c.PositionMs)))) throw new InvalidDataException("Invalid cue or region boundaries.");
         var statisticsId = managed?.Annotation(c.SoundId!)?.WorkspaceId ?? c.SoundId!;
         if (disk.Statistics.Count >= 50000 && !disk.Statistics.ContainsKey(statisticsId)) throw new InvalidDataException("Statistics storage limit reached.");
         if (!IsNewest(intent)) return null;
+        // A cue start or region prepared as an exact slice plays its slot (2.37), while the slot is still listed
+        // and still holds that slice; otherwise the sound itself, then the seek below, as before.
+        int? slotIndex = exact == null || c.Op == "play" ? null : SlotIndexOf(exact.Lease, exact.Generation);
         // The pipe checks once more, immediately before it writes: a play replaced while it queued there is not sent.
         string answer;
-        try { answer = await Pipe.Request($"DoPlaySound({index})", intent.Withdrawn.Token); }
+        try { answer = await Pipe.Request($"DoPlaySound({slotIndex ?? index})", intent.Withdrawn.Token); }
         catch (OperationCanceledException) when (intent.Withdrawn.IsCancellationRequested) { return null; }
         if (!answer.StartsWith("R-200", StringComparison.Ordinal)) throw new InvalidDataException("Soundpad rejected this action or its API does not support it.");
+        NoteAudio();
         var now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(); var person = Person(actor, participant); var epoch = Guid.NewGuid().ToString();
+        SlotLease? free;
         lock (playbackSync)
         {
             // A Stop or Panic that arrived while the play was on the wire was sent after it and has already
             // recorded the stop: that record stands, and this play (heard for an instant at most) is not counted.
             if (playbackOwner > intent.Revision) return null;
             playbackOwner = intent.Revision; playbackVersion++;
-            playback = new("PLAYING", 0, null, c.SoundId, epoch, person.Name, now, "web"); sampledTick = Environment.TickCount64; regionStart = null; seekSettlesUntil = Environment.TickCount64 + 1500;
+            // Whatever slice played before is replaced: its slot is free again (measured 2.36: at once).
+            free = DropSliceLocked();
+            if (slotIndex != null) { slice = new ExactSlice(exact!, c.Op == "region", intent); exact!.Taken = true; }
+            // A slice's record is about the ORIGINAL sound: its id and duration, the position where the slice starts.
+            playback = slotIndex == null ? new("PLAYING", 0, null, c.SoundId, epoch, person.Name, now, "web")
+                : new("PLAYING", exact!.OffsetMs, exact.SourceMs, c.SoundId, epoch, person.Name, now, "web", c.Op == "region" ? Math.Min(c.EndMs!.Value, exact.SourceMs) : null, c.Op == "region" && c.Repeat);
+            sampledTick = Environment.TickCount64; regionStart = null; seekSettlesUntil = Environment.TickCount64 + 1500;
         }
+        Free(free);
         try
         {
             await SamplePlayback(intent);
-            if (c.Op != "play" && !ShouldYield(intent))
+            if (slotIndex != null) { Interlocked.Increment(ref exactStarts); WakeAfter(exact!.SliceMs); }
+            else if (c.Op != "play" && exactEnabled) Interlocked.Increment(ref exactFallbacks);
+            if (c.Op != "play" && slotIndex == null && !ShouldYield(intent))
             {
                 for (int attempt = 0; playback.DurationMs is not > 0 && attempt < 3 && !ShouldYield(intent); attempt++) { await Task.Delay(50); await SamplePlayback(intent); }
                 Playback current; bool mine;
@@ -154,7 +192,8 @@ public sealed partial class Bridge
             // The play started but its cue could not be set: stop it rather than leave it playing from the top.
             // No newer play can have started meanwhile (this holds the gate), so the stop hits only this sound.
             try { await Success("DoStopSound()"); } catch (Exception) { }
-            lock (playbackSync) { if (playbackOwner == intent.Revision) { playbackVersion++; playback = new("STOPPED"); } }
+            lock (playbackSync) { if (playbackOwner == intent.Revision) { playbackVersion++; playback = new("STOPPED"); free = DropSliceLocked(); } }
+            Free(free);
             throw;
         }
     }
@@ -176,7 +215,11 @@ public sealed partial class Bridge
         else
         {
             if (c.PositionMs is null or < 0 || current.DurationMs is not > 0) throw new InvalidDataException("Invalid seek target or unknown duration.");
-            var target = Math.Min(c.PositionMs.Value, current.DurationMs.Value - 1); await Success($"DoSeekMs({target})");
+            var target = Math.Min(c.PositionMs.Value, current.DurationMs.Value - 1);
+            // A slice cannot be sought past its own range: a new slice starts from there instead (2.37).
+            ExactSlice? cut; lock (playbackSync) cut = slice;
+            if (cut != null) return await SeekSlice(c, cut, target, current.Status == "PAUSED");
+            await Success($"DoSeekMs({target})");
             lock (playbackSync) { if (playback.Epoch == c.Epoch) { seekSettlesUntil = Environment.TickCount64 + 1500; playback = playback with { PositionMs = target, PositionRevision = playback.PositionRevision + 1, RegionEndMs = null, Repeat = false, SampledAt = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() }; regionStart = null; sampledTick = Environment.TickCount64; } }
         }
         return true;

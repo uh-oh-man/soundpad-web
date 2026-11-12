@@ -1,6 +1,8 @@
 using SoundpadWeb;
 using SoundpadWeb.Testing;
 if (args.FirstOrDefault() == "--real-slice-audio-probe") { Environment.ExitCode = await RealSliceAudioProbe.Run(); return; }
+// Exact cue starts and regions on the real Soundpad (2.37); see RealExactPlaybackProbe.cs before running it.
+if (args.FirstOrDefault() == "--real-exact-playback-probe") { Environment.ExitCode = await RealExactPlaybackProbe.Run(); return; }
 if (args.FirstOrDefault() == "--real-slot-probe") { Environment.ExitCode = await RealSlotProbe.Run(); return; }
 if (args.FirstOrDefault() == "--word-timing-eval" && args.Length >= 2) { await WordTimingEval.Run(args); return; } // see WordTimingEval.cs
 if (args.FirstOrDefault() == "--mock-only")
@@ -442,6 +444,9 @@ bridge.UseMimicCapture(new MimicFixture());
 bridge.UseTranscriptEngine(new TranscriptFixture());
 bridge.UseHotkeys(key => new HotkeyFixture(key) { Taken = key == "F9" }); // F9 plays a key another app owns
 bridge.UseVoiceReplayLibrary(VoiceReplayFixture.Create(Path.Combine(directory, "voice-replay"))); // never the real library
+// Exact cue starts and regions (2.37) only with --exact-slices: the browser tests check the play-then-seek commands
+// Soundpad receives for a cue start (DoPlaySound(n), DoSeekMs(t)), which slices replace with DoPlaySound(slot).
+bridge.UseExactSlices(args.Contains("--exact-slices"));
 await bridge.Poll(true);
 // --owner-key <64 hex> (2.36) stands in for the Soundpad Web window's key, so e2e tests can open a page that takes
 // hosting over. Without it there is no window: the first protocol-3 page becomes the session owner, as in --no-window.

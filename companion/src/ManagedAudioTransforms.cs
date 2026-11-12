@@ -164,7 +164,7 @@ public sealed partial class ManagedAudioStore
             {
                 if (!variant.OwnsFile) throw new InvalidDataException("The original native entry is unavailable.");
                 if (variant.Permanent) throw new InvalidDataException("The accepted native entry was removed. Re-add the permanent file in Soundpad; the app will not silently create duplicates.");
-                journal.TempCategory ??= new() { Name = "Temp - Soundpad Web [" + journal.AppId[..6] + "-" + Guid.NewGuid().ToString("N")[..6] + "]" };
+                journal.TempCategory ??= NewTempCategory();
                 Save(); int category = await ManagedSoundpad.EnsureCategory(pipe, journal.TempCategory, Save);
                 variant.Native = await ManagedSoundpad.Import(pipe, variant.Path, category, journal.TempCategory.Name); variant.Native.SoundId = nativeId(variant.Path);
             }
