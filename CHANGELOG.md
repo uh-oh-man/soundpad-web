@@ -17,6 +17,7 @@ Notable changes to Soundpad Web. Versions follow the website's `package.json`; t
 
 - The EXE is now a Windows desktop app (about 13 MB larger, for Windows Forms and WebView2). Started from a terminal, it still prints there.
 - Wording across the site now says the Soundpad Web window keeps the session running, where it used to say to keep the host tab open.
+- Quitting while Soundpad is closed takes about 3 s instead of 7: the companion no longer waits for Soundpad to answer before it exits, and removes that session's temporary audio at the next start instead.
 
 - `--hidden-window` runs the window without ever showing it, for automated checks on a PC someone is using.
 

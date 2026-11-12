@@ -23,12 +23,19 @@ try {
     $listeners = @(Get-NetTCPConnection -State Listen -LocalPort $port)
     if ($listeners.Count -ne 1 -or $listeners[0].LocalAddress -ne '127.0.0.1' -or $listeners[0].OwningProcess -ne $process.Id) { throw 'Unexpected listener binding' }
     $process.StandardInput.WriteLine('')
-    if (-not $process.WaitForExit(10000)) { throw 'Graceful shutdown timed out' }
+    # Since 2.36 the window's WebView2 also has to let go of its profile; allow for a slow runner.
+    if (-not $process.WaitForExit(20000)) { throw 'Graceful shutdown timed out' }
     if ($process.ExitCode -ne 0) { throw 'EXE exited unsuccessfully' }
     # The EXE is a desktop (GUI) app since 2.36: PowerShell only captures such an app's output mid-pipeline.
     $licenses = @(& $exePath --licenses | Write-Output)
     if (($licenses -join "`n") -notmatch '2017 Leppsoft' -or ($licenses -join "`n") -notmatch 'Microsoft' -or ($licenses -join "`n") -notmatch 'Mark Heath' -or ($licenses -join "`n") -notmatch 'Andrew Ward') { throw 'Embedded notices missing' }
     Write-Output 'PASS: standalone EXE startup, numeric loopback-only listener, clean Enter shutdown, embedded notices. No browser or Soundpad launched; no audio played.'
+} catch {
+    # A public annotation, so a failed CI run says why without a login.
+    $output = ''
+    try { if ($process.HasExited) { $output = $process.StandardOutput.ReadToEnd() } } catch { }
+    Write-Output ("::error title=EXE smoke test::" + $_.Exception.Message + ' | ' + (($output -split "`r?`n" | Where-Object { $_ } | Select-Object -Last 6) -join ' | '))
+    throw
 } finally {
     if (-not $process.HasExited) { $process.Kill() }
     $process.Dispose()

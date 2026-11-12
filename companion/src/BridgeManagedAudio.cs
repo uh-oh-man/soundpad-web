@@ -273,7 +273,10 @@ public sealed partial class Bridge
         try
         {
             await audioGate.EnterAsync(PriorityGate.Lane.Normal);
-            try { if (!Audio.Public.Blocked) { Audio.RetireSession(); await Audio.Cleanup(); } recoveryPending = false; }
+            // With Soundpad closed the native part would only wait out pipe timeouts (seconds at every quit, 2.36 CI):
+            // the session is retired now and its files and Temp entries are removed at the next start, as after any
+            // cleanup that could not finish.
+            try { if (!Audio.Public.Blocked) { Audio.RetireSession(); if (available) await Audio.Cleanup(); } recoveryPending = false; }
             finally { audioGate.Release(); }
         }
         // Statistics of the last plays reach the disk before a clean exit (2.35).
