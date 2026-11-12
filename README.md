@@ -39,7 +39,8 @@ The host can also press a hotkey **in any app** to save the last few seconds mid
 - **Mimic**, described above, merged from the Voice Replay Studio desktop app.
 - Real named-pipe Soundpad integration, including Steam and standalone distributions using the same RC API.
 - Ordered, nested categories, native category icons, cross-category search, duplicate titles and empty categories.
-- Play, prominent Stop, accurate vendor playback status and progress where available.
+- Play, prominent Stop, accurate vendor playback status and progress where available. When two people click at once, the newest click wins: older ones never play late and show no error.
+- **Panic** (host): a separate button beside Stop, or **Shift+Escape**. It stops the sound and pauses guest playback until you press **Resume guest playback**; the session, Mimic and Temp carry on.
 - Up to 12 authorized guests per session, independent cryptographic host sessions, pinned host identity and invitation rotation.
 - Host-controlled permissions for playback, the Kick counter, seeking, Spotify, uploads, reverse and Mimic; guests default to playback enabled and counter editing disabled.
 - Authoritative persistent Kick counter with duplicate-request protection.
