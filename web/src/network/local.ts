@@ -139,7 +139,7 @@ export class LocalBridge {
       /** The companion window's launch key (2.36); only its page has one. Never logged or stored by the companion. */
       ownerKey?: string;
     },
-    /** Random per page load (2.36), so the companion gives a reloading owner its place back. */
+    /** This tab's id (2.36), kept across a reload so the companion gives a reloading owner its place back. */
     readonly clientId: string = crypto.randomUUID(),
   ) {
     this.connect();

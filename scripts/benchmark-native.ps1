@@ -35,7 +35,7 @@ try {
     $ready = $mockProcess.StandardOutput.ReadLineAsync().WaitAsync([TimeSpan]::FromSeconds(15)).GetAwaiter().GetResult()
     if ($ready -notmatch '^TEST_PIPE (soundpad-web-test-[a-f0-9]+)$') { throw 'Isolated mock did not start.' }
     $pipeName = $Matches[1]
-    $companionProcess = Start-IsolatedProcess $Executable @('--no-browser','--dev','--site','http://127.0.0.1:5173/','--pipe',$pipeName,'--data-dir',$taskRoot)
+    $companionProcess = Start-IsolatedProcess $Executable @('--no-browser','--no-window','--dev','--site','http://127.0.0.1:5173/','--pipe',$pipeName,'--data-dir',$taskRoot)
     $startup = $companionProcess.StandardOutput.ReadLineAsync().WaitAsync([TimeSpan]::FromSeconds(15)).GetAwaiter().GetResult()
     if ($startup -notmatch 'loopback port') { throw 'Companion benchmark startup failed.' }
     Start-Sleep -Seconds 2
@@ -61,7 +61,7 @@ try {
         $process.Dispose()
     }
     # Only these fixed app-owned files are created by this benchmark; no recursive deletion.
-    foreach ($name in @('state.json','state.json.tmp','companion.lock')) {
+    foreach ($name in @('state.json','state.json.tmp','companion.lock','companion.log','companion.1.log')) {
         $ownedFile = Join-Path $taskRoot $name
         if (Test-Path -LiteralPath $ownedFile) { Remove-Item -LiteralPath $ownedFile }
     }

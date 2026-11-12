@@ -148,9 +148,13 @@ describe('desktop session hello (2.36)', () => {
     expect(place.hash).toBe('');
     // Kept like the address, so a reload of the window page stays the owner.
     expect(sessionStorage.getItem('soundpad-owner-key')).toBe(ownerKey);
+    // The page hands its id over when it goes away, so the reloaded page presents the same one (review, 2.36).
+    sessionStorage.setItem('soundpad-client-id', hello.clientId as string);
     const reload = await hostPage('');
     expect(reload.socket.sent[0]).toMatchObject({ token, protocol: 3, ownerKey });
-    expect(reload.socket.sent[0].clientId).not.toBe(hello.clientId);
+    expect(reload.socket.sent[0].clientId).toBe(hello.clientId);
+    // It is taken back on load, so a duplicate of the open tab cannot present it too.
+    expect(sessionStorage.getItem('soundpad-client-id')).toBeNull();
   });
   it('sends no owner key from an ordinary launch link, and forgets an earlier one', async () => {
     sessionStorage.setItem('soundpad-owner-key', ownerKey);
@@ -270,6 +274,34 @@ describe('session owner (2.36)', () => {
     socket.receive({ type: 'state', state: state('2.36.0', 2) });
     await flush();
     expect(rooms).toHaveLength(1);
+  });
+  it('leaves its room when it is demoted on a reconnect, before the companion reports any state', async () => {
+    // Review (2.36): the role arrives first on a new socket, while the page still counts as not live.
+    const { socket } = await hostPage(`#host=1234.${token}`);
+    socket.receive({ type: 'role', role: 'owner', identity: identity(7) });
+    socket.receive({ type: 'state', state: state('2.36.0') });
+    await flush();
+    socket.close();
+    await vi.advanceTimersByTimeAsync(2600);
+    const again = FakeSocket.last;
+    expect(again).not.toBe(socket);
+    again.onopen?.();
+    again.receive({ type: 'role', role: 'view', identity: null });
+    await flush();
+    expect(rooms[0].closed).toEqual({ revoke: false });
+    expect(rooms).toHaveLength(1);
+  });
+  it('replaces the invitation once when two requests overlap', async () => {
+    const { socket } = await hostPage(`#host=1234.${token}&owner=${ownerKey}`);
+    socket.receive({ type: 'role', role: 'owner', identity: identity(7) });
+    socket.receive({ type: 'state', state: state('2.36.0') });
+    await flush();
+    socket.receive({ type: 'ownerAction', action: 'rotate' });
+    socket.receive({ type: 'ownerAction', action: 'rotate' });
+    await flush();
+    // One new room; a second running room would keep its own working invitation.
+    expect(rooms).toHaveLength(2);
+    expect(rooms[0].closed).toEqual({ revoke: true });
   });
 });
 

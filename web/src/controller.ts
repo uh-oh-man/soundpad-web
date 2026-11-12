@@ -106,6 +106,36 @@ export class Controller {
   private roleChanges = 0;
   /** The companion window's launch key; only its page has one, kept for its reloads. */
   private ownerKey?: string;
+  private clientId?: string;
+  /**
+   * This page's id toward the companion (2.36): kept across a reload of this tab, so a reloading owner gets the place the
+   * companion holds for it back at once. The id is handed over only when the page goes away and taken back on load, so a
+   * duplicated tab (which copies session storage while the page is open) gets an id of its own.
+   */
+  private hostClientId() {
+    if (this.clientId) return this.clientId;
+    let kept: string | null = null;
+    try {
+      kept = sessionStorage.getItem('soundpad-client-id');
+      sessionStorage.removeItem('soundpad-client-id');
+    } catch {
+      /* A new id per load still works; only the instant reclaim after a reload is lost. */
+    }
+    const id = kept && /^[0-9a-f-]{36}$/.test(kept) ? kept : crypto.randomUUID();
+    this.clientId = id;
+    try {
+      addEventListener('pagehide', () => {
+        try {
+          sessionStorage.setItem('soundpad-client-id', id);
+        } catch {
+          /* As above. */
+        }
+      });
+    } catch {
+      /* Not a browser page (unit tests). */
+    }
+    return id;
+  }
   private publishTimer?: ReturnType<typeof setTimeout>;
   private starting = false;
   private live = false;
@@ -303,6 +333,7 @@ export class Controller {
         session: (info) => this.showSession(info),
         ownerAction: (action) => this.ownerAction(action),
       },
+      this.hostClientId(),
     );
   }
   /** The companion named this page the session owner or a view (2.36). */
@@ -329,7 +360,9 @@ export class Controller {
    * that is running finishes first.
    */
   private async reconcile() {
-    if (this.starting || !this.live) return;
+    if (this.starting) return;
+    // A demoted page leaves its room even while the companion is unreachable: closing a room needs no companion,
+    // and a page that kept hosting would answer guests with the same invitation as the new owner (review, 2.36).
     if (this.role === 'view') {
       // Leave the room without revoking anyone: the same invitation goes on in the new owner.
       const session = this.session;
@@ -337,6 +370,7 @@ export class Controller {
       await session?.close(false);
       return;
     }
+    if (!this.live) return;
     if (!this.session) await this.hostSession(false);
     // A running room is the live invitation: tell the companion again if it holds none or an older one
     // (a Replace invite whose message was lost while the companion was unreachable).
@@ -396,7 +430,9 @@ export class Controller {
       // owner keeps the same invitation and guests reconnect by themselves. This tab's own copy is the
       // fallback for older companions.
       const relayed = rotate ? null : this.relayed;
-      const stored = rotate || relayed ? null : sessionStorage.getItem(key);
+      // A 2.36 companion (it sent a role) is the only keeper of the identity, so an invitation that End hosting
+      // ended cannot come back from this tab's copy; the copy is for older companions (review, 2.36).
+      const stored = rotate || relayed || this.role ? null : sessionStorage.getItem(key);
       this.identity = relayed
         ? { ...relayed }
         : stored
@@ -564,6 +600,12 @@ export class Controller {
             : 'Replacing the invitation in the hosting tab.',
         );
       else this.notify('Companion is disconnected.', 'error');
+      return;
+    }
+    // One replacement at a time: two overlapping ones (a press here and one relayed from a view) would leave a
+    // second room running with its own working invitation (review, 2.36).
+    if (this.starting) {
+      this.notify('The invitation is already being replaced. Try again in a moment.');
       return;
     }
     try {

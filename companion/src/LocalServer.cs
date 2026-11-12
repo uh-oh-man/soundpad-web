@@ -101,6 +101,10 @@ public sealed class LocalServer(Bridge bridge, string origin, string? ownerKey =
                 {
                     await sendGate.WaitAsync(lifetime.Token);
                     try { await socket.SendAsync(Encoding.UTF8.GetBytes(text), WebSocketMessageType.Text, true, lifetime.Token).WaitAsync(TimeSpan.FromSeconds(8)); }
+                    // A page that stops reading for 8 s is dropped, not kept with dead relays: it would otherwise stay
+                    // "connected" and could be promoted to owner without ever hearing it (review, 2.36). It reconnects
+                    // by itself and gets a fresh role.
+                    catch (TimeoutException) { lifetime.Cancel(); socket.Abort(); throw; }
                     finally { sendGate.Release(); }
                 }
                 Task Send(object value) => SendText(Json.Write(value));

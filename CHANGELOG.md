@@ -18,9 +18,15 @@ Notable changes to Soundpad Web. Versions follow the website's `package.json`; t
 - The EXE is now a Windows desktop app (about 13 MB larger, for Windows Forms and WebView2). Started from a terminal, it still prints there.
 - Wording across the site now says the Soundpad Web window keeps the session running, where it used to say to keep the host tab open.
 
+- `--hidden-window` runs the window without ever showing it, for automated checks on a PC someone is using.
+
 ### Measured
 
-On this PC, with a test Soundpad and the public relays (no real Soundpad, no second PC): a guest joined the window's session in under 2 s, and with the window minimized for 2 minutes 15 of 15 guest plays arrived, 37–67 ms from click to Soundpad. Closing the window exited in about 1 s and left no WebView2 processes.
+On this PC, with a test Soundpad and the public relays (no real Soundpad, no second PC): a guest joined the window's session in under 2 s, and with the window minimized for 2 minutes 15 of 15 guest plays arrived, 37–67 ms from click to Soundpad. Closing the window exited in about 1 s and left no WebView2 processes. With the 2.36 website in a hidden window, a browser tab became a view with the same invite, a guest joined in 1.8 s and 8 of 8 plays arrived in 33–96 ms, also after the view closed.
+
+### Reviewed
+
+A review of the change found six problems, all fixed before release: a tab demoted while reconnecting could keep hosting the same invitation; two overlapping Replace invite requests could leave a second working invitation; an invitation ended with End hosting could come back from a tab's saved copy; a page that stopped reading for 8 s kept its place and could be handed hosting it never heard about; a reloaded hosting tab lost its place to another tab; and the developer benchmark script opened a window.
 
 ### Tests
 
