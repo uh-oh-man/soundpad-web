@@ -28,7 +28,7 @@ public static class PlaybackBench
     {
         public int Seq; public string Client = "", Op = "", Kind = ""; public string? SoundId; public int? Index; public bool Intent;
         public long Intended, Arrived, Acked; public Reply? Reply; public string? Failure; public Task? Task;
-        public long? Reached; public long? NewerArrived;
+        public long? Reached; public long? NewerArrived; public long? PositionMs, EndMs;
         public bool Superseded => Reply is { Ok: true } && Flag("superseded") == true;
         public bool? Played => Reply is { Ok: true } ? Flag("played") : null;
         private bool? Flag(string name)
@@ -104,6 +104,15 @@ public static class PlaybackBench
                 return at >= 0 && at < entries.Length ? (int)entries[at].Attribute("index")! : -1;
             }
             var indexes = natives.Append(tempSound).ToDictionary(x => x.Id, x => IndexOf(x.Id));
+            // Warm-up (2.37), the same for every companion version: one cue start, a Stop, then a quiet moment, as a
+            // session has before the clicking starts. A companion with exact slices registers its slot files then
+            // (it never does while something plays); an older one just played a sound. At most 3 s.
+            await bridge.Execute(Cmd("startAt") with { SoundId = natives[0].Id, PositionMs = 500 }, "host");
+            await bridge.Execute(Cmd("stop"), "host");
+            for (int i = 0; i < 30 && SlotIndexes().Count < 3; i++) { await Task.Delay(100); await bridge.Poll(i % 10 == 0); }
+            await bridge.Poll(true);
+            // Slot entries (2.37) are the app's own and not in the website's library; a play of one is a cue start or region.
+            HashSet<int> SlotIndexes() => System.Xml.Linq.XDocument.Parse(mock.AllXml).Root!.Elements("Sound").Where(e => SlotPool.IsSlotFile((string?)e.Attribute("url") ?? "")).Select(e => (int)e.Attribute("index")!).ToHashSet();
 
             // The cost of one request with no simulated latency, for reading the numbers below.
             var probe = Stopwatch.StartNew(); for (int i = 0; i < 20; i++) await inner.Request("IsAlive()"); double bareRoundTrip = probe.Elapsed.TotalMilliseconds / 20;
@@ -115,7 +124,7 @@ public static class PlaybackBench
             // One caller at a time, like the single loopback socket: commands reach Execute in a definite order.
             Sent Send(string client, Command command, string kind, bool intent, string actor, Participant? person, string? requester)
             {
-                var item = new Sent { Client = client, Op = command.Op, Kind = kind, SoundId = command.SoundId, Intent = intent, Intended = Stopwatch.GetTimestamp() };
+                var item = new Sent { Client = client, Op = command.Op, Kind = kind, SoundId = command.SoundId, Intent = intent, Intended = Stopwatch.GetTimestamp(), PositionMs = command.PositionMs, EndMs = command.EndMs };
                 if (command.SoundId != null && indexes.TryGetValue(command.SoundId, out int index)) item.Index = index;
                 lock (order)
                 {
@@ -209,16 +218,38 @@ public static class PlaybackBench
 
             // Match each DoPlaySound Soundpad received to the command that caused it: the pipe call that was open
             // at that moment, then the command that was open around that call and answers first.
-            int unattributed = 0; var claimed = new HashSet<Sent>();
+            int unattributed = 0; var claimed = new HashSet<Sent>(); var slots = SlotIndexes(); var exactPlays = new HashSet<Sent>();
             foreach (var arrival in timeline.Where(e => e.Command.StartsWith("DoPlaySound(")))
             {
                 int index = int.Parse(arrival.Command[12..^1]);
                 var call = calls.Where(c => c.Command == arrival.Command && c.Issued <= arrival.At && c.Returned >= arrival.At).OrderByDescending(c => c.Issued).FirstOrDefault();
                 if (call.Command == null) { unattributed++; continue; }
-                var owner = intents.Where(x => !claimed.Contains(x) && x.Op != "stop" && x.Intended <= call.Issued && (x.Acked == 0 || x.Acked >= call.Returned) && x.Index == index).OrderBy(x => x.Acked == 0 ? long.MaxValue : x.Acked).FirstOrDefault()
+                bool slot = slots.Contains(index);
+                var owner = intents.Where(x => !claimed.Contains(x) && x.Op != "stop" && x.Intended <= call.Issued && (x.Acked == 0 || x.Acked >= call.Returned) && (slot ? x.Op is "startAt" or "region" : x.Index == index)).OrderBy(x => x.Acked == 0 ? long.MaxValue : x.Acked).FirstOrDefault()
                     ?? intents.Where(x => !claimed.Contains(x) && x.Op == "reverse" && x.Intended <= call.Issued && (x.Acked == 0 || x.Acked >= call.Returned)).OrderBy(x => x.Acked == 0 ? long.MaxValue : x.Acked).FirstOrDefault();
                 if (owner == null) { unattributed++; continue; }
-                claimed.Add(owner); owner.Reached = arrival.At;
+                claimed.Add(owner); owner.Reached = arrival.At; if (slot) exactPlays.Add(owner);
+            }
+            // Cue starts and regions (2.37): when was the wanted audio actually the one playing? An exact slice plays
+            // it from its first frame; the old way plays the sound from the top until its DoSeekMs arrives.
+            var cues = intents.Where(x => x.Op is "startAt" or "region" && x.Reached != null).ToArray();
+            double? CueReady(Sent x)
+            {
+                if (exactPlays.Contains(x)) return Ms(x.Intended, x.Reached!.Value);
+                var nextPlay = timeline.Where(e => e.At > x.Reached!.Value && e.Command.StartsWith("DoPlaySound(")).Select(e => e.At).DefaultIfEmpty(long.MaxValue).First();
+                var seek = timeline.Where(e => e.At > x.Reached!.Value && e.At < nextPlay && e.Command.StartsWith("DoSeekMs(")).Select(e => e.At).DefaultIfEmpty(0).First();
+                return seek == 0 ? null : Ms(x.Intended, seek);
+            }
+            var cueReady = cues.Select(x => (Op: x.Op, Ms: CueReady(x))).ToArray();
+            // Every slot play must hold exactly the frames its command asked for (48 kHz fixtures).
+            MockSoundpad.SlotPlay[] slotPlays; lock (mock.SlotPlays) slotPlays = mock.SlotPlays.ToArray();
+            int contentMismatches = 0;
+            foreach (var x in exactPlays)
+            {
+                var played = slotPlays.Where(p => p.Timestamp >= x.Reached!.Value).OrderBy(p => p.Timestamp).FirstOrDefault();
+                long sourceFrames = x.Kind == "temp" ? 48000L * 1800 / 1000 : 48000L * 2500 / 1000, from = SliceRenderer.FrameOf(x.PositionMs ?? 0, 48000);
+                long frames = x.Op == "region" ? Math.Min(SliceRenderer.FrameOf(x.EndMs ?? 0, 48000), sourceFrames) - from : sourceFrames - from;
+                if (played == null || played.Frames != frames) contentMismatches++;
             }
             var started = intents.Where(x => x.Reached != null).ToArray();
             double Staleness(Sent x) => x.NewerArrived is long newer ? Ms(newer, x.Reached!.Value) : double.NegativeInfinity;
@@ -234,7 +265,7 @@ public static class PlaybackBench
             // Is what Soundpad ended up doing what the last intent asked for?
             var last = intents.LastOrDefault();
             var lastPlay = timeline.LastOrDefault(e => e.Command.StartsWith("DoPlaySound("));
-            string expected = last == null ? "nothing" : last.Op == "stop" ? "stopped" : last.Index is int wanted ? $"DoPlaySound({wanted})" : "the reversed clip";
+            string expected = last == null ? "nothing" : last.Op == "stop" ? "stopped" : exactPlays.Contains(last) ? "an exact slice of the sound at index " + last.Index + " (played from a slot)" : last.Index is int wanted ? $"DoPlaySound({wanted})" : "the reversed clip";
             string actual; bool matches;
             if (last == null) { actual = "nothing"; matches = true; }
             else if (last.Op == "stop")
@@ -274,7 +305,19 @@ public static class PlaybackBench
                 {
                     sendToSoundpadForPlaysThatStarted = Distribution(started.Select(x => Ms(x.Intended, x.Reached!.Value))),
                     sendToAckForAllPlaybackCommands = Distribution(intents.Where(x => x.Acked != 0).Select(x => Ms(x.Intended, x.Acked))),
-                    sendToAckForStop = Distribution(stops.Select(x => Ms(x.Intended, x.Acked)))
+                    sendToAckForStop = Distribution(stops.Select(x => Ms(x.Intended, x.Acked))),
+                    // 2.37: cue starts and regions on their own, and when their wanted audio was really playing.
+                    sendToSoundpadForCueStartsAndRegions = Distribution(cues.Select(x => Ms(x.Intended, x.Reached!.Value))),
+                    sendToWantedAudioForCueStartsAndRegions = Distribution(cueReady.Where(c => c.Ms != null).Select(c => c.Ms!.Value))
+                },
+                exact = new
+                {
+                    cueStartsAndRegionsThatStarted = cues.Length,
+                    asExactSlices = cues.Count(exactPlays.Contains),
+                    theOldWayWithASeek = cues.Count(x => !exactPlays.Contains(x)),
+                    oldWayWithoutAnySeek = cueReady.Count(c => c.Ms == null),
+                    slotPlaysWithWrongFrames = contentMismatches,
+                    slotsRegistered = slots.Count
                 },
                 plays = new
                 {
@@ -318,6 +361,9 @@ public static class PlaybackBench
             Console.WriteLine(Line("Send -> answer (all playback commands)", result.latencyMs.sendToAckForAllPlaybackCommands));
             Console.WriteLine(Line("Send -> answer (Stop)", result.latencyMs.sendToAckForStop));
             Console.WriteLine($"Plays that reached Soundpad: {result.plays.reachedSoundpad}; obsolete (a newer intent had arrived {grace:0.#}+ ms earlier): {obsolete.Length}{(obsolete.Length > 0 ? $", worst {result.plays.obsoleteWorstMsAfterNewerIntent} ms late" : "")}; overtaken while on the wire (< {grace:0.#} ms): {overtaken.Length}; unmatched: {unattributed}");
+            Console.WriteLine(Line("Send -> reached Soundpad (cue starts and regions)", result.latencyMs.sendToSoundpadForCueStartsAndRegions));
+            Console.WriteLine(Line("Send -> wanted audio playing (cue starts and regions)", result.latencyMs.sendToWantedAudioForCueStartsAndRegions));
+            Console.WriteLine($"Cue starts and regions that started: {result.exact.cueStartsAndRegionsThatStarted}; exact slices {result.exact.asExactSlices}, the old way {result.exact.theOldWayWithASeek} ({result.exact.oldWayWithoutAnySeek} never got their seek); slot plays with wrong frames: {contentMismatches}; slots registered: {slots.Count}");
             Console.WriteLine($"Longest Stop wait: {result.longestStopWaitMs} ms");
             Console.WriteLine($"Final state: last intent {result.final.lastIntent} from the {result.final.lastIntentClient}; expected {expected}; got {actual}; {(matches ? "MATCHES" : "DOES NOT MATCH")}");
             Console.WriteLine($"Background: {string.Join(", ", result.background.queries.Select(p => p.Value + " " + p.Key))}; {uploads} uploads ({uploadFailures} failed); {polls} polls ({pollFailures} failed{(pollFailure != null ? ": " + pollFailure : "")}); {result.background.errors} error answers");

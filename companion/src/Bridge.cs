@@ -34,7 +34,7 @@ public sealed partial class Bridge(ISoundpad pipe, StateStore store) : IDisposab
         // Playback statistics still waiting for their deferred write go to disk now (2.35).
         Interlocked.Exchange(ref disposed, 1);
         if (Volatile.Read(ref stateDirty) != 0) { try { Task.Run(FlushState).Wait(TimeSpan.FromSeconds(2)); } catch (Exception) { /* the last durable save stands */ } }
-        hotkey.Dispose(); waveformService.Dispose(); transcriber.Dispose(); mimicCapture.Dispose();
+        hotkey.Dispose(); waveformService.Dispose(); transcriber.Dispose(); mimicCapture.Dispose(); pcm.Dispose();
     }
     public Snapshot Snapshot => new(1, revision, available, error, parsed.Public, playback, disk.Counter, disk.Permissions, 2,
         Convert.ToHexString(System.Security.Cryptography.HMACSHA256.HashData(Convert.FromBase64String(disk.IdentityKey), System.Text.Encoding.UTF8.GetBytes("workspace-host-v2"))).ToLowerInvariant(), disk.StatisticsVersion, typeof(Bridge).Assembly.GetName().Version?.ToString(3), managed?.Public.Revision ?? 0, MimicSnapshot, playbackSuspended);
@@ -60,12 +60,13 @@ public sealed partial class Bridge(ISoundpad pipe, StateStore store) : IDisposab
             }
             var cats = lastIconCategories;
             if (cats.StartsWith("R-404")) throw new InvalidDataException("This Soundpad version does not support categories. Update Soundpad.");
-            var next = LibraryParser.Parse(all, cats, disk, iconCache ??= store.ReadIcons(disk), nativeStatistics);
+            // The app's exact-playback slots are hidden from the library the website sees (2.37).
+            var next = HideSlots(LibraryParser.Parse(all, cats, disk, iconCache ??= store.ReadIcons(disk), nativeStatistics));
             parsed = next with { Public = next.Public with { Sounds = next.Public.Sounds.Select(s => managed?.Annotation(s.Id) is { } info ? s with { Name = info.Kind == "native" ? s.Name : info.Name, Icon = s.Icon ?? iconCache?.GetValueOrDefault(info.WorkspaceId) ?? info.Aliases.Select(id=>iconCache?.GetValueOrDefault(id)).FirstOrDefault(icon=>icon != null), Temporary = info.Temporary, UploadedBy = info.Uploader, AssetId = info.AssetId, Orientation = info.Orientation, AudioKind = info.Kind, InternalVariant = info.InternalVariant, AliasOf = info.AliasOf, WorkspaceId = info.WorkspaceId, Aliases = info.Aliases } : s).ToArray() } }; parsed = parsed with { Public = parsed.Public with { Version = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(Json.Write(parsed.Public)))).ToLowerInvariant()[..24] } }; available = true; error = null; lastSoundlist = all;
         }
         catch (Exception ex) when (ex is IOException or InvalidDataException or OperationCanceledException or System.Xml.XmlException or ArgumentException)
         {
-            available = false; lock (playbackSync) { playbackVersion++; playback = new(); }
+            available = false; SlotLease? free; lock (playbackSync) { playbackVersion++; playback = new(); free = DropSliceLocked(); } Free(free);
             error = ex is InvalidDataException ? ex.Message : "Soundpad is unavailable. Open it normally; reconnection is automatic.";
         }
     }
@@ -85,7 +86,7 @@ public sealed partial class Bridge(ISoundpad pipe, StateStore store) : IDisposab
                 {
                     await SamplePlayback();
                 }
-                catch (Exception ex) when (ex is IOException or OperationCanceledException) { available = false; lock (playbackSync) { playbackVersion++; playback = new(); } error = "Soundpad disconnected; reconnecting automatically."; }
+                catch (Exception ex) when (ex is IOException or OperationCanceledException) { available = false; SlotLease? free; lock (playbackSync) { playbackVersion++; playback = new(); free = DropSliceLocked(); } Free(free); error = "Soundpad disconnected; reconnecting automatically."; }
                 // Soundpad refused the seek or stop at the end of a region (2.35). This used to end the companion;
                 // the next poll simply tries again.
                 catch (InvalidDataException) { }
@@ -94,6 +95,7 @@ public sealed partial class Bridge(ISoundpad pipe, StateStore store) : IDisposab
         }
         finally { gate.Release(); }
         await RecoverAudioIfDue(library);
+        await RegisterSlotsIfDue();
     }
     public Task<Reply> Execute(Command c, string actor, Participant? participant = null, string? requester = null, string? audience = null)
     {
@@ -164,8 +166,17 @@ public sealed partial class Bridge(ISoundpad pipe, StateStore store) : IDisposab
         // the queue cannot grow. The limit stays for everything else.
         bool counted = !start && !control;
         if (counted && Interlocked.Increment(ref waiting) > 24) { Interlocked.Decrement(ref waiting); return new("ack", c.Id, false, "Busy. Try again."); }
+        ExactPlan? exact = null;
         try
         {
+            // A cue start or region is rendered into a slot before the gate is taken (2.37), so nothing waits for it;
+            // overtaken meanwhile, it plays nothing and is answered quietly.
+            if (start && intent != null)
+            {
+                var prepared = await PrepareFor(c, c.SoundId == null ? null : parsed.Paths.GetValueOrDefault(c.SoundId), intent);
+                if (prepared.Withdrawn) return Superseded(c, "newer");
+                exact = prepared.Plan;
+            }
             if (intent != null) { if (!await EnterFor(gate, intent)) return Superseded(c, "newer"); }
             else if (control) { if (!await EnterControl(c)) return Superseded(c, "stale"); }
             else await gate.EnterAsync(start ? PriorityGate.Lane.Urgent : PriorityGate.Lane.Normal);
@@ -189,7 +200,7 @@ public sealed partial class Bridge(ISoundpad pipe, StateStore store) : IDisposab
                         var found = await FreshIndex(c.SoundId, intent);
                         if (found.Result == Lookup.Withdrawn) return Superseded(c, "newer");
                         if (found.Result == Lookup.Missing) throw new InvalidDataException("That sound is no longer in Soundpad. Refresh and choose it again.");
-                        var epoch = await StartPlayback(c, actor, participant, found.Index, intent);
+                        var epoch = await StartPlayback(c, actor, participant, found.Index, intent, exact);
                         if (epoch == null) return Superseded(c, "newer");
                         data = new { played = true, epoch };
                         break;
@@ -237,6 +248,6 @@ public sealed partial class Bridge(ISoundpad pipe, StateStore store) : IDisposab
             }
             finally { gate.Release(); }
         }
-        finally { if (counted) Interlocked.Decrement(ref waiting); }
+        finally { Discard(exact); if (counted) Interlocked.Decrement(ref waiting); }
     }
 }

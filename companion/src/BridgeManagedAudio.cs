@@ -29,7 +29,10 @@ public sealed partial class Bridge
                     // background lane, so a play that is ready goes first.
                     await gate.EnterAsync(PriorityGate.Lane.Background); try { await work(); } finally { gate.Release(); }
                 });
-                managed.Changed += Publish; return managed;
+                managed.Changed += Publish;
+                // Exact playback (2.37): the slot files may go with the Temp category, and only a second after audio stopped.
+                managed.OwnedSlotPaths = () => Slots.Owned(); managed.PlaybackActivity = () => Interlocked.Read(ref lastAudio);
+                return managed;
             }
         }
     }
@@ -84,7 +87,7 @@ public sealed partial class Bridge
             if (intent == null) throw new InvalidDataException("Guest playback permission or session authorization changed.");
             if (!sessionAccepting) throw new InvalidDataException("Hosting has ended.");
             if (ReadyFor(c) is { } ready && await PlayReady(c, actor, participant, intent, ready) is { } played) return played;
-            string assetId, state; string? soundId;
+            string assetId, state; string? soundId, variantPath;
             if (!await EnterFor(audioGate, intent)) return Superseded(c, "newer");
             try
             {
@@ -114,25 +117,31 @@ public sealed partial class Bridge
                     }
                 }
                 var prepared = await Audio.Prepare(asset.Id, orientation, actor == "host" || disk.Permissions.GuestTransforms);
-                assetId = asset.Id; state = asset.State; soundId = prepared.Variant.Native?.SoundId;
+                assetId = asset.Id; state = asset.State; soundId = prepared.Variant.Native?.SoundId; variantPath = prepared.Variant.Path;
             }
             finally { audioGate.Release(); }
-            // In the urgent lane while it may still play; superseded meanwhile, only the bookkeeping is left.
-            if (!IsNewest(intent) || !await EnterFor(gate, intent)) await gate.EnterAsync(PriorityGate.Lane.Normal);
+            // Rendered before the gate is taken, like a library sound's (2.37); only while this may still play.
+            var exact = IsNewest(intent) ? await PrepareFor(c, variantPath, intent) : default;
             try
             {
-                if (disk.Receipts.ContainsKey(c.Id)) return new("ack", c.Id, true);
-                await RefreshInner();
-                if (!available || soundId == null || !parsed.Indexes.TryGetValue(soundId, out int index)) throw new InvalidDataException("The prepared native entry is unavailable. Its source is preserved in Temp.");
-                string? epoch = null; bool allowed = sessionAccepting && GuestStillAllowed(actor, requester, audience) && (actor == "host" || !playbackSuspended && (c.Op is not ("startAt" or "region") || disk.Permissions.GuestSeeking));
-                if (IsNewest(intent) && allowed)
-                    epoch = await StartPlayback(c with { Op = c.Op is "startAt" or "region" ? c.Op : "play", SoundId = soundId }, actor, participant, index, intent);
-                RememberReceipt(c); SaveLater(); Publish(); CommandAccepted?.Invoke();
-                // Prepared but not played: the quiet answer, with what was prepared. ("suspended" also covers a
-                // guest whose permission to play ended while the sound was being prepared.)
-                return new("ack", c.Id, true, Data: epoch != null ? new { assetId, state, played = true, epoch } : new { assetId, state, played = false, superseded = true, reason = allowed ? "newer" : "suspended" });
+                // In the urgent lane while it may still play; superseded meanwhile, only the bookkeeping is left.
+                if (!IsNewest(intent) || !await EnterFor(gate, intent)) await gate.EnterAsync(PriorityGate.Lane.Normal);
+                try
+                {
+                    if (disk.Receipts.ContainsKey(c.Id)) return new("ack", c.Id, true);
+                    await RefreshInner();
+                    if (!available || soundId == null || !parsed.Indexes.TryGetValue(soundId, out int index)) throw new InvalidDataException("The prepared native entry is unavailable. Its source is preserved in Temp.");
+                    string? epoch = null; bool allowed = sessionAccepting && GuestStillAllowed(actor, requester, audience) && (actor == "host" || !playbackSuspended && (c.Op is not ("startAt" or "region") || disk.Permissions.GuestSeeking));
+                    if (IsNewest(intent) && allowed)
+                        epoch = await StartPlayback(c with { Op = c.Op is "startAt" or "region" ? c.Op : "play", SoundId = soundId }, actor, participant, index, intent, exact.Plan);
+                    RememberReceipt(c); SaveLater(); Publish(); CommandAccepted?.Invoke();
+                    // Prepared but not played: the quiet answer, with what was prepared. ("suspended" also covers a
+                    // guest whose permission to play ended while the sound was being prepared.)
+                    return new("ack", c.Id, true, Data: epoch != null ? new { assetId, state, played = true, epoch } : new { assetId, state, played = false, superseded = true, reason = allowed ? "newer" : "suspended" });
+                }
+                finally { gate.Release(); }
             }
-            finally { gate.Release(); }
+            finally { Discard(exact.Plan); }
         }
         catch (Exception ex) when (ex is not OutOfMemoryException) { return new("ack", c.Id, false, ex is InvalidDataException ? ex.Message : "Managed audio could not finish. Open Temp to inspect preserved recovery state."); }
     }
@@ -150,19 +159,26 @@ public sealed partial class Bridge
     /// </summary>
     private async Task<Reply?> PlayReady(Command c, string actor, Participant? participant, Intent intent, ReadyAudio ready)
     {
-        if (!await EnterFor(gate, intent)) return Superseded(c, "newer");
+        // A cue start or region of a Temp or kept sound is an exact slice of its file too (2.37).
+        var prepared = await PrepareFor(c, ready.Path, intent);
+        if (prepared.Withdrawn) return Superseded(c, "newer");
         try
         {
-            if (disk.Receipts.ContainsKey(c.Id)) return new("ack", c.Id, true);
-            var found = await FreshIndex(ready.SoundId, intent);
-            if (found.Result == Lookup.Withdrawn) return Superseded(c, "newer");
-            if (found.Result == Lookup.Missing) return null;
-            var epoch = await StartPlayback(c with { Op = c.Op is "startAt" or "region" ? c.Op : "play", SoundId = ready.SoundId }, actor, participant, found.Index, intent);
-            if (epoch == null) return Superseded(c, "newer");
-            RememberReceipt(c); SaveLater(); Publish(); CommandAccepted?.Invoke();
-            return new("ack", c.Id, true, Data: new { assetId = ready.AssetId, state = ready.State, played = true, epoch });
+            if (!await EnterFor(gate, intent)) return Superseded(c, "newer");
+            try
+            {
+                if (disk.Receipts.ContainsKey(c.Id)) return new("ack", c.Id, true);
+                var found = await FreshIndex(ready.SoundId, intent);
+                if (found.Result == Lookup.Withdrawn) return Superseded(c, "newer");
+                if (found.Result == Lookup.Missing) return null;
+                var epoch = await StartPlayback(c with { Op = c.Op is "startAt" or "region" ? c.Op : "play", SoundId = ready.SoundId }, actor, participant, found.Index, intent, prepared.Plan);
+                if (epoch == null) return Superseded(c, "newer");
+                RememberReceipt(c); SaveLater(); Publish(); CommandAccepted?.Invoke();
+                return new("ack", c.Id, true, Data: new { assetId = ready.AssetId, state = ready.State, played = true, epoch });
+            }
+            finally { gate.Release(); }
         }
-        finally { gate.Release(); }
+        finally { Discard(prepared.Plan); }
     }
     /// <summary>
     /// "... and play" for a copy, clip or import that was just made (2.35): its intent was reserved when the

@@ -114,8 +114,42 @@ public sealed partial class ManagedAudioStore
     /// <summary>Creates or finds the Temp category exactly as a reverse would, without importing or playing anything (harness check).</summary>
     internal Task<int> EnsureTempCategory()
     {
-        journal.TempCategory ??= new() { Name = "Temp - Soundpad Web [" + journal.AppId[..6] + "-" + Guid.NewGuid().ToString("N")[..6] + "]" };
+        journal.TempCategory ??= NewTempCategory();
         Save(); return Native(() => ManagedSoundpad.EnsureCategory(pipe, journal.TempCategory, Save));
+    }
+    private OwnedCategory NewTempCategory() => new() { Name = "Temp - Soundpad Web [" + journal.AppId[..6] + "-" + Guid.NewGuid().ToString("N")[..6] + "]" };
+    /// <summary>How long Soundpad must have stayed stopped before the Temp category is removed (2.37).</summary>
+    internal const int TempQuietMs = 1000;
+    /// <summary>
+    /// When the companion last played, stopped or saw something playing (<see cref="Environment.TickCount64"/>), so the
+    /// Temp category is removed only a second after that (2.37). Without it, a second after Soundpad was seen stopped.
+    /// </summary>
+    public Func<long>? PlaybackActivity { get; set; }
+    /// <summary>The app's exact-playback slot files (2.37): removable with the Temp category, by exact path.</summary>
+    public Func<IReadOnlyCollection<string>>? OwnedSlotPaths { get; set; }
+    /// <summary>
+    /// Registers the exact-playback slot files (2.37) in the app's Temp category, creating the category the way an
+    /// import does. Only while Soundpad is stopped: it looks again before each change and gives up (false) as soon as
+    /// something plays, to be tried again later. A slot already listed in that category is kept as it is; one listed
+    /// anywhere else makes it throw, as an import would, so nothing of the person's is ever claimed.
+    /// </summary>
+    internal async Task<bool> RegisterSlots(IReadOnlyList<string> paths)
+    {
+        RequireWritable();
+        if (journal.TempCategory == null) { journal.TempCategory = NewTempCategory(); Save(); }
+        var temp = journal.TempCategory;
+        int? category = await Native(async () => await pipe.Request("GetPlayStatus()") == "STOPPED" ? await ManagedSoundpad.EnsureCategory(pipe, temp, Save) : (int?)null);
+        if (category == null) return false;
+        foreach (var path in paths)
+        {
+            bool added = await Native(async () =>
+            {
+                if (await pipe.Request("GetPlayStatus()") != "STOPPED") return false;
+                await ManagedSoundpad.Import(pipe, path, category.Value, temp.Name); return true;
+            });
+            if (!added) return false;
+        }
+        return true;
     }
     /// <summary>Raises (or clears) the Temp issue offering to remove garbled duplicate categories, so the host sees it at once.</summary>
     private async Task CheckDuplicateCategories()
@@ -238,23 +272,38 @@ public sealed partial class ManagedAudioStore
         if (journal.TempCategory is not { State: "created", NativeId: int index } temp) return;
         try
         {
-            await Native(async () =>
+            // Soundpad 4.0.35 exited once when a category was removed right after one of its sounds played (2.37,
+            // measured during the slot probe). So the category goes only when Soundpad was seen stopped, stayed
+            // stopped for a second with nothing played by the companion meanwhile, and is still stopped.
+            for (int round = 0; round < 3; round++)
             {
-                if (await pipe.Request("GetPlayStatus()") != "STOPPED") return false;
-                var catalog = await ManagedSoundpad.Read(pipe);
-                var category = catalog.Categories.SingleOrDefault(c => c.Index == index && c.Name == temp.Name);
-                if (category == null)
+                long? stopped = await Native(async () => await pipe.Request("GetPlayStatus()") == "STOPPED" ? Environment.TickCount64 : (long?)null);
+                if (stopped == null) return;
+                long activity = PlaybackActivity?.Invoke() ?? long.MinValue;
+                long wait = Math.Max(stopped.Value, activity) + TempQuietMs - Environment.TickCount64;
+                if (wait > 0) await Task.Delay((int)Math.Min(wait, TempQuietMs));
+                bool? done = await Native(async () =>
                 {
-                    // Already gone (removed by hand, or Soundpad was reset): start fresh next session.
-                    if (!catalog.Categories.Any(c => c.Name == temp.Name)) { journal.TempCategory = null; Save(); }
-                    return false;
-                }
-                var ours = journal.Assets.SelectMany(a => a.Variants).Where(v => v.Retired && v.OwnsFile && !v.Permanent && !v.LegacyApproval && v.State != "removed").Select(v => v.Path).ToHashSet(StringComparer.OrdinalIgnoreCase);
-                if (category.Paths.Any(p => !ours.Contains(p))) return false;
-                await ManagedSoundpad.RemoveCategoryWithSounds(pipe, catalog, category);
-                journal.TempCategory = null; Save();
-                return true;
-            });
+                    if (await pipe.Request("GetPlayStatus()") != "STOPPED") return false;
+                    if ((PlaybackActivity?.Invoke() ?? long.MinValue) != activity) return (bool?)null; // played meanwhile: wait again
+                    var catalog = await ManagedSoundpad.Read(pipe);
+                    var category = catalog.Categories.SingleOrDefault(c => c.Index == index && c.Name == temp.Name);
+                    if (category == null)
+                    {
+                        // Already gone (removed by hand, or Soundpad was reset): start fresh next session.
+                        if (!catalog.Categories.Any(c => c.Name == temp.Name)) { journal.TempCategory = null; Save(); }
+                        return false;
+                    }
+                    var ours = journal.Assets.SelectMany(a => a.Variants).Where(v => v.Retired && v.OwnsFile && !v.Permanent && !v.LegacyApproval && v.State != "removed").Select(v => v.Path).ToHashSet(StringComparer.OrdinalIgnoreCase);
+                    // The exact-playback slot files are the app's own too (2.37), by exact path; anything else still keeps the category.
+                    foreach (var slot in OwnedSlotPaths?.Invoke() ?? []) if (Path.IsPathFullyQualified(slot) && SlotPool.IsSlotFile(slot)) ours.Add(slot);
+                    if (category.Paths.Any(p => !ours.Contains(p))) return false;
+                    await ManagedSoundpad.RemoveCategoryWithSounds(pipe, catalog, category);
+                    journal.TempCategory = null; Save();
+                    return true;
+                });
+                if (done != null) return;
+            }
         }
         catch (Exception ex) when (ex is InvalidDataException or IOException or OperationCanceledException or System.Xml.XmlException)
         {
