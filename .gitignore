@@ -12,3 +12,6 @@ playwright-report/
 
 # Owner reports (bugs, feature wishes, spam): kept on this PC only, never uploaded. See reports/README.md.
 reports/
+
+# Claude Code worktrees made for parallel agents (temporary).
+.claude/worktrees/
