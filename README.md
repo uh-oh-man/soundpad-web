@@ -13,10 +13,10 @@ A static website plus one portable Windows program on the host PC. No accounts, 
 ## Host a session
 
 1. Download **SoundpadWeb.exe** from the [latest release](https://github.com/uh-oh-man/soundpad-web/releases/latest). It requires Windows 11 x64, with no installer, administrator access or separate .NET.
-2. Open Soundpad normally, then run the EXE. It opens the website for you.
-3. Click **Copy Invite** and share the link. Keep the companion window and your browser tab open while hosting.
+2. Open Soundpad normally, then run the EXE. Since 2.36 it opens its own **Soundpad Web window**, which hosts your session: guests stay connected as long as that window is open, even minimized, and you need no browser tab.
+3. Click **Copy Invite** and share the link. Each launch makes a fresh invitation; reloading the window keeps it.
 
-Use current Chrome or Edge to host, and allow the browser's local-network permission if it asks. To update, close the old companion normally and run the new EXE; refresh the website.
+You can still open the website in Chrome or Edge on the same PC as an extra view of your session (it shows the same guests and invite). Closing that tab does not affect guests. Closing the Soundpad Web window quits the companion and ends the session. If Windows lacks the WebView2 Runtime (it is part of Windows 11), the companion falls back to opening your browser as before; keep that tab open then. To update, close the old companion and run the new EXE.
 
 ## Join a session
 

@@ -13,14 +13,50 @@ using Microsoft.Extensions.DependencyInjection;
 using System.Threading.Channels;
 namespace SoundpadWeb;
 
-public sealed class LocalServer(Bridge bridge, string origin) : IAsyncDisposable
+/// <param name="ownerKey">The Soundpad Web window's per-launch key (2.36). A page that presents it is the session
+/// owner. Null when there is no window (--no-window, the fallback, the harness): the first page that asks becomes owner.</param>
+public sealed class LocalServer(Bridge bridge, string origin, string? ownerKey = null) : IAsyncDisposable
 {
     private WebApplication? app;
-    private int connected;
     /// <summary>Playback-control messages accepted per sliding second on the socket (all people together, 2.35).</summary>
     public const int ControlPerSecond = 600;
+    /// <summary>Host pages connected at once (2.36): the Soundpad Web window plus browser tabs that view it.</summary>
+    public const int MaxClients = 8;
+    /// <summary>How long a vanished owner's place is held for it (2.36): long enough for a page reload.</summary>
+    public TimeSpan OwnerGrace { get; init; } = TimeSpan.FromSeconds(3);
+    /// <summary>Warnings worth a line in the companion log (never carries keys or tokens).</summary>
+    public Action<string>? Log { get; init; }
     public string Token { get; } = Convert.ToHexString(RandomNumberGenerator.GetBytes(32)).ToLowerInvariant();
     public int Port { get; private set; }
+    private int sockets;
+
+    // Session ownership (2.36). Exactly one protocol-3 page runs the guest session (the Trystero host); the rest are
+    // views of it. Everything below is guarded by `roles`.
+    private readonly object roles = new();
+    private readonly List<HostClient> hosts = []; // protocol >= 3, oldest first
+    private int legacyHosts;                      // protocol < 3 pages: always owner-capable, as in 2.35
+    private HostClient? owner;
+    private string? graceFor;                     // clientId whose place is held after its owner page vanished
+    private long graceGeneration;
+    // The owner's HostIdentity and latest session summary live in memory only, for this launch: a reloaded, restarted
+    // or promoted owner gets the same identity back, so guests' invitations keep working. A new launch starts afresh.
+    private JsonElement? identity;
+    private string? session;
+    private long sessionVersion;
+
+    private sealed class HostClient(string clientId, bool keyed)
+    {
+        public string ClientId { get; } = clientId;
+        public bool Keyed { get; } = keyed;
+        public bool Owner;
+        public bool Ended;                        // its last session command was End hosting (2.36)
+        public string? RoleSent;
+        public long SessionSent = -1;
+        // Role and session changes coalesce: the sender reads the current values when it wakes.
+        public Channel<byte> Signal { get; } = Channel.CreateBounded<byte>(new BoundedChannelOptions(1) { FullMode = BoundedChannelFullMode.DropOldest });
+        public Channel<string> Forward { get; } = Channel.CreateBounded<string>(new BoundedChannelOptions(32) { FullMode = BoundedChannelFullMode.DropWrite });
+    }
+
     public async Task Start()
     {
         var builder = WebApplication.CreateSlimBuilder();
@@ -52,24 +88,32 @@ public sealed class LocalServer(Bridge bridge, string origin) : IAsyncDisposable
         {
             // Exact origin, exact numeric Host. No wildcard CORS and no token in access URLs/logs.
             if (context.Request.Headers.Origin != origin || context.Request.Host.Host != "127.0.0.1" || !context.WebSockets.IsWebSocketRequest) { context.Response.StatusCode = 403; return; }
-            if (Interlocked.CompareExchange(ref connected, 1, 0) != 0) { context.Response.StatusCode = 409; return; }
+            // Several host pages at once (2.36; one until 2.35). A place is taken before the hello, so pages that
+            // never authenticate can hold one for at most the 5 s hello deadline.
+            if (Interlocked.Increment(ref sockets) > MaxClients) { Interlocked.Decrement(ref sockets); context.Response.StatusCode = 409; return; }
+            HostClient? host = null; bool legacy = false;
             try
             {
                 using var socket = await context.WebSockets.AcceptWebSocketAsync();
                 using var lifetime = CancellationTokenSource.CreateLinkedTokenSource(context.RequestAborted);
                 using var sendGate = new SemaphoreSlim(1);
-                async Task Send(object value)
+                async Task SendText(string text)
                 {
                     await sendGate.WaitAsync(lifetime.Token);
-                    try { await socket.SendAsync(Encoding.UTF8.GetBytes(Json.Write(value)), WebSocketMessageType.Text, true, lifetime.Token).WaitAsync(TimeSpan.FromSeconds(8)); }
+                    try { await socket.SendAsync(Encoding.UTF8.GetBytes(text), WebSocketMessageType.Text, true, lifetime.Token).WaitAsync(TimeSpan.FromSeconds(8)); }
                     finally { sendGate.Release(); }
                 }
+                Task Send(object value) => SendText(Json.Write(value));
                 string auth;
                 using (var deadline = CancellationTokenSource.CreateLinkedTokenSource(lifetime.Token)) { deadline.CancelAfter(5000); auth = await Receive(socket, deadline.Token); }
-                var hello = JsonDocument.Parse(auth);
+                using var hello = JsonDocument.Parse(auth);
                 var supplied = hello.RootElement.GetProperty("token").GetString() ?? "";
-                bool modern = hello.RootElement.TryGetProperty("protocol", out var protocol) && protocol.TryGetInt32(out int version) && version >= 2;
-                if (supplied.Length != Token.Length || !CryptographicOperations.FixedTimeEquals(Encoding.UTF8.GetBytes(supplied), Encoding.UTF8.GetBytes(Token))) { await socket.CloseAsync(WebSocketCloseStatus.PolicyViolation, "Unauthorized", CancellationToken.None); return; }
+                int version = hello.RootElement.TryGetProperty("protocol", out var protocol) && protocol.TryGetInt32(out int number) ? number : 1;
+                bool modern = version >= 2;
+                if (!Matches(supplied, Token)) { await socket.CloseAsync(WebSocketCloseStatus.PolicyViolation, "Unauthorized", CancellationToken.None); return; }
+                // Protocol 3 pages (2.36) are told their role before anything else; older pages are hosts exactly as in 2.35.
+                if (version >= 3) { host = Join(hello.RootElement); await Flush(host, SendText); }
+                else { legacy = true; JoinLegacy(); }
                 var changes = Channel.CreateBounded<byte>(new BoundedChannelOptions(1) { FullMode = BoundedChannelFullMode.DropOldest });
                 void Changed(Snapshot _) => changes.Writer.TryWrite(0);
                 bridge.Changed += Changed; changes.Writer.TryWrite(0);
@@ -87,6 +131,8 @@ public sealed class LocalServer(Bridge bridge, string origin) : IAsyncDisposable
                         await Send(new { type = full ? "state" : "tick", state = full ? state : state with { Library = null! } }); sentLibrary = state.Library.Version;
                     }
                 });
+                var relay = host == null ? Task.CompletedTask : Task.Run(async () => { await foreach (var _ in host.Signal.Reader.ReadAllAsync(lifetime.Token)) await Flush(host, SendText); });
+                var forward = host == null ? Task.CompletedTask : Task.Run(async () => { await foreach (var text in host.Forward.Reader.ReadAllAsync(lifetime.Token)) await SendText(text); });
                 // Two budgets per sliding second (2.35). Playback control is cheap and coalesces in the Bridge (a newer
                 // play releases the older one at once), so a burst of presses from several people must never be answered
                 // with "Too many requests"; its limit only stops a runaway sender. Queries and everything else
@@ -116,6 +162,8 @@ public sealed class LocalServer(Bridge bridge, string origin) : IAsyncDisposable
                         var now = Environment.TickCount64;
                         using var doc = JsonDocument.Parse(input, new JsonDocumentOptions { MaxDepth = 24 });
                         var root = doc.RootElement;
+                        // Session relay messages between host pages (2.36) carry a type; commands never do.
+                        if (host != null && root.ValueKind == JsonValueKind.Object && root.TryGetProperty("type", out var kind) && kind.ValueKind == JsonValueKind.String) { Relay(host, kind.GetString()!, root); continue; }
                         var actor = root.GetProperty("actor").GetString() == "host" ? "host" : "guest";
                         var command = root.GetProperty("command").Deserialize<Command>(Json.Options) ?? throw new InvalidDataException();
                         running.RemoveAll(t => t.IsCompleted);
@@ -138,19 +186,151 @@ public sealed class LocalServer(Bridge bridge, string origin) : IAsyncDisposable
                         }
                         // Execute is CALLED here, in arrival order, and runs up to its first real wait: that is where
                         // playback intents get their order. Its answer is sent whenever it is ready.
+                        if (host != null && actor == "host" && command.Op is "endSession" or "beginSession") Hosting(host, command.Op == "endSession");
                         var operation = bridge.Execute(command, actor, person, requester, audience);
                         running.Add(Answer(command.Id, operation, slot));
                     }
                 }
-                finally { bridge.Changed -= Changed; bridge.WaveformChanged -= WaveChanged; lifetime.Cancel(); try { await sender; await waveSender; await Task.WhenAll(running); } catch (Exception) { } }
+                finally { bridge.Changed -= Changed; bridge.WaveformChanged -= WaveChanged; lifetime.Cancel(); try { await sender; await waveSender; await relay; await forward; await Task.WhenAll(running); } catch (Exception) { } }
             }
             catch (Exception ex) when (ex is WebSocketException or OperationCanceledException or JsonException or KeyNotFoundException or InvalidOperationException or IOException or InvalidDataException or TimeoutException) { }
-            finally { Interlocked.Exchange(ref connected, 0); }
+            finally
+            {
+                if (host != null) Leave(host);
+                if (legacy) lock (roles) legacyHosts--;
+                Interlocked.Decrement(ref sockets);
+            }
         });
         await app.StartAsync();
         var address = app.Services.GetRequiredService<IServer>().Features.Get<IServerAddressesFeature>()!.Addresses.Single();
         Port = new Uri(address).Port;
     }
+
+    private static bool Matches(string? supplied, string expected) => supplied != null && supplied.Length == expected.Length && CryptographicOperations.FixedTimeEquals(Encoding.UTF8.GetBytes(supplied), Encoding.UTF8.GetBytes(expected));
+
+    /// <summary>Registers an authenticated protocol-3 page and decides its role (2.36).</summary>
+    private HostClient Join(JsonElement hello)
+    {
+        string? key = hello.TryGetProperty("ownerKey", out var k) && k.ValueKind == JsonValueKind.String ? k.GetString() : null;
+        string? id = hello.TryGetProperty("clientId", out var c) && c.ValueKind == JsonValueKind.String ? c.GetString() : null;
+        // A page without a usable id can never reclaim a held place; it still gets a role like any other page.
+        if (string.IsNullOrEmpty(id) || id.Length > 64) id = "unnamed-" + Convert.ToHexString(RandomNumberGenerator.GetBytes(8));
+        var client = new HostClient(id, ownerKey != null && Matches(key, ownerKey));
+        string? warning = null;
+        lock (roles)
+        {
+            if (legacyHosts > 0) warning = "A host page from an older website is still open next to this one; both may run hosting. Reload or close the older tab.";
+            if (client.Keyed)
+            {
+                // The Soundpad Web window always runs the session. A browser tab that held it until now becomes a view
+                // and leaves its room without revoking guests; they rejoin the window's room with the same invitation.
+                if (owner != null && owner != client) { if (!owner.Keyed) warning ??= "The Soundpad Web window took over hosting from a browser tab."; Demote(owner); }
+                Promote(client);
+            }
+            // The first page becomes owner, unless an owner that just vanished still has its place held (a reload).
+            else if (owner == null && (graceFor == null || graceFor == client.ClientId)) Promote(client);
+            hosts.Add(client);
+        }
+        if (warning != null) Log?.Invoke(warning);
+        return client;
+    }
+
+    private void JoinLegacy()
+    {
+        bool others;
+        lock (roles) { others = hosts.Count + legacyHosts > 0; legacyHosts++; }
+        // Accepted for the compatibility window (a tab still on the 2.35 website), but two pages may now host.
+        if (others) Log?.Invoke("A host page from an older website connected while another host page is open; both may run hosting. Reload or close the older tab.");
+    }
+
+    private void Leave(HostClient client)
+    {
+        lock (roles)
+        {
+            hosts.Remove(client);
+            if (owner != client) return;
+            owner = null; client.Owner = false;
+            // An owner that pressed End hosting is not waited for, and no view is promoted into the session it ended: the
+            // next page that connects (its Resume hosting, say) becomes owner and starts a fresh invitation (2.36).
+            if (client.Ended) { graceFor = null; graceGeneration++; return; }
+            // Hold the place for a reload of the same page (or the window's key), then hand hosting to the oldest view.
+            graceFor = client.ClientId; long generation = ++graceGeneration;
+            _ = Task.Delay(OwnerGrace).ContinueWith(_ => GraceOver(generation), TaskScheduler.Default);
+        }
+    }
+
+    private void GraceOver(long generation)
+    {
+        lock (roles)
+        {
+            if (generation != graceGeneration || owner != null) return;
+            graceFor = null;
+            if (hosts.Count > 0) Promote(hosts[0]);
+        }
+    }
+
+    // Callers hold `roles`.
+    private void Promote(HostClient client) { graceFor = null; graceGeneration++; owner = client; client.Owner = true; client.Signal.Writer.TryWrite(0); }
+    private static void Demote(HostClient client) { client.Owner = false; client.Signal.Writer.TryWrite(0); }
+
+    /// <summary>Sends a page its role (when it changed) and, to a view, the latest session summary. Never runs twice at once for one page.</summary>
+    private async Task Flush(HostClient client, Func<string, Task> send)
+    {
+        string role; JsonElement? remembered; string? summary; long version;
+        lock (roles) { role = client.Owner ? "owner" : "view"; remembered = client.Owner ? identity : null; summary = session; version = sessionVersion; }
+        if (role != client.RoleSent) { await send(Json.Write(new { type = "role", role, identity = remembered })); client.RoleSent = role; }
+        if (role == "view" && summary != null && client.SessionSent != version) { await send(summary); client.SessionSent = version; }
+    }
+
+    /// <summary>
+    /// End hosting (<paramref name="ended"/>) or a new session (beginSession) from the owner page (2.36). End hosting revokes
+    /// every guest, so its invitation must not come back: the kept identity is forgotten (a later owner creates a new one,
+    /// as Resume hosting did up to 2.35) and the views are told the session is empty.
+    /// </summary>
+    private void Hosting(HostClient from, bool ended)
+    {
+        lock (roles)
+        {
+            if (owner != from) return;
+            from.Ended = ended;
+            if (!ended) return;
+            identity = null;
+            session = Json.Write(new { type = "session", invite = "", guests = Array.Empty<string>(), people = new { }, layouts = Array.Empty<object>() }); sessionVersion++;
+            foreach (var view in hosts) if (view != from) view.Signal.Writer.TryWrite(0);
+        }
+    }
+
+    /// <summary>Messages between host pages (2.36). Every loopback page is the host, so nothing here is guest input.</summary>
+    private void Relay(HostClient from, string kind, JsonElement root)
+    {
+        switch (kind)
+        {
+            case "identity":
+                // Kept for this launch only, from the owner only: a demoted page's late message must not replace it.
+                if (!root.TryGetProperty("identity", out var value) || value.ValueKind != JsonValueKind.Object || value.GetRawText().Length > 16384) return;
+                lock (roles) if (owner == from && !from.Ended) identity = value.Clone();
+                return;
+            case "session":
+                lock (roles)
+                {
+                    // An ended session's late summary must not bring its invitation back to the views.
+                    if (owner != from || from.Ended) return;
+                    session = root.GetRawText(); sessionVersion++;
+                    foreach (var view in hosts) if (view != from) view.Signal.Writer.TryWrite(0);
+                }
+                return;
+            case "ownerAction":
+                var action = root.TryGetProperty("action", out var a) && a.ValueKind == JsonValueKind.String ? a.GetString() : null;
+                if (action is not ("rotate" or "disconnect")) return;
+                string? peer = root.TryGetProperty("peer", out var p) && p.ValueKind == JsonValueKind.String ? p.GetString() : null;
+                if (peer?.Length > 128) return;
+                HostClient? target;
+                lock (roles) target = owner != null && owner != from ? owner : null;
+                target?.Forward.Writer.TryWrite(Json.Write(new { type = "ownerAction", action, peer }));
+                return;
+        }
+    }
+
     private static async Task<string> Receive(WebSocket socket, CancellationToken cancel)
     {
         using var data = new MemoryStream(); var buf = new byte[8192]; WebSocketReceiveResult r;

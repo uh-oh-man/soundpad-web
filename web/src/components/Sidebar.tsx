@@ -54,6 +54,7 @@ export function Sidebar({
   selectMine,
   update,
   manage,
+  hostNote = 'Keep this tab open to host.',
 }: {
   state: Snapshot;
   host: boolean;
@@ -65,6 +66,8 @@ export function Sidebar({
   selectMine: (folder: string) => void;
   update: Update;
   manage: () => void;
+  /** What keeps the session running (2.36): this tab, or the companion window. */
+  hostNote?: string;
 }) {
   const { category, myCategory, search } = selection;
   const mine = w?.layout === 'mine';
@@ -141,7 +144,7 @@ export function Sidebar({
         <span>
           <ShieldCheck size={15} /> Private session
         </span>
-        <p>{host ? 'Keep this tab open to host.' : 'Connected directly to your host.'}</p>
+        <p>{host ? hostNote : 'Connected directly to your host.'}</p>
       </div>
     </aside>
   );

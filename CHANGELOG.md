@@ -2,6 +2,31 @@
 
 Notable changes to Soundpad Web. Versions follow the website's `package.json`; the Windows companion is versioned separately and only needs updating when a release says so.
 
+## 2.36.0 — Hosting without a browser tab
+
+**Update the companion** for this one. The website still works with older companions, which host from a browser tab as before.
+
+### Added
+
+- **The companion has its own window**, and that window hosts your session. Guests stay connected while it is open, also when it is minimized or behind a game, and you no longer need a browser tab open. Closing the window quits the companion with its usual cleanup. Each launch makes a fresh invitation; reloading the window keeps it, so guests reconnect by themselves.
+- **Browser tabs are views.** Opening the website on the host PC (for example from an old launch link) shows the same session: the same invite, guests and controls. Replace invite and Disconnect work from a view; End hosting stays in the window. Closing a view does not affect guests.
+- Without a window (`--no-window`, or a PC without the WebView2 Runtime) the companion works as in 2.35: it opens your browser and that tab hosts. If that tab closes, another open tab takes over after a few seconds and guests reconnect to it.
+- The companion keeps a log at `%LOCALAPPDATA%\SoundpadWeb\companion.log`.
+
+### Changed
+
+- The EXE is now a Windows desktop app (about 13 MB larger, for Windows Forms and WebView2). Started from a terminal, it still prints there.
+- Wording across the site now says the Soundpad Web window keeps the session running, where it used to say to keep the host tab open.
+
+### Measured
+
+On this PC, with a test Soundpad and the public relays (no real Soundpad, no second PC): a guest joined the window's session in under 2 s, and with the window minimized for 2 minutes 15 of 15 guest plays arrived, 37–67 ms from click to Soundpad. Closing the window exited in about 1 s and left no WebView2 processes.
+
+### Tests
+
+- 9 new companion tests over real loopback connections (owner and views, the window taking over, a reload keeping the invitation, hand-over after the owner leaves, relayed session details, up to 8 pages).
+- 13 new website unit tests and 5 new browser tests (a view's Replace invite and Disconnect, closing a view, reloading the owner, hand-over without a window, the window taking over, an older companion).
+
 ## 2.35.0 — The newest click wins
 
 **Update the companion** for this one: the playback changes and Panic live in it. The website still works with older companions, which behave as before.

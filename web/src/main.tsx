@@ -25,6 +25,7 @@ import { z } from 'zod';
 import { useWorkspace, viewModes, type Workspace } from './workspace';
 import { arrangeSounds, boardTitle, type Totals } from './arrange';
 import { APP_VERSION_LABEL, REQUIRED_COMPANION, companionAtLeast, supports } from './version';
+import { hostCopy } from './hosting';
 import { SoundCollection } from './components/SoundCollection';
 import { Player } from './components/Player';
 import { IconEditor } from './components/IconEditor';
@@ -503,6 +504,7 @@ function App() {
               selectMine={selectMine}
               update={personal.update}
               manage={() => setManaging(true)}
+              hostNote={hostCopy(view.hosting, state.companionVersion, view.ownerWindow).sidebar}
             />
             <main className="soundboard">
               <WhatsNew projectUrl={repositoryUrl || PROJECT_URL} />

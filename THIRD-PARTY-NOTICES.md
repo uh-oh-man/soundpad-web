@@ -10,6 +10,8 @@ The standalone companion includes .NET / ASP.NET Core and System.Drawing.Common,
 
 Mimic transcripts (2.5.0+) use Whisper.net 1.9.1 and its whisper.cpp / GGML native libraries, both MIT licensed (`docs/licenses/whisper-net-license.txt`, `docs/licenses/whisper-cpp-license.txt`). The native libraries are embedded in the companion and written to `%LOCALAPPDATA%\SoundpadWeb\native\` on first use. The Whisper `base.en` model is **not** distributed: the host downloads it on request from the Whisper.net GGML distribution on Hugging Face. OpenAI's Whisper model is MIT licensed (https://github.com/openai/whisper/blob/main/LICENSE).
 
+The companion window (2.36+) uses the Microsoft Edge WebView2 SDK 1.0.4314.35 (`Microsoft.Web.WebView2`), under its BSD-style license (`docs/licenses/webview2-license.txt`, notices in `docs/licenses/webview2-notice.txt`). It runs on the WebView2 Runtime that is part of Windows 11; the runtime is not redistributed. The window uses Windows Forms from the .NET Windows Desktop runtime, under the same .NET licenses as above.
+
 The `mimic/` folder contains the Voice Replay Studio desktop app with its own `THIRD-PARTY.md` and `Licenses/`.
 
 Development dependencies are not included in the distributed browser or companion. Their license metadata is available in package-lock.json and their installed packages.

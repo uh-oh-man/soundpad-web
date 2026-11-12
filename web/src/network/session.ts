@@ -263,7 +263,7 @@ export class Session {
           for (const peer of Object.keys(this.room.getPeers())) this.sendHello(peer);
           if (Date.now() - this.started > 25000)
             this.status(
-              'Host unavailable. Keep the host tab open, check the invite, or try another network. Public relays and direct WebRTC can be blocked.',
+              'Host unavailable. Ask the host to keep Soundpad Web open (its window or host tab), check the invite, or try another network. Public relays and direct WebRTC can be blocked.',
             );
         }
       }

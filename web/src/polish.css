@@ -856,6 +856,12 @@ body,
   font-size: 12px;
   color: var(--text-muted);
 }
+/* A view of the companion window's session (2.36): calm, not a warning. */
+.desktop-view-note {
+  margin: 0 0 12px;
+  font-size: 13px;
+  color: var(--text-muted);
+}
 /* On phones a dialog fills the screen, and notices at the top would cover its title and close button
    (the only way out without a keyboard). While one is open, show notices at the bottom instead. */
 @media (max-width: 600px) {

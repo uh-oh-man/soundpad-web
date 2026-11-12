@@ -6,12 +6,101 @@ import {
   type Command,
   type Snapshot,
   type Participant,
+  participantSchema,
   slowOps,
 } from '../protocol';
+import { z } from 'zod';
+import type { SharedLayout } from '../shared-layout';
+import type { HostIdentity } from './identity';
 export type BridgeAddress = { port: number; token: string };
+
+/**
+ * Desktop session (2.36, feature "desktopSession"). A 2.36 companion admits several host pages and
+ * names one of them the session owner, which runs the guest room; the others are views. Its window
+ * page carries the launch's owner key. Older companions send none of these messages.
+ */
+export type HostRole = { role: 'owner' | 'view'; identity: HostIdentity | null };
+/** What the owner tells every view about the session, relayed by the companion. */
+export type SessionInfo = {
+  invite: string;
+  guests: string[];
+  people: Record<string, Participant>;
+  layouts: SharedLayout[];
+  /** True when the owner is the companion window (absent if a companion drops it: then a window). */
+  ownerWindow?: boolean;
+};
+export type OwnerAction = { action: 'rotate' } | { action: 'disconnect'; peer: string };
+export type DesktopEvents = {
+  role: (role: HostRole) => void;
+  session: (info: SessionInfo) => void;
+  ownerAction: (action: OwnerAction) => void;
+};
+/** The identity the companion keeps for this launch; it came from an owner page, so check its shape. */
+const identitySchema = z.object({
+  v: z.literal(1),
+  room: z.string().regex(/^[-\w]{32}$/),
+  secret: z.string().regex(/^[-\w]{43}$/),
+  publicKey: z.string().regex(/^[-\w]{100,200}$/),
+  privateKey: z.string().regex(/^[-\w]{100,400}$/),
+  shortCode: z
+    .string()
+    .regex(/^[12][-\w]{43,96}$/)
+    .optional(),
+});
+const roleSchema = z.object({
+  type: z.literal('role'),
+  role: z.enum(['owner', 'view']),
+  identity: identitySchema.nullable().optional(),
+});
+const peerId = z.string().min(1).max(100);
+const soundIds = z.array(z.string().regex(/^[a-f0-9]{64}$/)).max(50000);
+const sessionInfoSchema = z.object({
+  type: z.literal('session'),
+  invite: z.string().max(4000),
+  guests: z.array(peerId).max(64),
+  people: z.record(peerId, participantSchema),
+  layouts: z
+    .array(
+      z.object({
+        owner: peerId,
+        name: z.string().max(80),
+        organization: z.object({
+          folders: z
+            .array(
+              z.object({
+                id: z.uuid(),
+                name: z.string().min(1).max(80),
+                parent: z.uuid().nullable(),
+                soundIds,
+              }),
+            )
+            .max(128),
+          favorites: soundIds,
+          hidden: soundIds,
+          order: soundIds,
+        }),
+      }),
+    )
+    .max(32),
+  ownerWindow: z.boolean().optional(),
+});
+const ownerActionSchema = z.union([
+  z.object({ type: z.literal('ownerAction'), action: z.literal('rotate') }),
+  z.object({ type: z.literal('ownerAction'), action: z.literal('disconnect'), peer: peerId }),
+]);
+/** What a host page sends about the desktop session (2.36); only to a companion that sent a role. */
+export type DesktopMessage =
+  | { type: 'identity'; identity: HostIdentity }
+  | ({ type: 'session' } & SessionInfo)
+  | ({ type: 'ownerAction' } & OwnerAction);
 export class LocalBridge {
   private socket?: WebSocket;
   private stopped = false;
+  /**
+   * True once this socket's companion sent a role (2.36). Older companions read every message as a
+   * command and would drop the connection over any other kind, so nothing else is sent to them.
+   */
+  private desktopSession = false;
   private audience?: string;
   setAudience(value: string) {
     this.audience = value;
@@ -46,6 +135,12 @@ export class LocalBridge {
     private state: (s: Snapshot) => void,
     private status: (s: string) => void,
     private waveform?: (data: unknown) => void,
+    private desktop?: DesktopEvents & {
+      /** The companion window's launch key (2.36); only its page has one. Never logged or stored by the companion. */
+      ownerKey?: string;
+    },
+    /** Random per page load (2.36), so the companion gives a reloading owner its place back. */
+    readonly clientId: string = crypto.randomUUID(),
   ) {
     this.connect();
   }
@@ -54,15 +149,51 @@ export class LocalBridge {
     this.status('Connecting to companion');
     const ws = new WebSocket(`ws://127.0.0.1:${this.address.port}/bridge`);
     this.socket = ws;
+    this.desktopSession = false;
     const timeout = setTimeout(() => ws.close(), 8000);
     ws.onopen = () => {
-      ws.send(JSON.stringify({ token: this.address.token, protocol: 2 }));
+      // Protocol 3 (2.36) asks a desktop-session companion for a role. Older companions read only the
+      // token, so the extra fields change nothing for them.
+      ws.send(
+        JSON.stringify({
+          token: this.address.token,
+          protocol: 3,
+          clientId: this.clientId,
+          ...(this.desktop?.ownerKey ? { ownerKey: this.desktop.ownerKey } : {}),
+        }),
+      );
     };
     ws.onmessage = (e) => {
       try {
         const data = JSON.parse(e.data);
         if (data.type === 'waveform') {
           this.waveform?.(data.data);
+          return;
+        }
+        if (data.type === 'role') {
+          // A role this page cannot read would leave it not knowing whether to host: a mismatch.
+          const role = roleSchema.parse(data);
+          this.desktopSession = true;
+          this.desktop?.role({ role: role.role, identity: role.identity ?? null });
+          return;
+        }
+        if (data.type === 'session' || data.type === 'ownerAction') {
+          // Relayed from another page; one this page cannot read is skipped, not a reason to disconnect.
+          if (data.type === 'session') {
+            const info = sessionInfoSchema.safeParse(data);
+            if (info.success) {
+              const { invite, guests, people, layouts, ownerWindow } = info.data;
+              this.desktop?.session({ invite, guests, people, layouts, ownerWindow });
+            }
+          } else {
+            const action = ownerActionSchema.safeParse(data);
+            if (action.success)
+              this.desktop?.ownerAction(
+                action.data.action === 'rotate'
+                  ? { action: 'rotate' }
+                  : { action: 'disconnect', peer: action.data.peer },
+              );
+          }
           return;
         }
         if (data.type === 'state' || data.type === 'tick') {
@@ -148,6 +279,12 @@ export class LocalBridge {
         JSON.stringify({ actor, command, participant, requester, audience: this.audience }),
       );
     });
+  }
+  /** Sends a desktop-session message (2.36); dropped while the companion is unreachable. */
+  post(message: DesktopMessage) {
+    if (this.socket?.readyState !== WebSocket.OPEN || !this.desktopSession) return false;
+    this.socket.send(JSON.stringify(message));
+    return true;
   }
   async upload(bytes: Uint8Array, name: string, by: string, host = false, owner = 'host') {
     const response = await fetch(`http://127.0.0.1:${this.address.port}/session-audio`, {

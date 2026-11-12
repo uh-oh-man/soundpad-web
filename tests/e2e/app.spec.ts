@@ -3404,3 +3404,256 @@ test('a companion older than 2.35: no Panic, and Save & play still plays, as two
     'playback that follows the newest click, and Panic',
   );
 });
+
+// ---- Desktop session (2.36): one host page runs the guest room (the owner), the others are views ----
+
+const VIEW_OF_TAB =
+  'Hosting runs in another Soundpad Web tab. This tab is a view; closing it does not affect guests.';
+const VIEW_OF_WINDOW =
+  'Hosting runs in the Soundpad Web window. This tab is a view; closing it does not affect guests.';
+/**
+ * Test-only stand-in for the key the Soundpad Web window gets each launch; the harness takes it as
+ * --owner-key. The real companion makes a random one and never prints it.
+ */
+const OWNER_KEY = 'e2e0'.repeat(16);
+/** The board's count of a host page's guests; a view shows the owner's. */
+const guestCount = (page: Page) =>
+  page.locator('.board-heading').getByRole('status').filter({ hasText: 'connected guest' });
+/** The invitation a host page shows in Settings, once it has one. */
+async function shownInvite(page: Page) {
+  await page.getByRole('button', { name: 'Access settings' }).click();
+  await expect(page.locator('#invite')).toHaveValue(/#join=/);
+  const link = await page.locator('#invite').inputValue();
+  await page.getByRole('button', { name: 'Close dialog' }).click();
+  return link;
+}
+/** Opens a launch link in another page of the same browser, as a second host tab (or the window) would. */
+async function anotherHost(page: Page, link: string) {
+  const other = await page.context().newPage();
+  await other.goto(link);
+  await expect(playButton(other, 'Airhorn')).toBeEnabled();
+  return other;
+}
+/**
+ * Starts watching a guest's connection status. The returned wait passes once the guest has noticed
+ * its host page went away and has come back through the next owner. Every status the header shows is
+ * recorded, however briefly: in Playwright's WebKit a closed page's goodbye on the stand-in transport
+ * did not arrive (2.36), so the guest noticed only after 10 s without the host's state, as on a
+ * dropped link, and by then the next owner was there and the gap lasted milliseconds.
+ */
+async function watchReconnect(guest: Page) {
+  await guest.evaluate(() => {
+    const seen: string[] = [];
+    (window as unknown as { statuses: string[] }).statuses = seen;
+    const read = () => document.querySelector('header .status')?.textContent ?? '';
+    new MutationObserver(() => {
+      if (seen.at(-1) !== read()) seen.push(read());
+    }).observe(document.querySelector('header')!, {
+      childList: true,
+      subtree: true,
+      characterData: true,
+      attributes: true,
+    });
+  });
+  return async () => {
+    await expect
+      .poll(
+        () =>
+          guest.evaluate(() =>
+            (window as unknown as { statuses: string[] }).statuses.some((s) => s !== 'Connected'),
+          ),
+        { timeout: 20000 },
+      )
+      .toBe(true);
+    await expect(guest.locator('header .status')).toHaveText('Connected', { timeout: 20000 });
+  };
+}
+
+test('desktop session: a second host page is a view, its Replace invite and Disconnect work through the owner, and it has no End hosting', async ({
+  page,
+  harness,
+}) => {
+  await useLocalGuests(page);
+  await host(page, harness);
+  const guest = await joinGuest(page, 'View Alice');
+  const first = await shownInvite(page);
+  // The same launch link in a second tab: the companion names it a view of the first page's session.
+  const view = await anotherHost(page, harness.launch);
+  await expect(guestCount(view)).toHaveText(/1 connected guest/);
+  await expect(view.locator('aside.sidebar')).toContainText(
+    'Another Soundpad Web tab keeps your session running.',
+  );
+  await expect(page.locator('aside.sidebar')).toContainText('Keep this tab open to host.');
+  await view.getByRole('button', { name: 'Access settings' }).click();
+  const settings = view.getByRole('dialog', { name: 'Session & access' });
+  await expect(view.locator('#invite')).toHaveValue(first);
+  await expect(settings.getByRole('note').filter({ hasText: 'This tab is a view' })).toHaveText(
+    VIEW_OF_TAB,
+  );
+  await expect(settings.locator('.guest-row')).toContainText('View Alice');
+  await expect(settings.getByRole('button', { name: 'End hosting' })).toHaveCount(0);
+  // Disconnect in the view: the owner, which holds the guest's connection, closes it.
+  await settings.getByRole('button', { name: 'Disconnect', exact: true }).click();
+  await expect(guest.getByText('Access revoked', { exact: true })).toBeVisible();
+  for (const who of [page, view]) await expect(guestCount(who)).toHaveText(/0 connected guests/);
+  // The invitation still stands: a reload is a new peer, and both pages list it.
+  await guest.reload();
+  await expect(playButton(guest, 'Airhorn')).toBeEnabled();
+  for (const who of [page, view]) await expect(guestCount(who)).toHaveText(/1 connected guest/);
+  // Replace invite in the view: the owner replaces it, the guest loses access, both pages show the new one.
+  view.once('dialog', (d) => void d.accept());
+  await settings.getByRole('button', { name: 'Replace invite' }).click();
+  await expect(guest.getByText('Access revoked', { exact: true })).toBeVisible();
+  await expect(view.locator('#invite')).not.toHaveValue(first);
+  await expect(view.locator('#invite')).toHaveValue(/#join=/);
+  const replaced = await view.locator('#invite').inputValue();
+  expect(await shownInvite(page)).toBe(replaced);
+  // The owner keeps End hosting.
+  await page.getByRole('button', { name: 'Access settings' }).click();
+  await expect(page.getByRole('button', { name: 'End hosting' })).toBeVisible();
+});
+
+test('desktop session: closing a view leaves the guest playing, and a reloaded owner keeps the invitation while the guest reconnects by itself', async ({
+  page,
+  harness,
+}) => {
+  await useLocalGuests(page);
+  await host(page, harness);
+  const guest = await joinGuest(page);
+  const link = await shownInvite(page);
+  const view = await anotherHost(page, harness.launch);
+  await expect(guestCount(view)).toHaveText(/1 connected guest/);
+  await view.close();
+  await playButton(guest, 'Airhorn').click();
+  await expect.poll(() => harness.plays).toContain('DoPlaySound(1)');
+  await expect(guest.locator('header .status')).toHaveText('Connected');
+  await expect(guestCount(page)).toHaveText(/1 connected guest/);
+  // A reload is a new page load: the companion gives it its place back after the grace, with the
+  // identity it kept, so the invitation is the same and the guest needs no new link.
+  const reconnected = await watchReconnect(guest);
+  await page.reload();
+  await expect(playButton(page, 'Airhorn')).toBeEnabled();
+  await reconnected();
+  expect(await shownInvite(page)).toBe(link);
+  await expect(guestCount(page)).toHaveText(/1 connected guest/);
+  const before = harness.plays.length;
+  await playButton(guest, 'Airhorn').click();
+  await expect.poll(() => harness.plays.slice(before)).toContain('DoPlaySound(1)');
+});
+
+test('desktop session: without a window, closing the owner page hands hosting to the view, and the guest reconnects to it', async ({
+  page,
+  harness,
+}) => {
+  // `page` is the view here, so the failure diagnostics read the page that survives.
+  await useLocalGuests(page);
+  const owner = await page.context().newPage();
+  await host(owner, harness);
+  const guest = await joinGuest(owner);
+  const link = await shownInvite(owner);
+  await host(page, harness);
+  await expect(guestCount(page)).toHaveText(/1 connected guest/);
+  await expect(page.locator('aside.sidebar')).toContainText(
+    'Another Soundpad Web tab keeps your session running.',
+  );
+  const reconnected = await watchReconnect(guest);
+  await owner.close();
+  // After the companion's grace for a reload, the oldest view becomes the owner.
+  await expect(page.locator('aside.sidebar')).toContainText('Keep this tab open to host.', {
+    timeout: 15000,
+  });
+  await reconnected();
+  expect(await shownInvite(page)).toBe(link);
+  await expect(guestCount(page)).toHaveText(/1 connected guest/);
+  await playButton(guest, 'Airhorn').click();
+  await expect.poll(() => harness.plays).toContain('DoPlaySound(1)');
+  await page.getByRole('button', { name: 'Access settings' }).click();
+  await expect(page.getByRole('note').filter({ hasText: 'This tab is a view' })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'End hosting' })).toBeVisible();
+});
+
+test.describe('with a Soundpad Web window', () => {
+  test.use({ harnessOptions: ['--owner-key', OWNER_KEY] });
+  test('desktop session: the window page takes hosting over, and the tab that hosted becomes a view without revoking guests', async ({
+    page,
+    harness,
+  }) => {
+    await useLocalGuests(page);
+    await host(page, harness);
+    const guest = await joinGuest(page);
+    const link = await shownInvite(page);
+    const reconnected = await watchReconnect(guest);
+    // The window's page opens the launch link with the key, as the companion's window does.
+    const desk = await anotherHost(page, `${harness.launch}&owner=${OWNER_KEY}`);
+    await expect(desk.locator('aside.sidebar')).toContainText(
+      'This window keeps your session running.',
+    );
+    await expect(page.locator('aside.sidebar')).toContainText(
+      'The Soundpad Web window keeps your session running.',
+    );
+    await reconnected();
+    expect(await shownInvite(desk)).toBe(link);
+    for (const who of [desk, page]) await expect(guestCount(who)).toHaveText(/1 connected guest/);
+    await page.getByRole('button', { name: 'Access settings' }).click();
+    await expect(page.locator('#invite')).toHaveValue(link);
+    await expect(page.getByRole('note').filter({ hasText: 'This tab is a view' })).toHaveText(
+      VIEW_OF_WINDOW,
+    );
+    await expect(page.getByRole('button', { name: 'End hosting' })).toHaveCount(0);
+    await page.getByRole('button', { name: 'Close dialog' }).click();
+    await playButton(guest, 'Airhorn').click();
+    await expect.poll(() => harness.plays).toContain('DoPlaySound(1)');
+    await expect(guest.getByText('Access revoked', { exact: true })).toHaveCount(0);
+  });
+});
+
+test('desktop session: a companion older than 2.36 gets no session messages, and one host page hosts as before', async ({
+  page,
+  harness,
+}) => {
+  // Make the harness look like companion 2.35.0: it reads the hello as protocol 2 (a 2.35 companion
+  // ignores the newer fields), so it sends no role; and note anything the page sends with a type.
+  const typed: string[] = [];
+  await page.routeWebSocket(/ws:\/\/127\.0\.0\.1:\d+\/bridge/, (socket) => {
+    const server = socket.connectToServer();
+    socket.onMessage((message) => {
+      const frame = JSON.parse(String(message));
+      if (frame.token) {
+        expect(frame.protocol).toBe(3);
+        frame.protocol = 2;
+        delete frame.clientId;
+        delete frame.ownerKey;
+      }
+      if (frame.type) typed.push(frame.type);
+      server.send(JSON.stringify(frame));
+    });
+    server.onMessage((message) => {
+      const frame = JSON.parse(String(message));
+      if (frame.state?.companionVersion) frame.state.companionVersion = '2.35.0';
+      socket.send(JSON.stringify(frame));
+    });
+  });
+  await useLocalGuests(page);
+  await host(page, harness);
+  const guest = await joinGuest(page);
+  const link = await shownInvite(page);
+  await expect(page.locator('aside.sidebar')).toContainText('Keep this tab open to host.');
+  await playButton(guest, 'Airhorn').click();
+  await expect.poll(() => harness.plays).toContain('DoPlaySound(1)');
+  await page.getByRole('button', { name: 'Access settings' }).click();
+  await expect(page.getByRole('dialog', { name: 'Session & access' })).toContainText(
+    'The companion controls Soundpad. This tab connects your guests.',
+  );
+  await expect(page.getByRole('note').filter({ hasText: 'This tab is a view' })).toHaveCount(0);
+  await expect(page.getByRole('note').filter({ hasText: 'newer one adds' })).toContainText(
+    'the companion window that keeps your session running when the browser tab closes',
+  );
+  await expect(page.getByRole('button', { name: 'End hosting' })).toBeVisible();
+  await page.getByRole('button', { name: 'Close dialog' }).click();
+  // The tab keeps its own copy of the identity for older companions, so a reload keeps the invitation.
+  await page.reload();
+  await expect(playButton(page, 'Airhorn')).toBeEnabled();
+  expect(await shownInvite(page)).toBe(link);
+  await expect(guestCount(page)).toHaveText(/1 connected guest/, { timeout: 20000 });
+  expect(typed).toEqual([]);
+});

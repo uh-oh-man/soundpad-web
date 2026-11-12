@@ -45,6 +45,7 @@ export const FEATURES = {
   undoStop: [2, 30],
   guestUndo: [2, 32],
   intents: [2, 35],
+  desktopSession: [2, 36],
 } as const satisfies Record<string, readonly [number, number]>;
 
 /** True when the website changed version since this browser last used it (and it had used it before). */
@@ -73,6 +74,8 @@ const FEATURE_NAMES: Record<keyof typeof FEATURES, string> = {
   undoStop: 'Undo that stops only its own clip',
   guestUndo: 'Undo for guests on their own clips and copies',
   intents: 'playback that follows the newest click, and Panic',
+  desktopSession:
+    'the companion window that keeps your session running when the browser tab closes',
 };
 
 /**

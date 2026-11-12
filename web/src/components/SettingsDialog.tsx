@@ -3,6 +3,7 @@ import { controller } from '../controller';
 import { MAX_GUESTS } from '../network/session';
 import type { Snapshot } from '../protocol';
 import { missingFeatures, supports } from '../version';
+import { hostCopy } from '../hosting';
 import { themes, type Theme, type useAppearance } from '../appearance';
 
 const COMPANION_DOWNLOAD = `${(import.meta.env.VITE_REPOSITORY_URL as string | undefined) || 'https://github.com/uh-oh-man/soundpad-web'}/releases/latest/download/SoundpadWeb.exe`;
@@ -88,6 +89,8 @@ export function SettingsDialog({
   const { state, status } = view;
   const host = view.mode === 'host';
   const v2 = (state.protocol ?? 1) >= 2;
+  // Who keeps the session running (2.36): this tab, the companion window, or another page this tab views.
+  const copy = hostCopy(view.hosting, state.companionVersion, view.ownerWindow);
   return (
     <>
       <section className="appearance-setting" aria-label="Appearance">
@@ -113,11 +116,7 @@ export function SettingsDialog({
         <Radio size={18} />
         <div>
           <strong>{status}</strong>
-          <p>
-            {host
-              ? 'The companion controls Soundpad. This tab connects your guests.'
-              : 'Your host controls playback and permissions.'}
-          </p>
+          <p>{host ? copy.status : 'Your host controls playback and permissions.'}</p>
         </div>
       </div>
       {host && missingFeatures(state.companionVersion).length > 0 && (
@@ -132,6 +131,11 @@ export function SettingsDialog({
       )}
       {host && (
         <>
+          {copy.note && (
+            <p className="desktop-view-note" role="note">
+              {copy.note}
+            </p>
+          )}
           {permissionToggles
             .filter(
               (toggle) =>
@@ -218,15 +222,18 @@ export function SettingsDialog({
         </>
       )}
       <div className="dialog-foot">
-        <span>Keep the host tab and companion open. Closing either ends guest control.</span>
-        <button
-          onClick={() => {
-            close();
-            void controller.leave();
-          }}
-        >
-          <LogOut size={16} /> {host ? 'End hosting' : 'Leave session'}
-        </button>
+        <span>{host ? copy.foot : hostCopy('tab', null).foot}</span>
+        {/* A view does not end the session (2.36); its owner, the window, keeps End hosting. */}
+        {!(host && copy.place === 'view') && (
+          <button
+            onClick={() => {
+              close();
+              void controller.leave();
+            }}
+          >
+            <LogOut size={16} /> {host ? 'End hosting' : 'Leave session'}
+          </button>
+        )}
       </div>
     </>
   );

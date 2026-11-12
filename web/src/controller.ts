@@ -10,7 +10,13 @@ import {
 } from './protocol';
 import { acceptWaveform } from './waveform-cache';
 import { waveformSchema } from './protocol';
-import { LocalBridge, type BridgeAddress } from './network/local';
+import {
+  LocalBridge,
+  type BridgeAddress,
+  type HostRole,
+  type OwnerAction,
+  type SessionInfo,
+} from './network/local';
 import { Session } from './network/session';
 import {
   createIdentity,
@@ -35,7 +41,16 @@ type View = {
   profile: Participant;
   resumeAvailable: boolean;
   needsName: boolean;
+  /**
+   * Where a host page's guest room runs (2.36): in this tab as before, in this page because it is the
+   * companion window's, or elsewhere because this page is a view of the window's (or another tab's) session.
+   */
+  hosting: 'tab' | 'window' | 'view';
+  /** For a view: whether the owner is the companion window (false when another browser tab hosts). */
+  ownerWindow: boolean;
 };
+/** Largest session message an owner sends (2.36), under the companion's 200,000-byte socket limit. */
+export const SESSION_INFO_BYTES = 190000;
 const errorMessage = (e: unknown, fallback = 'Something went wrong.') =>
   e instanceof Error ? e.message : typeof e === 'string' && e ? e : fallback;
 function savedProfile(): Participant {
@@ -72,12 +87,26 @@ export class Controller {
     profile: savedProfile(),
     resumeAvailable: false,
     needsName: false,
+    hosting: 'tab',
+    ownerWindow: true,
   };
   private listeners = new Set<() => void>();
   private bridge?: LocalBridge;
   private session?: Session;
   private identity?: HostIdentity;
   private address?: BridgeAddress;
+  /**
+   * Desktop session (2.36): this page's role from the companion, which sends one before its first state.
+   * Unset with an older companion, which never sends one; then this page hosts exactly as before.
+   */
+  private role?: 'owner' | 'view';
+  /** The identity the companion kept for this launch, so a new owner keeps the same invitation. */
+  private relayed: HostIdentity | null = null;
+  /** Counts role changes, so a guest room that finished starting meanwhile is brought in line. */
+  private roleChanges = 0;
+  /** The companion window's launch key; only its page has one, kept for its reloads. */
+  private ownerKey?: string;
+  private publishTimer?: ReturnType<typeof setTimeout>;
   private starting = false;
   private live = false;
   private initialized = false;
@@ -117,6 +146,36 @@ export class Controller {
   private update(p: Partial<View>) {
     this.view = { ...this.view, ...p };
     for (const f of this.listeners) f();
+    if (
+      this.role === 'owner' &&
+      ('invite' in p || 'guests' in p || 'people' in p || 'layouts' in p)
+    )
+      this.publishSession();
+  }
+  /**
+   * Tells the views what they show about the session (2.36). Guests joining or renaming can come in
+   * bursts, so changes are gathered for a quarter second: at most four messages a second.
+   */
+  private publishSession() {
+    if (this.publishTimer) return;
+    this.publishTimer = setTimeout(() => {
+      this.publishTimer = undefined;
+      if (this.role !== 'owner' || !this.session) return;
+      const { invite, guests, people, layouts } = this.view;
+      const info = {
+        type: 'session' as const,
+        invite,
+        guests,
+        people,
+        layouts,
+        ownerWindow: !!this.ownerKey,
+      };
+      // The companion ends a socket over any message above 200,000 bytes, which would cost this page
+      // its ownership (and the views a promotion loop). Many large shared layouts can pass that, so
+      // then the views go without layouts rather than without the session.
+      const fits = new TextEncoder().encode(JSON.stringify(info)).byteLength <= SESSION_INFO_BYTES;
+      this.bridge?.post(fits ? info : { ...info, layouts: [] });
+    }, 250);
   }
   notify = (message: string, kind: NoticeKind = 'info', action?: NoticeAction) =>
     notify(message, kind, action);
@@ -149,12 +208,21 @@ export class Controller {
         if (confirmed) this.connectGuest(invite);
         else this.update({ mode: 'guest', status: 'Choose your name', needsName: true });
       } else {
-        const raw = hash.get('host') || sessionStorage.getItem('soundpad-bridge');
+        const fromLink = hash.get('host');
+        const raw = fromLink || sessionStorage.getItem('soundpad-bridge');
         if (!raw) return;
         const match = /^(\d{1,5})\.([a-f0-9]{64})$/.exec(raw);
         if (!match || +match[1] < 1 || +match[1] > 65535)
           throw Error('Invalid companion launch link. Relaunch the EXE.');
         sessionStorage.setItem('soundpad-bridge', raw);
+        // The companion window's page (2.36) also carries its owner key. Kept like the address so a
+        // reload stays the owner, and taken out of the address bar with it. A new launch link without
+        // one is an ordinary browser tab.
+        const owner = fromLink ? hash.get('owner') : sessionStorage.getItem('soundpad-owner-key');
+        if (owner && /^[a-f0-9]{64}$/.test(owner)) {
+          sessionStorage.setItem('soundpad-owner-key', owner);
+          this.ownerKey = owner;
+        } else sessionStorage.removeItem('soundpad-owner-key');
         history.replaceState(null, '', location.pathname + location.search);
         this.address = { port: +match[1], token: match[2] };
         if (sessionStorage.getItem('soundpad-ended')) {
@@ -215,7 +283,7 @@ export class Controller {
         this.live = true;
         this.update({ state: this.visibleState(state), status: 'Host ready' });
         this.session?.broadcast();
-        if (!this.session && !this.starting)
+        if (!this.session && !this.starting && this.role !== 'view')
           void this.hostSession(false).catch((e) => this.notify(errorMessage(e), 'error'));
       },
       (status) => {
@@ -228,7 +296,75 @@ export class Controller {
         acceptWaveform(this.view.state.hostId, data);
         this.session?.broadcastWaveform(data);
       },
+      {
+        ownerKey: this.ownerKey,
+        role: (role) =>
+          void this.takeRole(role).catch((e) => this.notify(errorMessage(e), 'error')),
+        session: (info) => this.showSession(info),
+        ownerAction: (action) => this.ownerAction(action),
+      },
     );
+  }
+  /** The companion named this page the session owner or a view (2.36). */
+  private async takeRole({ role, identity }: HostRole) {
+    const was = this.role;
+    this.role = role;
+    this.relayed = identity;
+    this.roleChanges++;
+    if (role === 'view') {
+      clearTimeout(this.publishTimer);
+      this.publishTimer = undefined;
+      // Demoted (the window took over): its guests reconnect to the window, so they are not this
+      // page's to list until the owner's session info arrives.
+      this.update({ hosting: 'view', ...(was === 'owner' ? { guests: [], people: {} } : {}) });
+    } else {
+      this.update({ hosting: this.ownerKey ? 'window' : 'tab' });
+      // The companion may hold older info than this page has (after a reconnect), so views get it again.
+      this.publishSession();
+    }
+    await this.reconcile();
+  }
+  /**
+   * Brings this page's guest room in line with its role (2.36). The first state starts it, and a start
+   * that is running finishes first.
+   */
+  private async reconcile() {
+    if (this.starting || !this.live) return;
+    if (this.role === 'view') {
+      // Leave the room without revoking anyone: the same invitation goes on in the new owner.
+      const session = this.session;
+      this.session = undefined;
+      await session?.close(false);
+      return;
+    }
+    if (!this.session) await this.hostSession(false);
+    // A running room is the live invitation: tell the companion again if it holds none or an older one
+    // (a Replace invite whose message was lost while the companion was unreachable).
+    else if (this.role === 'owner' && this.relayed?.room !== this.identity?.room)
+      this.sendIdentity();
+  }
+  /** Gives the companion this page's identity, which it keeps in memory for the next owner (2.36). */
+  private sendIdentity() {
+    if (this.role !== 'owner' || !this.identity) return;
+    if (this.bridge?.post({ type: 'identity', identity: this.identity }))
+      this.relayed = this.identity;
+  }
+  /** A view shows the owner's invitation, guests and layouts (2.36). */
+  private showSession(info: SessionInfo) {
+    if (this.role !== 'view') return;
+    this.update({
+      invite: info.invite,
+      guests: info.guests,
+      people: info.people,
+      layouts: info.layouts,
+      ownerWindow: info.ownerWindow !== false,
+    });
+  }
+  /** Replace invite and Disconnect pressed in a view, carried out here in the owner (2.36). */
+  private ownerAction(action: OwnerAction) {
+    if (this.role !== 'owner' || !this.session) return;
+    if (action.action === 'rotate') void this.rotate();
+    else if (this.view.guests.includes(action.peer)) this.disconnect(action.peer);
   }
   resume() {
     if (!this.address) return;
@@ -248,6 +384,7 @@ export class Controller {
   }
   private async hostSession(rotate: boolean) {
     this.starting = true;
+    const changes = this.roleChanges;
     try {
       if (rotate) await this.session?.close(true);
       const audienceId = crypto.randomUUID();
@@ -255,28 +392,47 @@ export class Controller {
       if (companionAtLeast(this.view.state.companionVersion, 2, 2))
         await this.bridge!.send(command('beginSession', { audienceId }), 'host');
       const key = 'soundpad-identity-' + this.address!.token;
-      const stored = rotate ? null : sessionStorage.getItem(key);
-      this.identity = stored ? JSON.parse(stored) : await createIdentity();
+      // A 2.36 companion keeps the launch's identity in memory, so a reloaded, restarted or promoted
+      // owner keeps the same invitation and guests reconnect by themselves. This tab's own copy is the
+      // fallback for older companions.
+      const relayed = rotate ? null : this.relayed;
+      const stored = rotate || relayed ? null : sessionStorage.getItem(key);
+      this.identity = relayed
+        ? { ...relayed }
+        : stored
+          ? JSON.parse(stored)
+          : await createIdentity();
       await prepareInvite(this.identity!);
       sessionStorage.setItem(key, JSON.stringify(this.identity));
-      this.session = new Session(
+      if (this.relayed?.room !== this.identity!.room) this.sendIdentity();
+      // A room this page has left (a Replace invite, or the window taking over in 2.36) can still
+      // report peers leaving; only the current one may change the guest list a view is shown.
+      const current = () => this.session === session;
+      const session: Session = new Session(
         this.identity!,
         this.identity,
         () => this.view.state,
         (c, peer, person) => this.bridge!.send(c, 'guest', person, peer),
         () => {},
         () => {},
-        (guests) => this.update({ guests }),
+        (guests) => current() && this.update({ guests }),
         this.transport,
-        { get: () => this.view.profile, changed: (people) => this.update({ people }) },
         {
-          layouts: (layouts) => this.update({ layouts }),
+          get: () => this.view.profile,
+          changed: (people) => current() && this.update({ people }),
+        },
+        {
+          layouts: (layouts) => current() && this.update({ layouts }),
           upload: (bytes, name, by, peer) => this.bridge!.upload(bytes, name, by, false, peer),
         },
       );
+      this.session = session;
       this.update({ invite: inviteUrl(this.identity!), guests: [] });
     } finally {
       this.starting = false;
+      // The role changed while the room started (the window took over, say).
+      if (changes !== this.roleChanges)
+        void this.reconcile().catch((e) => this.notify(errorMessage(e), 'error'));
     }
   }
   /** Runs a command; a refusal is shown as an error notice unless `quiet` (the caller reports it). */
@@ -399,6 +555,17 @@ export class Controller {
     }
   }
   async rotate() {
+    if (this.role === 'view') {
+      // The owner replaces it (2.36); this view shows the new invitation when the owner reports it.
+      if (this.bridge?.post({ type: 'ownerAction', action: 'rotate' }))
+        this.notify(
+          this.view.ownerWindow
+            ? 'Replacing the invitation in the Soundpad Web window.'
+            : 'Replacing the invitation in the hosting tab.',
+        );
+      else this.notify('Companion is disconnected.', 'error');
+      return;
+    }
     try {
       await this.hostSession(true);
       this.notify('Invitation replaced. Previous guests have been disconnected.', 'success');
@@ -407,13 +574,20 @@ export class Controller {
     }
   }
   disconnect(peer: string) {
+    if (this.role === 'view') {
+      // Only the owner holds the guest's connection (2.36); it also revokes the guest's audio there.
+      if (!this.bridge?.post({ type: 'ownerAction', action: 'disconnect', peer }))
+        this.notify('Companion is disconnected.', 'error');
+      return;
+    }
     void this.run('revokePeer', { ownerId: peer }).catch(() => {});
     this.session?.disconnect(peer);
   }
   async leave() {
     const wasHost = this.view.mode === 'host';
     try {
-      if (wasHost && this.live) {
+      // A view never ends the session (2.36): the owner runs it, and End hosting is not offered there.
+      if (wasHost && this.live && this.role !== 'view') {
         try {
           await this.run('endSession');
         } catch {
@@ -426,6 +600,10 @@ export class Controller {
       this.bridge = undefined;
       this.session = undefined;
       this.live = false;
+      clearTimeout(this.publishTimer);
+      this.publishTimer = undefined;
+      this.role = undefined;
+      this.relayed = null;
       if (wasHost) {
         sessionStorage.setItem('soundpad-ended', '1');
         sessionStorage.removeItem('soundpad-identity-' + this.address!.token);
@@ -439,6 +617,8 @@ export class Controller {
         people: {},
         invite: '',
         resumeAvailable: wasHost,
+        hosting: 'tab',
+        ownerWindow: true,
       });
     }
   }

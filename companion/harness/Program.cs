@@ -443,7 +443,11 @@ bridge.UseTranscriptEngine(new TranscriptFixture());
 bridge.UseHotkeys(key => new HotkeyFixture(key) { Taken = key == "F9" }); // F9 plays a key another app owns
 bridge.UseVoiceReplayLibrary(VoiceReplayFixture.Create(Path.Combine(directory, "voice-replay"))); // never the real library
 await bridge.Poll(true);
-await using var server = new LocalServer(bridge, args.FirstOrDefault() ?? "http://127.0.0.1:5173");
+// --owner-key <64 hex> (2.36) stands in for the Soundpad Web window's key, so e2e tests can open a page that takes
+// hosting over. Without it there is no window: the first protocol-3 page becomes the session owner, as in --no-window.
+int ownerAt = Array.IndexOf(args, "--owner-key");
+var ownerKey = ownerAt >= 0 && ownerAt + 1 < args.Length && System.Text.RegularExpressions.Regex.IsMatch(args[ownerAt + 1], "^[a-f0-9]{64}$") ? args[ownerAt + 1] : null;
+await using var server = new LocalServer(bridge, args.FirstOrDefault() ?? "http://127.0.0.1:5173", ownerKey) { Log = line => Console.WriteLine("TEST_LOG " + line) };
 await server.Start();
 Console.WriteLine("TEST_READY " + Json.Write(new { port = server.Port, token = server.Token }));
 using var stop = new CancellationTokenSource();

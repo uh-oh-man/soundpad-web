@@ -1,4 +1,5 @@
-param([string]$Executable = 'artifacts/release/SoundpadWeb.exe', [switch]$UseEmbeddedWebsite)
+# -Hidden runs the companion window without ever showing it (--hidden-window), for checks on a PC someone is using.
+param([string]$Executable = 'artifacts/release/SoundpadWeb.exe', [switch]$UseEmbeddedWebsite, [switch]$Hidden)
 $ErrorActionPreference = 'Stop'
 $exePath = (Resolve-Path -LiteralPath $Executable).Path
 $workspacePath = (Get-Location).Path
@@ -13,6 +14,7 @@ try {
     $process.StartInfo.RedirectStandardError = $true
     $arguments = @('--no-browser','--pipe',('soundpad-web-smoke-' + [guid]::NewGuid().ToString('N')),'--data-dir',$smokePath)
     if (-not $UseEmbeddedWebsite) { $arguments += @('--dev','--site','http://127.0.0.1:5173/') }
+    if ($Hidden) { $arguments += '--hidden-window' }
     foreach ($argument in $arguments) { $process.StartInfo.ArgumentList.Add($argument) }
     if (-not $process.Start()) { throw 'EXE failed to start' }
     $line = $process.StandardOutput.ReadLineAsync().WaitAsync([TimeSpan]::FromSeconds(15)).GetAwaiter().GetResult()
@@ -23,7 +25,8 @@ try {
     $process.StandardInput.WriteLine('')
     if (-not $process.WaitForExit(10000)) { throw 'Graceful shutdown timed out' }
     if ($process.ExitCode -ne 0) { throw 'EXE exited unsuccessfully' }
-    $licenses = & $exePath --licenses
+    # The EXE is a desktop (GUI) app since 2.36: PowerShell only captures such an app's output mid-pipeline.
+    $licenses = @(& $exePath --licenses | Write-Output)
     if (($licenses -join "`n") -notmatch '2017 Leppsoft' -or ($licenses -join "`n") -notmatch 'Microsoft' -or ($licenses -join "`n") -notmatch 'Mark Heath' -or ($licenses -join "`n") -notmatch 'Andrew Ward') { throw 'Embedded notices missing' }
     Write-Output 'PASS: standalone EXE startup, numeric loopback-only listener, clean Enter shutdown, embedded notices. No browser or Soundpad launched; no audio played.'
 } finally {
