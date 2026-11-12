@@ -17,7 +17,24 @@ import {
   type OwnerAction,
   type SessionInfo,
 } from './network/local';
-import { Session } from './network/session';
+import {
+  Session,
+  type ConnectionInfo,
+  type LobbyRequest,
+  type RelayFactory,
+  type Transport,
+} from './network/session';
+import { createRelayLink } from './network/relay';
+import { NO_WEBRTC } from './network/diagnostics';
+import {
+  DEFAULT_POLICY,
+  forNewInvite,
+  LIST,
+  MAX_PLACES,
+  readPolicy,
+  type PermissionKey,
+  type SessionPolicy,
+} from './network/policy';
 import {
   createIdentity,
   prepareInvite,
@@ -48,6 +65,21 @@ type View = {
   hosting: 'tab' | 'window' | 'view';
   /** For a view: whether the owner is the companion window (false when another browser tab hosts). */
   ownerWindow: boolean;
+  /** How this page is connected (2.37): transport, relay health, ICE findings, the diagnosis. */
+  connection?: ConnectionInfo;
+  /** Host (2.37): guests waiting for Let in or Turn away. */
+  requests: LobbyRequest[];
+  /** Host (2.37): admission, guest places and per-guest permissions. */
+  policy: SessionPolicy;
+  /** Host (2.37): each listed guest connection (by peer id) is direct or through the relay. */
+  links: Record<string, Transport>;
+};
+/** Largest session settings message a 2.37 companion keeps (LocalServer.MaxSessionSettingsBytes). */
+export const SESSION_SETTINGS_BYTES = 65536;
+/** Shown when a view is asked to change who is in the session; only the owner page can (2.37). */
+export const OWNER_ONLY = {
+  window: 'Change who is in the session from the Soundpad Web window.',
+  tab: 'Change who is in the session from the tab that hosts it.',
 };
 /** Largest session message an owner sends (2.36), under the companion's 200,000-byte socket limit. */
 export const SESSION_INFO_BYTES = 190000;
@@ -70,9 +102,8 @@ function savedProfile(): Participant {
   }
   return profile;
 }
-/** Shown to a guest whose browser has no WebRTC, which joining needs. */
-export const NO_WEBRTC =
-  "WebRTC blocked. This browser can't reach the host because WebRTC is turned off or not supported. Use an up-to-date Chrome, Edge, Firefox or Safari, and check that no setting or privacy extension blocks WebRTC.";
+/** Shown to a guest whose browser has no WebRTC (2.37: such a guest still joins through the relay). */
+export { NO_WEBRTC };
 
 export class Controller {
   private view: View = {
@@ -89,6 +120,9 @@ export class Controller {
     needsName: false,
     hosting: 'tab',
     ownerWindow: true,
+    requests: [],
+    policy: { ...DEFAULT_POLICY },
+    links: {},
   };
   private listeners = new Set<() => void>();
   private bridge?: LocalBridge;
@@ -166,6 +200,20 @@ export class Controller {
   private pendingInvite?: Invite;
   /** Dev server only (2.35): an e2e test's stand-in for Trystero; see `start`. Always unset in a build. */
   private transport?: ConstructorParameters<typeof Session>[7];
+  private testRelay?: RelayFactory;
+  /**
+   * The relay link both roles use (2.37): the app's own encrypted messages over the public Nostr
+   * relays Trystero already uses for discovery, for guests whose network blocks direct WebRTC.
+   */
+  private relayFactory(): RelayFactory {
+    return this.testRelay ?? ((options) => createRelayLink(options));
+  }
+  /**
+   * Admission, guest places and per-guest permissions (2.37). Kept here so a Replace invite keeps
+   * them, and with a 2.37 companion also there, so a reload or another owner page keeps them too.
+   */
+  private policy: SessionPolicy = { ...DEFAULT_POLICY };
+  private settingsTimer?: ReturnType<typeof setTimeout>;
   subscribe = (listener: () => void) => {
     this.listeners.add(listener);
     return () => {
@@ -178,7 +226,13 @@ export class Controller {
     for (const f of this.listeners) f();
     if (
       this.role === 'owner' &&
-      ('invite' in p || 'guests' in p || 'people' in p || 'layouts' in p)
+      ('invite' in p ||
+        'guests' in p ||
+        'people' in p ||
+        'layouts' in p ||
+        'requests' in p ||
+        'policy' in p ||
+        'links' in p)
     )
       this.publishSession();
   }
@@ -191,7 +245,7 @@ export class Controller {
     this.publishTimer = setTimeout(() => {
       this.publishTimer = undefined;
       if (this.role !== 'owner' || !this.session) return;
-      const { invite, guests, people, layouts } = this.view;
+      const { invite, guests, people, layouts, requests, policy, links } = this.view;
       const info = {
         type: 'session' as const,
         invite,
@@ -199,6 +253,8 @@ export class Controller {
         people,
         layouts,
         ownerWindow: !!this.ownerKey,
+        // What views show about the lobby and each guest (2.37); older views ignore it.
+        control: { requests, policy, links },
       };
       // The companion ends a socket over any message above 200,000 bytes, which would cost this page
       // its ownership (and the views a promotion loop). Many large shared layouts can pass that, so
@@ -222,8 +278,12 @@ export class Controller {
         } catch {
           /* No storage: the normal transport. */
         }
-        if (wanted === 'broadcast')
-          this.transport = (await import('./network/test-transport')).broadcastTransport();
+        if (wanted === 'broadcast') {
+          const test = await import('./network/test-transport');
+          this.transport = test.broadcastTransport();
+          // Its relay too (2.37), so a test page never opens public relays.
+          this.testRelay = test.broadcastRelay();
+        }
       }
       const hash = new URLSearchParams(location.hash.slice(1));
       if (hash.has('join')) {
@@ -270,12 +330,15 @@ export class Controller {
   }
   private connectGuest(invite: Invite) {
     // Guests reach the host over WebRTC. Without it (turned off by a setting or privacy extension, or an
-    // old browser) say so at once instead of waiting for the generic "Host unavailable" after 25 s.
-    if (typeof RTCPeerConnection === 'undefined' && !this.transport) {
-      this.update({ mode: 'guest', status: NO_WEBRTC, needsName: false });
-      return;
-    }
-    this.update({ mode: 'guest', status: 'Connecting', needsName: false });
+    // old browser) say so at once instead of waiting for the generic "Host unavailable" after 25 s;
+    // since 2.37 such a guest still gets in through the relay, and the message goes when it does.
+    const webrtc = typeof RTCPeerConnection !== 'undefined' || !!this.transport;
+    this.update({
+      mode: 'guest',
+      status: webrtc ? 'Connecting' : NO_WEBRTC,
+      needsName: false,
+      connection: undefined,
+    });
     this.session = new Session(
       invite,
       undefined,
@@ -293,7 +356,36 @@ export class Controller {
           throw Error('Host only.');
         },
       },
+      undefined,
+      {
+        relay: this.relayFactory(),
+        direct: webrtc,
+        connection: (connection) => this.guestConnection(connection),
+      },
     );
+  }
+  /** A guest's connection changed (2.37). "Reconnected" means the same session came back. */
+  private guestConnection(connection: ConnectionInfo) {
+    this.update({ connection });
+    if (connection.reconnected)
+      this.notify(
+        connection.transport === 'relay'
+          ? 'Reconnected to the host (relayed, slower).'
+          : 'Reconnected to the host.',
+        'success',
+      );
+  }
+  /** Guest (2.37): asks a full session's host for an extra place. */
+  askForPlace() {
+    this.session?.askForPlace();
+  }
+  /** Guest (2.37): asks again after the host did not answer in time. */
+  askAgain() {
+    this.session?.askAgain();
+  }
+  /** Runs the network check of Connection details again (2.37). */
+  async checkNetwork() {
+    await this.session?.checkNetwork();
   }
   confirmName(name: string) {
     if (!this.view.needsName || !name.trim() || !this.pendingInvite) return;
@@ -337,17 +429,26 @@ export class Controller {
     );
   }
   /** The companion named this page the session owner or a view (2.36). */
-  private async takeRole({ role, identity }: HostRole) {
+  private async takeRole({ role, identity, settings }: HostRole) {
     const was = this.role;
     this.role = role;
     this.relayed = identity;
     this.roleChanges++;
+    // The settings the companion kept for this launch (2.37): a reloaded or newly promoted owner
+    // carries on with them. A page whose room is already running has the newer copy and sends it.
+    if (role === 'owner') {
+      if (!this.session && settings) this.showPolicy(readPolicy(settings), false);
+      else if (this.session) this.saveSettings();
+    }
     if (role === 'view') {
       clearTimeout(this.publishTimer);
       this.publishTimer = undefined;
       // Demoted (the window took over): its guests reconnect to the window, so they are not this
       // page's to list until the owner's session info arrives.
-      this.update({ hosting: 'view', ...(was === 'owner' ? { guests: [], people: {} } : {}) });
+      this.update({
+        hosting: 'view',
+        ...(was === 'owner' ? { guests: [], people: {}, requests: [], links: {} } : {}),
+      });
     } else {
       this.update({ hosting: this.ownerKey ? 'window' : 'tab' });
       // The companion may hold older info than this page has (after a reconnect), so views get it again.
@@ -383,7 +484,7 @@ export class Controller {
     if (this.bridge?.post({ type: 'identity', identity: this.identity }))
       this.relayed = this.identity;
   }
-  /** A view shows the owner's invitation, guests and layouts (2.36). */
+  /** A view shows the owner's invitation, guests and layouts (2.36), and its lobby (2.37). */
   private showSession(info: SessionInfo) {
     if (this.role !== 'view') return;
     this.update({
@@ -392,6 +493,82 @@ export class Controller {
       people: info.people,
       layouts: info.layouts,
       ownerWindow: info.ownerWindow !== false,
+      requests: info.control?.requests ?? [],
+      policy: info.control ? readPolicy(info.control.policy) : { ...DEFAULT_POLICY },
+      links: info.control?.links ?? {},
+    });
+  }
+  /** Shows new settings and, with a 2.37 companion, keeps them there for this launch (2.37). */
+  private showPolicy(policy: SessionPolicy, save = true) {
+    this.policy = policy;
+    this.update({ policy });
+    if (save) this.saveSettings();
+  }
+  /**
+   * Sends the settings to the companion, which keeps them like the identity (2.37). Admitting guests
+   * changes them in bursts, so changes are gathered for a quarter second. An older companion would
+   * not keep them, so it is not sent any; they then live in this page only.
+   */
+  private saveSettings() {
+    if (this.settingsTimer) return;
+    this.settingsTimer = setTimeout(() => {
+      this.settingsTimer = undefined;
+      if (this.role !== 'owner' || !supports(this.view.state.companionVersion, 'sessionControl'))
+        return;
+      const settings = this.policy;
+      if (new TextEncoder().encode(JSON.stringify(settings)).byteLength > SESSION_SETTINGS_BYTES)
+        return;
+      this.bridge?.post({ type: 'sessionSettings', settings });
+    }, 250);
+  }
+  /** True when this page may change who is in the session; a view says where to do it instead. */
+  private owns() {
+    if (this.role !== 'view') return !!this.session;
+    this.notify(this.view.ownerWindow ? OWNER_ONLY.window : OWNER_ONLY.tab);
+    return false;
+  }
+  /** Host (2.37): lets a waiting guest in, or a turned-away one back. */
+  letIn(id: string) {
+    if (!this.owns()) return;
+    const away = this.policy.turnedAway.find((p) => p.id === id);
+    void this.session!.letIn(id)
+      .then(() => {
+        if (away) this.notify(`${away.name} can join again when they open the invitation.`);
+      })
+      .catch((e) => this.notify(errorMessage(e), 'error'));
+  }
+  /** Host (2.37): turns a waiting guest away. */
+  turnAway(id: string) {
+    if (this.owns()) this.session!.turnAway(id);
+  }
+  /** Host (2.37): "Let guests in at once" or "Ask me first". */
+  setAdmission(admission: SessionPolicy['admission']) {
+    if (this.owns()) this.session!.setPolicy({ ...this.session!.getPolicy(), admission });
+  }
+  /** Host (2.37): how many guests may be in at once, 1 to 12 (extra places come on top). */
+  setCapacity(capacity: number) {
+    if (!this.owns() || !Number.isInteger(capacity) || capacity < 1 || capacity > MAX_PLACES)
+      return;
+    this.session!.setPolicy({ ...this.session!.getPolicy(), capacity });
+  }
+  /**
+   * Host (2.37): one guest's own setting for one permission; undefined is "Same as everyone". Keyed
+   * by the guest's participant id, so it follows them through reloads and reconnects.
+   */
+  setGuestPermission(peer: string, key: PermissionKey, value: boolean | undefined) {
+    const id = this.view.people[peer]?.id;
+    if (!id || !this.owns()) return;
+    const policy = this.session!.getPolicy();
+    const own = { ...policy.overrides[id] };
+    if (value === undefined) delete own[key];
+    else own[key] = value;
+    const overrides = { ...policy.overrides };
+    delete overrides[id];
+    if (Object.keys(own).length) overrides[id] = own;
+    // The newest choices win when the list is at its bound, so the companion never refuses it.
+    this.session!.setPolicy({
+      ...policy,
+      overrides: Object.fromEntries(Object.entries(overrides).slice(-LIST)),
     });
   }
   /** Replace invite and Disconnect pressed in a view, carried out here in the owner (2.36). */
@@ -444,6 +621,8 @@ export class Controller {
       // A room this page has left (a Replace invite, or the window taking over in 2.36) can still
       // report peers leaving; only the current one may change the guest list a view is shown.
       const current = () => this.session === session;
+      // A new invitation starts with nobody admitted or turned away; the host's choices stay (2.37).
+      if (rotate) this.policy = forNewInvite(this.policy);
       const session: Session = new Session(
         this.identity!,
         this.identity,
@@ -451,7 +630,7 @@ export class Controller {
         (c, peer, person) => this.bridge!.send(c, 'guest', person, peer),
         () => {},
         () => {},
-        (guests) => current() && this.update({ guests }),
+        (guests, links) => current() && this.update({ guests, links: links ?? {} }),
         this.transport,
         {
           get: () => this.view.profile,
@@ -461,9 +640,24 @@ export class Controller {
           layouts: (layouts) => current() && this.update({ layouts }),
           upload: (bytes, name, by, peer) => this.bridge!.upload(bytes, name, by, false, peer),
         },
+        undefined,
+        {
+          relay: this.relayFactory(),
+          policy: this.policy,
+          policyChanged: (policy) => current() && this.showPolicy(policy),
+          lobby: (requests) => current() && this.update({ requests }),
+          connection: (connection) => current() && this.update({ connection }),
+        },
       );
       this.session = session;
-      this.update({ invite: inviteUrl(this.identity!), guests: [] });
+      this.update({
+        invite: inviteUrl(this.identity!),
+        guests: [],
+        links: {},
+        requests: [],
+        policy: this.policy,
+      });
+      if (rotate) this.saveSettings();
     } finally {
       this.starting = false;
       // The role changed while the room started (the window took over, say).
@@ -644,6 +838,10 @@ export class Controller {
       this.live = false;
       clearTimeout(this.publishTimer);
       this.publishTimer = undefined;
+      clearTimeout(this.settingsTimer);
+      this.settingsTimer = undefined;
+      // End hosting forgets the session's settings, as the companion does (2.37).
+      this.policy = { ...DEFAULT_POLICY };
       this.role = undefined;
       this.relayed = null;
       if (wasHost) {
@@ -661,6 +859,10 @@ export class Controller {
         resumeAvailable: wasHost,
         hosting: 'tab',
         ownerWindow: true,
+        connection: undefined,
+        requests: [],
+        policy: this.policy,
+        links: {},
       });
     }
   }

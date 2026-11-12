@@ -1,7 +1,8 @@
-import { Link, LogOut, Radio, RotateCcw, Trash2, Users } from 'lucide-react';
+import { Link, LogOut, Radio, RotateCcw, Trash2 } from 'lucide-react';
 import { controller } from '../controller';
-import { MAX_GUESTS } from '../network/session';
 import type { Snapshot } from '../protocol';
+import { SessionAccess } from './SessionAccess';
+import { ConnectionDetails } from './ConnectionDetails';
 import { missingFeatures, supports } from '../version';
 import { hostCopy } from '../hosting';
 import { themes, type Theme, type useAppearance } from '../appearance';
@@ -115,7 +116,11 @@ export function SettingsDialog({
       <div className="settings-status">
         <Radio size={18} />
         <div>
-          <strong>{status}</strong>
+          <strong>
+            {status === 'Connected' && view.connection?.transport === 'relay'
+              ? 'Connected (relayed, slower)'
+              : status}
+          </strong>
           <p>{host ? copy.status : 'Your host controls playback and permissions.'}</p>
         </div>
       </div>
@@ -179,25 +184,7 @@ export function SettingsDialog({
             Disconnect removes this connection only. Replace invite revokes the bearer link; a
             disconnected guest can otherwise rejoin.
           </p>
-          <h3>
-            Connected guests{' '}
-            <small>
-              {view.guests.length} / {MAX_GUESTS}
-            </small>
-          </h3>
-          {view.guests.length ? (
-            view.guests.map((id, i) => (
-              <div className="guest-row" key={id}>
-                <span>
-                  <Users size={17} /> {view.people[id]?.name ?? `Guest ${i + 1}`}{' '}
-                  <small>{id.slice(0, 8)}</small>
-                </span>
-                <button onClick={() => controller.disconnect(id)}>Disconnect</button>
-              </div>
-            ))
-          ) : (
-            <p className="muted">Share your invitation to bring friends in.</p>
-          )}
+          <SessionAccess view={view} />
           <button
             className="danger-link"
             disabled={!connected}
@@ -221,6 +208,7 @@ export function SettingsDialog({
           )}
         </>
       )}
+      <ConnectionDetails info={view.connection} host={host} />
       <div className="dialog-foot">
         <span>{host ? copy.foot : hostCopy('tab', null).foot}</span>
         {/* A view does not end the session (2.36); its owner, the window, keeps End hosting. */}

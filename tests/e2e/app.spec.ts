@@ -1678,6 +1678,9 @@ test('a guest whose browser has no WebRTC is told why at once', async ({
       delete (window as { RTCPeerConnection?: unknown }).RTCPeerConnection;
       localStorage.setItem('soundpad-name-confirmed', '1');
     });
+    // Since 2.37 such a guest tries the relay instead; with the relays unreachable as well, the
+    // WebRTC message stays (and this test never depends on public relays).
+    await context.routeWebSocket(/wss:\/\//, (socket) => socket.close());
     const guest = await context.newPage();
     await guest.goto(url);
     // A fresh browser context loads the whole app, which a slow CI runner can take a while to do (the
@@ -3656,4 +3659,130 @@ test('desktop session: a companion older than 2.36 gets no session messages, and
   expect(await shownInvite(page)).toBe(link);
   await expect(guestCount(page)).toHaveText(/1 connected guest/, { timeout: 20000 });
   expect(typed).toEqual([]);
+});
+
+/**
+ * Session control (2.37). Pages of one browser context share localStorage, where a guest's
+ * participant id lives, so each extra guest page gets its own profile before it loads (a confirmed
+ * name, so it joins without the name prompt).
+ */
+async function openGuest(hostPage: Page, link: string, name: string) {
+  const guest = await hostPage.context().newPage();
+  const id = crypto.randomUUID();
+  await guest.addInitScript(
+    ([id, name]) => {
+      localStorage.setItem('soundpad-profile', JSON.stringify({ id, name }));
+      localStorage.setItem('soundpad-name-confirmed', '1');
+    },
+    [id, name] as const,
+  );
+  await guest.goto(link);
+  return guest;
+}
+async function inviteLink(hostPage: Page) {
+  await hostPage.getByRole('button', { name: 'Access settings' }).click();
+  await expect(hostPage.locator('#invite')).toHaveValue(/#join=/);
+  const link = await hostPage.locator('#invite').inputValue();
+  await hostPage.getByRole('button', { name: 'Close dialog' }).click();
+  return link;
+}
+const waitingList = (hostPage: Page) =>
+  hostPage.locator('.board-heading').getByRole('list', { name: 'Guests waiting to join' });
+
+test('lobby: with Ask me first the host lets one guest in and turns another away', async ({
+  page,
+  harness,
+}) => {
+  await useLocalGuests(page);
+  await host(page, harness);
+  await page.getByRole('button', { name: 'Access settings' }).click();
+  await page.getByLabel('Admission').selectOption({ label: 'Ask me first' });
+  await page.getByRole('button', { name: 'Close dialog' }).click();
+  const link = await inviteLink(page);
+  const ann = await openGuest(page, link, 'Ann');
+  await expect(ann.locator('header .status')).toHaveText('Waiting for the host to let you in');
+  await expect(playButton(ann, 'Airhorn')).toHaveCount(0);
+  // A persistent request and a badge, not a notice that goes away.
+  await expect(waitingList(page)).toContainText('Ann wants to join');
+  await expect(page.getByRole('button', { name: 'Access settings, 1 waiting' })).toBeVisible();
+  await page.waitForTimeout(9000);
+  await expect(waitingList(page)).toContainText('Ann wants to join');
+  await waitingList(page).getByRole('button', { name: 'Let in Ann' }).click();
+  await expect(ann.locator('header .status')).toHaveText('Connected');
+  await expect(playButton(ann, 'Airhorn')).toBeEnabled();
+  await expect(waitingList(page)).toHaveCount(0);
+  // Ann reloads: she keeps her place and is not asked about again.
+  await ann.reload();
+  await expect(ann.locator('header .status')).toHaveText('Connected');
+  await expect(waitingList(page)).toHaveCount(0);
+
+  const bob = await openGuest(page, link, 'Bob');
+  await expect(waitingList(page)).toContainText('Bob wants to join');
+  await waitingList(page).getByRole('button', { name: 'Turn away Bob' }).click();
+  await expect(bob.locator('header .status')).toHaveText('The host didn’t let you in');
+  await expect(bob.locator('.connection-banner')).toContainText('ask them for a new invitation');
+  await expect(waitingList(page)).toHaveCount(0);
+  await page.getByRole('button', { name: 'Access settings' }).click();
+  const dialog = page.getByRole('dialog', { name: 'Session & access' });
+  await expect(dialog.getByRole('button', { name: 'Allow Bob again' })).toBeVisible();
+  await expect(dialog).toContainText('Connected guests 1 / 12');
+});
+
+test('capacity: a full session offers an extra place, and Let in adds one', async ({
+  page,
+  harness,
+}) => {
+  await useLocalGuests(page);
+  await host(page, harness);
+  await page.getByRole('button', { name: 'Access settings' }).click();
+  await page.getByLabel('Guest places').selectOption('1');
+  await page.getByRole('button', { name: 'Close dialog' }).click();
+  const link = await inviteLink(page);
+  const ann = await openGuest(page, link, 'Ann');
+  await expect(ann.locator('header .status')).toHaveText('Connected');
+  const bob = await openGuest(page, link, 'Bob');
+  await expect(bob.locator('header .status')).toHaveText('This session is full');
+  await bob.getByRole('button', { name: 'Ask for an extra place' }).click();
+  await expect(bob.locator('header .status')).toHaveText('Waiting for the host to let you in');
+  await expect(waitingList(page)).toContainText('Bob asks for an extra place');
+  await waitingList(page).getByRole('button', { name: 'Let in Bob' }).click();
+  await expect(bob.locator('header .status')).toHaveText('Connected');
+  await expect(playButton(bob, 'Airhorn')).toBeEnabled();
+  await page.getByRole('button', { name: 'Access settings' }).click();
+  const dialog = page.getByRole('dialog', { name: 'Session & access' });
+  await expect(dialog).toContainText('Connected guests 2 / 2');
+  await expect(dialog).toContainText('Plus 1 extra place granted this session.');
+});
+
+test('per-guest permissions: one guest’s playback is off while another’s still plays', async ({
+  page,
+  harness,
+}) => {
+  await useLocalGuests(page);
+  await host(page, harness);
+  const link = await inviteLink(page);
+  const ann = await openGuest(page, link, 'Ann');
+  const bob = await openGuest(page, link, 'Bob');
+  for (const guest of [ann, bob])
+    await expect(guest.locator('header .status')).toHaveText('Connected');
+  await page.getByRole('button', { name: 'Access settings' }).click();
+  const dialog = page.getByRole('dialog', { name: 'Session & access' });
+  await dialog.getByLabel('Permissions for Ann').click();
+  await dialog.getByLabel('Remote playback for Ann').selectOption({ label: 'Off' });
+  await expect(dialog.getByLabel('Permissions for Ann')).toContainText('(1 own)');
+  await page.getByRole('button', { name: 'Close dialog' }).click();
+  // Ann's page shows her own permissions; the host page refuses her play even when sent anyway.
+  await expect(playButton(ann, 'Airhorn')).toBeDisabled();
+  expect(await sendCommand(ann, 'play')).toEqual({
+    error: 'The host has disabled this action.',
+  });
+  expect(harness.plays.filter((p) => p.startsWith('DoPlaySound('))).toEqual([]);
+  await playButton(bob, 'Airhorn').click();
+  await expect.poll(() => harness.plays).toContain('DoPlaySound(1)');
+  // Same as everyone again.
+  await page.getByRole('button', { name: 'Access settings' }).click();
+  await dialog.getByLabel('Permissions for Ann').click();
+  await dialog.getByLabel('Remote playback for Ann').selectOption({ label: 'Same as everyone' });
+  await page.getByRole('button', { name: 'Close dialog' }).click();
+  await expect(playButton(ann, 'Airhorn')).toBeEnabled();
 });

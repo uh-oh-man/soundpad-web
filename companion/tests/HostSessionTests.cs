@@ -206,6 +206,49 @@ public sealed class HostSessionTests : IDisposable
         Assert.Equal("owner", Role(role)); Assert.Null(Identity(role));
     }
 
+    private static JsonElement? Settings(JsonElement role) => role.TryGetProperty("settings", out var value) && value.ValueKind == JsonValueKind.Object ? value : null;
+
+    [Fact]
+    public async Task SessionSettingsFollowTheOwnerLikeTheIdentityAndEndHostingForgetsThem()
+    {
+        // 2.37: admission, guest places and per-guest permissions survive an owner reload and a hand-over to a view.
+        await using var companion = await new Companion(folder, graceMs: 600).Start();
+        var owner = await Page.Host(companion.Server, "owner-page");
+        Assert.Null(Settings(await owner.Next("role")));
+        await owner.Send(new { type = "sessionSettings", settings = new { admission = "ask", capacity = 3 } });
+        await using var view = await Page.Host(companion.Server, "view-page");
+        Assert.Null(Settings(await view.Next("role"))); // a view is never given them
+        // A view cannot replace them, a non-object is ignored, and so is anything above 64 KiB.
+        await view.Send(new { type = "sessionSettings", settings = new { admission = "open" } });
+        await owner.Send(new { type = "sessionSettings", settings = "not an object" });
+        await owner.Send(new { type = "sessionSettings", settings = new { admission = "huge", padding = new string('x', LocalServer.MaxSessionSettingsBytes) } });
+        await Task.Delay(200);
+        await owner.DisposeAsync();
+        await Task.Delay(100);
+        // The reloaded owner gets them back next to the identity.
+        var reloaded = await Page.Host(companion.Server, "owner-page");
+        var role = await reloaded.Next("role");
+        Assert.Equal("owner", Role(role));
+        Assert.Equal("ask", Settings(role)!.Value.GetProperty("admission").GetString());
+        Assert.Equal(3, Settings(role)!.Value.GetProperty("capacity").GetInt32());
+        await reloaded.Send(new { type = "sessionSettings", settings = new { admission = "ask", capacity = 4 } });
+        await Task.Delay(100);
+        // The owner does not come back: the view is promoted and gets the latest settings.
+        await reloaded.DisposeAsync();
+        var promoted = await view.Next("role", 5000);
+        Assert.Equal("owner", Role(promoted));
+        Assert.Equal(4, Settings(promoted)!.Value.GetProperty("capacity").GetInt32());
+        // End hosting forgets them: the next owner starts with the defaults.
+        var end = Cmd("endSession");
+        await view.Send(new { actor = "host", command = end });
+        Assert.Equal(end.Id, (await view.Next("ack", 10000)).GetProperty("id").GetString());
+        await view.Send(new { type = "sessionSettings", settings = new { admission = "late" } });
+        await view.Close();
+        await using var resumed = await Page.Host(companion.Server, "resumed-page");
+        var fresh = await resumed.Next("role", 2000);
+        Assert.Equal("owner", Role(fresh)); Assert.Null(Settings(fresh)); Assert.Null(Identity(fresh));
+    }
+
     [Fact]
     public async Task SessionSummariesReachViewsAndLateJoinersButOnlyFromTheOwner()
     {

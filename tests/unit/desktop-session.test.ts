@@ -9,6 +9,11 @@ type FakeRoom = {
   guests: (ids: string[]) => void;
   profiles: { changed: (people: Record<string, { id: string; name: string }>) => void };
   extras: { layouts: (layouts: unknown[]) => void };
+  options: {
+    policy?: unknown;
+    policyChanged: (policy: unknown) => void;
+    lobby: (requests: unknown[]) => void;
+  };
   closed?: { revoke: boolean };
   disconnected: string[];
 };
@@ -22,8 +27,10 @@ vi.mock('../../web/src/network/session', () => ({
     guests: unknown;
     profiles: unknown;
     extras: unknown;
+    options: unknown;
     constructor(...args: unknown[]) {
-      [this.invite, this.host, , , , , this.guests, , this.profiles, this.extras] = args;
+      [this.invite, this.host, , , , , this.guests, , this.profiles, this.extras, , this.options] =
+        args;
       rooms.push(this as unknown as FakeRoom);
     }
     broadcast() {}
@@ -58,6 +65,7 @@ import { LocalBridge } from '../../web/src/network/local';
 import { EMPTY } from '../../web/src/protocol';
 import { hostCopy, TAB_VIEW_NOTE, VIEW_NOTE } from '../../web/src/hosting';
 import { supports } from '../../web/src/version';
+import { DEFAULT_POLICY } from '../../web/src/network/policy';
 
 /** The companion's socket, answered by hand. No real socket is opened. */
 class FakeSocket {
@@ -211,6 +219,7 @@ describe('session owner (2.36)', () => {
         people: { 'peer-a': person },
         layouts: [],
         ownerWindow: true,
+        control: { requests: [], policy: DEFAULT_POLICY, links: {} },
       },
     ]);
   });
@@ -401,6 +410,81 @@ describe('older companions (before 2.36)', () => {
     expect(bridge.post({ type: 'ownerAction', action: 'rotate' })).toBe(false);
     expect(socket.sent).toHaveLength(1); // the hello only
     bridge.close();
+  });
+});
+
+describe('session settings (2.37)', () => {
+  const kept = {
+    ...DEFAULT_POLICY,
+    admission: 'ask',
+    capacity: 3,
+    overrides: { '11111111-1111-4111-8111-111111111111': { remotePlayback: false } },
+  };
+  it('starts the room with the settings the companion kept, and sends every change back', async () => {
+    const { page, socket } = await hostPage(`#host=1234.${token}&owner=${ownerKey}`);
+    socket.receive({ type: 'role', role: 'owner', identity: identity(7), settings: kept });
+    socket.receive({ type: 'state', state: state('2.37.0') });
+    await flush();
+    expect(rooms[0].options.policy).toEqual(kept);
+    expect(page.getSnapshot().policy).toEqual(kept);
+    const changed = { ...kept, extra: 1, admitted: ['22222222-2222-4222-8222-222222222222'] };
+    rooms[0].options.policyChanged(changed);
+    expect(page.getSnapshot().policy).toEqual(changed);
+    await vi.advanceTimersByTimeAsync(300);
+    expect(socket.posted('sessionSettings')).toEqual([
+      { type: 'sessionSettings', settings: changed },
+    ]);
+    // A reloaded owner gets them back in its role, and a new room starts with them.
+    const reload = await hostPage(`#host=1234.${token}&owner=${ownerKey}`);
+    reload.socket.receive({
+      type: 'role',
+      role: 'owner',
+      identity: identity(7),
+      settings: changed,
+    });
+    reload.socket.receive({ type: 'state', state: state('2.37.0') });
+    await flush();
+    expect(rooms[1].options.policy).toEqual(changed);
+  });
+  it('keeps the settings in the page only with an older companion, and reads bad ones as defaults', async () => {
+    const { page, socket } = await hostPage(`#host=1234.${token}`);
+    socket.receive({
+      type: 'role',
+      role: 'owner',
+      identity: identity(7),
+      settings: { capacity: 99 },
+    });
+    socket.receive({ type: 'state', state: state('2.36.0') });
+    await flush();
+    expect(rooms[0].options.policy).toEqual(DEFAULT_POLICY);
+    rooms[0].options.policyChanged(kept);
+    await vi.advanceTimersByTimeAsync(300);
+    expect(page.getSnapshot().policy).toEqual(kept);
+    expect(socket.posted('sessionSettings')).toEqual([]);
+  });
+  it('shows a view the owner’s waiting guests and settings', async () => {
+    const { page, socket } = await hostPage(`#host=1234.${token}`);
+    socket.receive({ type: 'role', role: 'view', identity: null });
+    socket.receive({ type: 'state', state: state('2.37.0') });
+    await flush();
+    const request = {
+      id: '33333333-3333-4333-8333-333333333333',
+      name: 'Ann',
+      kind: 'admit',
+      at: 1,
+      expiresAt: 2,
+    };
+    socket.receive({
+      type: 'session',
+      invite: 'https://site.test/#join=x',
+      guests: ['peer-a'],
+      people: {},
+      layouts: [],
+      control: { requests: [request], policy: kept, links: { 'peer-a': 'relay' } },
+    });
+    expect(page.getSnapshot().requests).toEqual([request]);
+    expect(page.getSnapshot().policy).toEqual(kept);
+    expect(page.getSnapshot().links).toEqual({ 'peer-a': 'relay' });
   });
 });
 

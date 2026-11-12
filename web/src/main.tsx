@@ -37,6 +37,8 @@ import { SessionUpload } from './components/SessionUpload';
 import { Modal, dialogOpen } from './components/Modal';
 import { Sidebar } from './components/Sidebar';
 import { SettingsDialog } from './components/SettingsDialog';
+import { LobbyRequests } from './components/LobbyRequests';
+import type { ConnectionInfo } from './network/session';
 import { WhatsNew } from './components/WhatsNew';
 import { MimicPanel } from './components/MimicPanel';
 import { requestTemp } from './edit-copy';
@@ -194,11 +196,62 @@ function statusLabel(
   host: boolean,
   available: boolean,
   status: string,
+  relayed = false,
 ) {
   if (mode === 'landing') return 'Not connected';
   if (!connected) return status.split('.')[0];
   if (!available) return 'Soundpad unavailable';
-  return host ? 'Hosting' : 'Connected';
+  // Through the relay (2.37) everything works, only slower; the header says so.
+  return host ? 'Hosting' : relayed ? 'Connected (relayed, slower)' : 'Connected';
+}
+
+/** "35 s" or "2 min 5 s": how long a guest has been reconnecting (2.37). */
+function elapsed(ms: number) {
+  const s = Math.max(0, Math.floor(ms / 1000));
+  return s < 60 ? `${s} s` : `${Math.floor(s / 60)} min ${s % 60} s`;
+}
+
+/** The current time, once a second while `on`; for counters a person watches. */
+function useNow(on: boolean) {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (!on) return;
+    const timer = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, [on]);
+  return now;
+}
+
+/**
+ * What a guest who is not connected is told (2.37), with the step they can take: ask for an extra
+ * place, ask again, or wait while it reconnects by itself. Playback clicks made meanwhile are dropped.
+ */
+function GuestConnection({ status, info }: { status: string; info?: ConnectionInfo }) {
+  const reconnecting = !!info?.reconnecting && !info.lobby && !info.ended;
+  const now = useNow(reconnecting);
+  if (reconnecting)
+    return (
+      <span>
+        <strong>Reconnecting for {elapsed(now - info!.since)}.</strong> Playback is unavailable
+        until the host is back; it keeps trying by itself.
+        {info!.diagnosis ? ` ${info!.diagnosis.text}` : ''}
+      </span>
+    );
+  return (
+    <span>
+      {status}{' '}
+      {info?.lobby === 'full' && info.canAskExtra && (
+        <button className="primary" onClick={() => controller.askForPlace()}>
+          Ask for an extra place
+        </button>
+      )}
+      {info?.lobby === 'expired' && (
+        <button className="primary" onClick={() => controller.askAgain()}>
+          Ask again
+        </button>
+      )}
+    </span>
+  );
 }
 
 function Landing({ view }: { view: ReturnType<typeof controller.getSnapshot> }) {
@@ -451,7 +504,14 @@ function App() {
         <div className="top-actions">
           <span className={`status ${connected && state.available ? 'online' : ''}`} title={status}>
             <i />
-            {statusLabel(mode, connected, host, state.available, status)}
+            {statusLabel(
+              mode,
+              connected,
+              host,
+              state.available,
+              status,
+              view.connection?.transport === 'relay',
+            )}
           </span>
           {mimicListening && (
             <button
@@ -480,10 +540,16 @@ function App() {
           {mode !== 'landing' && (
             <button
               className="icon-button"
-              aria-label="Access settings"
+              // Waiting guests show as a badge until the host decides (2.37).
+              aria-label={`Access settings${host && view.requests.length ? `, ${view.requests.length} waiting` : ''}`}
               onClick={() => setSettings(true)}
             >
               <Settings2 size={20} />
+              {host && view.requests.length > 0 && (
+                <span className="badge" aria-hidden="true">
+                  {view.requests.length}
+                </span>
+              )}
             </button>
           )}
         </div>
@@ -555,6 +621,7 @@ function App() {
                       )}
                     </p>
                   )}
+                  {host && <LobbyRequests requests={view.requests} />}
                 </div>
                 <div className="board-actions">
                   {canMimic && (
@@ -592,12 +659,16 @@ function App() {
               {(!connected || state.error) && (
                 <div className="connection-banner" role="status">
                   <Radio size={18} />
-                  <span>
-                    {!connected ? status : state.error}{' '}
-                    {!connected &&
-                      host &&
-                      'Allow the browser’s local-network request if prompted. Keep the companion running.'}
-                  </span>
+                  {!connected && !host ? (
+                    <GuestConnection status={status} info={view.connection} />
+                  ) : (
+                    <span>
+                      {!connected ? status : state.error}{' '}
+                      {!connected &&
+                        host &&
+                        'Allow the browser’s local-network request if prompted. Keep the companion running.'}
+                    </span>
+                  )}
                 </div>
               )}
               {suspended && (
