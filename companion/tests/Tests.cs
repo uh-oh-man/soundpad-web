@@ -10,7 +10,7 @@ public sealed class Tests : IDisposable
     private readonly string directory = Path.Combine(Path.GetTempPath(), "soundpad-web-unit-" + Guid.NewGuid().ToString("N"));
     private StateStore Store => new(directory);
     private static Command Cmd(string op, string? sound = null, string? version = null, int? delta = null) => new(1, Guid.NewGuid().ToString(), DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(), op, sound, version, delta);
-    public void Dispose() { if (Directory.Exists(directory)) Directory.Delete(directory, true); }
+    public void Dispose() => TestFolders.Delete(directory);
     [Fact]
     public void XmlPreservesNestingOrderDuplicatesAndPrivacy()
     {

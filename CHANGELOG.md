@@ -28,6 +28,7 @@ This is the first step of a larger overhaul: making rapid back-and-forth between
 ### Fixed
 
 - The companion could close by itself if Soundpad refused the stop at the end of a region.
+- Saving settings no longer fails when a virus scanner holds the file for a moment just after it was written; the save retries briefly.
 - A refused command no longer makes the companion re-read its settings file, and the icon folder is only tidied when an icon changes.
 - Clicking a waveform just after someone else started a sound now starts it where you clicked, instead of doing nothing. A sound that was paused after you clicked its waveform stays paused.
 

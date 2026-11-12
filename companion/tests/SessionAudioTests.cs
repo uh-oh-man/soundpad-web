@@ -6,7 +6,7 @@ public sealed class SessionAudioTests : IDisposable
 {
     private readonly string folder = Path.Combine(Path.GetTempPath(), "soundpad-session-test-" + Guid.NewGuid().ToString("N"));
     public SessionAudioTests() => Directory.CreateDirectory(folder);
-    public void Dispose() => Directory.Delete(folder, true);
+    public void Dispose() => TestFolders.Delete(folder);
     private static Command Cmd(string op, string? id = null, string? version = null) => new(2, Guid.NewGuid().ToString(), DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(), op, id, version);
     private string Wave()
     {

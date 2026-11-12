@@ -13,7 +13,7 @@ public sealed class PlaybackIntentTests : IDisposable
 {
     private readonly string folder = Path.Combine(Path.GetTempPath(), "soundpad-intent-test-" + Guid.NewGuid().ToString("N"));
     public PlaybackIntentTests() => Directory.CreateDirectory(folder);
-    public void Dispose() => Directory.Delete(folder, true);
+    public void Dispose() => TestFolders.Delete(folder);
     private static Command Cmd(string op, string? sound = null) => new(2, Guid.NewGuid().ToString(), DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(), op, sound);
     private static JsonElement Data(Reply reply) => JsonSerializer.SerializeToElement(reply.Data ?? new { }, Json.Options);
     private static bool Flag(Reply reply, string name) => Data(reply).TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.True;

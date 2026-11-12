@@ -7,7 +7,7 @@ public sealed class MimicTests : IDisposable
 {
     private readonly string folder = Path.Combine(Path.GetTempPath(), "soundpad-mimic-test-" + Guid.NewGuid().ToString("N"));
     public MimicTests() => Directory.CreateDirectory(folder);
-    public void Dispose() => Directory.Delete(folder, true);
+    public void Dispose() => TestFolders.Delete(folder);
     private static Command Cmd(string op) => new(2, Guid.NewGuid().ToString(), DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(), op);
     private static T Data<T>(Reply reply) => JsonSerializer.Deserialize<T>(JsonSerializer.Serialize(reply.Data, Json.Options), Json.Options)!;
 
