@@ -75,13 +75,30 @@ public sealed class StateStore(string directory)
         {
             if (image.Sequence <= committed) return false;
             if (createFolder) Directory.CreateDirectory(directory); else if (!Directory.Exists(directory)) return false;
+            // A virus scanner can open a file just written for a moment (seen on GitHub's Windows runners in 2.35.0
+            // CI), which refuses the rename, or the next write to the same temporary name. Retry briefly; a temporary
+            // file that is still held gets a fresh name instead of failing the save.
             var temp = PathName + ".tmp";
-            using (var f = new FileStream(temp, FileMode.Create, FileAccess.Write, FileShare.None, 4096, FileOptions.WriteThrough))
+            for (int attempt = 0; ; attempt++)
             {
-                f.Write(image.Json); f.Flush(true);
+                try
+                {
+                    using (var f = new FileStream(temp, FileMode.Create, FileAccess.Write, FileShare.None, 4096, FileOptions.WriteThrough))
+                    {
+                        f.Write(image.Json); f.Flush(true);
+                    }
+                    break;
+                }
+                catch (IOException) when (attempt < 5) { temp = PathName + "." + attempt + ".tmp"; Thread.Sleep(20); }
             }
-            File.Move(temp, PathName, true);
+            for (int attempt = 0; ; attempt++)
+            {
+                try { File.Move(temp, PathName, true); break; }
+                catch (Exception ex) when (attempt < 40 && ex is IOException or UnauthorizedAccessException) { Thread.Sleep(25); }
+                catch { try { File.Delete(temp); } catch (Exception) { } throw; }
+            }
             committed = image.Sequence;
+            foreach (var stale in Directory.EnumerateFiles(directory, "state.json.*.tmp")) { try { File.Delete(stale); } catch (IOException) { } catch (UnauthorizedAccessException) { } }
             if (pruneIcons) { try { PruneIcons(image.IconFiles); } catch (IOException) { } catch (UnauthorizedAccessException) { } }
             return true;
         }

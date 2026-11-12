@@ -10,7 +10,7 @@ public sealed class ManagedAudioStoreTests : IDisposable
 {
     private readonly string folder = Path.Combine(Path.GetTempPath(), "soundpad-managed-v3-" + Guid.NewGuid().ToString("N"));
     public ManagedAudioStoreTests() => Directory.CreateDirectory(folder);
-    public void Dispose() => Directory.Delete(folder, true);
+    public void Dispose() => TestFolders.Delete(folder);
     private static string Id(string path) => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(path))).ToLowerInvariant();
     private ManagedAudioStore Store(ISoundpad pipe) => new(folder, pipe, Id, async work => await work());
     private byte[] Wave()

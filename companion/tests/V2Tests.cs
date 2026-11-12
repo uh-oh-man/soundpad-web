@@ -47,7 +47,7 @@ public sealed class V2Tests : IDisposable
     private readonly string folder = Path.Combine(Path.GetTempPath(), "soundpad-web-v2-" + Guid.NewGuid().ToString("N"));
     private StateStore Store => new(folder);
     public V2Tests() { Directory.CreateDirectory(folder); }
-    public void Dispose() { Directory.Delete(folder, true); }
+    public void Dispose() { TestFolders.Delete(folder); }
     /// <summary>The quiet answer to a seek or pause whose playback is gone (2.35): ok, marked superseded, reason "stale".</summary>
     private static bool Stale(Reply reply) { if (!reply.Ok || reply.Data == null) return false; using var data = JsonDocument.Parse(Json.Write(reply.Data)); return data.RootElement.TryGetProperty("superseded", out var superseded) && superseded.GetBoolean() && data.RootElement.GetProperty("reason").GetString() == "stale"; }
     private static Command Cmd(string op, string? id = null, string? version = null, long? position = null, string? epoch = null, long? end = null, bool repeat = false) => new(2, Guid.NewGuid().ToString(), DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(), op, id, version, PositionMs: position, Epoch: epoch, EndMs: end, Repeat: repeat);
