@@ -16,6 +16,7 @@
     "format": "prettier --write web/src tests *.ts *.js *.json .github/workflows"
   },
   "dependencies": {
+    "@noble/secp256k1": "3.2.0",
     "lucide-react": "^0.548.0",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
