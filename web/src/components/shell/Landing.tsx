@@ -86,13 +86,14 @@ export function Landing({ view }: { view: ReturnType<typeof controller.getSnapsh
 /**
  * "Try the example": a host session with example sounds that runs entirely in this page, so a
  * visitor can try the app before installing anything. Its code loads only when pressed. It says
- * what can be tried (2.41): not "every feature", since the Windows hotkey, Keep, Spotify and the
- * newer Mimic history need the host's PC.
+ * what can be tried (2.41, Stage G): not "every feature", since the Windows hotkey, Keep, Spotify and
+ * the Soundpad word index need the host's PC.
  */
 export function TryExample({ loading }: { loading: boolean }) {
   return (
     <div className="try-example">
       <button
+        className="btn btn-primary"
         aria-describedby="try-example-note"
         // Busy stays focusable (aria-disabled); presses are ignored until the example has loaded.
         aria-disabled={loading || undefined}
@@ -103,8 +104,8 @@ export function TryExample({ loading }: { loading: boolean }) {
         {loading ? 'Loading the example…' : 'Try the example'}
       </button>
       <p id="try-example-note">
-        Try the soundboard, edited copies, Mimic and simulated guests with example sounds. Nothing
-        is sent to Soundpad; sounds play in this browser.
+        Try the example: sounds, Mimic history and drafts, voices, sentences and simulated guests.
+        Nothing is sent to Soundpad; sounds play in this browser.
       </p>
     </div>
   );

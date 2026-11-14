@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { Check, Headphones, Pause, Play, Plus, SkipForward, Star, Trash2, X } from 'lucide-react';
 import { controller } from '../controller';
 import { flattenCategories, type Snapshot } from '../protocol';
@@ -20,6 +20,11 @@ import {
 } from '../library/voices';
 import { refreshLibrary } from '../library/voice-store';
 import { VoiceAvatar, libraryChange, useWordPlayer } from './VoiceShared';
+import { HostOnlyTag } from './SimulatedBadge';
+
+/** Why the word index and speaker groups do nothing in the example (Stage G spec 11.5). */
+const EXAMPLE_INDEX_NOTE =
+  'In the example these need the host’s PC: the word index reads Soundpad categories there, and speaker groups listen to its recording history.';
 
 /**
  * The review queue (2.41): new recordings one at a time. Listen (private preview), correct the text,
@@ -543,8 +548,19 @@ export function WordIndexSettings({ state, status }: { state: Snapshot; status: 
   );
   const index = status.index;
   const changed = JSON.stringify([...picked].sort()) !== JSON.stringify([...chosen].sort());
+  // The example (Stage G): the controls stay focusable but say why they do nothing, and a press says it too.
+  const demo = useSyncExternalStore(controller.subscribe, () => controller.getSnapshot().demo);
+  const explain = () => controller.notify(EXAMPLE_INDEX_NOTE, 'info');
+  const hostOnly = demo
+    ? ({ 'aria-disabled': true, 'aria-describedby': 'voices-index-host-only' } as const)
+    : {};
   return (
     <section className="voices-index" aria-label="Word index">
+      {demo && (
+        <p className="muted" id="voices-index-host-only">
+          <HostOnlyTag /> {EXAMPLE_INDEX_NOTE}
+        </p>
+      )}
       <p className="muted">
         Choose Soundpad categories whose sounds should be word-searchable. Their speech is
         recognised on this PC in the background, one file at a time at Gaming priority; files
@@ -572,14 +588,17 @@ export function WordIndexSettings({ state, status }: { state: Snapshot; status: 
         type="button"
         className="primary"
         disabled={!changed}
+        {...hostOnly}
         onClick={() =>
-          void controller
-            .run('libraryIndex', { categories: picked })
-            .then(() => {
-              controller.notify('Word index categories saved.', 'success');
-              return refreshLibrary();
-            })
-            .catch(() => {})
+          demo
+            ? explain()
+            : void controller
+                .run('libraryIndex', { categories: picked })
+                .then(() => {
+                  controller.notify('Word index categories saved.', 'success');
+                  return refreshLibrary();
+                })
+                .catch(() => {})
         }
       >
         Save categories
@@ -620,11 +639,14 @@ export function WordIndexSettings({ state, status }: { state: Snapshot; status: 
           type="checkbox"
           aria-label="Group speakers (experimental)"
           checked={status.settings.groupSpeakers}
+          {...hostOnly}
           onChange={(e) =>
-            void controller
-              .run('librarySettings', { groupSpeakers: e.target.checked })
-              .then(() => refreshLibrary())
-              .catch(() => {})
+            demo
+              ? explain()
+              : void controller
+                  .run('librarySettings', { groupSpeakers: e.target.checked })
+                  .then(() => refreshLibrary())
+                  .catch(() => {})
           }
         />
       </div>

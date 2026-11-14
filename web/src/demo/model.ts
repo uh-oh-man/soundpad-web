@@ -29,7 +29,18 @@ import {
   wordsWithin,
   type DemoWord,
 } from './library';
-import { clampSpeed, editedLengthMs, type ClipEdit, type Effect, type Level } from './dsp';
+import {
+  clampSpeed,
+  editedLengthMs,
+  type ClipEdit,
+  type Effect,
+  type Level,
+  type MixPart,
+} from './dsp';
+import { DemoHistory, loopMs, type Range } from './history';
+import { ALEX_BAND_MS, DemoDrafts } from './drafts';
+import { DemoVoices, LIBRARY_UNAVAILABLE } from './voices';
+import { DemoSentences } from './sentences';
 
 /**
  * The example session: a stand-in for the companion and the guest room that runs entirely in
@@ -72,6 +83,10 @@ export interface DemoEngine {
     maxMs: number,
   ): Promise<{ wav: string; seconds: number }>;
   previewLoop(fromMs: number, toMs: number): Promise<{ wav: string; seconds: number }>;
+  /** Makes `target` from a mix of parts (sentences, palette words); resolves with its length in ms. */
+  mix(target: string, parts: MixPart[]): Promise<number>;
+  /** A WAV (base64) of a mix, for a private preview. */
+  previewMix(parts: MixPart[], maxMs: number): Promise<{ wav: string; seconds: number }>;
   waveform(clip: string): Level[] | null;
   forget(clip: string): void;
   close(): void;
@@ -99,11 +114,15 @@ export type DemoOptions = {
 };
 
 /**
- * The companion version the example reports. Every control the website has is shown except the recording history
- * (2.39), which the example does not simulate: its Mimic keeps the 30 s view, listening to a loop of the example
- * clips. Raise this only together with the history ops (historyTimeline, historyLevels, historyTranscript, ...).
+ * The companion version the example reports, so the page shows the controls of that version. Stage G raised it
+ * from 2.37 to 2.40 with the recording history (2.39: a virtual history over the example's loop, see
+ * `history.ts`) and drafts (2.40: `drafts.ts`, with a simulated guest's selection), then to 2.42 with the voice
+ * library (2.41: `voices.ts`, three simulated voices from the example's own clips) and sentences with the
+ * speaking palette (2.42: `sentences.ts`). Every op of every feature up to this version is answered here, or
+ * refused with an honest reason on the allow-list in tests/unit/demo-coverage.test.ts, which fails when that
+ * is not so. Raise it only together with the ops of the features it unlocks, and that test.
  */
-export const DEMO_COMPANION = '2.37.0';
+export const DEMO_COMPANION = '2.42.0';
 export const DEMO_HOST_ID = 'de30'.padEnd(64, '0');
 /** Features that need the host's PC: the example says so instead of pretending. */
 export const UNAVAILABLE = {
@@ -111,9 +130,11 @@ export const UNAVAILABLE = {
   spotify:
     'Not available in the example: Spotify controls work with the Spotify app on the host’s PC.',
   hotkey:
-    'Not available in the example: the hotkey listens for a key in every app on the host’s PC, which a web page cannot do.',
+    'Not available in the example: the hotkey works only on the host’s PC, where it listens for a key in every app. A web page cannot do that.',
   library:
     'Not available in the example: Voice Replay Studio’s library is read from the host’s PC.',
+  share:
+    'Not available in the example: its guests are simulated and never see Mimic, so there is nobody to share the history with.',
   other: 'Not available in the example.',
 } as const;
 export const TRANSCRIPT_NOTE =
@@ -132,6 +153,10 @@ export const ALEX_GAP_MS = 20000;
 const ALEX_SPREAD_MS = 15000;
 const ALEX_PICKS = ['rimshot', 'air-horn', 'boing', 'cat-meow', 'wrong-buzzer', 'door-knock'];
 const TEMP_CATEGORY = { id: '90', name: 'Temp - Soundpad Web [example]' };
+/** The storage figures the example reports (budgetStatus): fixed, since nothing is written to a disk. */
+const TEMP_MB = 100,
+  KEPT_MB = 200;
+const MB = 1024 * 1024;
 const PLAYBACK_OPS: Command['op'][] = [
   'play',
   'startAt',
@@ -143,15 +168,16 @@ const PLAYBACK_OPS: Command['op'][] = [
   'seek',
 ];
 
+/** A simulated guest. Their names say so (Stage G, spec 11.5), wherever the page shows them. */
 type Guest = { peer: string; person: Participant; link: Transport };
 export const ALEX: Guest = {
   peer: 'a1e5c0de-example',
-  person: { id: '0e7a3b1e-0000-4000-8000-00000000a1e5', name: 'Alex' },
+  person: { id: '0e7a3b1e-0000-4000-8000-00000000a1e5', name: 'Alex (simulated)' },
   link: 'direct',
 };
 export const SAM: Guest = {
   peer: '5a3c0de5-example',
-  person: { id: '0e7a3b1e-0000-4000-8000-0000000005a3', name: 'Sam' },
+  person: { id: '0e7a3b1e-0000-4000-8000-0000000005a3', name: 'Sam (simulated)' },
   link: 'relay',
 };
 
@@ -220,6 +246,14 @@ export class DemoModel {
   private intent = 0;
   private suspended = false;
   private counter = 0;
+  /** Kick presses since the example started (the companion's 2.43 session count, never stored). */
+  private counterSession = 0;
+  private history = new DemoHistory();
+  private drafts = new DemoDrafts(this.history);
+  /** The clip each draft last played into the game, made from the loop when it was played. */
+  private draftClips = new Map<string, string>();
+  private library: DemoVoices;
+  private composer: DemoSentences;
   private permissions: Snapshot['permissions'] = {
     remotePlayback: true,
     guestCounter: false,
@@ -228,6 +262,8 @@ export class DemoModel {
     guestUploads: true,
     guestTransforms: true,
     guestMimic: false,
+    guestKeep: false,
+    guestLibraryEdit: true,
   };
   private stats = new Map<string, Stats>();
   private activity: Activity[] = [];
@@ -285,6 +321,8 @@ export class DemoModel {
       ),
       children: [],
     }));
+    this.library = new DemoVoices(DemoModel.soundId, (id) => engine.duration(id), Date.now());
+    this.composer = new DemoSentences(this.library);
   }
 
   /** The library's sound id for a sound key (tests and the engine use it). */
@@ -345,7 +383,9 @@ export class DemoModel {
         ? {
             status: playing.status,
             positionMs: Math.round(this.engine.position()),
-            durationMs: sound?.durationMs ?? null,
+            // A sentence or palette word is no library sound: its length is the audio made for it.
+            durationMs:
+              sound?.durationMs ?? (Math.round(this.engine.duration(playing.soundId)) || null),
             soundId: playing.soundId,
             epoch: playing.epoch,
             requester: playing.requester,
@@ -366,6 +406,11 @@ export class DemoModel {
             identitySource: 'web',
           },
       counter: this.counter,
+      counterSession: this.counterSession,
+      drafts: this.drafts.revision,
+      budgets: 1,
+      voiceLibrary: this.library.revision,
+      sentences: this.composer.revision,
       permissions: this.permissions,
       playbackSuspended: this.suspended,
       mimic: {
@@ -381,6 +426,7 @@ export class DemoModel {
         hotkeySeconds: 10,
         hotkeyKey: 'F6',
         recent: this.mimic.recent,
+        history: this.history.snapshot(),
       },
     };
   }
@@ -467,11 +513,13 @@ export class DemoModel {
         return { suspended: true };
       case 'counter':
         this.counter = Math.max(0, this.counter + (c.delta ?? 0));
+        this.counterSession = Math.max(0, this.counterSession + (c.delta ?? 0));
         this.publish();
         return { counter: this.counter };
       case 'reset':
         this.hostOnly(host);
         this.counter = 0;
+        this.counterSession = 0;
         this.publish();
         return { counter: 0 };
       case 'permissions':
@@ -503,7 +551,6 @@ export class DemoModel {
       case 'refresh':
       case 'beginSession':
       case 'endSession':
-      case 'revokePeer':
       case 'retryAudio':
       case 'retryCleanup':
         this.publish();
@@ -546,6 +593,7 @@ export class DemoModel {
       case 'mimicStart':
         this.hostOnly(host);
         if (c.sourceId !== MIMIC_SOURCE.id) throw Error('That source is not available.');
+        this.history.start(Date.now());
         this.mimic = {
           ...this.mimic,
           active: true,
@@ -558,6 +606,7 @@ export class DemoModel {
         return undefined;
       case 'mimicStop':
         this.hostOnly(host);
+        this.history.stop(Date.now());
         this.mimic = { ...this.mimic, active: false, ring: '' };
         this.publish();
         return undefined;
@@ -575,9 +624,158 @@ export class DemoModel {
         return this.peek();
       case 'mimicClip':
         return this.mimicClip(c, by, !!guest);
-      case 'mimicPreview':
+      case 'mimicPreview': {
         this.hostOnly(host);
-        return this.engine.previewLoop(...this.selection(c));
+        // A 2.39 page names frames of the recording history, or (2.40) a draft; the older view its 30 s window.
+        if (!c.draftId && c.startFrame === undefined)
+          return this.engine.previewLoop(...this.selection(c));
+        const range = c.draftId ? this.drafts.find(c.draftId) : this.historyRange(c);
+        return this.engine.previewLoop(loopMs(range.startFrame), loopMs(range.endFrame));
+      }
+      // ---- The recording history (2.39) and drafts (2.40): see history.ts and drafts.ts.
+      case 'historyTimeline':
+        return this.history.timeline(Date.now(), this.mimic.transcribing);
+      case 'historyLevels':
+        this.sameRecording(c);
+        return this.history.levels(this.frames(c), c.bins ?? 300, Date.now(), (from, to, n) =>
+          this.engine.loopLevels(from, to, n),
+        );
+      case 'historyTranscript':
+        this.sameRecording(c);
+        return this.history.transcript(this.frames(c), Date.now(), this.mimic.transcribing);
+      case 'historyCorrect':
+        this.hostOnly(host);
+        this.history.correct(c.wordId ?? 0, c.text ?? '', Date.now());
+        return { corrected: true };
+      case 'historySettings':
+        this.hostOnly(host);
+        this.history.settings(c.seconds, c.subtitles);
+        this.publish();
+        return undefined;
+      case 'historyDiscard':
+        this.hostOnly(host);
+        return this.history.discard();
+      case 'historyShare':
+        this.hostOnly(host);
+        throw Error(UNAVAILABLE.share);
+      case 'historyUnshare':
+        this.hostOnly(host);
+        return undefined; // Nothing is ever shared in the example.
+      case 'revokePeer':
+        this.hostOnly(host);
+        return undefined; // Simulated guests see no history, so there is no join time to end.
+      case 'draftCreate':
+        return this.draftCreate(c);
+      case 'draftList':
+        return this.drafts.list();
+      case 'draftUpdate': {
+        const draft = this.drafts.update(c, Date.now());
+        this.publish();
+        return draft;
+      }
+      case 'draftDiscard': {
+        const result = this.drafts.discard(c.draftId);
+        this.publish();
+        return result;
+      }
+      case 'draftCopy': {
+        const draft = this.drafts.copy(c.draftId, Date.now());
+        this.publish();
+        return draft;
+      }
+      case 'draftKeep':
+        // Into the voice library is a permanent keep: it writes files on the host's PC.
+        if (c.action === 'library') throw Error(UNAVAILABLE.keep);
+        return this.draftKeep(c, by);
+      case 'draftPlay':
+        return this.draftPlay(c, by, !!guest);
+      case 'budgetStatus':
+        return this.budgetStatus(person, host);
+      // ---- The voice library (2.41): see voices.ts.
+      case 'libraryStatus':
+        return this.library.status(host || this.permissions.guestLibraryEdit !== false);
+      case 'libraryList':
+        return this.library.list(c);
+      case 'libraryGet':
+        return this.library.getView(c);
+      case 'librarySearch':
+        return this.library.search(c);
+      case 'libraryVocabulary':
+        return this.library.vocabulary(c);
+      case 'libraryAudit':
+        return this.library.auditOf(c);
+      case 'libraryEdit':
+        return this.changeLibrary(() => this.library.edit(c, person.name));
+      case 'libraryRemove':
+        return this.changeLibrary(() => this.library.remove(c, person.name));
+      case 'libraryUndo':
+        return this.changeLibrary(() => this.library.undo(c, person.name));
+      case 'libraryVoice':
+        return this.changeLibrary(() => this.library.voice(c, person.name));
+      case 'libraryWanted':
+        return this.changeLibrary(() => this.library.want(c, person.name));
+      case 'libraryRetry':
+        this.library.get(c.recordingId);
+        return { queued: false }; // Its words are hand-placed and always ready.
+      case 'libraryPreview':
+        return this.libraryPreview(c);
+      case 'librarySettings':
+        this.hostOnly(host);
+        return this.changeLibrary(() => this.library.settings(c));
+      case 'libraryAdd':
+        throw Error(LIBRARY_UNAVAILABLE.add);
+      case 'libraryIndex':
+        throw Error(LIBRARY_UNAVAILABLE.index);
+      case 'historySearch':
+        this.sameRecording(c);
+        return this.history.search(c.query ?? '', Date.now());
+      case 'speakerGroups':
+        return { enabled: false, groups: [], unassigned: 0 };
+      case 'speakerName':
+      case 'speakerLink':
+        throw Error(LIBRARY_UNAVAILABLE.speakers);
+      // ---- Sentences and the speaking palette (2.42): see sentences.ts.
+      case 'sentenceList':
+        return this.composer.list();
+      case 'sentenceGet':
+        return this.composer.view(this.composer.find(c.sentenceId));
+      case 'sentenceAlternatives':
+        return this.composer.alternativesView(c);
+      case 'sentenceCreate':
+        return this.changeSentences(() => this.composer.create(c.sentence, person.name));
+      case 'sentenceText':
+        return this.changeSentences(() => this.composer.text(c));
+      case 'sentenceEdit':
+        return this.changeSentences(() => this.composer.edit(c));
+      case 'sentenceDiscard':
+        return this.changeSentences(() => this.composer.discard(c));
+      case 'sentenceKeep':
+        // Kept for this example only: the version's audio is made again from its pieces when it plays.
+        return this.changeSentences(() => this.composer.keep(c, person.name));
+      case 'sentencePreview': {
+        const { pieces, settings, sentence } = this.composer.piecesFor(c);
+        const heard = await this.engine.previewMix(this.composer.render(pieces, settings), 30000);
+        return { ...heard, revision: sentence.revision };
+      }
+      case 'sentencePlay':
+        return this.sentencePlay(c, by, !!guest);
+      case 'paletteSearch':
+        return this.composer.palette(c);
+      case 'paletteTap':
+        return this.paletteTap(c, by, !!guest);
+      case 'paletteMark':
+        return this.changeSentences(() => this.composer.mark(c, person.name));
+      case 'performance':
+        return this.changeSentences(() => this.composer.perform(c, person.name));
+      case 'performanceSets':
+        return c.action
+          ? this.changeSentences(() => this.composer.setsCommand(c))
+          : this.composer.setsCommand(c);
+      case 'keepSettings':
+      case 'budgetGrant':
+      case 'tempRecover':
+        this.hostOnly(host);
+        throw Error(UNAVAILABLE.other);
       default:
         throw Error(UNAVAILABLE.other);
     }
@@ -1106,7 +1304,11 @@ export class DemoModel {
     by: { id: string; name: string; source: 'host' | 'guest' },
     guest: boolean,
   ) {
-    const [from, to] = this.selection(c);
+    // A 2.39 page names the selection by frames of the recording history; the older 30 s view by its window.
+    const [from, to] =
+      c.startFrame !== undefined || c.draftId
+        ? this.loopRange(c.draftId ? this.drafts.find(c.draftId) : this.historyRange(c))
+        : this.selection(c);
     const words = this.loopWords(from, to);
     const mine = c.autoplay ? ++this.intent : 0;
     const id = soundIdFor(this.nextSound++);
@@ -1125,6 +1327,214 @@ export class DemoModel {
     if (guest && this.suspended)
       return { assetId: asset.id, state: 'temporary', ...superseded('suspended') };
     return { assetId: asset.id, state: 'temporary', ...this.start(id, 0, null, false, by, c.id) };
+  }
+
+  // ---- Recording history and drafts ---------------------------------------------------------
+
+  /** The frames a history command asks about (levels, transcript). */
+  private frames(c: Command): Range {
+    const startFrame = Math.max(0, c.startFrame ?? 0);
+    return { startFrame, endFrame: Math.max(startFrame, c.endFrame ?? startFrame) };
+  }
+
+  /** A history command about another recording than the current one is refused, as the companion does. */
+  private sameRecording(c: Command) {
+    if (c.sourceId && c.sourceId !== this.history.sessionId)
+      throw Error('That is from another recording. Select the moment again.');
+  }
+
+  /** A selection on the history, checked: on this recording, within what can be seen, at most 30 s. */
+  private historyRange(c: Command): Range {
+    return this.history.check(
+      { startFrame: c.startFrame ?? 0, endFrame: c.endFrame ?? 0 },
+      c.sourceId,
+      Date.now(),
+    );
+  }
+
+  /** History frames as times on the endless loop, which is what the engine cuts clips from. */
+  private loopRange(r: Range): [number, number] {
+    return [loopMs(r.startFrame), loopMs(r.endFrame)];
+  }
+
+  private draftCreate(c: Command) {
+    const { draft, first } = this.drafts.create(c, Date.now());
+    // A few seconds after the first draft, the simulated guest captures an older phrase (if they are in).
+    if (first)
+      this.later(ALEX_BAND_MS, () => {
+        if (this.present(ALEX) && this.drafts.addBand(Date.now())) this.publish();
+      });
+    this.publish();
+    return draft;
+  }
+
+  /** Keep in Temp: the draft's audio becomes a Temp clip, like Mimic it; with `close` the draft goes. */
+  private async draftKeep(c: Command, by: { id: string; name: string; source: 'host' | 'guest' }) {
+    const draft = this.drafts.find(c.draftId);
+    if (c.sourceId && c.sourceId !== draft.sessionId)
+      throw Error('That draft is from another recording.');
+    const [from, to] = this.loopRange(draft);
+    const words = this.loopWords(from, to);
+    const id = soundIdFor(this.nextSound++);
+    const length = await this.engine.fromLoop(id, from, to);
+    if (this.closed) throw Error('The example has ended.');
+    const name = (draft.name?.trim() || words.map((w) => w.w).join(' ') || 'Mimic clip').slice(
+      0,
+      100,
+    );
+    const asset = this.addUpload(id, name, length, by, words);
+    this.mimic.recent = [
+      { assetId: asset.id, name, by: by.name, at: Date.now() },
+      ...this.mimic.recent,
+    ].slice(0, 20);
+    const close = c.action === 'close';
+    this.drafts.kept(draft, close, Date.now());
+    this.publish();
+    return { assetId: asset.id, draftId: draft.id, closed: close };
+  }
+
+  /**
+   * Play into game: the draft's audio is cut from the loop and played like any sound, with a fresh epoch and
+   * the website as its identity, so the player and the header follow it. Only the newest click plays.
+   */
+  private async draftPlay(
+    c: Command,
+    by: { id: string; name: string; source: 'host' | 'guest' },
+    guest: boolean,
+  ) {
+    const draft = this.drafts.find(c.draftId);
+    if (c.sourceId && c.sourceId !== draft.sessionId)
+      throw Error('That draft is from another recording.');
+    const mine = ++this.intent;
+    const [from, to] = this.loopRange(draft);
+    const id = soundIdFor(this.nextSound++);
+    const length = await this.engine.fromLoop(id, from, to);
+    if (this.closed) throw Error('The example has ended.');
+    // The clip it played before goes, unless it is still the one playing.
+    const before = this.draftClips.get(draft.id);
+    if (before && this.playing?.soundId !== before) {
+      this.engine.forget(before);
+      this.sounds = this.sounds.filter((s) => s.id !== before);
+    }
+    this.draftClips.set(draft.id, id);
+    this.sounds = [
+      ...this.sounds,
+      {
+        id,
+        name: (draft.name?.trim() || 'Mimic draft').slice(0, 100),
+        icon: null,
+        durationMs: Math.round(length),
+        audioKind: 'generated',
+        internalVariant: true,
+        temporary: true,
+        uploadedBy: by.name,
+      },
+    ];
+    this.libraryChanged();
+    this.drafts.touch(draft, Date.now());
+    if (mine !== this.intent) {
+      this.publish();
+      return { draftId: draft.id, ...superseded('newer') };
+    }
+    if (guest && this.suspended) {
+      this.publish();
+      return { draftId: draft.id, ...superseded('suspended') };
+    }
+    return { draftId: draft.id, ...this.start(id, 0, null, false, by, c.id) };
+  }
+
+  // ---- Voice library and sentences ----------------------------------------------------------
+
+  private changeLibrary<T>(change: () => T) {
+    const result = change();
+    this.publish();
+    return result;
+  }
+
+  private changeSentences<T>(change: () => T) {
+    const result = change();
+    this.publish();
+    return result;
+  }
+
+  /** A private preview of a recording or a sound, or a word of it (heard only in this browser). */
+  private libraryPreview(c: Command) {
+    const clip = c.recordingId ? this.library.get(c.recordingId).soundId : this.sound(c.soundId).id;
+    const length = this.engine.duration(clip);
+    const from = Math.max(0, Math.min(c.positionMs ?? 0, length));
+    const to = Math.max(from + 1, Math.min(c.endMs ?? length, length));
+    return this.engine.previewClip(clip, { fromMs: from, toMs: to, effect: 'none' }, 30000);
+  }
+
+  /**
+   * Play into game: the sentence (or a kept version) is mixed from its pieces and played with a `sentence:` id, as
+   * a real host does, so the player names the sentence. Only the newest click plays.
+   */
+  private async sentencePlay(
+    c: Command,
+    by: { id: string; name: string; source: 'host' | 'guest' },
+    guest: boolean,
+  ) {
+    const mine = ++this.intent;
+    const { pieces, settings, sentence } = this.composer.piecesFor(c);
+    const parts = this.composer.render(pieces, settings);
+    if (!parts.length) throw Error('There is nothing to play in this sentence yet.');
+    const id = 'sentence:' + sentence.id;
+    await this.engine.mix(id, parts);
+    if (this.closed) throw Error('The example has ended.');
+    if (mine !== this.intent) return superseded('newer');
+    if (guest && this.suspended) return superseded('suspended');
+    return { ...this.start(id, 0, null, false, by, c.id), detail: { revision: sentence.revision } };
+  }
+
+  /** A palette tap: into the game (a `palette:` id), or heard privately; noted in a performance being recorded. */
+  private async paletteTap(
+    c: Command,
+    by: { id: string; name: string; source: 'host' | 'guest' },
+    guest: boolean,
+  ) {
+    if (!c.sentence?.item) throw Error('Choose a palette item.');
+    const { recording, startMs, endMs, label } = this.composer.tapped(c.sentence.item);
+    const parts = [
+      { clip: recording.soundId, atMs: 0, fromMs: startMs, toMs: endMs, fadeInMs: 3, fadeOutMs: 5 },
+    ];
+    if (c.action !== 'game')
+      return { ...(await this.engine.previewMix(parts, 30000)), text: label };
+    const mine = ++this.intent;
+    const id = 'palette:' + recording.id;
+    await this.engine.mix(id, parts);
+    if (this.closed) throw Error('The example has ended.');
+    if (mine !== this.intent) return superseded('newer');
+    if (guest && this.suspended) return superseded('suspended');
+    return { ...this.start(id, 0, null, false, by, c.id), detail: { text: label } };
+  }
+
+  /** Storage figures: fixed in the example, since nothing is kept on a disk. */
+  private budgetStatus(person: Participant, host: boolean) {
+    const usage = (p: Participant) => ({
+      id: p.id,
+      name: p.name,
+      tempBytes: 0,
+      tempLimitBytes: TEMP_MB * MB,
+      keptBytes: 0,
+      keptLimitBytes: KEPT_MB * MB,
+      paused: false,
+      waiting: null,
+    });
+    if (!host) return { guestKeep: false, own: usage(person), budgetMode: 'session' };
+    return {
+      settings: {
+        guestKeep: this.permissions.guestKeep === true,
+        destination: null,
+        categoryId: null,
+        categoryName: null,
+        tempMb: TEMP_MB,
+        keptMb: KEPT_MB,
+        budgetMode: 'session',
+      },
+      guests: this.guests.map((g) => usage(g.person)),
+      requests: [],
+    };
   }
 
   // ---- Who is in the session ----------------------------------------------------------------
@@ -1175,7 +1585,7 @@ export class DemoModel {
         this.publishSession();
       });
       this.hooks.notify(
-        `${guest.person.name} ${full ? 'asks for an extra place' : 'wants to join'}. Let them in or turn them away (a simulated guest).`,
+        `${guest.person.name} ${full ? 'asks for an extra place' : 'wants to join'}. Let them in or turn them away.`,
       );
       this.publishSession();
       return;
@@ -1193,7 +1603,7 @@ export class DemoModel {
       ]),
     };
     this.hooks.notify(
-      `${guest.person.name} joined (a simulated guest, ${guest.link === 'relay' ? 'relayed' : 'direct'}).`,
+      `${guest.person.name} joined (${guest.link === 'relay' ? 'relayed' : 'direct'}).`,
       'success',
     );
     this.publishSession();

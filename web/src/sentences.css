@@ -1,27 +1,38 @@
-/* Sentences (2.42): the builder's text and timeline, the speaking palette, performance sets and the
-   board's pinned sentence tiles. Same tokens and controls as the Voices window (voices.css). */
+/*
+ * Sentences (2.42): the builder's text and timeline, the speaking palette, performance sets and the board's
+ * pinned sentence tiles. Owned by WP-C (Stage G). Same tokens and controls as the Voices window (voices.css;
+ * the panel is the `board` size container there). Every state is shape and text as well as colour: voices
+ * carry their colour and name, pauses are hatched with their length, overlaps are striped and say
+ * "overlap", missing words are dashed in --warning and say "missing", the selection is a solid outline.
+ */
 .dialog:has(.sentences-panel) {
   max-width: 980px;
 }
 .sentence-rows {
-  list-style: none;
-  margin: 0;
-  padding: 0;
   display: grid;
   gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
 }
 .sentence-row {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--space-2);
   min-width: 0;
 }
 .sentence-open {
-  flex: 1 1 auto;
   display: grid;
+  flex: 1 1 auto;
   gap: 2px;
-  text-align: left;
   min-width: 0;
+  border-color: var(--line);
+  background: var(--surface-2);
+  text-align: left;
+}
+.sentence-open:hover {
+  border-color: var(--line-strong);
+  background: var(--surface-hover);
 }
 .sentence-open > * {
   overflow: hidden;
@@ -29,17 +40,20 @@
   white-space: nowrap;
 }
 .warning-badge {
-  border-color: var(--amber, var(--voice-fallback-amber));
-  color: var(--amber, var(--voice-fallback-amber));
+  border-color: var(--warning);
+  color: var(--warning);
 }
 .sentence-builder {
   display: grid;
-  gap: 10px;
+  gap: var(--space-3);
   min-width: 0;
 }
 .sentence-text {
   display: grid;
   gap: 4px;
+  min-width: 0;
+  color: var(--text-muted);
+  font-size: 12px;
 }
 .sentence-words {
   display: flex;
@@ -50,20 +64,21 @@
 .sentence-word {
   position: relative;
   padding: 2px 7px;
-  border-radius: 6px;
-  border: 1px solid color-mix(in srgb, var(--voice, var(--line)) 70%, transparent);
-  background: color-mix(in srgb, var(--voice, transparent) 18%, transparent);
+  border: 1px solid color-mix(in srgb, var(--voice, var(--line-strong)) 75%, transparent);
+  border-radius: var(--radius-s);
+  background: color-mix(in srgb, var(--voice, transparent) 16%, var(--surface-2));
+  color: var(--text-primary);
   font-size: 13px;
 }
 .sentence-word.selected {
   outline: 2px solid var(--accent);
   outline-offset: 1px;
 }
-/* Missing words: pulsing, or (reduced motion) a static dashed marker with a "!" badge. */
+/* Missing words: dashed --warning and pulsing, or (reduced motion) the same dashes, still, with a "!" badge. */
 .sentence-word.missing,
 .timeline-piece.kind-missing {
-  border: 1px dashed var(--amber, var(--voice-fallback-amber));
-  background: color-mix(in srgb, var(--amber, var(--voice-fallback-amber)) 12%, transparent);
+  border: 1px dashed var(--warning);
+  background: var(--warning-soft);
   color: var(--text-primary);
 }
 .missing-pulse {
@@ -72,12 +87,10 @@
 @keyframes missing-pulse {
   0%,
   100% {
-    box-shadow: 0 0 0 0
-      color-mix(in srgb, var(--amber, var(--voice-fallback-amber)) 0%, transparent);
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--warning) 0%, transparent);
   }
   50% {
-    box-shadow: 0 0 0 3px
-      color-mix(in srgb, var(--amber, var(--voice-fallback-amber)) 45%, transparent);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--warning) 45%, transparent);
   }
 }
 .missing-static {
@@ -90,9 +103,9 @@
   width: 14px;
   height: 14px;
   border-radius: 50%;
-  background: var(--amber, var(--voice-fallback-amber));
-  color: var(--voice-fallback-dark);
-  font-size: 10px;
+  background: var(--warning);
+  color: var(--text-on-warning);
+  font-size: 11px;
   font-weight: 700;
   line-height: 14px;
   text-align: center;
@@ -102,59 +115,80 @@
     animation: none;
   }
 }
+/* Motion: Reduce in Settings stops the pulse outright (the global rule only shortens it, and it repeats). */
+html[data-motion='reduce'] .missing-pulse {
+  animation: none;
+}
 .sentence-note {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: 6px;
   margin: 0;
+  color: var(--text-muted);
   font-size: 13px;
+}
+.sentence-note svg {
+  color: var(--warning);
 }
 .sentence-actions {
   flex-wrap: wrap;
 }
 .sentence-mix,
 .sentence-effects {
-  border: 1px solid var(--line);
-  border-radius: 8px;
   padding: 6px 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-s);
+  background: var(--surface-2);
 }
 .sentence-mix summary,
 .sentence-effects summary {
+  min-height: 28px;
   cursor: pointer;
   font-size: 13px;
 }
 .sentence-mix > * + *,
 .sentence-effects > * + * {
-  margin-top: 8px;
+  margin-top: var(--space-2);
 }
 .sentence-slider {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--space-2);
   font-size: 13px;
 }
 .sentence-slider input {
-  width: min(320px, 50vw);
+  width: min(320px, 50cqi);
+  accent-color: var(--accent);
 }
 .sentence-voices {
   display: flex;
   flex-wrap: wrap;
   gap: 6px 12px;
-  border: 0;
-  padding: 0;
   margin: 0;
+  padding: 0;
+  border: 0;
 }
 .sentence-voices legend {
-  font-size: 13px;
   margin-bottom: 4px;
+  font-size: 13px;
+}
+
+/* ---- The timeline ---------------------------------------------------------------------------------- */
+
+.sentence-timeline-wrap {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
 }
 .sentence-timeline {
   overflow-x: auto;
+  padding: 22px var(--space-2) 10px;
   border: 1px solid var(--line);
-  border-radius: 8px;
-  background: var(--surface-2);
-  padding: 22px 8px 10px;
+  border-radius: var(--radius-s);
+  background: var(--surface-0);
+  scrollbar-width: thin;
+  scrollbar-color: var(--line-strong) transparent;
 }
 .sentence-track {
   position: relative;
@@ -164,11 +198,12 @@
 .sentence-tick {
   position: absolute;
   top: -18px;
-  font-size: 10px;
-  color: var(--text-secondary, var(--voice-fallback-secondary));
-  border-left: 1px solid var(--line);
-  padding-left: 3px;
   height: 64px;
+  padding-left: 3px;
+  border-left: 1px solid var(--line);
+  color: var(--text-dim);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
   pointer-events: none;
 }
 .timeline-piece {
@@ -177,65 +212,95 @@
   height: 40px;
   min-width: 14px;
   padding: 0 6px;
-  border-radius: 6px;
-  border: 1px solid color-mix(in srgb, var(--voice, var(--line)) 80%, transparent);
-  background: color-mix(
-    in srgb,
-    var(--voice, var(--surface-2)) 30%,
-    var(--surface-1, var(--voice-fallback-surface))
-  );
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--voice, var(--line-strong)) 85%, transparent);
+  border-left-width: 3px;
+  border-radius: var(--radius-s);
+  background: color-mix(in srgb, var(--voice, var(--surface-2)) 26%, var(--surface-1));
   color: var(--text-primary);
   font-size: 12px;
-  overflow: hidden;
   white-space: nowrap;
-  touch-action: none;
   cursor: grab;
+  touch-action: none;
   transition:
-    left 120ms ease,
-    box-shadow 120ms ease;
+    left var(--dur-fast) var(--ease-out),
+    box-shadow var(--dur-fast) var(--ease-out);
+}
+.timeline-piece:hover {
+  background: color-mix(in srgb, var(--voice, var(--surface-2)) 34%, var(--surface-hover));
 }
 .timeline-piece.dragging {
+  z-index: 3;
   cursor: grabbing;
   transition: none;
-  z-index: 3;
 }
 .timeline-piece.selected {
+  z-index: 2;
   outline: 2px solid var(--accent);
   outline-offset: 1px;
-  z-index: 2;
+  box-shadow: var(--glow-soft);
 }
 /* With keyboard focus the focus ring's offset applies, as before this file loaded last (2.43). */
 .timeline-piece.selected:focus-visible {
   outline-offset: 3px;
 }
+.timeline-piece.kind-missing {
+  border-left-width: 1px;
+}
+/* A pause: hatched, with its length written in it. */
 .timeline-piece.kind-pause {
+  border: 1px dotted var(--line-strong);
   background: repeating-linear-gradient(
-    90deg,
-    transparent 0 6px,
-    color-mix(in srgb, var(--line) 60%, transparent) 6px 7px
+    135deg,
+    transparent 0 5px,
+    color-mix(in srgb, var(--line-strong) 45%, transparent) 5px 6px
   );
-  border-style: dotted;
+  color: var(--text-muted);
 }
 .timeline-piece.kind-splice {
   border-style: dashed;
   border-color: var(--accent);
 }
+/* An overlap: striped in --danger, and it says so. */
 .timeline-piece.overlap {
   background-image: repeating-linear-gradient(
     135deg,
     transparent 0 5px,
-    color-mix(in srgb, var(--voice-fallback-clash) 35%, transparent) 5px 8px
+    color-mix(in srgb, var(--danger) 35%, transparent) 5px 8px
   );
 }
 .timeline-piece.source-missing,
 .timeline-piece.source-changed {
-  border-color: var(--voice-fallback-clash);
+  border-color: var(--danger);
 }
 .timeline-text {
-  overflow: hidden;
-  text-overflow: ellipsis;
   display: block;
+  overflow: hidden;
   line-height: 38px;
+  text-overflow: ellipsis;
+}
+.timeline-piece.kind-pause .timeline-text {
+  font-variant-numeric: tabular-nums;
+}
+/* Short words on a piece: "missing", "overlap". Read as text too (the name says the same). */
+.timeline-flag {
+  position: absolute;
+  right: 3px;
+  bottom: 2px;
+  padding: 0 4px;
+  border-radius: 3px;
+  background: var(--surface-0);
+  color: var(--warning);
+  font-size: 11px;
+  font-weight: 650;
+  line-height: 14px;
+  pointer-events: none;
+}
+.timeline-flag.overlap {
+  color: var(--danger);
+}
+.timeline-piece:has(.timeline-flag) .timeline-text {
+  line-height: 30px;
 }
 @media (prefers-reduced-motion: reduce) {
   .timeline-piece {
@@ -247,18 +312,19 @@
   font-size: 12px;
 }
 .sentence-inspector {
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  padding: 8px 10px;
   display: grid;
-  gap: 8px;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-s);
+  background: var(--surface-2);
 }
 .sentence-takes {
-  list-style: none;
-  margin: 0;
-  padding: 0;
   display: grid;
   gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
 }
 .sentence-takes li {
   display: flex;
@@ -268,15 +334,18 @@
   font-size: 13px;
 }
 .sentence-takes li.current {
-  font-weight: 600;
+  font-weight: 650;
 }
+
+/* ---- The speaking palette, performances and sets ----------------------------------------------------- */
+
 .palette-items {
-  list-style: none;
-  margin: 0;
-  padding: 0;
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
   gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
 }
 .palette-item {
   display: flex;
@@ -285,12 +354,14 @@
   min-width: 0;
 }
 .palette-tap {
-  flex: 1 1 auto;
   display: flex;
+  flex: 1 1 auto;
   align-items: center;
   gap: 6px;
   min-width: 0;
-  border-color: color-mix(in srgb, var(--voice, var(--line)) 70%, transparent);
+  border-color: color-mix(in srgb, var(--voice, var(--line-strong)) 75%, transparent);
+  border-left-width: 3px;
+  background: color-mix(in srgb, var(--voice, transparent) 10%, var(--surface-2));
 }
 .palette-tap > span:first-of-type {
   overflow: hidden;
@@ -304,14 +375,14 @@
   font-style: italic;
 }
 .sentence-record {
-  align-items: center;
   flex-wrap: wrap;
+  align-items: center;
 }
 .recording-dot {
   width: 10px;
   height: 10px;
   border-radius: 50%;
-  background: var(--voice-fallback-clash);
+  background: var(--danger);
 }
 .sentence-sets {
   display: grid;
@@ -329,19 +400,30 @@
   gap: 6px;
   max-width: 100%;
   min-width: 0;
+  border-color: color-mix(in srgb, var(--warning) 40%, var(--line));
+  background: var(--surface-2);
 }
 .pinned-sentence > span:first-of-type {
+  max-width: 260px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  max-width: 260px;
 }
 .sentences-panel .badge {
   display: inline-flex;
   align-items: center;
   padding: 1px 7px;
   border: 1px solid var(--line);
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
+  color: var(--text-muted);
   font-size: 11px;
   white-space: nowrap;
+}
+@container board (max-width: 560px) {
+  .sentence-row {
+    flex-wrap: wrap;
+  }
+  .palette-items {
+    grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  }
 }

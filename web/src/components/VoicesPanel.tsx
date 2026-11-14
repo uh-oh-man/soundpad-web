@@ -49,12 +49,14 @@ import {
   useWordMode,
   useWordPlayer,
 } from './VoiceShared';
-import { PAGE } from './VoiceShared';
+import { PAGE, useSectionScroll } from './VoiceShared';
+import { recall, remember } from '../sections';
 import { useSentenceStore } from '../library/sentence-store';
 import { usePreviewAudio } from '../preview-audio';
 
 type Props = { state: Snapshot; host: boolean; connected: boolean; canPlay: boolean };
 type Tab = 'library' | 'review' | 'words' | 'voices' | 'index';
+const TABS: Tab[] = ['library', 'review', 'words', 'voices', 'index'];
 
 /**
  * Voices (2.41): the voice library. Search across Sounds, Voice clips and Sentences with type
@@ -65,8 +67,15 @@ type Tab = 'library' | 'review' | 'words' | 'voices' | 'index';
  */
 export function VoicesPanel({ state, host, connected, canPlay }: Props) {
   const { status: shared } = useVoiceStore();
-  const [tab, setTab] = useState<Tab>('library');
-  const [openId, setOpenId] = useState<string | null>(null);
+  // Section memory (Stage G): the tab and open recording come back when Voices is shown again.
+  const [tab, setTab] = useState<Tab>(() => {
+    const saved = recall('voices').tab;
+    return TABS.includes(saved as Tab) ? (saved as Tab) : 'library';
+  });
+  const [openId, setOpenId] = useState<string | null>(() => recall('voices').recordingId ?? null);
+  useEffect(() => remember('voices', { tab, recordingId: openId ?? undefined }), [tab, openId]);
+  const panel = useRef<HTMLDivElement>(null);
+  useSectionScroll('voices', panel, !!shared);
   useEffect(() => {
     const waiting = takeOpen('recording');
     if (waiting?.kind === 'recording') setOpenId(waiting.recordingId);
@@ -91,7 +100,7 @@ export function VoicesPanel({ state, host, connected, canPlay }: Props) {
     ...(host ? ([['index', 'Word index']] as [Tab, string][]) : []),
   ];
   return (
-    <div className="voices-panel">
+    <div className="voices-panel" ref={panel}>
       <p className="muted voices-intro">
         {status.count} recording{status.count === 1 ? '' : 's'} kept
         {status.pending ? ` · finding the words of ${status.pending}` : ''}

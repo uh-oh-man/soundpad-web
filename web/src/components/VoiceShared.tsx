@@ -1,4 +1,5 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState, type RefObject } from 'react';
+import { recall, remember } from '../sections';
 import { Headphones, Play } from 'lucide-react';
 import { z } from 'zod';
 import { controller } from '../controller';
@@ -151,4 +152,37 @@ export function WordModeSwitch({
       )}
     </div>
   );
+}
+
+/**
+ * Section memory (Stage G): keeps the scroll position of the Voices or Sentences section in `sections.ts`,
+ * and puts it back once when `ready` first becomes true. The section scrolls inside its dialog today and
+ * inside the main view (#board) after the shell change, so the scroller is looked up from the panel.
+ */
+export function useSectionScroll(
+  section: 'voices' | 'sentences',
+  panel: RefObject<HTMLElement | null>,
+  ready: boolean,
+  restore = true,
+) {
+  const restored = useRef(!restore);
+  useEffect(() => {
+    const scroller = panel.current?.closest<HTMLElement>('.dialog, #board');
+    if (!scroller) return;
+    if (ready && !restored.current) {
+      restored.current = true;
+      const top = recall(section).scrollTop;
+      if (top) requestAnimationFrame(() => (scroller.scrollTop = top));
+    }
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const save = () => {
+      clearTimeout(timer);
+      timer = setTimeout(() => remember(section, { scrollTop: scroller.scrollTop }), 150);
+    };
+    scroller.addEventListener('scroll', save, { passive: true });
+    return () => {
+      clearTimeout(timer);
+      scroller.removeEventListener('scroll', save);
+    };
+  }, [section, panel, ready]);
 }

@@ -4,3 +4,317 @@
  * OrganizeSound. Owned by WP-C. Only selectors for WP-C components; overrides studio.css by load order at
  * equal specificity, never with !important.
  */
+
+/* ---- The start page ------------------------------------------------------------------------------ */
+
+.welcome .eyebrow {
+  color: var(--accent-text);
+  font-size: 12px;
+  font-weight: 650;
+  letter-spacing: 1.6px;
+}
+.welcome h1 {
+  color: var(--text-primary);
+}
+.welcome h1 span {
+  color: var(--text-muted);
+}
+.setup-card {
+  border-color: var(--line);
+  border-radius: var(--radius-l);
+  background: var(--surface-glass);
+  backdrop-filter: blur(var(--blur));
+  box-shadow: var(--shadow-1);
+}
+.setup-icon {
+  border-radius: var(--radius);
+  background: var(--accent-soft);
+  color: var(--accent-text);
+}
+.steps b {
+  border: 1px solid var(--line-strong);
+  background: var(--surface-2);
+  font-variant-numeric: tabular-nums;
+}
+.welcome .join-note,
+.try-example p {
+  color: var(--text-muted);
+}
+.text-link {
+  color: var(--accent-text);
+}
+.privacy {
+  color: var(--text-dim);
+}
+/* The way into the example is the page's one primary action. */
+.try-example .btn {
+  min-height: 40px;
+  padding: 0 var(--space-4);
+  font-weight: 650;
+}
+
+/* ---- The example banner and honest tags ------------------------------------------------------------ */
+
+.demo-banner {
+  border: 1px solid color-mix(in srgb, var(--accent) 35%, var(--line));
+  border-left: 3px solid var(--accent);
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--accent-soft) 70%, var(--surface-1));
+  color: var(--text-primary);
+}
+.demo-banner svg {
+  color: var(--accent-text);
+}
+.demo-banner strong {
+  font-weight: 650;
+}
+.demo-banner .btn {
+  min-height: 36px;
+}
+
+.simulated-badge,
+.host-only-tag {
+  display: inline-flex;
+  align-items: center;
+  min-height: 20px;
+  padding: 1px 8px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-pill);
+  background: var(--surface-2);
+  color: var(--text-dim);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.4px;
+  white-space: nowrap;
+  vertical-align: middle;
+}
+.host-only-tag {
+  border-color: color-mix(in srgb, var(--warning) 45%, var(--line));
+  color: var(--warning);
+  background: var(--warning-soft);
+}
+
+/* ---- Modals ------------------------------------------------------------------------------------------ */
+
+/* A plain tint, no blur: a full-window blur is costly on every frame behind an open dialog. */
+.scrim {
+  background: color-mix(in srgb, var(--surface-0) 80%, transparent);
+}
+.dialog {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-l);
+  background: var(--surface-1);
+  box-shadow:
+    var(--shadow-2),
+    0 0 0 1px color-mix(in srgb, var(--accent) 6%, transparent);
+}
+.dialog-title {
+  background: var(--surface-1);
+}
+.dialog-title h2 {
+  font-size: 20px;
+  letter-spacing: -0.2px;
+}
+/* Primary actions in dialogs and on the start page: the token fill with white text. */
+:is(.dialog, .welcome) .primary {
+  border-color: var(--accent-fill);
+  background: var(--accent-fill);
+  color: var(--text-on-accent);
+  box-shadow: var(--glow-soft);
+}
+:is(.dialog, .welcome) .primary:hover:not(:disabled, [aria-disabled='true']) {
+  border-color: var(--accent-fill-hover);
+  background: var(--accent-fill-hover);
+}
+:is(.dialog, .welcome) .primary:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+.dialog h3 {
+  color: var(--text-primary);
+  font-size: 15px;
+  font-weight: 650;
+}
+.dialog p {
+  color: var(--text-muted);
+}
+.dialog-foot {
+  border-top-color: var(--line);
+}
+.dialog-foot span {
+  color: var(--text-dim);
+}
+
+/* ---- Settings (Access settings) ---------------------------------------------------------------------- */
+
+.appearance-setting {
+  padding: var(--space-4);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface-2);
+}
+.appearance-setting h3 {
+  margin: 0 0 var(--space-3);
+  color: var(--accent-text);
+  font-size: 11px;
+  letter-spacing: 1.4px;
+  text-transform: uppercase;
+}
+.appearance-setting select {
+  min-height: 36px;
+  border-color: var(--line-strong);
+  border-radius: var(--radius-s);
+  background: var(--surface-1);
+  color: var(--text-primary);
+}
+.appearance-setting .choice-group label {
+  min-height: 34px;
+  border-color: var(--line-strong);
+  background: var(--surface-1);
+  color: var(--text-muted);
+}
+.appearance-setting .choice-group label:has(input:checked) {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--text-primary);
+}
+.appearance-setting .choice-group label:has(input:focus-visible) {
+  box-shadow: var(--focus-ring);
+}
+.settings-status {
+  border: 1px solid color-mix(in srgb, var(--accent) 22%, var(--line));
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--accent-soft) 55%, var(--surface-1));
+  color: var(--accent-text);
+}
+.settings-status strong {
+  color: var(--text-primary);
+}
+.setting-row {
+  border-bottom-color: var(--line);
+}
+.setting-row input {
+  accent-color: var(--accent);
+}
+.invite-field input {
+  border-color: var(--line-strong);
+  border-radius: var(--radius-s);
+  background: var(--surface-2);
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+.danger-link {
+  color: var(--danger);
+}
+.companion-features,
+.desktop-view-note {
+  padding: var(--space-2) var(--space-3);
+  border-left: 3px solid var(--accent);
+  border-radius: var(--radius-s);
+  background: var(--surface-2);
+}
+.companion-features a {
+  color: var(--accent-text);
+}
+.connection-details {
+  margin-top: var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-s);
+  background: var(--surface-0);
+}
+.connection-details summary {
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+/* ---- Session & access, lobby and storage ------------------------------------------------------------ */
+
+.session-access {
+  margin-top: var(--space-4);
+}
+.session-access select {
+  min-height: 34px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-s);
+  background: var(--surface-2);
+  color: var(--text-primary);
+}
+.guest-row {
+  border-bottom-color: var(--line);
+}
+.guest-permissions {
+  border-radius: var(--radius-s);
+}
+.guest-permissions[open] {
+  padding: var(--space-2);
+  background: var(--surface-2);
+}
+.guest-usage {
+  color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
+}
+.lobby-requests li {
+  border-color: color-mix(in srgb, var(--accent) 30%, var(--line));
+  border-radius: var(--radius-s);
+  background: var(--surface-2);
+}
+.keep-settings,
+.temp-recovery {
+  border-radius: var(--radius);
+}
+.temp-recovery {
+  border: 1px solid color-mix(in srgb, var(--warning) 40%, var(--line));
+  background: var(--warning-soft);
+}
+.quit-clips li {
+  border-bottom: 1px solid var(--line);
+}
+
+/* ---- What's new, guest name, My Layout, Organize ------------------------------------------------------ */
+
+.whats-new {
+  border: 1px solid color-mix(in srgb, var(--accent) 35%, var(--line));
+  border-radius: var(--radius-s);
+  background: color-mix(in srgb, var(--accent-soft) 60%, var(--surface-1));
+  color: var(--text-primary);
+}
+.whats-new a {
+  color: var(--accent-text);
+}
+.guest-name-dialog {
+  max-width: 440px;
+}
+.guest-name-dialog input {
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-s);
+  background: var(--surface-2);
+  color: var(--text-primary);
+}
+.layout-manager input,
+.organize-sound input,
+.folder-create select,
+.folder-edit select {
+  border-color: var(--line-strong);
+  border-radius: var(--radius-s);
+  background: var(--surface-2);
+  color: var(--text-primary);
+}
+.folder-edit {
+  padding: var(--space-1) var(--space-2);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-s);
+  background: var(--surface-0);
+}
+.folder-membership {
+  border-radius: var(--radius-s);
+}
+.folder-membership:hover {
+  background: var(--surface-hover);
+}
+.folder-membership:has(input:checked) {
+  color: var(--text-primary);
+}
+.folder-membership input {
+  accent-color: var(--accent);
+}
