@@ -420,7 +420,7 @@ p {
 .counter-label small {
   display: block;
   letter-spacing: 0;
-  font-size: 12px;
+  font-size: 11px;
   color: var(--text-dim);
   margin-top: 6px;
 }
@@ -801,7 +801,7 @@ p {
     max-width: 220px;
   }
   .counter-label {
-    font-size: 12px;
+    font-size: 11px;
   }
 }
 @media (max-width: 700px) {
@@ -809,7 +809,8 @@ p {
     display: none;
   }
   .status {
-    font-size: 12px;
+    font-size: 11px;
+    letter-spacing: 0.2px;
   }
   .workspace {
     display: block;
@@ -829,7 +830,7 @@ p {
     font-size: 26px;
   }
   .board-heading .eyebrow {
-    font-size: 12px;
+    font-size: 11px;
   }
   .board-heading p {
     font-size: 12px;
@@ -915,7 +916,7 @@ p {
   }
   .counter-label {
     margin-right: auto;
-    font-size: 12px;
+    font-size: 11px;
   }
   .counter-label small {
     display: none;
@@ -1121,7 +1122,7 @@ p {
 .view-list .sound-hint,
 .view-waveforms .sound-hint {
   margin: 3px 0 0;
-  font-size: 12px;
+  font-size: 11px;
 }
 .view-list .sound-actions,
 .view-waveforms .sound-actions {
@@ -1163,7 +1164,7 @@ p {
   font-size: 12px;
 }
 .view-details .sound-hint {
-  font-size: 12px;
+  font-size: 11px;
   margin-top: 3px;
 }
 .view-details .sound-actions {
@@ -1388,7 +1389,7 @@ p {
   gap: 10px;
 }
 .player-v2 .counter-label {
-  font-size: 12px;
+  font-size: 11px;
   margin: 0;
 }
 .player-v2 .counter-label small {
@@ -1585,7 +1586,7 @@ p {
   }
   .topbar .status {
     max-width: 100px;
-    font-size: 12px;
+    font-size: 11px;
   }
   .top-actions {
     gap: 2px;
@@ -1789,7 +1790,7 @@ p {
   min-width: 0;
 }
 .release-version {
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 700;
   color: var(--text-primary);
   border: 1px solid color-mix(in srgb, var(--accent) 40%, transparent);
