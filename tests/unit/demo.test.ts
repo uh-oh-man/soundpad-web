@@ -1,6 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { FakeEngine, HOST, id, setup } from './demo-engine';
 import {
   ALEX,
+  DEMO_COMPANION,
   ALEX_GAP_MS,
   DemoModel,
   GUEST_JOIN_MS,
@@ -8,13 +10,10 @@ import {
   SAM,
   SAM_ASKS_MS,
   UNAVAILABLE,
-  type DemoEngine,
-  type DemoSessionInfo,
 } from '../../web/src/demo/model';
 import { DEMO_SOUNDS, mimicLoopLines, wordLines } from '../../web/src/demo/library';
 import {
   applyEdit,
-  editedLengthMs,
   loopLevels,
   loopSlice,
   resample,
@@ -22,135 +21,10 @@ import {
   stretch,
   waveformLevels,
   wav,
-  type ClipEdit,
   type Pcm,
 } from '../../web/src/demo/dsp';
-import {
-  command,
-  snapshotSchema,
-  statisticsSchema,
-  waveformSchema,
-  type Command,
-  type Snapshot,
-} from '../../web/src/protocol';
+import { command, snapshotSchema, statisticsSchema, waveformSchema } from '../../web/src/protocol';
 import { DEFAULT_POLICY } from '../../web/src/network/policy';
-
-const HOST = { id: '33333333-3333-4333-8333-333333333333', name: 'Host' };
-const id = (key: string) => DemoModel.soundId(key);
-
-/** Plays nothing: it remembers what it was asked to play, and makes clips when the test says so. */
-class FakeEngine implements DemoEngine {
-  lengths = new Map(DEMO_SOUNDS.map((s) => [DemoModel.soundId(s.key), s.durationMs]));
-  now?: { clip: string; from: number; end: number | null; repeat: boolean; ended: () => void };
-  at = 0;
-  paused = false;
-  closed = false;
-  /** When set, clips are made only when `finish()` is called. */
-  hold = false;
-  private waiting: (() => void)[] = [];
-  finish() {
-    for (const done of this.waiting.splice(0)) done();
-  }
-  private make(target: string, length: number) {
-    return new Promise<number>((resolve) => {
-      const done = () => {
-        this.lengths.set(target, length);
-        resolve(length);
-      };
-      if (this.hold) this.waiting.push(done);
-      else done();
-    });
-  }
-  duration(clip: string) {
-    return this.lengths.get(clip) ?? 0;
-  }
-  play(clip: string, from: number, end: number | null, repeat: boolean, ended: () => void) {
-    this.now = { clip, from, end, repeat, ended };
-    this.at = from;
-    this.paused = false;
-  }
-  stop() {
-    this.now = undefined;
-  }
-  pause() {
-    this.paused = true;
-  }
-  resume() {
-    this.paused = false;
-  }
-  seek(ms: number) {
-    this.at = ms;
-  }
-  position() {
-    return this.at;
-  }
-  derive(target: string, source: string, edit: ClipEdit) {
-    expect(this.lengths.has(source)).toBe(true);
-    return this.make(target, editedLengthMs(edit));
-  }
-  reverse(target: string, source: string) {
-    return this.make(target, this.duration(source));
-  }
-  fromLoop(target: string, from: number, to: number) {
-    return this.make(target, to - from);
-  }
-  loopLevels(_from: number, _to: number, count: number) {
-    return new Array<number>(count).fill(500);
-  }
-  async decode(target: string, bytes: Uint8Array) {
-    if (!bytes.length) throw Error('empty');
-    this.lengths.set(target, 1000);
-    return 1000;
-  }
-  async previewClip(_source: string, edit: ClipEdit) {
-    return { wav: 'UklGRg==', seconds: editedLengthMs(edit) / 1000 };
-  }
-  async previewLoop(from: number, to: number) {
-    return { wav: 'UklGRg==', seconds: (to - from) / 1000 };
-  }
-  waveform(clip: string) {
-    return this.lengths.has(clip)
-      ? waveformLevels({ rate: 8000, channels: [new Float32Array(8000)] })
-      : null;
-  }
-  forget(clip: string) {
-    this.lengths.delete(clip);
-  }
-  close() {
-    this.closed = true;
-  }
-}
-
-function setup({ visible = true } = {}) {
-  const engine = new FakeEngine();
-  const states: Snapshot[] = [];
-  const sessions: DemoSessionInfo[] = [];
-  const notices: string[] = [];
-  let shown = visible;
-  const model = new DemoModel(
-    engine,
-    {
-      state: (s) => states.push(s),
-      session: (s) => sessions.push(s),
-      notify: (message) => notices.push(message),
-    },
-    { random: () => 0, visible: () => shown },
-  );
-  const send = (op: Command['op'], fields: Partial<Command> = {}) =>
-    model.send(command(op, fields), HOST);
-  const asAlex = (op: Command['op'], fields: Partial<Command> = {}) =>
-    model.send(command(op, fields), ALEX.person, ALEX);
-  return {
-    model,
-    engine,
-    send,
-    asAlex,
-    notices,
-    state: () => states[states.length - 1],
-    session: () => sessions[sessions.length - 1],
-    setVisible: (on: boolean) => (shown = on),
-  };
-}
 
 beforeEach(() => {
   vi.useFakeTimers();
@@ -179,7 +53,7 @@ describe('example session model', () => {
     expect(s.library.sounds.find((x) => x.id === id('air-horn'))?.icon).toMatch(/^data:image/);
     expect(s.library.categories[0].icon).toBe('data:image/png;base64,AAAA');
     expect(s.available).toBe(true);
-    expect(s.companionVersion).toBe('2.37.0');
+    expect(s.companionVersion).toBe(DEMO_COMPANION);
   });
 
   it('plays, pauses, seeks and stops, and the player hears the position', async () => {
