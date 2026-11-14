@@ -77,15 +77,17 @@ public sealed class MimicTests : IDisposable
         var fixture = new MimicFixture(); bridge.UseMimicCapture(fixture); await bridge.Poll(true);
         Assert.True((await bridge.Execute(Cmd("beginSession"), "host")).Ok);
         Assert.True((await bridge.Execute(Cmd("permissions") with { Permissions = new(GuestMimic: true, GuestUploads: false) }, "host")).Ok);
+        // Alice was admitted before capture started (2.38: guests see the history from their join time).
+        bridge.NoteGuest(new("guest-1", "Alice"), "peer-1", null);
         Assert.True((await bridge.Execute(Cmd("mimicStart") with { SourceId = MimicFixture.Source.Id }, "host")).Ok);
         fixture.Advance(TimeSpan.FromSeconds(31));
-        var peek = Data<MimicPeek>(await bridge.Execute(Cmd("mimicPeek"), "guest"));
+        var peek = Data<MimicPeek>(await bridge.Execute(Cmd("mimicPeek"), "guest", new("guest-1", "Alice"), "peer-1"));
         Assert.Equal(Bridge.MimicBuckets, peek.Levels.Length); Assert.Contains(peek.Levels, l => l > 400); Assert.Contains(0, peek.Levels);
         long windowStart = peek.End - MimicFixture.Rate * 30L;
         // Find the start of a tone burst inside the window and select exactly its half second.
         long burst = windowStart + (2 * MimicFixture.Rate - windowStart % (2 * MimicFixture.Rate)) % (2 * MimicFixture.Rate);
         long fromMs = (burst - windowStart) * 1000 / MimicFixture.Rate;
-        var silent = await bridge.Execute(Cmd("mimicClip") with { MimicEnd = peek.End, PositionMs = fromMs + 600, EndMs = fromMs + 1400 }, "guest");
+        var silent = await bridge.Execute(Cmd("mimicClip") with { MimicEnd = peek.End, PositionMs = fromMs + 600, EndMs = fromMs + 1400 }, "guest", new("guest-1", "Alice"), "peer-1");
         Assert.False(silent.Ok); Assert.Contains("silent", silent.Error);
         var clip = await bridge.Execute(Cmd("mimicClip") with { MimicEnd = peek.End, PositionMs = fromMs, EndMs = fromMs + 500, Name = "Said it" }, "guest", new("guest-1", "Alice"), "peer-1");
         Assert.True(clip.Ok, clip.Error);
@@ -96,9 +98,14 @@ public sealed class MimicTests : IDisposable
         var journal = JsonSerializer.Deserialize<AudioJournal>(File.ReadAllText(Path.Combine(folder, "managed-audio", "journal.json")), Json.Options)!;
         using (var wave = new NAudio.Wave.WaveFileReader(journal.Assets.Single().Variants.Single().Path))
             Assert.InRange(wave.TotalTime.TotalMilliseconds, 480, 520);
-        fixture.Advance(TimeSpan.FromSeconds(31 + Bridge.MimicGraceSeconds));
-        var expired = await bridge.Execute(Cmd("mimicClip") with { MimicEnd = peek.End, PositionMs = fromMs, EndMs = fromMs + 500 }, "guest");
-        Assert.False(expired.Ok); Assert.Contains("scrolled out", expired.Error);
+        // 2.38: the selection stays available for as long as the history keeps it (here the shortest, one minute,
+        // plus up to one 10 s segment), and is then answered as gone, never cut from other audio.
+        fixture.Advance(TimeSpan.FromSeconds(45));
+        Assert.True((await bridge.Execute(Cmd("mimicClip") with { MimicEnd = peek.End, PositionMs = fromMs, EndMs = fromMs + 500, Name = "Still there" }, "guest", new("guest-1", "Alice"), "peer-1")).Ok);
+        Assert.True((await bridge.Execute(Cmd("historySettings") with { Seconds = 60 }, "host")).Ok);
+        fixture.Advance(TimeSpan.FromSeconds(40));
+        var expired = await bridge.Execute(Cmd("mimicClip") with { MimicEnd = peek.End, PositionMs = fromMs, EndMs = fromMs + 500 }, "guest", new("guest-1", "Alice"), "peer-1");
+        Assert.False(expired.Ok); Assert.Contains("no longer in the history", expired.Error);
         Assert.True((await bridge.Execute(Cmd("permissions") with { Permissions = new(GuestMimic: false) }, "host")).Ok);
         Assert.False((await bridge.Execute(Cmd("mimicClip") with { MimicEnd = peek.End, PositionMs = 0, EndMs = 500 }, "guest")).Ok);
     }
@@ -122,48 +129,73 @@ public sealed class MimicTests : IDisposable
         public void Dispose() => inner.Dispose();
     }
 
+    /// <summary>A history (2.38) and its transcript in their own folder under this test's folder.</summary>
+    private (HistoryStore Store, TranscriptWords Words) NewHistory(string name = "history")
+    {
+        var root = Path.Combine(folder, name); Directory.CreateDirectory(root);
+        var store = HistoryStore.Create(root, new HistoryOptions { Rate = MimicFixture.Rate, TailSeconds = 600 });
+        return (store, TranscriptWords.Open(root, store.SessionId));
+    }
+    private static float[] Burst(int frames) => Enumerable.Range(0, frames).Select(i => MimicFixture.Sample(i)).ToArray();
+
     [Fact]
-    public async Task AFailedTranscriberDropsItsLinesSoGuestsStopSeeingThem()
+    public async Task AFailedTranscriberStopsButKeepsTheWordsItRecognised()
     {
         using var transcriber = new MimicTranscriber(new FailingEngine());
-        var ring = new MimicRing(MimicFixture.Rate, 45);
-        await transcriber.Enable(() => ring, false);
+        var (store, words) = NewHistory(); using var closeStore = store;
+        transcriber.Attach(store, words);
+        await transcriber.Enable(() => store, false);
         // Transcripts start from "now" once the loop attaches (every 0.5 s); speak after that.
         await Task.Delay(3000);
-        ring.Write(Enumerable.Range(0, MimicFixture.Rate / 2).Select(i => MimicFixture.Sample(i)).ToArray());
-        ring.WriteSilence(MimicFixture.Rate * 3);
-        for (int i = 0; i < 200 && transcriber.Lines(ring, 0, ring.Written).Length == 0; i++) await Task.Delay(100); // up to 20 s on a slow CI runner
-        Assert.Single(transcriber.Lines(ring, 0, ring.Written));
-        ring.Write(Enumerable.Range(0, MimicFixture.Rate / 2).Select(i => MimicFixture.Sample(i)).ToArray());
-        ring.WriteSilence(MimicFixture.Rate * 3);
+        store.Append(Burst(MimicFixture.Rate / 2));
+        store.AppendSilence(MimicFixture.Rate * 3);
+        for (int i = 0; i < 200 && transcriber.Lines(store, HistoryAccess.Host, 0, store.LiveFrame).Length == 0; i++) await Task.Delay(100); // up to 20 s on a slow CI runner
+        Assert.Single(transcriber.Lines(store, HistoryAccess.Host, 0, store.LiveFrame));
+        store.Append(Burst(MimicFixture.Rate / 2));
+        store.AppendSilence(MimicFixture.Rate * 3);
         for (int i = 0; i < 200 && transcriber.Enabled; i++) await Task.Delay(100);
         Assert.False(transcriber.Enabled);
         Assert.StartsWith("Transcripts stopped", transcriber.Status);
-        Assert.Empty(transcriber.Lines(ring, 0, ring.Written)); // the earlier line is gone too
+        // 2.38: words describe the history's audio and stay with it; only recognising stops.
+        Assert.Single(transcriber.Lines(store, HistoryAccess.Host, 0, store.LiveFrame));
     }
 
     [Fact]
-    public async Task TranscriptLinesLineUpWithTheBufferAndSilenceIsSkipped()
+    public async Task TranscriptLinesLineUpWithTheHistoryAndSilenceIsSkipped()
     {
         var engine = new TranscriptFixture();
         using var transcriber = new MimicTranscriber(engine);
-        var ring = new MimicRing(MimicFixture.Rate, 45);
-        Assert.False(await transcriber.Step(ring, false, default));
+        var (store, words) = NewHistory(); using var closeStore = store;
+        transcriber.Attach(store, words);
+        Assert.False(await transcriber.Step(store, false, default));
         // 1 s of silence, 0.5 s of tone, 2.5 s of silence: one line at 1.0-1.5 s.
-        ring.WriteSilence(MimicFixture.Rate);
-        ring.Write(Enumerable.Range(0, MimicFixture.Rate / 2).Select(i => MimicFixture.Sample(i)).ToArray());
-        ring.WriteSilence(MimicFixture.Rate * 5 / 2);
-        Assert.True(await transcriber.Step(ring, false, default));
-        var line = Assert.Single(transcriber.Lines(ring, 0, ring.Written));
+        store.AppendSilence(MimicFixture.Rate);
+        store.Append(Burst(MimicFixture.Rate / 2));
+        store.AppendSilence(MimicFixture.Rate * 5 / 2);
+        Assert.True(await transcriber.Step(store, false, default));
+        var line = Assert.Single(transcriber.Lines(store, HistoryAccess.Host, 0, store.LiveFrame));
         Assert.Equal("Fixture tone 1", line.Text);
-        Assert.InRange(line.StartMs, 990, 1010); Assert.InRange(line.EndMs, 1490, 1520);
+        // Word edges come from the audio (anchor-valley): the tone's own start and end.
+        Assert.InRange(line.StartMs, 975, 1015); Assert.InRange(line.EndMs, 1485, 1530);
         // Relative to a later window start, times shift accordingly.
-        Assert.InRange(Assert.Single(transcriber.Lines(ring, MimicFixture.Rate, ring.Written)).StartMs, -10, 10);
+        Assert.InRange(Assert.Single(transcriber.Lines(store, HistoryAccess.Host, MimicFixture.Rate, store.LiveFrame)).StartMs, -25, 15);
+        // Three words, back to back, each on the absolute timeline, with honest status and pauses at the phrase edges.
+        var list = transcriber.WordsBetween(store, HistoryAccess.Host, 0, store.LiveFrame).Select(w => w.Word).ToList();
+        Assert.Equal(["Fixture", "tone", "1"], list.Select(w => w.Text));
+        Assert.True(list[0].PauseBefore); Assert.True(list[^1].PauseAfter);
+        Assert.Equal(list[0].End, list[1].Start); Assert.Equal(list[1].End, list[2].Start);
+        Assert.All(list, w => Assert.Contains(w.Status, new[] { WordStatus.Done, WordStatus.Uncertain }));
+        Assert.Single(list.Select(w => w.PhraseId).Distinct());
         int calls = engine.Calls;
-        ring.WriteSilence(MimicFixture.Rate * 5);
-        Assert.True(await transcriber.Step(ring, false, default));
+        store.AppendSilence(MimicFixture.Rate * 5);
+        Assert.True(await transcriber.Step(store, false, default));
         Assert.Equal(calls, engine.Calls); // silent chunks never reach the recognizer
-        Assert.Empty(transcriber.Lines(new MimicRing(MimicFixture.Rate, 45), 0, 1));
+        Assert.Empty(transcriber.PendingBetween(store, [new(0, store.LiveFrame)], 1000, store.LiveFrame)); // all of it is recognised now
+        var (other, otherWords) = NewHistory("other"); using var closeOther = other;
+        Assert.Empty(transcriber.Lines(other, HistoryAccess.Host, 0, 1)); // another session's words never show
+        // The words are stored with the history: opened again, the transcript is the same.
+        var again = TranscriptWords.Open(Path.Combine(folder, "history"), store.SessionId);
+        Assert.Equal(list.Select(w => (w.Id, w.Start, w.End, w.Text)), again.Between(0, store.LiveFrame).Select(w => (w.Word.Id, w.Word.Start, w.Word.End, w.Word.Text)));
     }
 
     [Fact]
@@ -199,18 +231,43 @@ public sealed class MimicTests : IDisposable
     {
         var engine = new TranscriptFixture();
         using var transcriber = new MimicTranscriber(engine);
-        var ring = new MimicRing(MimicFixture.Rate, 45);
-        Assert.False(await transcriber.Step(ring, false, default));
+        var (store, words) = NewHistory(); using var closeStore = store;
+        transcriber.Attach(store, words);
+        Assert.False(await transcriber.Step(store, false, default));
         float[] Tone(double seconds) => Enumerable.Range(0, (int)(seconds * MimicFixture.Rate)).Select(i => 0.5f * MathF.Sin(i * 0.17f)).ToArray();
-        ring.Write(Tone(5));
-        Assert.False(await transcriber.Step(ring, false, default)); // still talking: wait
+        store.Append(Tone(5));
+        Assert.False(await transcriber.Step(store, false, default)); // still talking: wait
         Assert.Equal(0, engine.Calls);
-        ring.WriteSilence(MimicFixture.Rate / 2);
-        Assert.True(await transcriber.Step(ring, false, default)); // pause: transcribe the whole sentence
-        Assert.Single(transcriber.Lines(ring, 0, ring.Written));
-        ring.Write(Tone(16));
-        Assert.True(await transcriber.Step(ring, false, default)); // 15 s without a pause forces a cut
+        store.AppendSilence(MimicFixture.Rate / 2);
+        Assert.True(await transcriber.Step(store, false, default)); // pause: transcribe the whole sentence
+        Assert.Single(transcriber.Lines(store, HistoryAccess.Host, 0, store.LiveFrame));
+        store.Append(Tone(16));
+        Assert.True(await transcriber.Step(store, false, default)); // 15 s without a pause forces a cut
         Assert.Equal(2, engine.Calls);
+        // The words at a forced cut that was not at a pause are marked uncertain, never "done".
+        var last = transcriber.WordsBetween(store, HistoryAccess.Host, 0, store.LiveFrame).Select(w => w.Word).Last();
+        Assert.Equal(WordStatus.Uncertain, last.Status);
+        // The cut came at the quietest moment of the last five seconds, so what follows it waits for the next chunk.
+        Assert.All(transcriber.PendingBetween(store, [new(0, store.LiveFrame)], 0, store.LiveFrame), p => Assert.True(p.StartFrame >= MimicFixture.Rate * 15L));
+    }
+
+    [Fact]
+    public async Task PausesAreFoundUnderASteadyBackgroundNotOnlyInSilence()
+    {
+        // Game sound is rarely silent: speech over a steady bed, then the bed alone. The pre-2.38 rule (RMS under
+        // 0.004) never fired here, so every chunk was a forced 15 s cut; a pause relative to the background does.
+        var engine = new TranscriptFixture();
+        using var transcriber = new MimicTranscriber(engine);
+        var (store, words) = NewHistory(); using var closeStore = store;
+        transcriber.Attach(store, words);
+        Assert.False(await transcriber.Step(store, false, default));
+        var random = new Random(7);
+        float Bed() => (float)(random.NextDouble() * 2 - 1) * 0.03f;
+        store.Append(Enumerable.Range(0, MimicFixture.Rate * 4).Select(i => 0.5f * MathF.Sin(i * 0.17f) + Bed()).ToArray());
+        Assert.False(await transcriber.Step(store, false, default)); // still talking
+        store.Append(Enumerable.Range(0, MimicFixture.Rate / 2).Select(_ => Bed()).ToArray());
+        Assert.True(await transcriber.Step(store, false, default)); // a pause, although the background never went quiet
+        Assert.Equal(1, engine.Calls);
     }
 
     [Fact]
@@ -657,11 +714,13 @@ public sealed class MimicTests : IDisposable
         Assert.False(stale.Ok); Assert.Contains("restarted", stale.Error);
         // A transcriber step from a replaced loop commits nothing.
         using var transcriber = new MimicTranscriber(new TranscriptFixture());
-        var ring = new MimicRing(MimicFixture.Rate, 45);
-        ring.Write(Enumerable.Range(0, MimicFixture.Rate * 3).Select(i => MimicFixture.Sample(i)).ToArray());
-        ring.WriteSilence(MimicFixture.Rate);
-        Assert.False(await transcriber.Step(ring, false, default, generation: 999));
-        Assert.Empty(transcriber.Lines(ring, 0, ring.Written));
+        var (store, words) = NewHistory(); using var closeStore = store;
+        transcriber.Attach(store, words);
+        Assert.False(await transcriber.Step(store, false, default));
+        store.Append(Burst(MimicFixture.Rate * 3));
+        store.AppendSilence(MimicFixture.Rate);
+        Assert.False(await transcriber.Step(store, false, default, generation: 999));
+        Assert.Empty(transcriber.Lines(store, HistoryAccess.Host, 0, store.LiveFrame));
     }
 
     [Fact]

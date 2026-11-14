@@ -99,9 +99,10 @@ internal static class RealExactPlaybackProbe
             await bridge.WarmExact(fixture);
 
             capture = host.Capture();
-            await capture.Start(new MimicSource("app:" + soundpad, "Soundpad", "app"), 120);
-            if (!capture.Running || capture.Ring == null) { log.WriteLine("ABORT: could not capture Soundpad's output: " + capture.Status); return 2; }
-            var ring = capture.Ring; int rate = ring.Rate;
+            var ring = new MimicRing(capture.Rate, 120); int rate = ring.Rate;
+            await capture.Start(new MimicSource("app:" + soundpad, "Soundpad", "app"), ring);
+            if (!capture.Running) { log.WriteLine("ABORT: could not capture Soundpad's output: " + capture.Status); return 2; }
+            capture.Pump();
             await Task.Delay(400);
             float[] Captured(long from, int ms) { long end = Math.Min(ring.Written, from + (long)ms * rate / 1000); return end > from ? ring.Read(from, end) : []; }
             long idleAt = ring.Written; await Task.Delay(300);

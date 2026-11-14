@@ -46,6 +46,16 @@ export const commandSchema = z
       'trimPreview',
       // Host only (2.35): stops Soundpad at once and holds guest playback until the host resumes it.
       'panic',
+      // Recording history (2.38). Timeline, levels and transcript are what a guest with Mimic may ask for,
+      // scoped by the companion to what was recorded since they joined; the rest is the host's.
+      'historyTimeline',
+      'historyLevels',
+      'historyTranscript',
+      'historyShare',
+      'historyUnshare',
+      'historySettings',
+      'historyDiscard',
+      'historyCorrect',
     ]),
     assetId: z.uuid().optional(),
     variantId: z.uuid().optional(),
@@ -58,6 +68,15 @@ export const commandSchema = z
     ownerId: z.string().max(128).optional(),
     sourceId: z.string().max(512).optional(),
     mimicEnd: z.number().int().nonnegative().safe().optional(),
+    // Recording history (2.38): frames on the history timeline, waveform bins, the history length, the
+    // subtitles setting, and a transcript correction.
+    startFrame: z.number().int().nonnegative().safe().optional(),
+    endFrame: z.number().int().nonnegative().safe().optional(),
+    bins: z.number().int().min(1).max(2048).optional(),
+    seconds: z.number().int().min(60).max(3600).optional(),
+    subtitles: z.enum(['gaming', 'balanced', 'fast']).optional(),
+    wordId: z.number().int().positive().safe().optional(),
+    text: z.string().max(100).optional(),
     name: z.string().max(100).optional(),
     speed: z.number().min(0.05).max(20).optional(),
     keepPitch: z.boolean().optional(),
@@ -230,6 +249,17 @@ export const snapshotSchema = z.object({
         )
         .max(20)
         .nullish(),
+      // The rolling recording history (2.38). Older companions omit it.
+      history: z
+        .object({
+          sessionId: z.string().max(64).nullable(),
+          seconds: z.number().int().positive().max(3600),
+          subtitles: z.enum(['gaming', 'balanced', 'fast']),
+          sourceLost: z.boolean(),
+          recoveredMs: z.number().int().nonnegative(),
+          problem: z.string().max(600).nullish(),
+        })
+        .nullish(),
     })
     .nullable()
     .optional(),
@@ -302,6 +332,10 @@ export function isGuestAllowed(c: Command, s: Snapshot) {
   // "Make it and play it" (2.35) needs the same permission as playing it afterwards did.
   if (c.autoplay && !s.permissions.remotePlayback) return false;
   if (c.op === 'mimicPeek' || c.op === 'mimicClip') return s.permissions.guestMimic === true;
+  // The recording history (2.38): only what a guest may see of it, which the companion limits to
+  // what was recorded since they joined (and what the host shared).
+  if (c.op === 'historyTimeline' || c.op === 'historyLevels' || c.op === 'historyTranscript')
+    return s.permissions.guestMimic === true;
   if (c.op === 'trimAudio') return s.permissions.guestUploads !== false;
   // Undo of a guest's own clip or copy (2.32): the companion checks the guest added it.
   if (c.op === 'removeAudio') return s.permissions.guestUploads !== false;

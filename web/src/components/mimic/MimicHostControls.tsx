@@ -1,17 +1,36 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Captions, Download, Keyboard, Mic2, RefreshCw, Square } from 'lucide-react';
+import {
+  Captions,
+  Download,
+  History as HistoryIcon,
+  Keyboard,
+  Mic2,
+  RefreshCw,
+  Square,
+} from 'lucide-react';
 import { z } from 'zod';
 import { controller } from '../../controller';
 import type { Snapshot } from '../../protocol';
 import { supports } from '../../version';
 import { preferredSource, sourceKey } from '../../mimic/selection';
+import { formatSpan } from '../../mimic/history';
 
 const SOURCE_KEY = 'soundpad-mimic-source';
 const sourcesSchema = z.object({
   sources: z
     .array(z.object({ id: z.string().max(512), name: z.string().max(600), kind: z.string() }))
     .max(500),
+  // 2.38: the source the companion remembers from last time, when it is listed now.
+  remembered: z.string().max(512).nullish(),
 });
+
+/** How much history the host can keep (2.38), in minutes. */
+const HISTORY_MINUTES = [1, 2, 5, 10, 20, 30, 60];
+const SUBTITLES = [
+  { value: 'gaming', label: 'Gaming (lightest)' },
+  { value: 'balanced', label: 'Balanced' },
+  { value: 'fast', label: 'Fast' },
+] as const;
 
 /** Keys the companion accepts for the Mimic hotkey (2.14+); F6 is Voice Replay Studio's. */
 const HOTKEY_KEYS = ['F6', 'F7', 'F8', 'F9', 'F10'];
@@ -95,7 +114,15 @@ export function MimicHostControls({ state, connected }: { state: Snapshot; conne
     try {
       const parsed = sourcesSchema.parse(await controller.run('mimicSources'));
       setSources(parsed.sources);
-      setSource((current) => preferredSource(parsed.sources, current, rememberedSource()));
+      // The one still chosen, else the one the companion remembers (2.38), else this browser's memory.
+      const remembered = parsed.remembered;
+      setSource((current) =>
+        !parsed.sources.some((s) => s.id === current) &&
+        remembered &&
+        parsed.sources.some((s) => s.id === remembered)
+          ? remembered
+          : preferredSource(parsed.sources, current, rememberedSource()),
+      );
     } catch {
       /* Controller shows the error. */
     }
@@ -103,6 +130,12 @@ export function MimicHostControls({ state, connected }: { state: Snapshot; conne
   useEffect(() => {
     if (connected) void loadSources();
   }, [connected, loadSources]);
+  // The output went away (2.38): offer the outputs there are now; the history so far is kept.
+  const lost = !!mimic?.history?.sourceLost;
+  useEffect(() => {
+    if (lost && connected) void loadSources();
+  }, [lost, connected, loadSources]);
+  const history = supports(state.companionVersion, 'history') ? mimic?.history : undefined;
 
   async function command(run: () => Promise<unknown>, onError?: () => void) {
     running.current = true;
@@ -163,6 +196,82 @@ export function MimicHostControls({ state, connected }: { state: Snapshot; conne
           </button>
         )}
       </div>
+      {history?.sourceLost && !active && (
+        <p className="warning mimic-lost" role="alert">
+          The output Mimic was recording went away. Choose another output and start listening again;
+          the history so far is kept.
+        </p>
+      )}
+      {history && history.recoveredMs > 0 && (
+        <p className="warning mimic-recovered">
+          Recovered {formatSpan(history.recoveredMs)} of history from the last session (the
+          companion did not close normally).{' '}
+          <button
+            type="button"
+            aria-disabled={busy || undefined}
+            onClick={() => {
+              if (running.current) return;
+              if (
+                !window.confirm(
+                  'Discard the recovered recording history? It is deleted from this PC and cannot be brought back.',
+                )
+              )
+                return;
+              void command(() => controller.run('historyDiscard'));
+            }}
+          >
+            Discard
+          </button>
+        </p>
+      )}
+      {history?.problem && <p className="warning mimic-problem">{history.problem}</p>}
+      {history && (
+        <div className="mimic-transcribe mimic-history-settings">
+          <HistoryIcon size={16} />
+          <label>
+            Keep the last
+            <select
+              aria-label="Recording history length"
+              value={Math.round(history.seconds / 60)}
+              aria-disabled={busy || undefined}
+              onChange={(e) => {
+                if (running.current) return;
+                const minutes = Number(e.target.value);
+                void command(() => controller.run('historySettings', { seconds: minutes * 60 }));
+              }}
+            >
+              {HISTORY_MINUTES.map((m) => (
+                <option key={m} value={m}>
+                  {m === 60 ? '1 hour' : `${m} min`}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label>
+            Subtitles
+            <select
+              aria-label="Subtitles setting"
+              value={history.subtitles}
+              aria-disabled={busy || undefined}
+              onChange={(e) => {
+                if (running.current) return;
+                const subtitles = e.target.value as (typeof SUBTITLES)[number]['value'];
+                void command(() => controller.run('historySettings', { subtitles }));
+              }}
+            >
+              {SUBTITLES.map((s) => (
+                <option key={s.value} value={s.value}>
+                  {s.label}
+                </option>
+              ))}
+            </select>
+          </label>
+          <small>
+            Kept on this PC until the companion closes. Gaming recognises speech with the least CPU,
+            at low priority.
+          </small>
+        </div>
+      )}
       {supports(state.companionVersion, 'transcripts') && (
         <div className="mimic-transcribe">
           <Captions size={16} />

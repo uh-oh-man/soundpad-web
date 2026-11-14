@@ -40,12 +40,13 @@ public sealed class ExactPlaybackProbeTests : IDisposable
     private sealed class SilentCapture : IMimicCapture
     {
         public IReadOnlyList<MimicSource> Sources() => [];
-        public Task Start(MimicSource source, int seconds) { Running = true; SourceName = source.Name; return Task.CompletedTask; }
+        int IMimicCapture.Rate => Rate;
+        public Task Start(MimicSource source, IMimicSink sink) { Running = true; SourceName = source.Name; return Task.CompletedTask; }
         public void Stop() => Running = false;
+        public void Pump() { }
         public bool Running { get; private set; }
         public string Status => Running ? "Listening (stand-in)" : "Off";
         public string? SourceName { get; private set; }
-        public MimicRing? Ring { get; } = new(Rate, 5);
         public void Dispose() { }
     }
 

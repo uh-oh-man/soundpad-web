@@ -726,7 +726,7 @@ export class Controller {
         this.identity!,
         this.identity,
         () => this.view.state,
-        (c, peer, person) => this.bridge!.send(c, 'guest', person, peer),
+        (c, peer, person, joinedAt) => this.bridge!.send(c, 'guest', person, peer, joinedAt),
         () => {},
         () => {},
         (guests, links) => current() && this.update({ guests, links: links ?? {} }),

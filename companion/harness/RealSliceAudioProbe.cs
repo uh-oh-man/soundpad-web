@@ -71,6 +71,8 @@ internal static class RealSliceAudioProbe
         Console.WriteLine($"before: {before.Entries.Length} sounds, {before.Categories.Length} categories");
         bool added = false;
         using var capture = new WasapiMimicCapture();
+        var probeRing = new MimicRing(capture.Rate, 120);
+        MimicRing CaptureRing() { capture.Pump(); return probeRing; }
         try
         {
             Directory.CreateDirectory(folder);
@@ -86,15 +88,15 @@ internal static class RealSliceAudioProbe
             }
             int IndexOf(string path) => ready.Entries.Single(e => e.Path.Equals(path, StringComparison.OrdinalIgnoreCase)).Index;
             async Task Write(string path, byte[] wav) { var w = await SlotPool.WriteInPlace(path, wav, 80, 10, default); if (!w.Ok) throw new IOException("slot write blocked: " + w.Error); }
-            async Task<long> Play(string path) { long at = capture.Ring!.Written; var reply = await real.Request($"DoPlaySound({IndexOf(path)})"); if (!reply.StartsWith("R-200", StringComparison.Ordinal)) throw new InvalidDataException("play refused: " + reply); return at; }
-            await capture.Start(new("app:" + soundpad.Id, "Soundpad", "app"), 120);
+            async Task<long> Play(string path) { long at = CaptureRing().Written; var reply = await real.Request($"DoPlaySound({IndexOf(path)})"); if (!reply.StartsWith("R-200", StringComparison.Ordinal)) throw new InvalidDataException("play refused: " + reply); return at; }
+            await capture.Start(new("app:" + soundpad.Id, "Soundpad", "app"), probeRing);
             if (!capture.Running) { Console.WriteLine("ABORT: could not capture Soundpad's output: " + capture.Status); return 2; }
             await Task.Delay(400);
-            float[] Captured(long from, int ms) { var ring = capture.Ring!; long end = Math.Min(ring.Written, from + (long)ms * Rate / 1000); return end > from ? ring.Read(from, end) : []; }
+            float[] Captured(long from, int ms) { var ring = CaptureRing(); long end = Math.Min(ring.Written, from + (long)ms * Rate / 1000); return end > from ? ring.Read(from, end) : []; }
             async Task Quiet() { await real.Request("DoStopSound()"); await Task.Delay(350); }
 
             // Noise floor of the capture while nothing plays.
-            long idleAt = capture.Ring!.Written; await Task.Delay(300);
+            long idleAt = CaptureRing().Written; await Task.Delay(300);
             var idle = Captured(idleAt, 300); double floor = Math.Max(1e-5, Math.Sqrt(idle.Select(x => (double)x * x).DefaultIfEmpty(0).Average()) * 4);
             Console.WriteLine($"capture: {capture.Status}, {capture.Packets} packets, idle level {floor / 4:0.000000}");
 
@@ -161,7 +163,7 @@ internal static class RealSliceAudioProbe
             for (int round = 0; round < 3; round++)
             {
                 t = await Play(files[0]); await Task.Delay(400);
-                long stopAt = capture.Ring!.Written; await real.Request("DoStopSound()"); await Task.Delay(500);
+                long stopAt = CaptureRing().Written; await real.Request("DoStopSound()"); await Task.Delay(500);
                 var data = Captured(t, 900); var old = Span(data, 1000, floor);
                 Console.WriteLine($"RESULT stop round {round + 1}: sound ended {(old == null ? "?" : Ms(old.Value.Last - (int)(stopAt - t)))} ms after Stop was sent");
                 await Task.Delay(200);
