@@ -22,6 +22,7 @@ import {
   isTempOpen,
   editCopyForm,
   closeEditor,
+  sectionNav,
 } from './helpers/shell';
 import { kickDetail } from './helpers/playback';
 import { resolve } from 'node:path';
@@ -2360,13 +2361,13 @@ test('Temp: a search appears once there are more than six sources', async ({ pag
   await search.fill('fox');
   await expect(page.locator('.temp-source')).toHaveCount(1);
   await expect(page.locator('.temp-source')).toContainText('Foxtrot');
-  // An open Edit copy stays listed whatever the search says.
+  // An open Edit copy (in the editor panel since 2.43) stays open whatever the search says.
   await page
     .locator('.temp-source', { hasText: 'Foxtrot' })
     .getByRole('button', { name: 'Edit copy' })
     .click();
   await search.fill('nothing like this');
-  await expect(page.getByText('No sources match', { exact: false })).toHaveCount(0);
+  await expect(page.getByText('No sources match “nothing like this”.')).toBeVisible();
   await expect(editCopyForm(page, 'Foxtrot')).toBeVisible();
   await page
     .getByRole('form', { name: 'Edit a copy of Foxtrot' })
@@ -3196,8 +3197,8 @@ test('Mimic fits a phone: header keeps Settings on screen and long clip names do
   await page.keyboard.press('Enter');
   await expect(dialog.getByRole('region', { name: 'Just mimicked' })).toBeVisible();
   const pastDialog = await page.evaluate(() => {
-    const edge = document.querySelector('.dialog')!.getBoundingClientRect().right + 1;
-    return [...document.querySelectorAll('.dialog *')].filter(
+    const edge = document.querySelector('#editor-panel')!.getBoundingClientRect().right + 1;
+    return [...document.querySelectorAll('#editor-panel *')].filter(
       (e) => e.getBoundingClientRect().right > edge,
     ).length;
   });
@@ -4251,7 +4252,8 @@ test('notices never cover Mimic’s close button, Leave example, Stop, Panic or 
   browserName,
 }) => {
   // Review finding (2.41): stacked notices at the top right covered the Mimic dialog's close button and Leave
-  // example, and Tab could not reach their Undo from inside the dialog.
+  // example, and Tab could not reach their Undo. Since 2.43 Mimic is the non-modal editor panel and notices sit
+  // in a dock under the board (above the player on a narrow screen), never over the panel.
   test.skip(browserName === 'webkit', 'Playwright’s Windows WebKit cannot start the example');
   /** True when a press in the middle of the control lands on the control itself. */
   const onTop = (control: Locator) =>
@@ -4277,52 +4279,45 @@ test('notices never cover Mimic’s close button, Leave example, Stop, Panic or 
       await dialog.getByRole('button', { name: 'Last 3 s' }).click();
       await dialog.getByRole('button', { name: 'Mimic it' }).click();
     }
-    const undo = page.getByRole('button', { name: 'Undo' }).first();
+    const undo = page.locator('.notification-stack').getByRole('button', { name: 'Undo' }).first();
     await expect(undo).toBeVisible();
-    // The close button is never under the notices, which are part of the dialog.
+    // The notices are never part of the panel, and its close button is never under them.
+    await expect(dialog.locator('.notification-stack')).toHaveCount(0);
     const close = dialog.getByRole('button', { name: 'Close dialog' });
     expect(await onTop(close), `close at ${size.width}`).toBe(true);
     expect(await onTop(undo), `Undo at ${size.width}`).toBe(true);
-    await expect(dialog.getByRole('button', { name: 'Undo' }).first()).toBeVisible();
-    // Lying over the dialog's content (its waveform when scrolled), a notice lets presses and drags through
-    // to it; only its buttons take the pointer.
-    const message = dialog.locator('.notification-stack .toast span').first();
-    expect(
-      await message.evaluate((el) => {
-        const r = el.getBoundingClientRect();
-        const hit = document.elementFromPoint(r.x + 4, r.y + r.height / 2);
-        return !!hit && !hit.closest('.notification-stack');
-      }),
-      `notice passes the pointer through at ${size.width}`,
-    ).toBe(true);
-    // Keyboard: Shift+Tab from Close reaches a notice inside the dialog's focus trap.
+    // Keyboard: no trap; Shift+Tab from Close goes back through the page and reaches a notice's Undo.
     await close.focus();
     let reached = false;
     for (let i = 0; i < 60 && !reached; i++) {
       await page.keyboard.press('Shift+Tab');
       reached = await page.evaluate(
-        () => !!document.activeElement?.closest('[role="dialog"] .notification-stack'),
+        () => !!document.activeElement?.closest('.notification-stack .toast'),
       );
     }
     expect(reached, `Tab to a notice at ${size.width}`).toBe(true);
-    await close.click();
-    await expect(dialog).toHaveCount(0);
-    // On the board with notices still showing: every critical control is on top.
-    await expect(page.locator('.notification-stack .toast').first()).toBeVisible();
+    // With the panel and the notices showing, every critical control is on top (on a phone the editor
+    // sheet covers the example banner until Show board or Close).
     for (const control of [
-      page.getByRole('button', { name: 'Leave example' }),
-      page.locator('.board-actions').getByRole('button', { name: 'Mimic', exact: true }),
+      ...(size.width > 1000 ? [page.getByRole('button', { name: 'Leave example' })] : []),
       page.getByRole('button', { name: /^Access settings/ }),
       page.locator('.transport .stop'),
       page.getByRole('button', { name: 'Panic: stop audio and pause guest playback' }),
       undo,
     ])
       expect(await onTop(control), `${await control.textContent()} at ${size.width}`).toBe(true);
+    await close.click();
+    await expect(dialog).toHaveCount(0);
+    await expect(page.locator('.notification-stack .toast').first()).toBeVisible();
+    for (const control of [
+      page.getByRole('button', { name: 'Leave example' }),
+      sectionNav(page).getByRole('button', { name: 'Mimic', exact: true }),
+      page.locator('.transport .stop'),
+      undo,
+    ])
+      expect(await onTop(control), `${await control.textContent()} at ${size.width}`).toBe(true);
     // Reopen, close, and leave, all with the pointer.
-    await page
-      .locator('.board-actions')
-      .getByRole('button', { name: 'Mimic', exact: true })
-      .click();
+    await sectionNav(page).getByRole('button', { name: 'Mimic', exact: true }).click();
     await closeEditor(page);
     await page.getByRole('button', { name: 'Leave example' }).click();
     await expect(page.getByRole('button', { name: 'Try the example' })).toBeVisible();
@@ -4372,6 +4367,8 @@ test('Mimic history: dragging the overview keeps one request of a kind in flight
   const overview = dialog.getByRole('slider', { name: /Recording history overview/ });
   await expect(overview).toBeVisible();
   await page.waitForTimeout(8000);
+  // The editor panel is shorter than the window: bring the overview into view first.
+  await overview.scrollIntoViewIfNeeded();
   const box = (await overview.boundingBox())!;
   for (const op of kinds) {
     most[op] = 0;
@@ -4709,6 +4706,16 @@ test('palette: a recorded performance of my own palette taps opens as an editabl
     .first()
     .click();
   await expect(sentences.getByText('Recording your performance: 2 taps')).toBeVisible();
+  // The page counts a tap at once; a preview tap made while the previous preview is still loading reaches
+  // the companion when that one has loaded. Stop once the companion has both, as a person would.
+  await expect
+    .poll(async () => {
+      const status = (await sendCommand(page, 'performance', { action: 'status' })) as {
+        data?: { taps: number };
+      };
+      return status.data?.taps;
+    })
+    .toBe(2);
   await sentences.getByRole('button', { name: 'Stop recording' }).click();
   await sentences.getByRole('button', { name: 'Open the take as a sentence' }).click();
   const builder = sentences.getByRole('region', { name: /^Sentence / });
@@ -4721,7 +4728,7 @@ test('palette: a recorded performance of my own palette taps opens as an editabl
   await expect(timeline.getByRole('button').first()).toHaveAccessibleName(/at 10 ms/);
 });
 
-test('sentences (2.42 review): Space selects a lone piece, Escape closes, nudges add up, the player names the sentence, text typed just before Keep is kept, and removing a pause keeps the focus', async ({
+test('sentences (2.42 review): Space selects a lone piece, Escape clears it, nudges add up, the player names the sentence, text typed just before Keep is kept, and removing a pause keeps the focus', async ({
   page,
   harness,
 }) => {
@@ -4740,10 +4747,12 @@ test('sentences (2.42 review): Space selects a lone piece, Escape closes, nudges
   await page.keyboard.press('Space');
   await expect(word).toHaveAttribute('aria-pressed', 'true');
   await expect(builder.getByRole('region', { name: /^Piece “fixture”/i })).toBeVisible();
-  // Escape clears the selection first; with nothing selected it closes the window.
+  // Escape clears the selection; Sentences is a view (2.43), so a second Escape leaves it showing.
   await page.keyboard.press('Escape');
   await expect(word).toHaveAttribute('aria-pressed', 'false');
   await page.keyboard.press('Escape');
+  await expect(sentences).toBeVisible();
+  await closeSection(page, 'Sentences');
   await expect(sentences).toBeHidden();
   await page.getByRole('button', { name: 'Sentences', exact: true }).click();
   await sentences

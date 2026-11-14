@@ -441,7 +441,8 @@
 .mimic-history-settings select {
   margin-left: 6px;
 }
-@media (max-width: 600px) {
+/* Narrow by the editor panel's width (2.43): a narrow docked panel gets the phone layout too. */
+@container editor (max-width: 480px) {
   .mimic-when {
     margin-left: 0;
     width: 100%;

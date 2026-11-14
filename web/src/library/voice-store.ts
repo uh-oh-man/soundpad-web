@@ -2,6 +2,7 @@ import { useEffect, useRef, useSyncExternalStore } from 'react';
 import { controller } from '../controller';
 import type { Snapshot } from '../protocol';
 import { statusSchema, type LibraryNotice, type LibraryStatus } from './voices';
+import { requestEditor, showView } from '../shell';
 
 /**
  * The voice library's status (2.41): voices, tags, wanted words, the category index's progress and the
@@ -54,8 +55,15 @@ export type OpenRequest =
   | { kind: 'recording'; recordingId: string };
 let pending: OpenRequest | null = null;
 const openListeners = new Set<(request: OpenRequest) => void>();
+/**
+ * Asks to show `request`. Since 2.43 the shell shows Voices as a view and Mimic in the editor panel
+ * (one view plus at most one editor); the view or panel takes the request once it is showing (or at
+ * once, when it already is) through `useOpenRequests` / `takeOpen`.
+ */
 export function requestOpen(request: OpenRequest) {
   pending = request;
+  if (request.kind === 'recording') showView('voices');
+  else requestEditor({ kind: 'mimic', sessionId: request.sessionId });
   for (const listener of openListeners) listener(request);
 }
 /** Takes the request still waiting for a window that opens after it was made (once). */

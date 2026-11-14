@@ -1,18 +1,14 @@
-import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
-import { createRoot } from 'react-dom/client';
 import {
-  Search,
-  Link,
-  Music2,
-  RefreshCw,
-  Users,
-  X,
-  Radio,
-  Mic2,
-  OctagonPause,
-  BookAudio,
-  MessageSquare,
-} from 'lucide-react';
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+  type CSSProperties,
+} from 'react';
+import { createRoot } from 'react-dom/client';
+import { Search, Link, Music2, RefreshCw, Users, X, Radio, OctagonPause } from 'lucide-react';
 import { controller } from './controller';
 import { flattenCategories, type Sound } from './protocol';
 import { z } from 'zod';
@@ -25,7 +21,7 @@ import { Player } from './components/Player';
 import { IconEditor } from './components/IconEditor';
 import { PersonalLayout, OrganizeSound } from './components/PersonalLayout';
 import { Statistics } from './components/Statistics';
-import { Notifications } from './components/Notifications';
+import { NoticeAnnouncer, Notifications } from './components/Notifications';
 import { TempManager } from './components/TempManager';
 import { SessionUpload } from './components/SessionUpload';
 import { Modal, dialogOpen } from './components/Modal';
@@ -37,10 +33,11 @@ import { useBudgetSync, useDraftStore, useDraftSync } from './mimic/draft-store'
 import type { ConnectionInfo } from './network/session';
 import { WhatsNew } from './components/WhatsNew';
 import { MimicPanel } from './components/MimicPanel';
+import { TempCopyEditor } from './components/EditCopyForm';
 import { VoicesPanel } from './components/VoicesPanel';
 import { PinnedSentences, SentencesPanel } from './components/SentencesPanel';
 import { useSentenceSync } from './library/sentence-store';
-import { useLibrarySync, useOpenRequests } from './library/voice-store';
+import { useLibrarySync } from './library/voice-store';
 import { requestTemp } from './edit-copy';
 import { removeNewTempAudio } from './remove-temp';
 import { guestHeld, HELD_BY_HOST, playback } from './playback';
@@ -54,6 +51,26 @@ import { Landing, PROJECT_URL, ProjectFooter } from './components/shell/Landing'
 import { DemoBanner } from './components/shell/DemoBanner';
 import { TopBar } from './components/shell/TopBar';
 import { SectionHeader } from './components/shell/SectionHeader';
+import { AppShell, useMediaQuery, useViewportWidth } from './components/shell/AppShell';
+import { SectionNav, navPlacement } from './components/shell/SectionNav';
+import { SectionView } from './components/shell/SectionView';
+import { EditorPanel } from './components/shell/EditorPanel';
+import { SoundEditor } from './components/shell/SoundEditor';
+import { ActivityView, useSharedActivity } from './components/shell/ActivityView';
+import { Splitter, clampEditorWidth, editorMaxWidth } from './components/shell/Splitter';
+import {
+  useEditorRequests,
+  useViewRequests,
+  type EditorRequest,
+  type PanelMode,
+  type ShellView,
+} from './shell';
+import { recall, remember } from './sections';
+import { usePref } from './prefs';
+import { currentOpener, returnFocus } from './focus-return';
+import { useUnreadNotices } from './notifications';
+import { useNoticeSounds } from './notice-sound';
+import { useTempAssetsSync } from './temp-assets';
 // Stylesheets in their cascade order (Stage G spec 3.1). Each later file overrides earlier ones at equal
 // specificity; see the ownership note at the top of each file. The DM Sans font goes after tokens.css.
 import './tokens.css';
@@ -170,7 +187,10 @@ function usePanicShortcut() {
   }, []);
 }
 
-/** "/" focuses search, except while typing or while a dialog is open. */
+/**
+ * "/" focuses the current view's search (2.43: `[data-view-search]`), except while typing or while a
+ * dialog is open. The editor panel is not a modal dialog, so "/" works while it is open.
+ */
 function useSearchShortcut() {
   useEffect(() => {
     function key(e: KeyboardEvent) {
@@ -181,8 +201,14 @@ function useSearchShortcut() {
         (target.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName))
       )
         return;
+      const search =
+        document.querySelector<HTMLInputElement>('#board [data-view-search]') ??
+        document.querySelector<HTMLInputElement>(
+          '#board input[type="search"], #board input[aria-label^="Search"]',
+        );
+      if (!search) return;
       e.preventDefault();
-      document.querySelector<HTMLInputElement>('input[aria-label="Search sounds"]')?.focus();
+      search.focus();
     }
     document.addEventListener('keydown', key);
     return () => document.removeEventListener('keydown', key);
@@ -247,9 +273,6 @@ function App() {
   const [myCategory, setMyCategory] = useState('all');
   const [search, setSearch] = useState('');
   const [settings, setSettings] = useState(false);
-  const [mimicOpen, setMimicOpen] = useState(false);
-  const [voicesOpen, setVoicesOpen] = useState(false);
-  const [sentencesOpen, setSentencesOpen] = useState(false);
   const [managing, setManaging] = useState(false);
   const [editing, setEditing] = useState<Sound | null>(null);
   const [organizing, setOrganizing] = useState<Sound | null>(null);
@@ -299,16 +322,130 @@ function App() {
     supports(state.companionVersion, 'sentences') &&
     (host || controller.relaysSentences());
   useSentenceSync(state, sentencesReady);
-  // A notice's Jump opens Mimic at that moment; Open shows the recording in Voices.
-  useOpenRequests((request) => {
-    // One window at a time: the other closes (what it showed is remembered).
-    setMimicOpen(request.kind === 'history');
-    setVoicesOpen(request.kind === 'recording');
-    setSentencesOpen(false);
-  });
+  // A notice's Jump opens Mimic at that moment and Open shows the recording in Voices: the library
+  // store asks the shell (showView / requestEditor), and the view or panel takes the request.
   // After the host's Panic (2.35): guests cannot start audio until the host resumes; the host can.
   const suspended = mode !== 'landing' && state.playbackSuspended === true;
   const held = guestHeld(state, host);
+
+  // ---- The shell (2.43): which view shows, the editor panel, navigation style and widths ----
+  const [navStyle] = usePref('nav');
+  const [sidebarRail, setSidebarRail] = usePref('sidebarRail');
+  const [storedWidth, setStoredWidth] = usePref('editorWidth');
+  const narrow = useMediaQuery('(max-width: 1000px)');
+  const belowWide = useMediaQuery('(max-width: 1279px)');
+  const viewport = useViewportWidth();
+  const [section, setSection] = useState<ShellView>(() => recall('shell').view ?? 'board');
+  // A view whose feature is not (yet) available shows the Soundboard; the choice is kept for when it is.
+  const shown: ShellView =
+    section === 'voices' && libraryReady
+      ? 'voices'
+      : section === 'sentences' && sentencesReady
+        ? 'sentences'
+        : 'board';
+  const [panel, setPanel] = useState<EditorRequest | null>(restorePanel);
+  const [panelFocus, setPanelFocus] = useState(0);
+  const [minimized, setMinimized] = useState(false);
+  const [dragWidth, setDragWidth] = useState<number | null>(null);
+  const opener = useRef<HTMLElement | null>(null);
+  const returning = useRef<{ kind: EditorRequest['kind'] } | null>(null);
+  const shownPanel = mode !== 'landing' ? panel : null;
+  const panelMode: PanelMode | 'closed' = !shownPanel
+    ? 'closed'
+    : narrow
+      ? minimized
+        ? 'minimized'
+        : 'sheet'
+      : 'docked';
+  // With the panel docked under 1280 px (the VR or companion window) the sidebar folds to icons, so the
+  // board keeps its room; in top tabs style the sidebar can be folded by hand.
+  const rail =
+    !narrow && ((panelMode === 'docked' && belowWide) || (navStyle === 'tabs' && sidebarRail));
+  const sidebarWidth = rail ? 64 : navStyle === 'tabs' && shown !== 'board' ? 0 : 234;
+  const editorMax = editorMaxWidth(viewport, sidebarWidth);
+  const editorWidth = clampEditorWidth(dragWidth ?? storedWidth, viewport, sidebarWidth);
+  const placement = navPlacement(navStyle, narrow);
+  const unread = useUnreadNotices();
+  useNoticeSounds();
+  useSharedActivity(view, host);
+  useTempAssetsSync(
+    connected && !needsCompanionUpdate && mode !== 'landing',
+    state.managedAudioVersion,
+  );
+
+  /** Opens the panel at `request`, or switches it there; the heading gets the keyboard. */
+  function openEditor(request: EditorRequest) {
+    if (controller.getSnapshot().mode === 'landing') return;
+    if (!panel) opener.current = currentOpener();
+    setPanel((current) =>
+      // Asking again for what is open keeps it as it is (a copy editor keeps its unsaved fields).
+      current && JSON.stringify(current) === JSON.stringify(request) ? current : request,
+    );
+    setMinimized(false);
+    setPanelFocus((n) => n + 1);
+  }
+  function closePanel() {
+    if (!panel) return;
+    if (panel.kind === 'temp-edit')
+      remember('tempEdit', { sourceId: undefined, fields: undefined });
+    returning.current = { kind: panel.kind };
+    setPanel(null);
+    setMinimized(false);
+  }
+  // Once the panel has gone, focus goes back to what opened it, else to the nav's Mimic or the board.
+  useEffect(() => {
+    if (panel || !returning.current) return;
+    const { kind } = returning.current;
+    returning.current = null;
+    const back = opener.current;
+    opener.current = null;
+    const active = document.activeElement;
+    // Something outside took the keyboard meanwhile (Keep's form in Temp): leave it there.
+    if (active && active !== document.body && !active.closest('#editor-panel')) return;
+    returnFocus(back, () =>
+      kind === 'mimic'
+        ? document.querySelector<HTMLElement>('.section-nav [data-section="mimic"]')
+        : document.getElementById('board'),
+    );
+  }, [panel]);
+  useEditorRequests(openEditor);
+  useViewRequests((request) => switchView(request.view));
+  useEffect(() => {
+    remember('shell', {
+      view: section,
+      panel: panel
+        ? {
+            kind: panel.kind,
+            ...(panel.kind === 'temp-edit' && { sourceId: panel.sourceId }),
+            ...(panel.kind === 'sound-edit' && { soundId: panel.soundId }),
+          }
+        : null,
+    });
+  }, [section, panel]);
+
+  /** Shows a main view; where each one was scrolled to is kept for coming back. */
+  function switchView(next: ShellView) {
+    const board = document.getElementById('board');
+    if (board) remember(shown, { scrollTop: board.scrollTop });
+    setSection(next);
+  }
+  useLayoutEffect(() => {
+    const board = document.getElementById('board');
+    if (!board) return;
+    const top = recall(shown).scrollTop ?? 0;
+    board.scrollTop = top;
+    // The view's content (tiles, lists) lays out over a few frames: keep asking for the position
+    // until it holds, for at most about half a second.
+    let frame = 0;
+    let tries = 0;
+    const again = () => {
+      if (Math.abs(board.scrollTop - top) <= 1 || ++tries > 30) return;
+      board.scrollTop = top;
+      frame = requestAnimationFrame(again);
+    };
+    frame = requestAnimationFrame(again);
+    return () => cancelAnimationFrame(frame);
+  }, [shown]);
 
   // Tell everyone when a Mimic clip is made (also by the host's F6 mid-game). Clips that existed
   // before this tab joined are not announced.
@@ -435,95 +572,146 @@ function App() {
     }
   }
 
-  return (
-    <div
-      className={`app-shell ${mode === 'landing' ? 'is-landing' : 'is-connected'} ${held ? 'playback-held' : ''}`}
-    >
-      <TopBar
-        view={view}
-        connected={connected}
-        host={host}
-        mimicListening={mimicListening}
-        kept={kept}
+  const ribbon = {
+    playback: state.playback,
+    hostId: state.hostId,
+    held: held || suspended,
+    active: true,
+  };
+  const sectionNav = (where: 'sidebar' | 'topbar') =>
+    mode !== 'landing' && placement === where ? (
+      <SectionNav
+        view={shown}
+        panelKind={shownPanel?.kind ?? null}
+        placement={where}
         canMimic={canMimic}
-        openMimic={() => setMimicOpen(true)}
-        openSettings={() => setSettings(true)}
+        libraryReady={libraryReady}
+        sentencesReady={sentencesReady}
+        showView={switchView}
+        openMimic={() => openEditor({ kind: 'mimic' })}
       />
-      {mode === 'landing' ? (
-        <Landing view={view} />
-      ) : (
-        <>
-          {view.demo && <DemoBanner />}
-          <div className="workspace">
-            <Sidebar
-              state={state}
-              host={host}
-              categories={categories}
-              librarySize={librarySize}
-              workspace={w}
-              selection={selection}
-              selectHost={selectHost}
-              selectMine={selectMine}
-              update={personal.update}
-              manage={() => setManaging(true)}
-              hostNote={
-                view.demo
-                  ? DEMO_COPY.sidebar
-                  : hostCopy(view.hosting, state.companionVersion, view.ownerWindow).sidebar
-              }
-            />
-            <main className="soundboard">
-              <WhatsNew projectUrl={repositoryUrl || PROJECT_URL} />
-              {connected && (protocol < 2 || needsCompanionUpdate) && (
-                <aside className="companion-update" role="status">
-                  <strong>
-                    {host
-                      ? protocol < 2
-                        ? 'Update your Windows companion for V2'
-                        : `Update your Windows companion to ${REQUIRED_COMPANION.label}`
-                      : 'Ask the host to update the Windows companion'}
-                  </strong>
-                  <p>
-                    Basic playback still works. Install the latest companion for session audio,
-                    reverse playback, shared waveforms and guest Spotify.
-                  </p>
-                  {host && (
-                    <a
-                      href={`${repositoryUrl || PROJECT_URL}/releases/latest/download/SoundpadWeb.exe`}
-                    >
-                      Download the updated companion
-                    </a>
-                  )}
-                </aside>
-              )}
-              <SectionHeader
-                className="board-heading"
-                eyebrow={host ? 'YOUR SOUNDBOARD' : 'SHARED SOUNDBOARD'}
-                title={title}
-                ribbon={{
-                  playback: state.playback,
-                  hostId: state.hostId,
-                  held: held || suspended,
-                  active: true,
-                }}
-                actions={
-                  <>
-                    {canMimic && (
-                      <button onClick={() => setMimicOpen(true)}>
-                        <Mic2 size={17} /> Mimic
-                      </button>
-                    )}
-                    {libraryReady && (
-                      <button onClick={() => setVoicesOpen(true)}>
-                        <BookAudio size={17} /> Voices
-                      </button>
-                    )}
-                    {sentencesReady && (
-                      <button onClick={() => setSentencesOpen(true)}>
-                        <MessageSquare size={17} /> Sentences
-                      </button>
-                    )}
+    ) : null;
+  const sheetShown = panelMode === 'sheet';
+  const panelTitle = !shownPanel
+    ? ''
+    : shownPanel.kind === 'mimic'
+      ? 'Mimic'
+      : shownPanel.kind === 'temp-edit'
+        ? 'Copy editor'
+        : shownPanel.kind === 'activity'
+          ? 'Activity'
+          : `Edit ${state.library.sounds.find((s) => s.id === shownPanel.soundId)?.name ?? 'sound'}`;
+
+  return (
+    <>
+      <AppShell
+        className={`app-shell ${mode === 'landing' ? 'is-landing' : 'is-connected'} ${held ? 'playback-held' : ''}`}
+        style={
+          panelMode === 'docked'
+            ? ({ '--editor-cur': `${editorWidth}px` } as CSSProperties)
+            : undefined
+        }
+        landing={mode === 'landing'}
+        view={shown}
+        nav={navStyle}
+        panelMode={panelMode}
+        rail={rail}
+        topbar={
+          <TopBar
+            view={view}
+            connected={connected}
+            host={host}
+            mimicListening={mimicListening}
+            kept={kept}
+            canMimic={canMimic}
+            openMimic={() => openEditor({ kind: 'mimic' })}
+            openSettings={() => setSettings(true)}
+            nav={sectionNav('topbar')}
+            activity={{
+              unread,
+              open: shownPanel?.kind === 'activity',
+              show: () => openEditor({ kind: 'activity' }),
+            }}
+          />
+        }
+        banner={mode !== 'landing' && view.demo ? <DemoBanner /> : undefined}
+        sidebar={
+          <Sidebar
+            state={state}
+            host={host}
+            categories={categories}
+            librarySize={librarySize}
+            workspace={w}
+            selection={selection}
+            selectHost={selectHost}
+            selectMine={selectMine}
+            update={personal.update}
+            manage={() => setManaging(true)}
+            hostNote={
+              view.demo
+                ? DEMO_COPY.sidebar
+                : hostCopy(view.hosting, state.companionVersion, view.ownerWindow).sidebar
+            }
+            nav={sectionNav('sidebar')}
+            library={shown === 'board'}
+            rail={
+              navStyle === 'tabs' && !narrow
+                ? { collapsed: sidebarRail, toggle: () => setSidebarRail(!sidebarRail) }
+                : undefined
+            }
+            inert={sheetShown}
+          />
+        }
+        board={
+          <main
+            id="board"
+            className="soundboard"
+            tabIndex={-1}
+            aria-label={
+              shown === 'board' ? 'Soundboard' : shown === 'voices' ? 'Voices' : 'Sentences'
+            }
+            inert={sheetShown}
+          >
+            {shown === 'voices' ? (
+              <SectionView view="voices" ribbon={ribbon}>
+                <VoicesPanel state={state} host={host} connected={connected} canPlay={canPlay} />
+              </SectionView>
+            ) : shown === 'sentences' ? (
+              <SectionView view="sentences" ribbon={ribbon}>
+                <SentencesPanel state={state} host={host} connected={connected} canPlay={canPlay} />
+              </SectionView>
+            ) : (
+              <>
+                <WhatsNew projectUrl={repositoryUrl || PROJECT_URL} />
+                {connected && (protocol < 2 || needsCompanionUpdate) && (
+                  <aside className="companion-update" role="status">
+                    <strong>
+                      {host
+                        ? protocol < 2
+                          ? 'Update your Windows companion for V2'
+                          : `Update your Windows companion to ${REQUIRED_COMPANION.label}`
+                        : 'Ask the host to update the Windows companion'}
+                    </strong>
+                    <p>
+                      Basic playback still works. Install the latest companion for session audio,
+                      reverse playback, shared waveforms and guest Spotify.
+                    </p>
                     {host && (
+                      <a
+                        href={`${repositoryUrl || PROJECT_URL}/releases/latest/download/SoundpadWeb.exe`}
+                      >
+                        Download the updated companion
+                      </a>
+                    )}
+                  </aside>
+                )}
+                <SectionHeader
+                  className="board-heading"
+                  eyebrow={host ? 'YOUR SOUNDBOARD' : 'SHARED SOUNDBOARD'}
+                  title={title}
+                  ribbon={ribbon}
+                  actions={
+                    host && (
                       <>
                         <button
                           className="icon-button"
@@ -547,317 +735,409 @@ function App() {
                           <Link size={17} /> Copy Invite
                         </button>
                       </>
-                    )}
-                  </>
-                }
-              >
-                <p>
-                  {search
-                    ? `${sounds.length} matching sound${sounds.length === 1 ? '' : 's'}`
-                    : `${sounds.length} sound${sounds.length === 1 ? '' : 's'} · ${host ? 'Ready when your friends are' : 'Tap a sound to play on the host'}`}
-                </p>
-                {host && (
-                  // Who is connected, at the top where the host looks (it used to sit in the footer).
-                  <p className="connected-guests" role="status" aria-live="polite">
-                    <Users size={15} aria-hidden="true" />
-                    <span>{`${view.guests.length} connected guest${view.guests.length === 1 ? '' : 's'}`}</span>
-                    {view.guests.length > 0 && (
-                      <span className="guest-names">
-                        {view.guests
-                          .slice(0, 4)
-                          .map((id, i) => view.people[id]?.name ?? `Guest ${i + 1}`)
-                          .join(', ')}
-                        {view.guests.length > 4 && ` +${view.guests.length - 4} more`}
-                        {view.demo && ' (simulated)'}
-                      </span>
-                    )}
-                  </p>
-                )}
-                {host && <LobbyRequests requests={view.requests} />}
-                {host && budget?.host && <BudgetRequests requests={budget.host.requests} />}
-                {host && !!state.tempRecovery && <TempRecovery clips={state.tempRecovery} />}
-              </SectionHeader>
-              {(!connected || state.error) && (
-                <div className="connection-banner" role="status">
-                  <Radio size={18} />
-                  {!connected && !host ? (
-                    <GuestConnection status={status} info={view.connection} />
-                  ) : (
-                    <span>
-                      {!connected ? status : state.error}{' '}
-                      {!connected &&
-                        host &&
-                        'Allow the browser’s local-network request if prompted. Keep the companion running.'}
-                    </span>
-                  )}
-                </div>
-              )}
-              {suspended && (
-                // Stays on screen until the host resumes (2.35); a notice would time out.
-                <div className="playback-suspended" role="status">
-                  <OctagonPause size={18} aria-hidden="true" />
-                  {host ? (
-                    <>
-                      <span>
-                        <strong>Guest playback is paused.</strong> You can still play; guests cannot
-                        until you resume.
-                      </span>
-                      <button
-                        className="primary"
-                        disabled={!connected}
-                        aria-disabled={resuming || undefined}
-                        onClick={() => {
-                          if (resuming) return;
-                          setResuming(true);
-                          void playback.resume().finally(() => setResuming(false));
-                        }}
-                      >
-                        Resume guest playback
-                      </button>
-                    </>
-                  ) : (
-                    <span>
-                      <strong>{HELD_BY_HOST}</strong>. Play buttons work again when the host resumes
-                      it.
-                    </span>
-                  )}
-                </div>
-              )}
-              {sentencesReady && <PinnedSentences canPlay={canPlay && (host || !suspended)} />}
-              {!!view.layouts.length && (
-                <section className="shared-layouts" aria-label="Shared guest layouts">
-                  <small>Shared layouts · updates automatically</small>
-                  {view.layouts.map((layout) => (
-                    <button
-                      key={layout.owner}
-                      disabled={!w}
-                      onClick={() => {
-                        personal.update((current) => ({
-                          ...current,
-                          ...layout.organization,
-                          layout: 'mine',
-                        }));
-                        setMyCategory('all');
-                        setSearch('');
-                      }}
-                    >
-                      {layout.name} · {layout.organization.folders.length} folders · Copy into My
-                      Layout
-                    </button>
-                  ))}
-                </section>
-              )}
-              <SessionUpload
-                disabled={
-                  !connected ||
-                  needsCompanionUpdate ||
-                  (!host && state.permissions.guestUploads === false)
-                }
-              />
-              {!needsCompanionUpdate && (
-                <TempManager state={state} host={host} connected={connected} />
-              )}
-              <div className="toolbar">
-                <label className="search">
-                  <Search size={18} />
-                  <input
-                    aria-label="Search sounds"
-                    value={search}
-                    onChange={(e) => setSearch(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Escape' && search) {
-                        e.preventDefault();
-                        setSearch('');
-                      }
-                    }}
-                    placeholder="Search all sounds…"
-                  />
-                  {search && (
-                    <button aria-label="Clear search" onClick={() => setSearch('')}>
-                      <X size={15} />
-                    </button>
-                  )}
-                  <kbd>/</kbd>
-                </label>
-                <label className="mobile-categories">
-                  <span className="sr-only">Category</span>
-                  <select
-                    aria-label="Category"
-                    value={w?.layout === 'mine' ? 'personal:' + myCategory : category}
-                    onChange={(e) => {
-                      const value = e.target.value;
-                      if (value.startsWith('personal:'))
-                        selectMine(value.slice('personal:'.length));
-                      else selectHost(value);
-                    }}
-                  >
-                    <option value="all">All sounds</option>
-                    {w && (
-                      <optgroup label="My layout">
-                        <option value="personal:all">My sounds</option>
-                        <option value="personal:favorites">Favorites</option>
-                        {w.folders.map((f) => (
-                          <option key={f.id} value={'personal:' + f.id}>
-                            {f.name}
-                          </option>
-                        ))}
-                      </optgroup>
-                    )}
-                    {categories.map(({ category: c, depth }) => (
-                      <option value={c.id} key={c.id}>
-                        {'　'.repeat(depth) + (c.name || 'Unnamed category')}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <span className="grid-caption">
-                  {held
-                    ? 'PAUSED BY HOST'
-                    : canPlay
-                      ? 'CLICK TO PLAY'
-                      : !state.available
-                        ? 'WAITING FOR SOUNDPAD'
-                        : 'PLAYBACK DISABLED'}
-                </span>
-              </div>
-              <div className="view-toolbar">
-                <div className="layout-switch" role="group" aria-label="Layout">
-                  <button
-                    aria-pressed={w?.layout !== 'mine'}
-                    onClick={() => personal.update((current) => ({ ...current, layout: 'host' }))}
-                  >
-                    Host Layout
-                  </button>
-                  <button
-                    disabled={!w}
-                    aria-pressed={w?.layout === 'mine'}
-                    onClick={() => personal.update((current) => ({ ...current, layout: 'mine' }))}
-                  >
-                    My Layout
-                  </button>
-                </div>
-                <label>
-                  View
-                  <select
-                    aria-label="View mode"
-                    disabled={!w}
-                    value={w?.view ?? 'icons'}
-                    onChange={(e) =>
-                      personal.update((current) => ({
-                        ...current,
-                        view: e.target.value as Workspace['view'],
-                      }))
-                    }
-                  >
-                    {viewModes.map((mode) => (
-                      <option key={mode} value={mode}>
-                        {viewLabels[mode]}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <label>
-                  Sort
-                  <select
-                    aria-label="Sort sounds"
-                    disabled={!w}
-                    value={w?.sort ?? 'original'}
-                    onChange={(e) =>
-                      personal.update((current) => ({
-                        ...current,
-                        sort: e.target.value as Workspace['sort'],
-                      }))
-                    }
-                  >
-                    {sortLabels.map(([value, label]) => (
-                      <option key={value} value={value}>
-                        {label}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <button
-                  disabled={!w || w.sort === 'original'}
-                  aria-label={`Sort ${w?.descending ? 'descending' : 'ascending'}; toggle direction`}
-                  title={w?.descending ? 'Descending' : 'Ascending'}
-                  onClick={() =>
-                    personal.update((current) => ({ ...current, descending: !current.descending }))
+                    )
                   }
                 >
-                  {w?.descending ? '↓' : '↑'}
-                </button>
-                <button disabled={!w} onClick={() => setManaging(true)}>
-                  Manage layout
-                </button>
-              </div>
-              {w && w.layout === 'mine' && (
-                <p className="workspace-save">
-                  {personal.status} · Personal organization never changes Soundpad.
-                </p>
-              )}
-              {sounds.length ? (
-                <SoundCollection
-                  sounds={sounds}
+                  <p>
+                    {search
+                      ? `${sounds.length} matching sound${sounds.length === 1 ? '' : 's'}`
+                      : `${sounds.length} sound${sounds.length === 1 ? '' : 's'} · ${host ? 'Ready when your friends are' : 'Tap a sound to play on the host'}`}
+                  </p>
+                  {host && (
+                    // Who is connected, at the top where the host looks (it used to sit in the footer).
+                    <p className="connected-guests" role="status" aria-live="polite">
+                      <Users size={15} aria-hidden="true" />
+                      <span>{`${view.guests.length} connected guest${view.guests.length === 1 ? '' : 's'}`}</span>
+                      {view.guests.length > 0 && (
+                        <span className="guest-names">
+                          {view.guests
+                            .slice(0, 4)
+                            .map((id, i) => view.people[id]?.name ?? `Guest ${i + 1}`)
+                            .join(', ')}
+                          {view.guests.length > 4 && ` +${view.guests.length - 4} more`}
+                          {view.demo && ' (simulated)'}
+                        </span>
+                      )}
+                    </p>
+                  )}
+                  {host && <LobbyRequests requests={view.requests} />}
+                  {host && budget?.host && <BudgetRequests requests={budget.host.requests} />}
+                  {host && !!state.tempRecovery && <TempRecovery clips={state.tempRecovery} />}
+                </SectionHeader>
+                {(!connected || state.error) && (
+                  <div className="connection-banner" role="status">
+                    <Radio size={18} />
+                    {!connected && !host ? (
+                      <GuestConnection status={status} info={view.connection} />
+                    ) : (
+                      <span>
+                        {!connected ? status : state.error}{' '}
+                        {!connected &&
+                          host &&
+                          'Allow the browser’s local-network request if prompted. Keep the companion running.'}
+                      </span>
+                    )}
+                  </div>
+                )}
+                {suspended && (
+                  // Stays on screen until the host resumes (2.35); a notice would time out.
+                  <div className="playback-suspended" role="status">
+                    <OctagonPause size={18} aria-hidden="true" />
+                    {host ? (
+                      <>
+                        <span>
+                          <strong>Guest playback is paused.</strong> You can still play; guests
+                          cannot until you resume.
+                        </span>
+                        <button
+                          className="primary"
+                          disabled={!connected}
+                          aria-disabled={resuming || undefined}
+                          onClick={() => {
+                            if (resuming) return;
+                            setResuming(true);
+                            void playback.resume().finally(() => setResuming(false));
+                          }}
+                        >
+                          Resume guest playback
+                        </button>
+                      </>
+                    ) : (
+                      <span>
+                        <strong>{HELD_BY_HOST}</strong>. Play buttons work again when the host
+                        resumes it.
+                      </span>
+                    )}
+                  </div>
+                )}
+                {sentencesReady && <PinnedSentences canPlay={canPlay && (host || !suspended)} />}
+                {!!view.layouts.length && (
+                  <section className="shared-layouts" aria-label="Shared guest layouts">
+                    <small>Shared layouts · updates automatically</small>
+                    {view.layouts.map((layout) => (
+                      <button
+                        key={layout.owner}
+                        disabled={!w}
+                        onClick={() => {
+                          personal.update((current) => ({
+                            ...current,
+                            ...layout.organization,
+                            layout: 'mine',
+                          }));
+                          setMyCategory('all');
+                          setSearch('');
+                        }}
+                      >
+                        {layout.name} · {layout.organization.folders.length} folders · Copy into My
+                        Layout
+                      </button>
+                    ))}
+                  </section>
+                )}
+                {/* One toolbar row (2.43): search, layout and view, Temp and session audio. */}
+                <div className="board-toolbar">
+                  <div className="toolbar">
+                    <label className="search">
+                      <Search size={18} />
+                      <input
+                        aria-label="Search sounds"
+                        data-view-search
+                        value={search}
+                        onChange={(e) => setSearch(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Escape' && search) {
+                            e.preventDefault();
+                            setSearch('');
+                          }
+                        }}
+                        placeholder="Search all sounds…"
+                      />
+                      {search && (
+                        <button aria-label="Clear search" onClick={() => setSearch('')}>
+                          <X size={15} />
+                        </button>
+                      )}
+                      <kbd>/</kbd>
+                    </label>
+                    <label className="mobile-categories">
+                      <span className="sr-only">Category</span>
+                      <select
+                        aria-label="Category"
+                        value={w?.layout === 'mine' ? 'personal:' + myCategory : category}
+                        onChange={(e) => {
+                          const value = e.target.value;
+                          if (value.startsWith('personal:'))
+                            selectMine(value.slice('personal:'.length));
+                          else selectHost(value);
+                        }}
+                      >
+                        <option value="all">All sounds</option>
+                        {w && (
+                          <optgroup label="My layout">
+                            <option value="personal:all">My sounds</option>
+                            <option value="personal:favorites">Favorites</option>
+                            {w.folders.map((f) => (
+                              <option key={f.id} value={'personal:' + f.id}>
+                                {f.name}
+                              </option>
+                            ))}
+                          </optgroup>
+                        )}
+                        {categories.map(({ category: c, depth }) => (
+                          <option value={c.id} key={c.id}>
+                            {'　'.repeat(depth) + (c.name || 'Unnamed category')}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  </div>
+                  <div className="view-toolbar">
+                    <div className="layout-switch" role="group" aria-label="Layout">
+                      <button
+                        aria-pressed={w?.layout !== 'mine'}
+                        onClick={() =>
+                          personal.update((current) => ({ ...current, layout: 'host' }))
+                        }
+                      >
+                        Host Layout
+                      </button>
+                      <button
+                        disabled={!w}
+                        aria-pressed={w?.layout === 'mine'}
+                        onClick={() =>
+                          personal.update((current) => ({ ...current, layout: 'mine' }))
+                        }
+                      >
+                        My Layout
+                      </button>
+                    </div>
+                    <label>
+                      <span className="toolbar-word">View</span>
+                      <select
+                        aria-label="View mode"
+                        disabled={!w}
+                        value={w?.view ?? 'icons'}
+                        onChange={(e) =>
+                          personal.update((current) => ({
+                            ...current,
+                            view: e.target.value as Workspace['view'],
+                          }))
+                        }
+                      >
+                        {viewModes.map((mode) => (
+                          <option key={mode} value={mode}>
+                            {viewLabels[mode]}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <label>
+                      <span className="toolbar-word">Sort</span>
+                      <select
+                        aria-label="Sort sounds"
+                        disabled={!w}
+                        value={w?.sort ?? 'original'}
+                        onChange={(e) =>
+                          personal.update((current) => ({
+                            ...current,
+                            sort: e.target.value as Workspace['sort'],
+                          }))
+                        }
+                      >
+                        {sortLabels.map(([value, label]) => (
+                          <option key={value} value={value}>
+                            {label}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <button
+                      disabled={!w || w.sort === 'original'}
+                      aria-label={`Sort ${w?.descending ? 'descending' : 'ascending'}; toggle direction`}
+                      title={w?.descending ? 'Descending' : 'Ascending'}
+                      onClick={() =>
+                        personal.update((current) => ({
+                          ...current,
+                          descending: !current.descending,
+                        }))
+                      }
+                    >
+                      {w?.descending ? '↓' : '↑'}
+                    </button>
+                    <button disabled={!w} onClick={() => setManaging(true)}>
+                      Manage layout
+                    </button>
+                  </div>
+                  <SessionUpload
+                    disabled={
+                      !connected ||
+                      needsCompanionUpdate ||
+                      (!host && state.permissions.guestUploads === false)
+                    }
+                  />
+                  {!needsCompanionUpdate && (
+                    <TempManager state={state} host={host} connected={connected} />
+                  )}
+                  <span className="grid-caption" data-ok={(!held && canPlay) || undefined}>
+                    {held
+                      ? 'PAUSED BY HOST'
+                      : canPlay
+                        ? 'CLICK TO PLAY'
+                        : !state.available
+                          ? 'WAITING FOR SOUNDPAD'
+                          : 'PLAYBACK DISABLED'}
+                  </span>
+                </div>
+                {w && w.layout === 'mine' && (
+                  <p className="workspace-save">
+                    {personal.status} · Personal organization never changes Soundpad.
+                  </p>
+                )}
+                {sounds.length ? (
+                  <SoundCollection
+                    sounds={sounds}
+                    state={state}
+                    host={host}
+                    canPlay={canPlay}
+                    workspace={w}
+                    update={personal.update}
+                    edit={setEditing}
+                    organize={setOrganizing}
+                    stats={setStatistics}
+                    totals={totals}
+                    folderId={
+                      w?.layout === 'mine' && myCategory !== 'all' && myCategory !== 'favorites'
+                        ? myCategory
+                        : undefined
+                    }
+                  />
+                ) : (
+                  <div className="empty">
+                    <Music2 size={35} />
+                    <h2>
+                      {search
+                        ? 'No sounds found'
+                        : state.available
+                          ? 'Nothing in this category yet'
+                          : 'Your sounds belong here'}
+                    </h2>
+                    <p>
+                      {search
+                        ? 'Try another name. Search includes every category.'
+                        : state.available
+                          ? 'Add sounds in Soundpad, then refresh the library.'
+                          : host
+                            ? 'Open Soundpad normally. We’ll pick up your library automatically.'
+                            : 'Waiting for the host’s Soundpad library.'}
+                    </p>
+                  </div>
+                )}
+                <div className="board-footer">
+                  <span>
+                    {view.demo
+                      ? 'Example sounds play in this browser'
+                      : 'Audio plays through the host’s Soundpad'}
+                  </span>
+                  <ProjectFooter />
+                </div>
+              </>
+            )}
+          </main>
+        }
+        dock={<Notifications />}
+        splitter={
+          panelMode === 'docked' ? (
+            <Splitter
+              width={editorWidth}
+              max={editorMax}
+              onChange={setDragWidth}
+              onCommit={(width) => {
+                setStoredWidth(width);
+                setDragWidth(null);
+              }}
+            />
+          ) : undefined
+        }
+        panel={
+          shownPanel && (
+            <EditorPanel
+              kind={shownPanel.kind}
+              mode={panelMode === 'closed' ? 'docked' : panelMode}
+              title={panelTitle}
+              summary={shownPanel.kind === 'mimic' && mimicListening ? 'listening' : 'open'}
+              focusKey={panelFocus}
+              onClose={closePanel}
+              onMinimize={() => setMinimized(true)}
+              onRestore={() => {
+                setMinimized(false);
+                setPanelFocus((n) => n + 1);
+              }}
+            >
+              {shownPanel.kind === 'mimic' ? (
+                <MimicPanel
+                  state={state}
+                  host={host}
+                  connected={connected}
+                  canPlay={canPlay}
+                  onTempRequest={(kind, assetId) => {
+                    // Keep happens in the Temp list on the Soundboard; Edit switches the panel to the
+                    // copy editor (2.43: Mimic used to close for both).
+                    if (kind === 'keep') closePanel();
+                    requestTemp(kind, assetId);
+                  }}
+                />
+              ) : shownPanel.kind === 'temp-edit' ? (
+                <TempCopyEditor
+                  key={shownPanel.sourceId}
+                  state={state}
+                  host={host}
+                  sourceId={shownPanel.sourceId}
+                  fields={shownPanel.fields}
+                  onFields={(fields) =>
+                    remember('tempEdit', { sourceId: shownPanel.sourceId, fields })
+                  }
+                  onDone={closePanel}
+                />
+              ) : shownPanel.kind === 'sound-edit' ? (
+                <SoundEditor
+                  key={shownPanel.soundId}
                   state={state}
                   host={host}
                   canPlay={canPlay}
+                  soundId={shownPanel.soundId}
+                  focus={shownPanel.focus}
                   workspace={w}
                   update={personal.update}
-                  edit={setEditing}
-                  organize={setOrganizing}
-                  stats={setStatistics}
-                  totals={totals}
-                  folderId={
-                    w?.layout === 'mine' && myCategory !== 'all' && myCategory !== 'favorites'
-                      ? myCategory
-                      : undefined
-                  }
+                  held={held}
+                  onDone={closePanel}
                 />
               ) : (
-                <div className="empty">
-                  <Music2 size={35} />
-                  <h2>
-                    {search
-                      ? 'No sounds found'
-                      : state.available
-                        ? 'Nothing in this category yet'
-                        : 'Your sounds belong here'}
-                  </h2>
-                  <p>
-                    {search
-                      ? 'Try another name. Search includes every category.'
-                      : state.available
-                        ? 'Add sounds in Soundpad, then refresh the library.'
-                        : host
-                          ? 'Open Soundpad normally. We’ll pick up your library automatically.'
-                          : 'Waiting for the host’s Soundpad library.'}
-                  </p>
-                </div>
+                <ActivityView />
               )}
-              <div className="board-footer">
-                <span>
-                  {view.demo
-                    ? 'Example sounds play in this browser'
-                    : 'Audio plays through the host’s Soundpad'}
-                </span>
-                <ProjectFooter />
-              </div>
-            </main>
-          </div>
-          <Player
-            state={state}
-            host={host}
-            connected={connected}
-            disabled={!canPlay}
-            canSeek={canSeek}
-            workspace={w}
-            update={personal.update}
-          >
-            <KickCounter state={state} send={run} pending={pending} canEdit={canCount} />
-          </Player>
-        </>
-      )}
-      <Notifications />
+            </EditorPanel>
+          )
+        }
+        player={
+          mode !== 'landing' && (
+            <Player
+              state={state}
+              host={host}
+              connected={connected}
+              disabled={!canPlay}
+              canSeek={canSeek}
+              workspace={w}
+              update={personal.update}
+            >
+              <KickCounter state={state} send={run} pending={pending} canEdit={canCount} />
+            </Player>
+          )
+        }
+      >
+        {mode === 'landing' && <Landing view={view} />}
+        {mode === 'landing' && <ProjectFooter />}
+        {view.needsName && <GuestName initial={view.profile.name} />}
+      </AppShell>
+      <NoticeAnnouncer />
       {settings && (
         <Modal label="Session & access" onClose={() => setSettings(false)}>
           <SettingsDialog
@@ -870,32 +1150,6 @@ function App() {
         </Modal>
       )}
       {view.quitPrompt && host && <QuitPromptDialog clips={view.quitPrompt.clips} />}
-      {mimicOpen && mode !== 'landing' && (
-        <Modal label="Mimic" onClose={() => setMimicOpen(false)}>
-          <MimicPanel
-            state={state}
-            host={host}
-            connected={connected}
-            canPlay={canPlay}
-            onTempRequest={(kind, assetId) => {
-              setMimicOpen(false);
-              requestTemp(kind, assetId);
-            }}
-          />
-        </Modal>
-      )}
-      {sentencesOpen && mode !== 'landing' && sentencesReady && (
-        <Modal label="Sentences" onClose={() => setSentencesOpen(false)}>
-          <SentencesPanel state={state} host={host} connected={connected} canPlay={canPlay} />
-        </Modal>
-      )}
-      {voicesOpen && mode !== 'landing' && libraryReady && (
-        <Modal label="Voices" onClose={() => setVoicesOpen(false)}>
-          <VoicesPanel state={state} host={host} connected={connected} canPlay={canPlay} />
-        </Modal>
-      )}
-      {mode === 'landing' && <ProjectFooter />}
-      {view.needsName && <GuestName initial={view.profile.name} />}
       {editing && (
         <Modal label="Sound icon" onClose={() => setEditing(null)}>
           <IconEditor sound={editing} close={() => setEditing(null)} />
@@ -922,7 +1176,25 @@ function App() {
           <OrganizeSound sound={organizing} workspace={w} update={personal.update} />
         </Modal>
       )}
-    </div>
+    </>
   );
+}
+
+/** The panel this tab showed before a reload (2.43 section memory), if it can be shown again. */
+function restorePanel(): EditorRequest | null {
+  const saved = recall('shell').panel;
+  if (!saved) return null;
+  if (saved.kind === 'mimic' || saved.kind === 'activity') return { kind: saved.kind };
+  if (saved.kind === 'temp-edit' && saved.sourceId) {
+    const edit = recall('tempEdit');
+    return {
+      kind: 'temp-edit',
+      sourceId: saved.sourceId,
+      ...(edit.sourceId === saved.sourceId && edit.fields && { fields: edit.fields }),
+    };
+  }
+  if (saved.kind === 'sound-edit' && saved.soundId)
+    return { kind: 'sound-edit', soundId: saved.soundId };
+  return null;
 }
 createRoot(document.getElementById('root')!).render(<App />);

@@ -1,4 +1,5 @@
-import { AudioLines, Settings2 } from 'lucide-react';
+import { useEffect, useRef, type ReactNode } from 'react';
+import { AudioLines, History, Settings2 } from 'lucide-react';
 import { controller } from '../../controller';
 import { APP_VERSION_LABEL } from '../../version';
 
@@ -33,11 +34,15 @@ export type TopBarProps = {
   canMimic: boolean;
   openMimic: () => void;
   openSettings: () => void;
+  /** The section tabs, when they are shown in the topbar (top tabs style, narrow screens). */
+  nav?: ReactNode;
+  /** Notices since Activity was last opened, and whether it is open now. */
+  activity?: { unread: number; open: boolean; show: () => void };
 };
 
 /**
- * The header: brand and version, connection status, Mimic's badge, the display name and Access
- * settings (Stage G P0.6: the JSX moved out of main.tsx unchanged; WP-A owns it from here).
+ * The header (2.43): brand and version, the section tabs in top tabs style, connection status, what
+ * Mimic is capturing, Activity, the display name and Access settings.
  */
 export function TopBar({
   view,
@@ -48,10 +53,32 @@ export function TopBar({
   canMimic,
   openMimic,
   openSettings,
+  nav,
+  activity,
 }: TopBarProps) {
   const { state, mode, status } = view;
+  // The editor sheet (narrow screens) starts where the header ends; the header's height changes as it wraps.
+  const header = useRef<HTMLElement>(null);
+  useEffect(() => {
+    const element = header.current;
+    if (!element) return;
+    const root = document.documentElement;
+    const resize = new ResizeObserver(() =>
+      root.style.setProperty('--topbar-bottom', `${element.getBoundingClientRect().height}px`),
+    );
+    resize.observe(element);
+    return () => {
+      resize.disconnect();
+      root.style.removeProperty('--topbar-bottom');
+    };
+  }, []);
+  // A 2.39 companion records a history while Mimic listens: say what is being captured, in words.
+  const capturing =
+    mode !== 'landing' && state.mimic?.active && state.mimic.history
+      ? (state.mimic.source ?? 'a source')
+      : null;
   return (
-    <header className="topbar">
+    <header className="topbar" ref={header}>
       <a href={location.pathname} className="brand">
         <span className="brand-icon">
           <AudioLines size={23} />
@@ -65,6 +92,7 @@ export function TopBar({
         <span className="sr-only">, home</span>
       </a>
       <span className="edition">BROWSER REMOTE</span>
+      {nav}
       <div className="top-actions">
         <span className={`status ${connected && state.available ? 'online' : ''}`} title={status}>
           <i />
@@ -78,6 +106,15 @@ export function TopBar({
             view.demo,
           )}
         </span>
+        {capturing && (
+          <span className="capture-chip" role="status" title={`Capturing ${capturing}`}>
+            <i aria-hidden="true" />
+            <span className="capture-long">Capturing · {capturing}</span>
+            <span className="capture-short" aria-hidden="true">
+              Rec
+            </span>
+          </span>
+        )}
         {mimicListening && (
           <button
             className="mimic-badge"
@@ -87,6 +124,34 @@ export function TopBar({
           >
             <i /> Mimic on
           </button>
+        )}
+        {mode !== 'landing' && activity && (
+          <button
+            type="button"
+            className="icon-button activity-button"
+            aria-label="Activity"
+            aria-expanded={activity.open}
+            aria-controls={activity.open ? 'editor-panel' : undefined}
+            aria-describedby={activity.unread ? 'activity-unread' : undefined}
+            title="Activity: recent notices and what guests did"
+            onClick={activity.show}
+          >
+            <History size={20} aria-hidden="true" />
+            {activity.unread > 0 && (
+              // The count is drawn by CSS, so it never becomes part of the button's name.
+              <span
+                className="badge"
+                aria-hidden="true"
+                data-count={activity.unread > 99 ? '99+' : activity.unread}
+              />
+            )}
+          </button>
+        )}
+        {mode !== 'landing' && activity && activity.unread > 0 && (
+          // Its description: the button's name stays "Activity" whatever the count.
+          <span id="activity-unread" hidden>
+            {activity.unread} new
+          </span>
         )}
         {mode !== 'landing' && (
           <input

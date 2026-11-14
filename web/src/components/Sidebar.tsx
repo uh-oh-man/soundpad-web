@@ -1,5 +1,12 @@
 import type { ButtonHTMLAttributes, ReactNode } from 'react';
-import { AudioLines, Folder, Music2, ShieldCheck } from 'lucide-react';
+import {
+  AudioLines,
+  Folder,
+  Music2,
+  PanelLeftClose,
+  PanelLeftOpen,
+  ShieldCheck,
+} from 'lucide-react';
 import type { Category, Snapshot } from '../protocol';
 import { moveSound, type Workspace } from '../workspace';
 import type { BoardSelection } from '../arrange';
@@ -25,6 +32,8 @@ function NavButton({
     <button
       className={`category ${selected ? 'selected' : ''}`}
       style={depth ? { paddingLeft: 14 + depth * 16 } : undefined}
+      // The name when the sidebar is a strip of icons (2.43), where the label is not shown.
+      title={label}
       {...rest}
     >
       {icon}
@@ -55,6 +64,10 @@ export function Sidebar({
   update,
   manage,
   hostNote = 'Keep this tab open to host.',
+  nav,
+  library = true,
+  rail,
+  inert,
 }: {
   state: Snapshot;
   host: boolean;
@@ -68,76 +81,101 @@ export function Sidebar({
   manage: () => void;
   /** What keeps the session running (2.36): this tab, or the companion window. */
   hostNote?: string;
+  /** The section list, first, in sidebar navigation style (2.43). */
+  nav?: ReactNode;
+  /** The Soundboard's library and workspace lists; Voices and Sentences show none (2.43). */
+  library?: boolean;
+  /** Top tabs style: the sidebar can fold to a strip of icons. */
+  rail?: { collapsed: boolean; toggle: () => void };
+  /** Out of reach while the editor sheet covers the board (narrow screens). */
+  inert?: boolean;
 }) {
   const { category, myCategory, search } = selection;
   const mine = w?.layout === 'mine';
   return (
-    <aside className="sidebar">
-      {(state.protocol ?? 1) >= 2 && <SpotifyPanel host={host} />}
-      <div className="sidebar-heading">
-        LIBRARY <span>{librarySize}</span>
-      </div>
-      <NavButton
-        selected={category === 'all' && !mine}
-        icon={<AudioLines size={18} />}
-        label="All sounds"
-        count={librarySize}
-        onClick={() => selectHost('all')}
-      />
-      <div className="sidebar-label">SOUNDPAD CATEGORIES</div>
-      <nav aria-label="Sound categories">
-        {categories.map(({ category: c, depth }) => (
-          <NavButton
-            key={c.id}
-            depth={depth}
-            selected={category === c.id && !search && !mine}
-            icon={c.icon ? <img src={c.icon} alt="" /> : <Folder size={17} />}
-            label={c.name || 'Unnamed category'}
-            count={c.soundIds.length}
-            onClick={() => selectHost(c.id)}
-          />
-        ))}
-      </nav>
-      {categories.length === 0 && (
-        <p className="sidebar-empty">Your Soundpad categories will appear here.</p>
+    <aside className="sidebar" inert={inert}>
+      {rail && (
+        <button
+          type="button"
+          className="icon-button rail-toggle"
+          aria-expanded={!rail.collapsed}
+          aria-label={rail.collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+          title={rail.collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+          onClick={rail.toggle}
+        >
+          {rail.collapsed ? <PanelLeftOpen size={18} /> : <PanelLeftClose size={18} />}
+        </button>
       )}
-      {w && (
+      {nav}
+      {(state.protocol ?? 1) >= 2 && <SpotifyPanel host={host} />}
+      {library && (
         <>
-          <div className="sidebar-label">MY WORKSPACE</div>
+          <div className="sidebar-heading">
+            LIBRARY <span>{librarySize}</span>
+          </div>
           <NavButton
-            selected={mine && myCategory === 'all'}
-            icon={<Folder size={17} />}
-            label="My sounds"
-            onClick={() => selectMine('all')}
+            selected={category === 'all' && !mine}
+            icon={<AudioLines size={18} />}
+            label="All sounds"
+            count={librarySize}
+            onClick={() => selectHost('all')}
           />
-          <NavButton
-            selected={mine && myCategory === 'favorites'}
-            icon={<Music2 size={17} />}
-            label="Favorites"
-            count={w.favorites.length}
-            onClick={() => selectMine('favorites')}
-          />
-          {w.folders.map((f) => (
-            <NavButton
-              key={f.id}
-              depth={folderDepth(w, f.parent)}
-              selected={mine && myCategory === f.id}
-              icon={<Folder size={17} />}
-              label={f.name}
-              count={f.soundIds.length}
-              onDragOver={(e) => e.preventDefault()}
-              onDrop={(e) => {
-                e.preventDefault();
-                const id = e.dataTransfer.getData('application/x-soundpad-id');
-                if (state.library.sounds.some((s) => s.id === id))
-                  update((current) => moveSound(current, id, f.id));
-              }}
-              onClick={() => selectMine(f.id)}
-            />
-          ))}
-          <button className="category" onClick={manage}>
-            Manage personal layout
-          </button>
+          <div className="sidebar-label">SOUNDPAD CATEGORIES</div>
+          <nav aria-label="Sound categories">
+            {categories.map(({ category: c, depth }) => (
+              <NavButton
+                key={c.id}
+                depth={depth}
+                selected={category === c.id && !search && !mine}
+                icon={c.icon ? <img src={c.icon} alt="" /> : <Folder size={17} />}
+                label={c.name || 'Unnamed category'}
+                count={c.soundIds.length}
+                onClick={() => selectHost(c.id)}
+              />
+            ))}
+          </nav>
+          {categories.length === 0 && (
+            <p className="sidebar-empty">Your Soundpad categories will appear here.</p>
+          )}
+          {w && (
+            <>
+              <div className="sidebar-label">MY WORKSPACE</div>
+              <NavButton
+                selected={mine && myCategory === 'all'}
+                icon={<Folder size={17} />}
+                label="My sounds"
+                onClick={() => selectMine('all')}
+              />
+              <NavButton
+                selected={mine && myCategory === 'favorites'}
+                icon={<Music2 size={17} />}
+                label="Favorites"
+                count={w.favorites.length}
+                onClick={() => selectMine('favorites')}
+              />
+              {w.folders.map((f) => (
+                <NavButton
+                  key={f.id}
+                  depth={folderDepth(w, f.parent)}
+                  selected={mine && myCategory === f.id}
+                  icon={<Folder size={17} />}
+                  label={f.name}
+                  count={f.soundIds.length}
+                  onDragOver={(e) => e.preventDefault()}
+                  onDrop={(e) => {
+                    e.preventDefault();
+                    const id = e.dataTransfer.getData('application/x-soundpad-id');
+                    if (state.library.sounds.some((s) => s.id === id))
+                      update((current) => moveSound(current, id, f.id));
+                  }}
+                  onClick={() => selectMine(f.id)}
+                />
+              ))}
+              <button className="category" onClick={manage}>
+                Manage personal layout
+              </button>
+            </>
+          )}
         </>
       )}
       <div className="sidebar-bottom">
