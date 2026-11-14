@@ -818,3 +818,70 @@ html[data-motion='reduce'] .player.intent-pending .playback-icon {
   margin-top: 4px;
 }
 
+/* ---------- Header ribbon (spec 6.2) ---------- */
+/* The header holding a ribbon is its positioning box; its own content sits above the ribbon. */
+:has(> .header-ribbon) {
+  position: relative;
+  isolation: isolate;
+}
+.header-ribbon ~ * {
+  position: relative;
+  z-index: 1;
+}
+.header-ribbon {
+  --ribbon-clear-l: 35%;
+  --ribbon-clear-r: 75%;
+  position: absolute;
+  inset: 0 0 auto;
+  z-index: 0;
+  height: 100%;
+  max-height: var(--ribbon-h);
+  pointer-events: none;
+  /* Faint (0.2) behind the title and the buttons, full in the open middle, fading out at the foot. */
+  -webkit-mask-image:
+    linear-gradient(
+      90deg,
+      rgb(0 0 0 / 0.2) 0 var(--ribbon-clear-l),
+      #000 calc(var(--ribbon-clear-l) + 8%) calc(var(--ribbon-clear-r) - 8%),
+      rgb(0 0 0 / 0.2) var(--ribbon-clear-r) 100%
+    ),
+    linear-gradient(180deg, #000 78%, transparent);
+  -webkit-mask-composite: source-in;
+  mask-image:
+    linear-gradient(
+      90deg,
+      rgb(0 0 0 / 0.2) 0 var(--ribbon-clear-l),
+      #000 calc(var(--ribbon-clear-l) + 8%) calc(var(--ribbon-clear-r) - 8%),
+      rgb(0 0 0 / 0.2) var(--ribbon-clear-r) 100%
+    ),
+    linear-gradient(180deg, #000 78%, transparent);
+  mask-composite: intersect;
+}
+.header-ribbon canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+/* Phones: a 56 px band of its own under the title row, never behind text. */
+@media (max-width: 700px) {
+  :has(> .header-ribbon) {
+    flex-wrap: wrap;
+  }
+  .header-ribbon {
+    --ribbon-clear-l: 0%;
+    --ribbon-clear-r: 100%;
+    position: relative;
+    inset: auto;
+    order: 10;
+    flex: 0 0 100%;
+    grid-column: 1 / -1;
+    height: var(--ribbon-h);
+    max-height: none;
+  }
+}
+@media (forced-colors: active) {
+  .header-ribbon {
+    display: none;
+  }
+}
