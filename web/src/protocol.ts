@@ -71,7 +71,67 @@ export const commandSchema = z
       'budgetGrant',
       // After a crash (2.40): the host recovers or discards the previous session's Temp.
       'tempRecover',
+      // The voice library (2.41): everyone may read and search it; editing needs guestLibraryEdit for
+      // guests; settings and the category word index are the host's.
+      'libraryStatus',
+      'libraryList',
+      'libraryGet',
+      'librarySearch',
+      'libraryVocabulary',
+      'libraryAudit',
+      'libraryEdit',
+      'libraryRemove',
+      'libraryUndo',
+      'libraryVoice',
+      'libraryWanted',
+      'libraryAdd',
+      'libraryRetry',
+      'libraryPreview',
+      'librarySettings',
+      'libraryIndex',
+      // Word search in the recording history, and speaker groups (2.41): guests with Mimic, scoped.
+      'historySearch',
+      'speakerGroups',
+      'speakerName',
+      'speakerLink',
     ]),
+    // Voice library (2.41): which recording(s), metadata, an audit group to undo, search text and paging.
+    recordingId: z
+      .string()
+      .regex(/^[a-f0-9]{32}$/)
+      .optional(),
+    recordingIds: z
+      .array(z.string().regex(/^[a-f0-9]{32}$/))
+      .min(1)
+      .max(500)
+      .optional(),
+    // A voice's id, or '' to clear it.
+    voiceId: z
+      .string()
+      .regex(/^([a-f0-9]{32})?$/)
+      .optional(),
+    tags: z.array(z.string().min(1).max(40)).max(32).optional(),
+    addTags: z.array(z.string().min(1).max(40)).max(32).optional(),
+    removeTags: z.array(z.string().min(1).max(40)).max(32).optional(),
+    favorite: z.boolean().optional(),
+    title: z.string().max(200).optional(),
+    correctedText: z.string().max(4000).optional(),
+    reviewed: z.boolean().optional(),
+    auditId: z.number().int().positive().safe().optional(),
+    query: z.string().max(200).optional(),
+    offset: z.number().int().min(0).max(100000).optional(),
+    limit: z.number().int().min(1).max(500).optional(),
+    color: z
+      .string()
+      .regex(/^#[0-9a-f]{6}$/)
+      .optional(),
+    categories: z.array(z.string().min(1).max(256)).max(256).optional(),
+    groupId: z.number().int().min(1).max(64).optional(),
+    kind: z.enum(['all', 'clip', 'sound']).optional(),
+    unassigned: z.boolean().optional(),
+    tag: z.string().max(40).optional(),
+    groupSpeakers: z.boolean().optional(),
+    guestLibraryEdit: z.boolean().optional(),
     assetId: z.uuid().optional(),
     variantId: z.uuid().optional(),
     orientation: z.enum(['normal', 'reversed']).optional(),
@@ -145,6 +205,15 @@ export const commandSchema = z
         'deny',
         'recover',
         'discard',
+        // 2.41: draftKeep / mimicLibraryImport into the voice library; voices and wanted words; the index.
+        'library',
+        'create',
+        'update',
+        'delete',
+        'add',
+        'remove',
+        'pause',
+        'resume',
       ])
       .optional(),
     permissions: z
@@ -157,6 +226,7 @@ export const commandSchema = z
         guestTransforms: z.boolean().optional(),
         guestMimic: z.boolean().optional(),
         guestKeep: z.boolean().optional(),
+        guestLibraryEdit: z.boolean().optional(),
       })
       .strict()
       .optional(),
@@ -262,7 +332,11 @@ export const snapshotSchema = z.object({
     guestMimic: z.boolean().optional(),
     // 2.40: guests may Keep clips into the host's chosen destination. Older companions omit it.
     guestKeep: z.boolean().optional(),
+    // 2.41: guests may name and tag voice-library recordings (with Undo and audit). Older companions omit it.
+    guestLibraryEdit: z.boolean().optional(),
   }),
+  // 2.41: rises when the voice library, its word index, notices or speaker groups change (fetch libraryStatus).
+  voiceLibrary: z.number().int().nonnegative().optional(),
   // 2.40: these rise when drafts or guest budgets change, so pages fetch draftList or budgetStatus;
   // tempRecovery counts the clips a crashed companion left in Temp until the host decides.
   drafts: z.number().int().nonnegative().optional(),
@@ -360,6 +434,8 @@ export const slowOps: readonly Command['op'][] = [
   'draftKeep',
   'draftPlay',
   'tempRecover',
+  'libraryPreview',
+  'libraryAdd',
 ];
 /**
  * Playback and transport commands (2.35). They are answered quickly and a burst of them is normal use
@@ -389,6 +465,9 @@ export function isGuestAllowed(c: Command, s: Snapshot) {
   // Play into game needs playback as well, like Mimic & play.
   if (c.op === 'draftPlay')
     return s.permissions.guestMimic === true && s.permissions.remotePlayback;
+  // Into the voice library from a draft (2.41): the same as keeping it.
+  if (c.op === 'draftKeep' && c.action === 'library')
+    return s.permissions.guestMimic === true && s.permissions.guestKeep === true;
   if (c.op.startsWith('draft') || c.op === 'mimicPreview') return s.permissions.guestMimic === true;
   // Keep (2.40): into the host's destination, within their budget; never a path of their own.
   if (c.op === 'keepAudio')
@@ -399,6 +478,33 @@ export function isGuestAllowed(c: Command, s: Snapshot) {
       c.categoryName === undefined
     );
   if (c.op === 'budgetStatus') return true;
+  // The voice library (2.41): guests see and search the kept library by default; private previews
+  // are answered to them only. Editing (names, tags, voices, wanted words, Undo) needs the host's
+  // guestLibraryEdit; the settings and the category word index are the host's.
+  if (
+    c.op === 'libraryStatus' ||
+    c.op === 'libraryList' ||
+    c.op === 'libraryGet' ||
+    c.op === 'librarySearch' ||
+    c.op === 'libraryVocabulary' ||
+    c.op === 'libraryAudit' ||
+    c.op === 'libraryPreview'
+  )
+    return true;
+  if (
+    c.op === 'libraryEdit' ||
+    c.op === 'libraryRemove' ||
+    c.op === 'libraryUndo' ||
+    c.op === 'libraryVoice' ||
+    c.op === 'libraryWanted' ||
+    c.op === 'libraryAdd' ||
+    c.op === 'libraryRetry'
+  )
+    return s.permissions.guestLibraryEdit !== false;
+  if (c.op === 'historySearch' || c.op === 'speakerGroups')
+    return s.permissions.guestMimic === true;
+  if (c.op === 'speakerName' || c.op === 'speakerLink')
+    return s.permissions.guestMimic === true && s.permissions.guestLibraryEdit !== false;
   if (c.op === 'trimAudio') return s.permissions.guestUploads !== false;
   // Undo of a guest's own clip or copy (2.32): the companion checks the guest added it.
   if (c.op === 'removeAudio') return s.permissions.guestUploads !== false;

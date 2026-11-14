@@ -27,6 +27,8 @@ public interface ITranscriptEngine : IDisposable
     Task<IReadOnlyList<TranscribedSpan>> Transcribe(float[] samples16k, CancellationToken cancel);
     /// <summary>Gaming, Balanced or Fast; engines that have no such choice ignore it.</summary>
     void UseMode(SubtitleMode mode) { }
+    /// <summary>Background work (the voice library and the category word index, 2.41): always at Gaming priority.</summary>
+    Task<IReadOnlyList<TranscribedSpan>> TranscribeBackground(float[] samples16k, CancellationToken cancel) => Transcribe(samples16k, cancel);
 }
 
 public sealed class WhisperEngine(string modelPath, string? sharedModelPath = null, string? nativeDirectory = null, int? threads = null) : ITranscriptEngine
@@ -39,6 +41,25 @@ public sealed class WhisperEngine(string modelPath, string? sharedModelPath = nu
     public int Threads => threads ?? (mode == SubtitleMode.Gaming ? 1 : 2);
     private volatile SubtitleMode mode = SubtitleMode.Gaming;
     public void UseMode(SubtitleMode next) => mode = next;
+    /// <summary>Background files (2.41) always use the Gaming settings: one thread, below normal priority, whatever the subtitles setting.</summary>
+    [ThreadStatic] private static bool background;
+    public async Task<IReadOnlyList<TranscribedSpan>> TranscribeBackground(float[] samples16k, CancellationToken cancel)
+    {
+        await busy.WaitAsync(cancel);
+        try
+        {
+            var all = new List<TranscribedSpan>();
+            for (int at = 0; at < samples16k.Length; at += PieceSeconds * MimicTranscriber.SpeechRate)
+            {
+                int length = samples16k.Length <= MaxCallSeconds * MimicTranscriber.SpeechRate ? samples16k.Length : Math.Min(PieceSeconds * MimicTranscriber.SpeechRate, samples16k.Length - at);
+                var piece = length == samples16k.Length ? samples16k : samples16k.AsSpan(at, length).ToArray();
+                foreach (var span in await OnOwnThread(piece, cancel, gaming: true)) all.Add(Shift(span, at));
+                if (length == samples16k.Length) break;
+            }
+            return all;
+        }
+        finally { busy.Release(); }
+    }
     private static readonly string[] NativeLibraries = ["ggml-base-whisper.dll", "ggml-cpu-whisper.dll", "ggml-whisper.dll", "whisper.dll"];
     private static readonly object nativeGate = new();
     /// <summary>
@@ -124,13 +145,14 @@ public sealed class WhisperEngine(string modelPath, string? sharedModelPath = nu
         return span with { Start = span.Start + offset, End = span.End + offset, Tokens = span.Tokens?.Select(t => t with { StartCs = t.StartCs + cs, EndCs = t.EndCs + cs, DtwCs = t.DtwCs < 0 ? -1 : t.DtwCs + cs }).ToArray() };
     }
     /// <summary>The synchronous recognition runs on its own thread, below normal priority except in Fast mode, so a game keeps the CPU it needs.</summary>
-    private Task<IReadOnlyList<TranscribedSpan>> OnOwnThread(float[] samples16k, CancellationToken cancel)
+    private Task<IReadOnlyList<TranscribedSpan>> OnOwnThread(float[] samples16k, CancellationToken cancel, bool gaming = false)
     {
         cancel.ThrowIfCancellationRequested();
         var result = new TaskCompletionSource<IReadOnlyList<TranscribedSpan>>(TaskCreationOptions.RunContinuationsAsynchronously);
-        var current = mode;
+        var current = gaming ? SubtitleMode.Gaming : mode;
         var thread = new Thread(() =>
         {
+            background = gaming;
             try { result.TrySetResult(Recognise(samples16k)); }
             catch (Exception ex) { result.TrySetException(ex); }
         }) { IsBackground = true, Name = "Mimic speech recognition", Priority = current == SubtitleMode.Fast ? ThreadPriority.Normal : ThreadPriority.BelowNormal };
@@ -145,7 +167,7 @@ public sealed class WhisperEngine(string modelPath, string? sharedModelPath = nu
         // One pass gives phrases, token timestamps and the DTW anchors of every token. The heads preset must match the model (base.en).
         factory ??= WhisperFactory.FromPath(Model ?? throw new InvalidDataException("Download the speech model first."),
             new WhisperFactoryOptions { UseDtwTimeStamps = true, HeadsPreset = WhisperAlignmentHeadsPreset.BaseEn });
-        int count = Threads, context = ShortContext(samples16k.Length);
+        int count = background && threads == null ? 1 : Threads, context = ShortContext(samples16k.Length);
         int index = processors.FindIndex(p => p.Threads == count && p.Context == context);
         (int Threads, int Context, WhisperProcessor Processor, List<TranscribedSpan> Collected) entry;
         if (index >= 0) { entry = processors[index]; processors.RemoveAt(index); }
@@ -425,14 +447,16 @@ public sealed class MimicTranscriber(ITranscriptEngine engine) : IDisposable
         if (result == null) return false;
         var (recognised, next) = result.Value;
         // After a forced cut, a sentence still being spoken at the edge is held back and retried with what follows.
+        IReadOnlyList<TranscriptWord> added;
         lock (gate)
         {
             // A loop replaced while Whisper ran (turned off and on again, another session) must not commit or rewind.
             if (!ReferenceEquals(current, store) || generation != null && generation != loopGeneration || committed != start) return false;
-            transcript.Add(recognised, new(start, next));
+            added = transcript.Add(recognised, new(start, next));
             committed = next; lastCutForced = forced && next == cut;
             status = "Listening for speech";
         }
+        Announce(history, added);
         return true;
     }
 
@@ -479,14 +503,42 @@ public sealed class MimicTranscriber(ITranscriptEngine engine) : IDisposable
         bool forcedStart = !energy.QuietBetween(0, CutWindowMs / 2);
         var result = await Recognise(history, piece.StartFrame, cut, audio, speech, forcedStart, forcedEnd, transcript, cancel, generation, holdBack: false);
         if (result == null) return false;
+        IReadOnlyList<TranscriptWord> added;
         lock (gate)
         {
             if (!ReferenceEquals(current, store) || generation != null && generation != loopGeneration) return false;
             // The live loop may have reached this stretch meanwhile; never recognise anything twice.
             if (transcript.Missing(piece.StartFrame, cut) is not [var only] || only != new HistoryRange(piece.StartFrame, cut)) return true;
-            transcript.Add(result.Value.Words, new(piece.StartFrame, result.Value.Next));
+            added = transcript.Add(result.Value.Words, new(piece.StartFrame, result.Value.Next));
         }
+        Announce(history, added);
         return true;
+    }
+
+    /// <summary>Words just added to the history's transcript (2.41: wanted-word notices, speaker grouping). Raised outside the lock.</summary>
+    public event Action<HistoryStore, IReadOnlyList<TranscriptWord>>? WordsAdded;
+    private void Announce(HistoryStore history, IReadOnlyList<TranscriptWord> added)
+    {
+        if (added.Count == 0) return;
+        try { WordsAdded?.Invoke(history, added); } catch (Exception ex) when (ex is not OutOfMemoryException) { }
+    }
+
+    /// <summary>
+    /// The words of a sound file with their timings (2.41: library recordings and indexed Soundpad sounds), by the same
+    /// pipeline as the history (Whisper with word anchors, then WordAligner), at Gaming priority. Needs the speech
+    /// model, not transcripts being on. The file is only read.
+    /// </summary>
+    public async Task<List<LibraryWord>> WordsOfFile(string path, CancellationToken cancel)
+    {
+        if (!engine.Available) throw new InvalidDataException("Download the speech model first.");
+        var (mono, rate) = await Task.Run(() => AudioFile.ReadMono(path), cancel);
+        if (mono.Length == 0 || Quiet(mono)) return [];
+        var speech = Resample(mono, rate, SpeechRate);
+        var spans = await engine.TranscribeBackground(speech, cancel);
+        var energy = SpeechEnergy.Analyze(speech);
+        double snr = energy.PeakDb - energy.FloorDb;
+        return [.. WordAligner.Align(spans, energy).Select(w => new LibraryWord((long)Math.Round(w.StartMs), Math.Max((long)Math.Round(w.StartMs) + 1, (long)Math.Round(w.EndMs)),
+            w.Text.Length > 200 ? w.Text[..200] : w.Text, w.Probability, WordAligner.Status(w.Probability, w.StretchMs, false, snr) == WordStatus.Uncertain)).Where(w => w.Text.Length > 0)];
     }
 
     /// <summary>Recognises [start, cut) and aligns its words. Returns the words (no ids yet) and where the next chunk begins.</summary>

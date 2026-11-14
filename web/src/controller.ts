@@ -848,6 +848,10 @@ export class Controller {
   relaysDrafts() {
     return this.view.mode === 'host' || (this.session?.hostRelaysDrafts ?? false);
   }
+  /** Whether the page that relays this page's commands knows the 2.41 voice-library ones. */
+  relaysLibrary() {
+    return this.view.mode === 'host' || (this.session?.hostRelaysLibrary ?? false);
+  }
   private dispatch(c: Command) {
     if (this.demo)
       return this.demo.send(c, {

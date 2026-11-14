@@ -24,6 +24,8 @@ export const siteRelaysIntents = (site: string | null | undefined) => companionA
  * older host page refuses commands it does not know, so guests check its welcome first.
  */
 export const siteRelaysDrafts = (site: string | null | undefined) => companionAtLeast(site, 2, 40);
+/** True when the host's page relays the 2.41 voice-library commands (its welcome also says so). */
+export const siteRelaysLibrary = (site: string | null | undefined) => companionAtLeast(site, 2, 41);
 
 /** Oldest companion that supports every feature of this website. */
 export const REQUIRED_COMPANION = { major: 2, minor: 3, label: '2.3' } as const;
@@ -55,6 +57,7 @@ export const FEATURES = {
   history: [2, 39],
   drafts: [2, 40],
   reviewFixes: [2, 41],
+  voiceLibrary: [2, 41],
 } as const satisfies Record<string, readonly [number, number]>;
 
 /** True when the website changed version since this browser last used it (and it had used it before). */
@@ -91,6 +94,8 @@ const FEATURE_NAMES: Record<keyof typeof FEATURES, string> = {
     'drafts of Mimic clips you can edit before keeping, Latest phrase, private preview for guests, guest Keep with storage budgets, and Temp that stays until you quit',
   reviewFixes:
     'discarding only the recording history a crash recovered (what was recorded since stays), and edits that always stay with the recording they were made on',
+  voiceLibrary:
+    'the voice library: kept clips with voices, tags and their words, word search that plays a single word, wanted words, a review queue, and word search in Soundpad categories you choose',
 };
 
 /**

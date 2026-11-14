@@ -16,7 +16,13 @@ import {
 } from '../protocol';
 import { parseOrganization, type SharedLayout, type Organization } from '../shared-layout';
 import { cleanName } from '../protocol';
-import { APP_VERSION, siteRelaysDrafts, siteRelaysIntents, supports } from '../version';
+import {
+  APP_VERSION,
+  siteRelaysDrafts,
+  siteRelaysIntents,
+  siteRelaysLibrary,
+  supports,
+} from '../version';
 import { sign, verify, type HostIdentity, type Invite } from './identity';
 import {
   CHALLENGE_PATTERN,
@@ -305,6 +311,8 @@ export class Session {
   private welcomedSite = '';
   /** The host page said it relays the 2.40 commands (drafts, guest preview and Keep, budgets). */
   private welcomedDrafts = false;
+  /** The host page said it relays the 2.41 voice-library commands. */
+  private welcomedLibrary = false;
   private olderHostRate = new RateLimit(OLDER_HOST_RATE);
   // Guest connection state (2.37).
   private since = Date.now();
@@ -332,6 +340,10 @@ export class Session {
    */
   get hostRelaysDrafts() {
     return !!this.hostPeer && this.welcomedDrafts;
+  }
+  /** Guest: whether the host's page relays the 2.41 voice-library commands (as hostRelaysDrafts). */
+  get hostRelaysLibrary() {
+    return !!this.hostPeer && this.welcomedLibrary;
   }
   /** Guest: how this page reaches the host now (2.37). */
   get transport(): Transport | undefined {
@@ -1068,7 +1080,7 @@ export class Session {
         hostNow: Date.now(),
         site: this.site,
         // 2.40: what this page relays beyond what its version says (see hostRelaysDrafts).
-        relays: ['drafts'],
+        relays: ['drafts', 'library'],
         data: [...this.layouts.values()] as unknown as JsonValue,
       },
       peer,
@@ -1444,6 +1456,9 @@ export class Session {
       this.welcomedDrafts =
         siteRelaysDrafts(this.welcomedSite) ||
         (Array.isArray(m.relays) && m.relays.length <= 16 && m.relays.includes('drafts'));
+      this.welcomedLibrary =
+        siteRelaysLibrary(this.welcomedSite) ||
+        (Array.isArray(m.relays) && m.relays.length <= 16 && m.relays.includes('library'));
       this.syncClock(m.hostNow, true);
     }
     const reconnected = first && this.everConnected;

@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import {
+  BookAudio,
   BookmarkPlus,
   ChevronLeft,
   ChevronRight,
@@ -10,6 +11,7 @@ import {
   Play,
   Radio,
   Scissors,
+  Search,
   Share2,
   Trash2,
   X,
@@ -67,6 +69,9 @@ import {
 } from '../../mimic/drafts';
 import { refreshDrafts, useDraftStore } from '../../mimic/draft-store';
 import { recall, remember } from '../../sections';
+import { z } from 'zod';
+import { requestOpen, takeOpen, useOpenRequests, useVoiceStore } from '../../library/voice-store';
+import { historySearchSchema, speakerGroupsSchema, type SpeakerGroups } from '../../library/voices';
 import { MimicWave } from './MimicWave';
 import { MimicOverview } from './MimicOverview';
 import { historyPoller } from '../../mimic/history-poll';
@@ -169,6 +174,14 @@ export function MimicHistory({
     draftsOn,
   );
   const waiting = !host && budget?.guest?.own.paused ? budget.guest.own.waiting : null;
+  // The voice library (2.41): Keep in voice library, word search in this recording, speaker groups.
+  const libraryOn =
+    supports(state.companionVersion, 'voiceLibrary') && (host || controller.relaysLibrary());
+  const canLibraryKeep = libraryOn && (host || state.permissions.guestKeep === true);
+  const { status: libraryStatus } = useVoiceStore();
+  const [query, setQuery] = useState('');
+  const [found, setFound] = useState<z.infer<typeof historySearchSchema> | null>(null);
+  const [speakers, setSpeakers] = useState<SpeakerGroups | null>(null);
 
   // Remember what this section shows, so closing the window (or a reload) comes back to it.
   useEffect(() => {
@@ -521,6 +534,44 @@ export function MimicHistory({
       setBusy(false);
     }
   }
+  /** Keep in voice library (2.41): kept permanently at once, with its words; the draft closes. */
+  async function keepToLibrary(draft: Draft) {
+    if (busy || waiting) return;
+    setBusy(true);
+    try {
+      await saveName(draft);
+      const result = z
+        .object({ recordingId: z.string().max(64).nullish(), closed: z.boolean().optional() })
+        .parse(await controller.run('draftKeep', { draftId: draft.id, action: 'library' }));
+      const recordingId = result.recordingId;
+      controller.notify(
+        `“${name.trim() || draft.name || 'Draft'}” is in the voice library.`,
+        'success',
+        recordingId
+          ? { label: 'Open', run: () => requestOpen({ kind: 'recording', recordingId }) }
+          : undefined,
+      );
+      closeDraft();
+      await refreshDrafts();
+    } catch {
+      /* Controller shows the error. */
+    } finally {
+      setBusy(false);
+    }
+  }
+  async function searchHistory() {
+    const text = query.trim();
+    if (!text || !sessionId) return;
+    try {
+      setFound(
+        historySearchSchema.parse(
+          await controller.run('historySearch', { query: text, sourceId: sessionId }),
+        ),
+      );
+    } catch {
+      /* Controller shows the error. */
+    }
+  }
   async function playDraft(draft: Draft) {
     if (busy || held || waiting) return;
     setBusy(true);
@@ -679,6 +730,55 @@ export function MimicHistory({
     document.addEventListener('keydown', listener, true);
     return () => document.removeEventListener('keydown', listener, true);
   }, []);
+
+  // Speaker groups (experimental, 2.41), when the host turned them on: fetched when the library says they changed.
+  const grouping = libraryOn && libraryStatus?.settings.groupSpeakers === true;
+  useEffect(() => {
+    if (!grouping || !connected) {
+      setSpeakers(null);
+      return;
+    }
+    let live = true;
+    controller
+      .run('speakerGroups', {}, { quiet: true })
+      .then((raw) => {
+        if (live) setSpeakers(speakerGroupsSchema.parse(raw));
+      })
+      .catch(() => {
+        if (live) setSpeakers(null);
+      });
+    return () => {
+      live = false;
+    };
+  }, [grouping, connected, libraryStatus?.revision]);
+  // A notice's jump marker (2.41): show and select that moment once the history is here.
+  const jumpTo = useRef<{ sessionId: string; range: FrameRange } | null>(null);
+  const [jumpKick, setJumpKick] = useState(0);
+  useEffect(() => {
+    const request = takeOpen('history');
+    if (request?.kind === 'history')
+      jumpTo.current = {
+        sessionId: request.sessionId,
+        range: { startFrame: request.startFrame, endFrame: request.endFrame },
+      };
+  }, []);
+  useOpenRequests((request) => {
+    if (request.kind !== 'history') return;
+    takeOpen('history');
+    jumpTo.current = {
+      sessionId: request.sessionId,
+      range: { startFrame: request.startFrame, endFrame: request.endFrame },
+    };
+    setJumpKick((k) => k + 1);
+  });
+  useEffect(() => {
+    const target = jumpTo.current;
+    if (!target || !timeline?.sessionId) return;
+    jumpTo.current = null;
+    if (target.sessionId !== timeline.sessionId) return;
+    if (open) closeDraft();
+    select(target.range);
+  }, [timeline?.sessionId, jumpKick]);
 
   if (!timeline) return <p className="muted">Loading the recording history…</p>;
   if (!timeline.sessionId)
@@ -854,6 +954,76 @@ export function MimicHistory({
           ))}
         </ul>
       )}
+      {libraryOn && (
+        <form
+          className="mimic-search"
+          role="search"
+          aria-label="Search this recording"
+          onSubmit={(e) => {
+            e.preventDefault();
+            void searchHistory();
+          }}
+        >
+          <div className="mimic-quick">
+            <input
+              type="search"
+              aria-label="Words to find in the recording"
+              placeholder="Find words said in this recording"
+              maxLength={100}
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+            />
+            <button type="submit">
+              <Search size={14} /> Find
+            </button>
+            {found && (
+              <button type="button" onClick={() => setFound(null)}>
+                <X size={14} /> Close results
+              </button>
+            )}
+          </div>
+          {found &&
+            (found.matches.length ? (
+              <ul aria-label="Found in the recording">
+                {found.matches.map((m) => {
+                  const at = wallOf(timeline, m.startFrame);
+                  return (
+                    <li key={m.startFrame}>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (open) closeDraft();
+                          select({ startFrame: m.startFrame, endFrame: m.endFrame });
+                        }}
+                      >
+                        {at !== null && <time>{formatClock(at)}</time>} “{m.context || m.text}”
+                      </button>
+                    </li>
+                  );
+                })}
+              </ul>
+            ) : (
+              <p className="muted">Not found in what you can see of the recording.</p>
+            ))}
+        </form>
+      )}
+      {speakers?.enabled && (
+        <div className="mimic-speakers" role="group" aria-label="Speakers">
+          <span className="muted">Speakers (experimental):</span>
+          {speakers.groups.map((g) => (
+            <SpeakerControls
+              key={g.id}
+              group={g}
+              voices={libraryStatus?.voices ?? []}
+              canEdit={libraryStatus?.canEdit ?? false}
+            />
+          ))}
+          {speakers.groups.length === 0 && <span className="muted">none yet</span>}
+          {speakers.unassigned > 0 && (
+            <span className="muted">{speakers.unassigned} unassigned</span>
+          )}
+        </div>
+      )}
       {(mimic?.transcribing || words.length > 0) && (
         <ol className="mimic-transcript mimic-words" aria-label="Transcript">
           {shown.length ? (
@@ -862,6 +1032,9 @@ export function MimicHistory({
                 <time>
                   {ago(Math.max(0, framesToMs(sentence[0].start - start, rate)), WINDOW_MS)}
                 </time>
+                {speakers?.enabled && sentence[0].speaker != null && (
+                  <SpeakerChip id={sentence[0].speaker} groups={speakers} />
+                )}
                 <span className="mimic-sentence">
                   {sentence.map((w) => (
                     <button
@@ -1018,6 +1191,16 @@ export function MimicHistory({
           >
             Keep in Temp and close draft
           </button>
+          {canLibraryKeep && (
+            <button
+              type="button"
+              aria-disabled={busy || !!waiting || undefined}
+              title="Keep it permanently as a voice-library recording, with its words"
+              onClick={() => void keepToLibrary(open)}
+            >
+              <BookAudio size={15} /> Keep in voice library
+            </button>
+          )}
           <button
             type="button"
             aria-disabled={busy || undefined}
@@ -1090,5 +1273,76 @@ export function MimicHistory({
         </>
       )}
     </div>
+  );
+}
+
+/** A phrase's speaker group, coloured; "Speaker N" until a person names it. */
+function SpeakerChip({ id, groups }: { id: number; groups: SpeakerGroups }) {
+  const group = groups.groups.find((g) => g.id === id);
+  if (!group) return null;
+  return (
+    <span
+      className="mimic-speaker"
+      style={{ color: group.color }}
+      title="Grouped by how it sounds (experimental)"
+    >
+      {group.label}
+    </span>
+  );
+}
+
+/** Naming a speaker group, and linking it to a library voice: only ever done by a person. */
+function SpeakerControls({
+  group,
+  voices,
+  canEdit,
+}: {
+  group: SpeakerGroups['groups'][number];
+  voices: { id: string; name: string }[];
+  canEdit: boolean;
+}) {
+  const [name, setName] = useState(group.name ?? '');
+  return (
+    <form
+      className="mimic-speakers"
+      onSubmit={(e) => {
+        e.preventDefault();
+        void controller
+          .run('speakerName', { groupId: group.id, name: name.trim() })
+          .catch(() => {});
+      }}
+    >
+      <span className="mimic-speaker" style={{ color: group.color }}>
+        {group.label} · {group.phrases}
+      </span>
+      {canEdit && (
+        <>
+          <input
+            type="search"
+            aria-label={`Name ${group.label}`}
+            placeholder="Name"
+            maxLength={40}
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+          />
+          <select
+            aria-label={`Link ${group.label} to a library voice`}
+            value={group.voiceId ?? ''}
+            onChange={(e) =>
+              void controller
+                .run('speakerLink', { groupId: group.id, voiceId: e.target.value })
+                .catch(() => {})
+            }
+          >
+            <option value="">No library voice</option>
+            {voices.map((v) => (
+              <option key={v.id} value={v.id}>
+                {v.name}
+              </option>
+            ))}
+          </select>
+        </>
+      )}
+    </form>
   );
 }

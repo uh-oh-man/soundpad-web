@@ -48,6 +48,7 @@ public sealed partial class Bridge(ISoundpad pipe, StateStore store) : IDisposab
         // Playback statistics still waiting for their deferred write go to disk now (2.35).
         Interlocked.Exchange(ref disposed, 1);
         if (Volatile.Read(ref stateDirty) != 0) { try { Task.Run(FlushState).Wait(TimeSpan.FromSeconds(2)); } catch (Exception) { /* the last durable save stands */ } }
+        workerStop.Cancel();
         hotkey.Dispose(); waveformService.Dispose(); transcriber.Dispose(); audioWork.Dispose();
         // An ordinary quit deletes this launch's recording history and transcript (2.39); after a crash it is recovered instead.
         try { CloseHistory(); } catch (Exception ex) when (ex is not OutOfMemoryException) { /* removed with the next launch's recovery */ }
@@ -55,7 +56,7 @@ public sealed partial class Bridge(ISoundpad pipe, StateStore store) : IDisposab
     }
     public Snapshot Snapshot => new(1, revision, available, error, parsed.Public, playback, disk.Counter, disk.Permissions, 2,
         Convert.ToHexString(System.Security.Cryptography.HMACSHA256.HashData(Convert.FromBase64String(disk.IdentityKey), System.Text.Encoding.UTF8.GetBytes("workspace-host-v2"))).ToLowerInvariant(), disk.StatisticsVersion, typeof(Bridge).Assembly.GetName().Version?.ToString(3), managed?.Public.Revision ?? 0, MimicSnapshot, playbackSuspended,
-        Interlocked.Read(ref draftsRevision), budgets.Revision, tempRecovery > 0 ? tempRecovery : null) { Permissions = PublicPermissions };
+        Interlocked.Read(ref draftsRevision), budgets.Revision, tempRecovery > 0 ? tempRecovery : null, Interlocked.Read(ref voicesRevision)) { Permissions = PublicPermissions };
     public string? Website => disk.Website;
     public void SetWebsite(string site) { disk.Website = site; store.Save(disk); }
     private void Publish() { Interlocked.Increment(ref revision); Changed?.Invoke(Snapshot); }
@@ -155,6 +156,7 @@ public sealed partial class Bridge(ISoundpad pipe, StateStore store) : IDisposab
         // arrival order, before anything that may wait, so a command they sent later never sees the old one.
         if (c.Op == "revokePeer" && actor == "host" && c.GuestId is { Length: > 0 and <= 128 } guestId) ForgetGuest(guestId);
         if (await ExecuteKeep(c, actor, participant, requester, audience) is { } keep) return keep;
+        if (await ExecuteVoices(c, actor, participant, requester, audience) is { } voices) return voices;
         var query = await Query(c, actor); if (query != null) return query;
         if (c.Op == "stop") return await ExecuteStop(c, actor, requester, audience, intent);
         if (c.Op == "panic") return await ExecutePanic(c, actor, intent);
@@ -251,7 +253,13 @@ public sealed partial class Bridge(ISoundpad pipe, StateStore store) : IDisposab
                         var permissions = c.Permissions ?? throw new InvalidDataException("Missing permissions.");
                         // Guest Keep (2.40) lives in keep-settings.json, never in state.json; an older website leaves it as it is.
                         if (permissions.GuestKeep is bool guestKeep && guestKeep != Keep.GuestKeep) SaveKeep(Keep with { GuestKeep = guestKeep });
-                        disk.Permissions = permissions with { GuestKeep = null }; break;
+                        // Guest library editing (2.41) lives in the voice library's own file, never in state.json.
+                        if (permissions.GuestLibraryEdit is bool libraryEdit && libraryEdit != LibrarySettingsNow.GuestLibraryEdit)
+                        {
+                            try { Voices.UpdateSettings(s => s with { GuestLibraryEdit = libraryEdit }); }
+                            catch (InvalidDataException ex) { Log("The voice library setting could not be saved: " + ex.Message); }
+                        }
+                        disk.Permissions = permissions with { GuestKeep = null, GuestLibraryEdit = null }; break;
                     case "icon":
                         if (c.SoundId == null || !parsed.Indexes.ContainsKey(c.SoundId)) throw new InvalidDataException("Unknown sound.");
                         var iconIdentity = managed?.Annotation(c.SoundId);

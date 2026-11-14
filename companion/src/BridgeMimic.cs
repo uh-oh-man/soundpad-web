@@ -87,6 +87,8 @@ public sealed partial class Bridge
         var reply = await Upload(wav, name + ".wav", by, host, owner, audience, mimic: true, guest: guest);
         if (reply.Ok && reply.Data?.GetType().GetProperty("assetId")?.GetValue(reply.Data) is string assetId)
         {
+            // Provenance for the voice library (2.41): this stretch of this history session.
+            NoteProvenance(assetId, new LibrarySource { Kind = "history", SessionId = h.SessionId, StartFrame = start, EndFrame = stop, Rate = h.Rate });
             lock (recentClips)
             {
                 recentClips.RemoveAll(c => c.AssetId == assetId);
@@ -108,6 +110,7 @@ public sealed partial class Bridge
         TranscriptWords? words = null;
         if (h != null) { words = TranscriptWords.Open(HistoryRoot, h.SessionId); words.CutAt(h.LiveFrame); } // as UseStoreLocked does
         transcriber.Attach(h, words);
+        WireTranscriber();
     }
 
     /// <summary>Replaces the capture backend; tests and the e2e harness use a deterministic fixture source.</summary>
@@ -175,10 +178,13 @@ public sealed partial class Bridge
 
     private static bool IsMimic(string op) => op is "mimicSources" or "mimicStart" or "mimicStop" or "mimicPeek" or "mimicClip" or "mimicTranscribe" or "mimicHotkey" or "mimicPreview" or "mimicLibrary" or "mimicLibraryImport"
         or "historyTimeline" or "historyLevels" or "historyTranscript" or "historyShare" or "historyUnshare" or "historySettings" or "historyDiscard" or "historyCorrect"
+        // 2.41: search in the history's words, and speaker groups.
+        or "historySearch" or "speakerGroups" or "speakerName" or "speakerLink"
         || IsDraftOp(op);
     /// <summary>What a guest with Guest Mimic may ask of Mimic; everything else is the host's.</summary>
-    /// <summary>Since 2.40 also drafts, Quick Mimic and private preview (scoped by what they may see, rate limited).</summary>
-    private static bool GuestMimicOp(string op) => op is "mimicPeek" or "mimicClip" or "mimicPreview" or "historyTimeline" or "historyLevels" or "historyTranscript" || IsDraftOp(op);
+    /// <summary>Since 2.40 also drafts, Quick Mimic and private preview (scoped by what they may see, rate limited); 2.41 history search and speaker groups.</summary>
+    private static bool GuestMimicOp(string op) => op is "mimicPeek" or "mimicClip" or "mimicPreview" or "historyTimeline" or "historyLevels" or "historyTranscript"
+        or "historySearch" or "speakerGroups" or "speakerName" or "speakerLink" || IsDraftOp(op);
 
     private VoiceReplayLibrary voiceReplay = new();
     /// <summary>Points at another Voice Replay Studio data folder; tests use a temporary one.</summary>
@@ -294,8 +300,24 @@ public sealed partial class Bridge
                         // The name becomes a file name first: keep path separators from cutting the title short ("AC/DC").
                         var reply = await Upload(wav, title.Replace('/', '-').Replace('\\', '-') + ".wav", "Host", true, "host", audioAudience);
                         if (reply.Ok) Log($"Imported \"{title}\" from Voice Replay Studio into Temp");
+                        if (reply.Ok && Field(reply, "assetId") is string imported)
+                        {
+                            var source = new LibrarySource { Kind = "vrs", VrsId = (c.SourceId ?? "").Length <= 64 ? c.SourceId : null };
+                            NoteProvenance(imported, source);
+                            // 2.41: "Import to voice library" keeps it at once (the host's Keep destination); its words are found in the background.
+                            if (c.Action == "library")
+                            {
+                                var recording = await KeepIntoLibrary(imported, actor, participant, requester, audience, source, null);
+                                return new("ack", c.Id, true, Data: new { assetId = imported, recordingId = recording?.Id });
+                            }
+                        }
                         return c.Autoplay ? await Autoplay(reply with { Id = c.Id }, c, actor, participant, requester, audience, intent) : reply with { Id = c.Id };
                     }
+                case "historySearch": return new("ack", c.Id, true, Data: HistorySearch(c, actor, participant, requester));
+                case "speakerGroups":
+                case "speakerName":
+                case "speakerLink":
+                    return new("ack", c.Id, true, Data: Speakers(c, actor));
                 default: throw new InvalidDataException("Unsupported command.");
             }
         }

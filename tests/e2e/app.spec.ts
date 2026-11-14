@@ -4542,3 +4542,172 @@ test('Mimic history: dragging the overview keeps one request of a kind in flight
   expect(sent.historyLevels).toBeLessThanOrEqual(Math.ceil((dragMs + 2000) / 120) + 4);
   expect(sent.historyLevels).toBeLessThan(120);
 });
+
+// ---- Voice library (2.41) ------------------------------------------------------------------------
+
+/** Keeps the last ten seconds of the history in the voice library, as a draft's Keep in voice library does. */
+async function keepRecentInLibrary(page: Page, name: string) {
+  const draft = (await sendCommand(page, 'draftCreate', { action: 'recent', name })) as {
+    data?: { id: string };
+    error?: string;
+  };
+  expect(draft.error).toBeUndefined();
+  const kept = (await sendCommand(page, 'draftKeep', {
+    draftId: draft.data!.id,
+    action: 'library',
+  })) as { data?: { recordingId: string }; error?: string };
+  expect(kept.error).toBeUndefined();
+  return kept.data!.recordingId;
+}
+async function startListening(page: Page) {
+  await page.getByRole('button', { name: 'Mimic', exact: true }).click();
+  const dialog = page.getByRole('dialog', { name: 'Mimic' });
+  await dialog.getByRole('button', { name: 'Start listening' }).click();
+  await expect(dialog.getByRole('status').first()).toContainText('Listening to Fixture');
+  return dialog;
+}
+
+test('voice library: a kept draft appears in Voices with its words, a word search finds it, and the word plays into the game', async ({
+  page,
+  harness,
+}) => {
+  await host(page, harness);
+  const dialog = await startListening(page);
+  await dialog.getByLabel('Transcribe Mimic audio').check();
+  await expect(
+    dialog
+      .getByRole('list', { name: 'Transcript' })
+      .getByRole('button', { name: 'Fixture', exact: true })
+      .first(),
+  ).toBeVisible({ timeout: 15000 });
+  await dialog.getByRole('button', { name: 'Last 3 s', exact: true }).click();
+  await dialog.getByLabel('Clip name').fill('Library line');
+  await dialog.getByRole('button', { name: 'Capture', exact: true }).click();
+  const draft = dialog.getByRole('region', { name: 'Draft' });
+  await draft.getByRole('button', { name: 'Keep in voice library' }).click();
+  await expect(page.getByText('“Library line” is in the voice library.')).toBeVisible({
+    timeout: TEMP_READY,
+  });
+  await expect(draft).toHaveCount(0); // kept: the draft is done
+  await dialog.getByRole('button', { name: 'Close dialog' }).click();
+  await page.getByRole('button', { name: 'Voices', exact: true }).click();
+  const voices = page.getByRole('dialog', { name: 'Voices' });
+  const recordings = voices.getByRole('list', { name: 'Recordings' });
+  await expect(recordings).toContainText('Library line');
+  // Its words: copied from the history's transcript (or found in the background), "Fixture tone N".
+  await expect(recordings).toContainText(/Fixture tone \d+/, { timeout: 20000 });
+  await voices.getByLabel('Search the voice library').fill('tone');
+  const results = voices.getByRole('list', { name: 'Search results' });
+  const result = results.getByRole('listitem').filter({ hasText: 'Library line' });
+  await expect(result.getByText('Voice clip', { exact: true })).toBeVisible();
+  await expect(result.locator('mark').first()).toHaveText('tone');
+  // Play exactly that word into the game: a region of the kept sound, not the whole clip.
+  await voices.getByRole('radio', { name: /Play into game/ }).check();
+  const before = harness.plays.length;
+  await result.getByRole('button', { name: 'Play “tone” (match)' }).first().click();
+  await expect.poll(() => harness.plays.slice(before).join(' ')).toMatch(/DoPlaySound\(\d+\)/);
+  await expect.poll(() => harness.plays.slice(before).join(' ')).toMatch(/DoSeekMs\(\d+\)/);
+});
+
+test('voice library: a guest tags a recording and takes it back with Undo; the host sees who did it', async ({
+  page,
+  harness,
+}) => {
+  await useLocalGuests(page);
+  await host(page, harness);
+  await startListening(page);
+  await page.keyboard.press('Escape');
+  const id = await keepRecentInLibrary(page, 'Shared line');
+  const guest = await joinGuest(page);
+  await guest.getByRole('button', { name: 'Voices', exact: true }).click();
+  const voices = guest.getByRole('dialog', { name: 'Voices' });
+  await voices
+    .getByRole('list', { name: 'Recordings' })
+    .getByRole('button', { name: 'Shared line', exact: true })
+    .click();
+  const detail = voices.getByRole('region', { name: 'Recording Shared line' });
+  await detail.getByLabel('Add a tag').fill('funny');
+  await detail.getByRole('button', { name: 'Add', exact: true }).click();
+  await expect(detail.getByLabel('Tags')).toContainText('funny');
+  await expect(guest.locator('.notification-stack').getByText('Tag “funny” added.')).toBeVisible();
+  await guest.locator('.notification-stack').getByRole('button', { name: 'Undo' }).click();
+  await expect(detail.getByLabel('Tags')).not.toContainText('funny');
+  // The host sees both changes, by name.
+  const audit = (await sendCommand(page, 'libraryAudit', { recordingId: id })) as {
+    data: { entries: { byName: string; field: string; undoOf: number | null }[] };
+  };
+  const tags = audit.data.entries.filter((e) => e.field === 'tags');
+  expect(tags.map((e) => [e.byName, !!e.undoOf])).toEqual([
+    ['Fixture Guest', true],
+    ['Fixture Guest', false],
+  ]);
+  // With guest editing off, the guest can still look but no longer change it.
+  await page.getByRole('button', { name: 'Access settings' }).click();
+  await page.getByLabel('Allow guests to edit the voice library').uncheck();
+  await page.keyboard.press('Escape');
+  await expect(detail.getByLabel('Add a tag')).toBeDisabled();
+});
+
+test('voice library: the host indexes a Soundpad category and finds its sound by a word', async ({
+  page,
+  harness,
+}) => {
+  await host(page, harness);
+  await page.getByRole('button', { name: 'Voices', exact: true }).click();
+  const voices = page.getByRole('dialog', { name: 'Voices' });
+  await voices.getByRole('tab', { name: 'Word index' }).click();
+  await voices.getByRole('checkbox', { name: /^Reactions/ }).check();
+  await voices.getByRole('button', { name: 'Save categories' }).click();
+  // "Reactions" holds Laugh and, in "Deep cuts", Airhorn: each is read once, in the background.
+  await expect(voices.getByRole('status').filter({ hasText: 'sounds indexed' })).toContainText(
+    '2 of 2 sounds indexed',
+    { timeout: 30000 },
+  );
+  await voices.getByRole('tab', { name: 'Library' }).click();
+  await voices.getByLabel('Search the voice library').fill('fixture');
+  const results = voices.getByRole('list', { name: 'Search results' });
+  const laugh = results.getByRole('listitem').filter({ hasText: 'Laugh' });
+  await expect(laugh.getByText('Sound', { exact: true })).toBeVisible();
+  await expect(laugh.locator('mark').first()).toHaveText(/fixture/i);
+  // Filtering out Sounds hides them.
+  await voices
+    .getByRole('group', { name: 'Result types' })
+    .getByRole('button', { name: /^Sounds/ })
+    .click();
+  await expect(laugh).toHaveCount(0);
+});
+
+test('voice library: the review queue labels and keeps new recordings from the keyboard', async ({
+  page,
+  harness,
+}) => {
+  await host(page, harness);
+  await startListening(page);
+  await page.keyboard.press('Escape');
+  await keepRecentInLibrary(page, 'First new');
+  await page.waitForTimeout(1200); // a different stretch for the second one
+  await keepRecentInLibrary(page, 'Second new');
+  expect(
+    (await sendCommand(page, 'libraryVoice', { action: 'create', name: 'Robo' })).error,
+  ).toBeUndefined();
+  await page.getByRole('button', { name: 'Voices', exact: true }).click();
+  const voices = page.getByRole('dialog', { name: 'Voices' });
+  await voices.getByRole('tab', { name: 'Review (2)' }).click();
+  const queue = voices.getByRole('region', { name: 'Review queue' });
+  await expect(queue).toBeFocused();
+  await expect(queue).toContainText('1 of 2');
+  await expect(queue).toContainText('First new');
+  await page.keyboard.press('1'); // the first voice
+  await expect(queue.getByRole('button', { name: /Robo/ })).toHaveAttribute('aria-pressed', 'true');
+  await page.keyboard.press('Enter'); // keep: reviewed, next
+  await expect(queue).toContainText('2 of 2');
+  await expect(queue).toContainText('Second new');
+  await page.keyboard.press('s'); // skip
+  await expect(queue).toContainText('All caught up. 1 kept, 1 skipped.');
+  await expect(voices.getByRole('tab', { name: 'Review (1)' })).toBeVisible();
+  const list = (await sendCommand(page, 'libraryList', { reviewed: true })) as {
+    data: { items: { title: string; voiceId: string | null }[] };
+  };
+  expect(list.data.items.map((r) => r.title)).toEqual(['First new']);
+  expect(list.data.items[0].voiceId).toMatch(/^[a-f0-9]{32}$/);
+});
