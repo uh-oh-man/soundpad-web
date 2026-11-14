@@ -1,147 +1,31 @@
-import { test as base, expect, type Locator, type Page } from '@playwright/test';
+import { type Locator, type Page } from '@playwright/test';
 import AxeBuilder from '@axe-core/playwright';
-import { spawn } from 'node:child_process';
+import {
+  test,
+  expect,
+  startHarness,
+  host,
+  invite,
+  finishGuestName,
+  playButton,
+  useLocalGuests,
+  joinGuest,
+  sendCommand,
+  ORIGIN,
+  PORT,
+  TEMP_READY,
+} from './helpers/harness';
+import {
+  section,
+  closeSection,
+  openTemp,
+  isTempOpen,
+  editCopyForm,
+  closeEditor,
+} from './helpers/shell';
+import { kickDetail } from './helpers/playback';
 import { resolve } from 'node:path';
 import { readFile, mkdir, writeFile } from 'node:fs/promises';
-type Harness = {
-  launch: string;
-  /** 2.41: replaces the recording history with a new one at once, as when Mimic restarts. */
-  restartHistory: () => void;
-  /** What reached Soundpad to play, seek or pause (TEST_PLAY lines), in order. */
-  plays: string[];
-  /** The same plus every stop (TEST_STOP lines, 2.35), in order: what Soundpad was told last. */
-  soundpad: string[];
-  log: () => string;
-};
-// How long to wait for an upload, reverse or edited copy to be ready in Temp. On a slow CI runner one
-// took over 25 s (v2.29.0's tag run), and a failed tag run publishes no EXE, so CI gets more room.
-const TEMP_READY = process.env.CI ? 45000 : 25000;
-// The dev server's port: 5173 unless E2E_PORT says otherwise (a second checkout running the suite at the same time).
-const PORT = process.env.E2E_PORT ?? '5173';
-const ORIGIN = `http://127.0.0.1:${PORT}`;
-async function startHarness(origin = ORIGIN, count = 4, options: string[] = []) {
-  const proc = spawn(
-    resolve(
-      'companion/harness/bin/Release/net10.0-windows10.0.19041.0/win-x64/SoundpadWeb.Harness.exe',
-    ),
-    [origin, String(count), ...options],
-    { windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] },
-  );
-  const plays: string[] = [];
-  const soundpad: string[] = [];
-  let output = '';
-  const address = await new Promise<{ port: number; token: string }>((resolve, reject) => {
-    const timeout = setTimeout(
-      () => reject(Error('Test harness startup timed out. Build companion/harness first.')),
-      15000,
-    );
-    proc.on('error', reject);
-    proc.on('exit', (code) => {
-      if (code) reject(Error('Test harness exited: ' + code));
-    });
-    proc.stdout.on('data', (chunk) => {
-      output = (output + chunk.toString()).slice(-20000);
-      const ready = /TEST_READY (\{[^\n]+\})/.exec(output);
-      if (ready) {
-        clearTimeout(timeout);
-        resolve(JSON.parse(ready[1]));
-      }
-      for (const match of chunk.toString().matchAll(/TEST_(PLAY|STOP) ([^\r\n]+)/g)) {
-        if (match[1] === 'PLAY') plays.push(match[2]);
-        soundpad.push(match[2]);
-      }
-    });
-    proc.stderr.on('data', (chunk) => {
-      if (chunk.toString().includes('Unhandled')) reject(Error('Test harness error.'));
-    });
-  });
-  return {
-    launch: `${origin}/#host=${address.port}.${address.token}`,
-    plays,
-    soundpad,
-    // The companion's own console log (it notes refusals and errors), for failure diagnostics.
-    log: () =>
-      output
-        .split(/\r?\n/)
-        .filter((l) => l && !l.startsWith('TEST_'))
-        .slice(-15)
-        .join(' | '),
-    /** 2.41: the companion replaces its recording history with a new one at once (as when Mimic restarts). */
-    restartHistory: () => proc.stdin.write('restart-history\n'),
-    stop: async () => {
-      proc.stdin.write('exit\n');
-      await new Promise<void>((r) => {
-        if (proc.exitCode !== null) r();
-        else {
-          proc.once('exit', () => r());
-          setTimeout(() => {
-            if (proc.exitCode === null) proc.kill();
-            r();
-          }, 5000);
-        }
-      });
-    },
-  };
-}
-const test = base.extend<{ harness: Harness; diagnostics: void; harnessOptions: string[] }>({
-  // Extra harness arguments for a group of tests (test.use), e.g. ['--latency-ms', '40'] for a
-  // Soundpad that takes 40 ms per request; see the end of companion/harness/Program.cs.
-  harnessOptions: [[], { option: true }],
-  harness: async ({ harnessOptions }, use) => {
-    const harness = await startHarness(undefined, undefined, harnessOptions);
-    try {
-      await use(harness);
-    } finally {
-      await harness.stop();
-    }
-  },
-  // When a test fails, add what the page and companion were saying to the failure. CI's traces and
-  // logs need a login to read, but failure messages are public, so a flaky run explains itself.
-  diagnostics: [
-    async ({ page, harness }, use, testInfo) => {
-      const consoleErrors: string[] = [];
-      page.on('console', (m) => {
-        if (m.type() === 'error') consoleErrors.push(m.text().slice(0, 200));
-      });
-      page.on('pageerror', (e) => consoleErrors.push(e.message.slice(0, 200)));
-      await use();
-      if (testInfo.status === testInfo.expectedStatus) return;
-      const visible = await page
-        .evaluate(() => {
-          const text = (selector: string) =>
-            (document.querySelector(selector) as HTMLElement | null)?.innerText.trim() ?? '';
-          return {
-            notices: text('.notification-stack'),
-            status: text('header'),
-            url: location.pathname + location.search,
-          };
-        })
-        .catch(() => null);
-      throw Error(
-        [
-          'Diagnostics for the failure above:',
-          `page notices: ${JSON.stringify(visible?.notices ?? '(page closed)')}`,
-          `page header: ${JSON.stringify(visible?.status.slice(0, 300) ?? '')}`,
-          `console errors: ${JSON.stringify(consoleErrors.slice(-5))}`,
-          `companion log: ${harness.log()}`,
-        ].join('\n'),
-      );
-    },
-    { auto: true },
-  ],
-});
-async function host(page: Page, harness: Harness) {
-  await page.goto(harness.launch);
-  await expect(
-    page.getByRole('button', { name: 'Play from start: Airhorn', exact: true }),
-  ).toBeEnabled();
-}
-async function invite(page: Page) {
-  await page.getByRole('button', { name: 'Access settings' }).click();
-  const url = await page.locator('#invite').inputValue();
-  await page.getByRole('button', { name: 'Close dialog' }).click();
-  return url;
-}
 /**
  * Capture (2.40) opens the selection as a draft; Keep in Temp makes the clip (what "Mimic it" did at once
  * until 2.39). Returns the draft region, which stays open.
@@ -151,12 +35,6 @@ async function captureAndKeep(dialog: Locator) {
   const draft = dialog.getByRole('region', { name: 'Draft' });
   await draft.getByRole('button', { name: 'Keep in Temp', exact: true }).click();
   return draft;
-}
-async function finishGuestName(page: Page, name = 'Fixture Guest') {
-  const dialog = page.getByRole('dialog', { name: /gamer name/i });
-  await expect(dialog).toBeVisible();
-  await dialog.getByLabel('Gamer name').fill(name);
-  await dialog.getByRole('button', { name: 'Done', exact: true }).click();
 }
 
 test('landing page has an honest disconnected state', async ({ page }) => {
@@ -303,7 +181,7 @@ test('host controls persist permissions and reset requires confirmation', async 
   await expect(page.getByLabel('Allow remote playback')).not.toBeChecked();
   await expect(page.getByLabel('Allow guest counter changes')).toBeChecked();
   page.once('dialog', (d) => d.dismiss());
-  await page.getByRole('button', { name: 'Reset Kick counter' }).click();
+  await kickDetail(page, 'Reset');
   await expect(page.getByLabel('Kick count', { exact: true })).toHaveText('1');
 });
 test('production static bundle on a synthetic HTTPS origin reaches only its authenticated loopback bridge', async ({
@@ -1031,7 +909,7 @@ test('session uploads use temp, reverse immediately, and End hosting keeps Temp 
   await expect.poll(() => harness.plays).toContain('DoPlaySound(6)');
   await expect(page.locator('.player-track')).toContainText('Session tone (reversed)');
   await page.getByRole('button', { name: 'Stop', exact: true }).click();
-  await page.locator('#temp-manager > summary').click();
+  await openTemp(page);
   await page.getByRole('button', { name: 'Keep normal permanently', exact: true }).click();
   await page.getByRole('button', { name: 'Confirm permanent save', exact: true }).click();
   await expect(page.locator('.temp-save')).toHaveCount(0);
@@ -1050,7 +928,7 @@ test('session uploads use temp, reverse immediately, and End hosting keeps Temp 
       .getByRole('button', { name: /^Temp - Soundpad Web/ }),
   ).toBeVisible();
   // Temp opens as it was left (2.40: each section remembers its open item).
-  await expect(page.locator('#temp-manager')).toHaveAttribute('open', '');
+  await isTempOpen(page);
   await expect(page.locator('#temp-manager')).toContainText('reversed · ready');
   await expect(
     page.getByRole('button', { name: 'Play from start: Airhorn', exact: true }),
@@ -1157,7 +1035,7 @@ test('live Nostr/WebRTC: compact invites, guest upload, shared organization and 
     await g2.getByRole('button', { name: 'Reverse and play Guest tone', exact: true }).click();
     await expect.poll(() => harness.plays).toContain('DoPlaySound(6)');
     await page.getByRole('button', { name: 'Stop', exact: true }).click();
-    await page.locator('#temp-manager > summary').click();
+    await openTemp(page);
     await page.getByRole('button', { name: 'Keep normal permanently', exact: true }).click();
     await page.getByRole('button', { name: 'Confirm permanent save', exact: true }).click();
     await expect(page.locator('.temp-save')).toHaveCount(0);
@@ -1355,13 +1233,13 @@ test('polished tile and Temp review screenshots in both themes and mobile', asyn
   await page.getByRole('button', { name: 'Reverse and play Session review', exact: true }).click();
   await expect(page.locator('.player-track')).toContainText('Session review (reversed)');
   await page.getByRole('button', { name: 'Stop', exact: true }).click();
-  await page.locator('#temp-manager > summary').click();
+  await openTemp(page);
   await expect(page.locator('.temp-source')).toContainText('Session review');
   await page.screenshot({ path: 'artifacts/screenshots/v23-temp.png' });
   await page.getByRole('button', { name: 'Keep normal permanently', exact: true }).click();
   await page.screenshot({ path: 'artifacts/screenshots/v23-permanent-confirmation.png' });
   await page.getByRole('button', { name: 'Cancel', exact: true }).click();
-  await page.locator('#temp-manager > summary').click();
+  await openTemp(page);
   await page.getByRole('combobox', { name: 'View mode' }).selectOption('icons');
   await page.getByRole('button', { name: 'Access settings' }).click();
   await page.getByRole('combobox', { name: 'Theme', exact: true }).selectOption('purple');
@@ -1429,12 +1307,12 @@ test('Mimic: host listens, everyone sees it, and a selection becomes a playable 
   await expect(page.locator('.player-track')).toContainText('Fixture mimic (reversed)');
   // Trim saves an exact copy as a new Temp sound and keeps the original.
   await page.keyboard.press('Escape');
-  await page.locator('#temp-manager > summary').click();
+  await openTemp(page);
   const source = page
     .locator('.temp-source')
     .filter({ has: page.getByText('Fixture mimic', { exact: true }) });
   await source.getByRole('button', { name: 'Edit copy', exact: true }).click();
-  const trim = page.getByRole('form', { name: 'Edit a copy of Fixture mimic' });
+  const trim = editCopyForm(page, 'Fixture mimic');
   // Starts as the whole clip: the last 3 s, or a little less if listening began under 3 s earlier
   // (a slow machine takes longer to get here).
   await expect(trim.getByLabel('End (s)')).toHaveValue(/^(2\.\d+|3)$/);
@@ -1866,7 +1744,7 @@ test('Mimic drafts: Capture opens a draft, an edge drags into the audio around i
   await draft.getByRole('button', { name: 'Keep in Temp', exact: true }).click();
   await expect(playButton(page, 'Draft one')).toBeEnabled({ timeout: TEMP_READY });
   // Closing Mimic and playing a Soundboard tile keep the draft: Mimic opens on it again.
-  await dialog.getByRole('button', { name: 'Close dialog' }).click();
+  await closeEditor(page);
   await playButton(page, 'Airhorn').click();
   await expect.poll(() => harness.plays.length).toBeGreaterThan(playsBefore);
   await page.getByRole('button', { name: 'Mimic', exact: true }).click();
@@ -2016,7 +1894,7 @@ test('guest storage: at the Temp budget new clips wait for the host, who allows 
   expect((await clip(1, 'Budget two')).error).toBeUndefined();
   expect((await clip(1.5, 'Budget three')).error).toMatch(/Waiting for the host to allow more/);
   // The guest is told where they stand; the host gets a request, like the lobby's.
-  await guest.locator('#temp-manager > summary').click();
+  await openTemp(guest);
   await expect(guest.locator('#temp-manager')).toContainText('waiting for the host to allow more');
   const requests = page.getByRole('list', { name: 'Guests waiting for more storage' });
   await expect(requests).toContainText('Fixture Guest asks for more Temp space');
@@ -2263,7 +2141,7 @@ test('Temp offers to remove duplicate Temp categories that old companions create
     });
   });
   await host(page, harness);
-  await page.locator('#temp-manager > summary').click();
+  await openTemp(page);
   await expect(page.getByText('Soundpad has 1507 copies')).toBeVisible();
   page.once('dialog', (dialog) => void dialog.accept());
   await page.getByRole('button', { name: 'Remove duplicate categories' }).click();
@@ -2283,12 +2161,12 @@ test('Edit copy: dragging on the waveform sets Start and End, and the host can p
   await expect(
     page.getByRole('button', { name: 'Play from start: Drag tone', exact: true }),
   ).toBeEnabled({ timeout: TEMP_READY });
-  await page.locator('#temp-manager > summary').click();
+  await openTemp(page);
   await page
     .locator('.temp-source', { hasText: 'Drag tone' })
     .getByRole('button', { name: 'Edit copy' })
     .click();
-  const form = page.getByRole('form', { name: 'Edit a copy of Drag tone' });
+  const form = editCopyForm(page, 'Drag tone');
   const wave = form.getByTestId('trim-wave');
   await expect(wave.locator('.trim-wave-path')).toHaveAttribute('d', /M/, { timeout: 15000 });
   const box = (await wave.boundingBox())!;
@@ -2353,12 +2231,12 @@ test('Edit copy: Zoom to selection shows just the chosen part for fine dragging'
   await expect(
     page.getByRole('button', { name: 'Play from start: Zoom tone', exact: true }),
   ).toBeEnabled({ timeout: TEMP_READY });
-  await page.locator('#temp-manager > summary').click();
+  await openTemp(page);
   await page
     .locator('.temp-source', { hasText: 'Zoom tone' })
     .getByRole('button', { name: 'Edit copy' })
     .click();
-  const form = page.getByRole('form', { name: 'Edit a copy of Zoom tone' });
+  const form = editCopyForm(page, 'Zoom tone');
   const wave = form.getByTestId('trim-wave');
   await expect(wave.locator('.trim-wave-path')).toHaveAttribute('d', /M/, { timeout: 15000 });
   // The whole sound is chosen at first, so there is nothing to zoom to yet.
@@ -2415,12 +2293,12 @@ test('Edit copy: Loop repeats the preview and replays it when the cut changes', 
   await expect(
     page.getByRole('button', { name: 'Play from start: Loop tone', exact: true }),
   ).toBeEnabled({ timeout: TEMP_READY });
-  await page.locator('#temp-manager > summary').click();
+  await openTemp(page);
   await page
     .locator('.temp-source', { hasText: 'Loop tone' })
     .getByRole('button', { name: 'Edit copy' })
     .click();
-  const form = page.getByRole('form', { name: 'Edit a copy of Loop tone' });
+  const form = editCopyForm(page, 'Loop tone');
   await form.getByLabel('Loop').check();
   const playsBefore = harness.plays.length;
   await form.getByRole('button', { name: 'Preview' }).click();
@@ -2471,7 +2349,7 @@ test('Temp: a search appears once there are more than six sources', async ({ pag
     ).toBeEnabled({ timeout: TEMP_READY });
     if (i === 5) {
       // Six sources: no search yet.
-      await page.locator('#temp-manager > summary').click();
+      await openTemp(page);
       await expect(page.locator('.temp-source')).toHaveCount(6);
       await expect(page.getByRole('searchbox', { name: 'Search Temp' })).toHaveCount(0);
     }
@@ -2489,7 +2367,7 @@ test('Temp: a search appears once there are more than six sources', async ({ pag
     .click();
   await search.fill('nothing like this');
   await expect(page.getByText('No sources match', { exact: false })).toHaveCount(0);
-  await expect(page.getByRole('form', { name: 'Edit a copy of Foxtrot' })).toBeVisible();
+  await expect(editCopyForm(page, 'Foxtrot')).toBeVisible();
   await page
     .getByRole('form', { name: 'Edit a copy of Foxtrot' })
     .getByRole('button', { name: 'Cancel' })
@@ -2511,12 +2389,12 @@ test('Edit copy: Save & play makes the copy and plays it through Soundpad', asyn
   await expect(
     page.getByRole('button', { name: 'Play from start: Play me', exact: true }),
   ).toBeEnabled({ timeout: TEMP_READY });
-  await page.locator('#temp-manager > summary').click();
+  await openTemp(page);
   await page
     .locator('.temp-source', { hasText: 'Play me' })
     .getByRole('button', { name: 'Edit copy' })
     .click();
-  const form = page.getByRole('form', { name: 'Edit a copy of Play me' });
+  const form = editCopyForm(page, 'Play me');
   await form.getByLabel('Start (s)').fill('0.5');
   await form.getByRole('combobox').selectOption('chipmunk');
   const playsBefore = harness.plays.length;
@@ -2542,12 +2420,12 @@ test('Edit copy: Undo on the notice takes the new copy back out (host)', async (
   await expect(
     page.getByRole('button', { name: 'Play from start: Undo me', exact: true }),
   ).toBeEnabled({ timeout: TEMP_READY });
-  await page.locator('#temp-manager > summary').click();
+  await openTemp(page);
   await page
     .locator('.temp-source', { hasText: 'Undo me' })
     .getByRole('button', { name: 'Edit copy' })
     .click();
-  const form = page.getByRole('form', { name: 'Edit a copy of Undo me' });
+  const form = editCopyForm(page, 'Undo me');
   await form.getByRole('combobox').selectOption('echo');
   await form.getByRole('button', { name: 'Save copy' }).click();
   const copy = page.getByRole('button', { name: 'Play from start: Undo me (echo)', exact: true });
@@ -2574,12 +2452,12 @@ test('Edit copy: Undo right after Save & play stops the copy, then removes it', 
   await expect(
     page.getByRole('button', { name: 'Play from start: Undo me', exact: true }),
   ).toBeEnabled({ timeout: TEMP_READY });
-  await page.locator('#temp-manager > summary').click();
+  await openTemp(page);
   await page
     .locator('.temp-source', { hasText: 'Undo me' })
     .getByRole('button', { name: 'Edit copy' })
     .click();
-  const form = page.getByRole('form', { name: 'Edit a copy of Undo me' });
+  const form = editCopyForm(page, 'Undo me');
   await form.getByRole('combobox').selectOption('echo');
   await form.getByRole('button', { name: 'Save & play' }).click();
   const notice = page.getByRole('status').filter({ hasText: 'Copy added to Temp and playing.' });
@@ -2608,7 +2486,7 @@ test('Undo on the upload notice takes the wrong file straight back out', async (
     .click();
   await expect(page.getByText('Upload removed from Temp.')).toBeVisible({ timeout: 15000 });
   await expect(sound).toHaveCount(0, { timeout: TEMP_READY });
-  await page.locator('#temp-manager > summary').click();
+  await openTemp(page);
   await expect(page.locator('.temp-source', { hasText: 'Wrong file' })).toHaveCount(0);
 });
 
@@ -2638,12 +2516,12 @@ test('Edit copy can make a copy at any speed', async ({ page, harness }) => {
   await expect(
     page.getByRole('button', { name: 'Play from start: Speed tone', exact: true }),
   ).toBeEnabled({ timeout: TEMP_READY });
-  await page.locator('#temp-manager > summary').click();
+  await openTemp(page);
   await page
     .locator('.temp-source', { hasText: 'Speed tone' })
     .getByRole('button', { name: 'Edit copy' })
     .click();
-  const form = page.getByRole('form', { name: 'Edit a copy of Speed tone' });
+  const form = editCopyForm(page, 'Speed tone');
   await form.getByRole('combobox').selectOption('speed');
   const speed = form.getByRole('group', { name: 'Speed' });
   await speed.getByLabel('Exact speed (×)').fill('0.5');
@@ -2665,7 +2543,7 @@ test('Edit copy can make a copy at any speed', async ({ page, harness }) => {
     .first()
     .getByRole('button', { name: 'Edit copy' })
     .click();
-  const again = page.getByRole('form', { name: 'Edit a copy of Speed tone' });
+  const again = editCopyForm(page, 'Speed tone');
   await again.getByRole('combobox').selectOption('speed');
   await again.getByRole('group', { name: 'Speed' }).getByLabel('Exact speed (×)').fill('0.5');
   await again.getByLabel('Keep pitch').check();
@@ -2693,7 +2571,7 @@ test('the host can clear all temporary audio mid-session and keep hosting', asyn
     .setInputFiles({ name: 'Clear me.wav', mimeType: 'audio/wav', buffer: sessionWave() });
   const sound = page.getByRole('button', { name: 'Play from start: Clear me', exact: true });
   await expect(sound).toBeEnabled({ timeout: TEMP_READY });
-  await page.locator('#temp-manager > summary').click();
+  await openTemp(page);
   page.once('dialog', (dialog) => void dialog.accept());
   await page.getByRole('button', { name: 'Clear all temporary audio' }).click();
   await expect(
@@ -2714,7 +2592,7 @@ test('Temp keeps the native original distinct from its generated reverse', async
   await page.getByRole('button', { name: 'Reverse and play Airhorn', exact: true }).click();
   await expect(page.locator('.player-track')).toContainText('Airhorn (reversed)');
   await page.getByRole('button', { name: 'Stop', exact: true }).click();
-  await page.locator('#temp-manager > summary').click();
+  await openTemp(page);
   await expect(page.getByRole('button', { name: 'Play normal', exact: true })).toBeEnabled();
   await expect(
     page.getByRole('button', { name: 'Keep normal permanently', exact: true }),
@@ -2741,7 +2619,7 @@ test('accessibility: no serious or critical axe violations on the main screens',
   await landing.close();
   await host(page, harness);
   await scan(page, 'board');
-  await page.locator('#temp-manager > summary').click();
+  await openTemp(page);
   await scan(page, 'temp');
   await page.getByRole('button', { name: 'Access settings' }).click();
   await scan(page, 'settings');
@@ -2803,7 +2681,7 @@ test('accessibility: no serious or critical axe violations in the dialogs, views
   await expect(
     page.getByRole('button', { name: 'Play from start: Scan tone', exact: true }),
   ).toBeEnabled({ timeout: TEMP_READY }); // decoding an upload can be slow on CI
-  await page.locator('#temp-manager > summary').click();
+  await openTemp(page);
   await page
     .locator('.temp-source', { hasText: 'Scan tone' })
     .getByRole('button', { name: 'Edit copy' })
@@ -2839,7 +2717,7 @@ test('slow connection: busy buttons, Temp and Mimic toggles keep keyboard focus 
   }
   await expect(page.getByLabel('Kick count', { exact: true })).toHaveText('1');
   // The reverse above left a Temp source; its buttons and Refresh library behave the same way.
-  await page.locator('#temp-manager > summary').click();
+  await openTemp(page);
   for (const button of [
     page.getByRole('button', { name: 'Play normal', exact: true }).first(),
     page.getByRole('button', { name: 'Refresh library', exact: true }),
@@ -3056,7 +2934,7 @@ test('Mimic: Edit on a fresh clip opens its Edit copy in Temp', async ({ page, h
   // with Edit copy for this clip, and Start has the keyboard focus.
   await recent.getByRole('button', { name: 'Edit a copy of Trim me' }).click();
   await expect(dialog).toBeHidden();
-  const form = page.getByRole('form', { name: 'Edit a copy of Trim me' });
+  const form = editCopyForm(page, 'Trim me');
   await expect(form).toBeVisible({ timeout: 15000 });
   await expect(form.getByLabel('Start (s)')).toBeFocused();
   await expect(form.getByLabel('Start (s)')).toHaveValue('0');
@@ -3150,7 +3028,7 @@ test('Edit copy: with transcripts on, a plain trim is named after its words', as
   await page.keyboard.press('Enter');
   const recent = dialog.getByRole('region', { name: 'Just mimicked' });
   await recent.getByRole('button', { name: 'Edit a copy of Words test' }).click();
-  const form = page.getByRole('form', { name: 'Edit a copy of Words test' });
+  const form = editCopyForm(page, 'Words test');
   await expect(form).toBeVisible({ timeout: 15000 });
   await expect(form).toContainText('named after its words');
   await expect(form.getByLabel('Name')).toHaveAttribute('placeholder', 'Its words (trimmed)');
@@ -3184,13 +3062,13 @@ test('accessibility: no serious or critical axe violations in the newer controls
   await expect(
     page.getByRole('button', { name: 'Play from start: Scan tone', exact: true }),
   ).toBeEnabled({ timeout: TEMP_READY });
-  await page.locator('#temp-manager > summary').click();
+  await openTemp(page);
   await scan('temp with clear button');
   await page
     .locator('.temp-source', { hasText: 'Scan tone' })
     .getByRole('button', { name: 'Edit copy' })
     .click();
-  const form = page.getByRole('form', { name: 'Edit a copy of Scan tone' });
+  const form = editCopyForm(page, 'Scan tone');
   await form.getByRole('combobox').selectOption('speed');
   await form.getByLabel('Keep pitch').check();
   await scan('edit copy at any speed');
@@ -3271,12 +3149,12 @@ test('on a phone, keyboard focus is never hidden behind the player bar', async (
   await expect(
     page.getByRole('button', { name: 'Play from start: Focus tone', exact: true }),
   ).toBeEnabled({ timeout: TEMP_READY });
-  await page.locator('#temp-manager > summary').click();
+  await openTemp(page);
   await page
     .locator('.temp-source', { hasText: 'Focus tone' })
     .getByRole('button', { name: 'Edit copy' })
     .click();
-  const form = page.getByRole('form', { name: 'Edit a copy of Focus tone' });
+  const form = editCopyForm(page, 'Focus tone');
   await page.evaluate(() => window.scrollTo(0, 0));
   await form.getByLabel('Name').focus();
   for (const name of ['Save copy', 'Save & play', 'Preview']) {
@@ -3338,35 +3216,6 @@ test('Mimic fits a phone: header keeps Settings on screen and long clip names do
 
 const LONG_TITLE =
   'An extremely long sound title that should wrap gracefully on every single phone screen without breaking the grid';
-const playButton = (page: Page, name: string, nth = 0) =>
-  page.getByRole('button', { name: `Play from start: ${name}`, exact: true }).nth(nth);
-/**
- * Lets a guest page join the host page inside this browser context with no relay and no WebRTC: the
- * dev server's BroadcastChannel transport (web/src/network/test-transport.ts) carries the session.
- * Call before the host page loads. A production build has no such switch.
- */
-async function useLocalGuests(page: Page) {
-  await page
-    .context()
-    .addInitScript(() => localStorage.setItem('soundpad-test-transport', 'broadcast'));
-}
-/** Opens the host's invitation in a second page of the same context and waits until it is connected. */
-async function joinGuest(hostPage: Page, name = 'Fixture Guest') {
-  // The invitation exists once the companion has begun the session, which a slow Soundpad delays.
-  await hostPage.getByRole('button', { name: 'Access settings' }).click();
-  await expect(hostPage.locator('#invite')).toHaveValue(/#join=/);
-  const link = await hostPage.locator('#invite').inputValue();
-  await hostPage.getByRole('button', { name: 'Close dialog' }).click();
-  const guest = await hostPage.context().newPage();
-  await guest.goto(link);
-  await finishGuestName(guest, name);
-  await expect(playButton(guest, 'Airhorn')).toBeEnabled();
-  await expect(guest.locator('header .status')).toHaveText('Connected');
-  await expect(
-    hostPage.locator('.board-heading').getByRole('status').filter({ hasText: 'connected guest' }),
-  ).toHaveText(/1 connected guest/);
-  return guest;
-}
 /** Records every error notice a page shows from now on (each leaves after 8 s); returns a reader. */
 async function recordErrors(page: Page) {
   await page.evaluate(() => {
@@ -3387,23 +3236,6 @@ const reportedStatus = (page: Page) =>
     const { controller } = await import(/* @vite-ignore */ '/src/' + 'controller.ts');
     return controller.getSnapshot().state.playback.status as string;
   });
-/** Sends one command from the page as its controller would, without the page's own checks. */
-const sendCommand = (page: Page, op: string, fields: Record<string, unknown> = {}) =>
-  page.evaluate(
-    async ([op, fields]) => {
-      const { controller } = await import(/* @vite-ignore */ '/src/' + 'controller.ts');
-      const { library } = controller.getSnapshot().state;
-      const play = { soundId: library.sounds[0].id, libraryVersion: library.version };
-      try {
-        return {
-          data: await controller.run(op, op === 'play' ? play : fields, { quiet: true }),
-        };
-      } catch (e) {
-        return { error: e instanceof Error ? e.message : String(e) };
-      }
-    },
-    [op, fields] as const,
-  );
 
 test('two controllers: host and guest alternate plays and waveform cues, and the last click wins', async ({
   page,
@@ -3736,12 +3568,12 @@ test.describe('with a Soundpad that takes 1.5 s to import a file', () => {
       .getByLabel('Add session audio', { exact: true })
       .setInputFiles({ name: 'Slow copy.wav', mimeType: 'audio/wav', buffer: sessionWave(2) });
     await expect(playButton(page, 'Slow copy')).toBeEnabled({ timeout: TEMP_READY });
-    await page.locator('#temp-manager > summary').click();
+    await openTemp(page);
     await page
       .locator('.temp-source', { hasText: 'Slow copy' })
       .getByRole('button', { name: 'Edit copy' })
       .click();
-    const form = page.getByRole('form', { name: 'Edit a copy of Slow copy' });
+    const form = editCopyForm(page, 'Slow copy');
     await form.getByRole('combobox').selectOption('chipmunk');
     const before = harness.soundpad.length;
     await form.getByRole('button', { name: 'Save & play' }).click();
@@ -3825,12 +3657,12 @@ test('two pages in one browser: a guest joins without any relay, uploads, saves 
   await expect(page.locator('.player-track')).toContainText('Requested by Upload Alice');
   // A guest's Save & play is one command too (2.35): the host's page passes its autoplay mark on, and
   // the companion plays the copy when it is ready.
-  await guest.locator('#temp-manager > summary').click();
+  await openTemp(guest);
   await guest
     .locator('.temp-source', { hasText: 'Guest tone' })
     .getByRole('button', { name: 'Edit copy' })
     .click();
-  const form = guest.getByRole('form', { name: 'Edit a copy of Guest tone' });
+  const form = editCopyForm(guest, 'Guest tone');
   await form.getByRole('combobox').selectOption('chipmunk');
   const before = harness.plays.length;
   await form.getByRole('button', { name: 'Save & play' }).click();
@@ -3887,12 +3719,12 @@ test('a companion older than 2.35: no Panic, and Save & play still plays, as two
     .getByLabel('Add session audio', { exact: true })
     .setInputFiles({ name: 'Old way.wav', mimeType: 'audio/wav', buffer: sessionWave(2) });
   await expect(playButton(page, 'Old way')).toBeEnabled({ timeout: TEMP_READY });
-  await page.locator('#temp-manager > summary').click();
+  await openTemp(page);
   await page
     .locator('.temp-source', { hasText: 'Old way' })
     .getByRole('button', { name: 'Edit copy' })
     .click();
-  const form = page.getByRole('form', { name: 'Edit a copy of Old way' });
+  const form = editCopyForm(page, 'Old way');
   await form.getByRole('combobox').selectOption('chipmunk');
   const before = harness.plays.length;
   await form.getByRole('button', { name: 'Save & play' }).click();
@@ -4343,7 +4175,7 @@ test('example session: plays example sounds in this browser, edits a copy, and l
   await expect(mimic.locator('.mimic-intro')).toContainText('The example shows the older Mimic');
   await expect(mimic).toContainText("Host's PC only: there, pressing F6 in any app saves the last");
   await expect(mimic).not.toContainText('Press F6 in any app on this PC');
-  await mimic.getByRole('button', { name: 'Close dialog' }).click();
+  await closeEditor(page);
   // There is no companion to update (the example stands in for one without the 2.39 recording history).
   await page.getByRole('button', { name: 'Access settings' }).click();
   await expect(page.getByRole('dialog').first()).toBeVisible();
@@ -4378,10 +4210,10 @@ test('example session: plays example sounds in this browser, edits a copy, and l
   // Temp: reverse a sound, then make an edited copy of it.
   await page.getByRole('button', { name: 'Reverse and play Dog Bark' }).click();
   await expect(page.locator('.player-track strong')).toHaveText('Dog Bark (reversed)');
-  await page.locator('#temp-manager > summary').click();
+  await openTemp(page);
   const source = page.locator('.temp-source').filter({ hasText: 'Dog Bark' });
   await source.getByRole('button', { name: 'Edit copy' }).click();
-  const form = page.getByRole('form', { name: 'Edit a copy of Dog Bark' });
+  const form = editCopyForm(page, 'Dog Bark');
   await form.getByLabel('Effect').selectOption('speed');
   await form.getByLabel('Exact speed (×)').fill('2');
   await form.getByLabel('Keep pitch').check();
@@ -4491,7 +4323,7 @@ test('notices never cover Mimic’s close button, Leave example, Stop, Panic or 
       .locator('.board-actions')
       .getByRole('button', { name: 'Mimic', exact: true })
       .click();
-    await dialog.getByRole('button', { name: 'Close dialog' }).click();
+    await closeEditor(page);
     await page.getByRole('button', { name: 'Leave example' }).click();
     await expect(page.getByRole('button', { name: 'Try the example' })).toBeVisible();
   }
@@ -4616,9 +4448,9 @@ test('voice library: a kept draft appears in Voices with its words, a word searc
     timeout: TEMP_READY,
   });
   await expect(draft).toHaveCount(0); // kept: the draft is done
-  await dialog.getByRole('button', { name: 'Close dialog' }).click();
+  await closeEditor(page);
   await page.getByRole('button', { name: 'Voices', exact: true }).click();
-  const voices = page.getByRole('dialog', { name: 'Voices' });
+  const voices = section(page, 'Voices');
   const recordings = voices.getByRole('list', { name: 'Recordings' });
   await expect(recordings).toContainText('Library line');
   // Its words: copied from the history's transcript (or found in the background), "Fixture tone N".
@@ -4647,7 +4479,7 @@ test('voice library: a guest tags a recording and takes it back with Undo; the h
   const id = await keepRecentInLibrary(page, 'Shared line');
   const guest = await joinGuest(page);
   await guest.getByRole('button', { name: 'Voices', exact: true }).click();
-  const voices = guest.getByRole('dialog', { name: 'Voices' });
+  const voices = section(guest, 'Voices');
   await voices
     .getByRole('list', { name: 'Recordings' })
     .getByRole('button', { name: 'Shared line', exact: true })
@@ -4681,7 +4513,7 @@ test('voice library: the host indexes a Soundpad category and finds its sound by
 }) => {
   await host(page, harness);
   await page.getByRole('button', { name: 'Voices', exact: true }).click();
-  const voices = page.getByRole('dialog', { name: 'Voices' });
+  const voices = section(page, 'Voices');
   await voices.getByRole('tab', { name: 'Word index' }).click();
   await voices.getByRole('checkbox', { name: /^Reactions/ }).check();
   await voices.getByRole('button', { name: 'Save categories' }).click();
@@ -4718,7 +4550,7 @@ test('voice library: the review queue labels and keeps new recordings from the k
     (await sendCommand(page, 'libraryVoice', { action: 'create', name: 'Robo' })).error,
   ).toBeUndefined();
   await page.getByRole('button', { name: 'Voices', exact: true }).click();
-  const voices = page.getByRole('dialog', { name: 'Voices' });
+  const voices = section(page, 'Voices');
   await voices.getByRole('tab', { name: 'Review (2)' }).click();
   const queue = voices.getByRole('region', { name: 'Review queue' });
   await expect(queue).toBeFocused();
@@ -4751,7 +4583,7 @@ async function recordingsWithWords(page: Page, count = 2) {
       .getByRole('button', { name: 'Fixture', exact: true })
       .first(),
   ).toBeVisible({ timeout: 15000 });
-  await dialog.getByRole('button', { name: 'Close dialog' }).click();
+  await closeEditor(page);
   for (let i = 1; i <= count; i++) await keepRecentInLibrary(page, `Take ${i}`);
   await expect
     .poll(
@@ -4778,7 +4610,7 @@ test('sentences: typed from recorded words without playing, a take swapped, a mi
   await host(page, harness);
   await recordingsWithWords(page);
   await page.getByRole('button', { name: 'Sentences', exact: true }).click();
-  const sentences = page.getByRole('dialog', { name: 'Sentences' });
+  const sentences = section(page, 'Sentences');
   const before = harness.plays.length;
   await sentences.getByLabel('New sentence').fill('fixture tone zebra');
   await sentences.getByRole('button', { name: 'New sentence' }).click();
@@ -4821,7 +4653,7 @@ test('sentences: typed from recorded words without playing, a take swapped, a mi
   await expect(builder.getByText('Kept · version 1')).toBeVisible();
   await builder.getByRole('button', { name: 'Pin to board' }).click();
   await expect(builder.getByRole('button', { name: 'Unpin from board' })).toBeVisible();
-  await sentences.getByRole('button', { name: 'Close dialog' }).click();
+  await closeSection(page, 'Sentences');
   const tile = page
     .getByRole('region', { name: 'Pinned sentences' })
     .getByRole('button', { name: 'Play sentence: fixture tone zebra' });
@@ -4843,9 +4675,9 @@ test('sentences: typed from recorded words without playing, a take swapped, a mi
   await expect(versions.getByText(/^Version 2 ·/)).toBeVisible();
   await expect(versions.getByText(/^Version 1 ·/)).toBeVisible();
   // Kept sentences are found by the library's combined search, as their own type.
-  await sentences.getByRole('button', { name: 'Close dialog' }).click();
+  await closeSection(page, 'Sentences');
   await page.getByRole('button', { name: 'Voices', exact: true }).click();
-  const voices = page.getByRole('dialog', { name: 'Voices' });
+  const voices = section(page, 'Voices');
   await voices.getByLabel('Search the voice library').fill('zebra');
   const found = voices
     .getByRole('list', { name: 'Search results' })
@@ -4861,7 +4693,7 @@ test('palette: a recorded performance of my own palette taps opens as an editabl
   await host(page, harness);
   await recordingsWithWords(page, 1);
   await page.getByRole('button', { name: 'Sentences', exact: true }).click();
-  const sentences = page.getByRole('dialog', { name: 'Sentences' });
+  const sentences = section(page, 'Sentences');
   await sentences.getByRole('tab', { name: 'Palette' }).click();
   await sentences.getByRole('button', { name: 'Record performance' }).click();
   await expect(sentences.getByText('Recording your performance: 0 taps')).toBeVisible();
@@ -4896,7 +4728,7 @@ test('sentences (2.42 review): Space selects a lone piece, Escape closes, nudges
   await host(page, harness);
   await recordingsWithWords(page, 1);
   await page.getByRole('button', { name: 'Sentences', exact: true }).click();
-  const sentences = page.getByRole('dialog', { name: 'Sentences' });
+  const sentences = section(page, 'Sentences');
   await sentences.getByLabel('New sentence').fill('fixture');
   await sentences.getByRole('button', { name: 'New sentence' }).click();
   const builder = sentences.getByRole('region', { name: /^Sentence / });
