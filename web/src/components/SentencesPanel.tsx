@@ -1,6 +1,5 @@
 import {
   useEffect,
-  useMemo,
   useRef,
   useState,
   type CSSProperties,
@@ -25,6 +24,7 @@ import {
 import { controller } from '../controller';
 import type { Command, SentenceInput, Snapshot } from '../protocol';
 import { usePreviewAudio } from '../preview-audio';
+import { useReducedMotion } from '../motion';
 import { useVoiceStore } from '../library/voice-store';
 import { refreshSentences, useSentenceStore } from '../library/sentence-store';
 import type { Voice } from '../library/voices';
@@ -41,7 +41,6 @@ import {
   performanceSchema,
   pieceLabel,
   placeAt,
-  prefersReducedMotion,
   prune,
   pxOf,
   sameRef,
@@ -312,7 +311,8 @@ function Builder({
   const sendingText = useRef<Promise<void> | null>(null);
   const refocus = useRef<string[] | null>(null);
   const retry = useRef({ timer: 0, delay: 1000 });
-  const reduced = useMemo(prefersReducedMotion, []);
+  // The system's Reduce motion, or this browser's Motion: Reduce (Stage G), followed while open.
+  const reduced = useReducedMotion();
 
   const load = async () => {
     window.clearTimeout(retry.current.timer);
@@ -982,8 +982,17 @@ function Timeline({
                 onKeyDown={(e) => key(e, p, index)}
               >
                 <span className="timeline-text">
-                  {p.kind === 'pause' ? '…' : (p.substitute ?? p.text)}
+                  {/* A pause shows its length (Stage G): it is hatched, and its name says the same. */}
+                  {p.kind === 'pause' ? formatMs(p.durationMs) : (p.substitute ?? p.text)}
                 </span>
+                {(marker || overlaps.has(p.id)) && (
+                  <span
+                    className={`timeline-flag${overlaps.has(p.id) ? ' overlap' : ''}`}
+                    aria-hidden="true"
+                  >
+                    {overlaps.has(p.id) ? 'overlap' : 'missing'}
+                  </span>
+                )}
                 {marker && reduced && (
                   <span className="missing-badge" aria-hidden="true">
                     !
