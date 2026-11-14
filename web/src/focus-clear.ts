@@ -65,7 +65,7 @@ export function keepClear(el: Element | null) {
   if (!(el instanceof HTMLElement) || !el.isConnected) return;
   // Keyboard focus only: a click already landed where the pointer is, and scrolling then (for example
   // mid-drag on a waveform under a dialog's notices) would move things under the pointer.
-  if (!el.matches(':focus-visible')) return;
+  if (!el.matches(':focus-visible') || getComputedStyle(el).position === 'fixed') return;
   const root = document.scrollingElement ?? document.documentElement;
   const dialog = el.closest('[role="dialog"]');
   for (let scroller = el.parentElement; scroller; scroller = scroller.parentElement) {
@@ -79,8 +79,9 @@ export function keepClear(el: Element | null) {
       if (isRoot) window.scrollBy({ top: shift, behavior: 'instant' });
       else scroller.scrollBy({ top: shift, behavior: 'instant' });
     }
-    // A dialog floats over the page: scrolling the page behind it would not move the control.
-    if (isRoot || scroller === dialog) return;
+    // A dialog floats over the page, and so does anything fixed (the player and its waveform tools on a
+    // phone): scrolling what is behind it would not move the control, only jump the page.
+    if (isRoot || scroller === dialog || getComputedStyle(scroller).position === 'fixed') return;
   }
 }
 

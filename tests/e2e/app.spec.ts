@@ -3368,6 +3368,57 @@ test('on a phone, keyboard focus is never hidden behind the player bar or the no
   }
 });
 
+test("on a phone, focus in the player's waveform tools stays clear of the notices and never scrolls the page", async ({
+  page,
+  harness,
+}) => {
+  // 2.41 review: the tools open fixed above the player, where the notices sit too. Tab put their region
+  // controls under the notices, and moving focus clear scrolled the page behind them instead.
+  await page.setViewportSize({ width: 375, height: 812 });
+  await host(page, harness);
+  await page.getByRole('button', { name: 'Play from start: Airhorn', exact: true }).click();
+  const player = page.locator('.player');
+  await page.getByRole('button', { name: 'Expand player waveform' }).click();
+  await player.getByRole('button', { name: 'Edit', exact: true }).click();
+  await expect(player.getByLabel('New cue name')).toBeVisible();
+  await page.evaluate(async () => {
+    const path = '/src/notifications.ts';
+    const { notify } = await import(path);
+    // With a button, so each stays 10 s.
+    notify('A fixture notice, long enough to need a second line on a phone.', 'info', {
+      label: 'Undo',
+      run: () => {},
+    });
+    notify('A second fixture notice.', 'info', { label: 'Undo', run: () => {} });
+  });
+  await expect(page.locator('.notification-stack .toast')).toHaveCount(2);
+  await page.evaluate(() => window.scrollTo(0, 200));
+  await player
+    .getByLabel('New cue name')
+    .evaluate((el) => (el as HTMLElement).focus({ preventScroll: true }));
+  for (let step = 0; step < 8; step++) {
+    await page.keyboard.press('Tab');
+    const shown = await page.evaluate(() => {
+      const el = document.activeElement as HTMLElement;
+      const r = el.getBoundingClientRect();
+      const x = r.left + r.width / 2,
+        y = r.top + r.height / 2;
+      const b = document.querySelector('.notification-stack')!.getBoundingClientRect();
+      return {
+        name: el.getAttribute('aria-label') ?? el.textContent?.trim(),
+        inTools: !!el.closest('.wave-tools'),
+        underNotices: x >= b.left && x <= b.right && y >= b.top && y <= b.bottom,
+        scrollY: window.scrollY,
+      };
+    });
+    expect(shown.inTools, `step ${step} is still in the tools`).toBe(true);
+    expect(shown, `${shown.name} is clear of the notices`).toMatchObject({
+      underNotices: false,
+      scrollY: 200,
+    });
+  }
+});
+
 test('Mimic fits a phone: header keeps Settings on screen and long clip names do not widen the window', async ({
   page,
   harness,

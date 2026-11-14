@@ -997,6 +997,12 @@ html {
   display: block;
   height: var(--notices-clearance, 0px);
 }
+/* The player's waveform tools open above it, where the notices sit too: the same room at their end lets
+   their last controls scroll clear of the notices. */
+.player-wave .wave-tools {
+  padding-bottom: calc(15px + var(--notices-clearance, 0px));
+  scroll-padding-bottom: var(--notices-clearance, 0px);
+}
 /* A notice's one action, e.g. Undo after Edit copy (2.28). */
 .notification-stack .toast-action {
   flex: none;
