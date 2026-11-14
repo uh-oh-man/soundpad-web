@@ -65,6 +65,44 @@ public sealed class SessionAudioTests : IDisposable
         await bridge.CleanupSession(); await bridge.Poll(true); Assert.Equal(4, bridge.Snapshot.Library.Sounds.Length); // quitting removes it
     }
     [Fact]
+    public async Task EditedCopiesCanStartFromAnySoundpadSound()
+    {
+        // 2.43 (gate soundEdit): trimAudio and trimPreview take a library sound as the source. The companion finds the file
+        // in its own index, refuses sentences, palette words, unknown sounds and two sources, and keeps the guest rules.
+        var input = Path.Combine(folder, "two-seconds.wav");
+        using (var writer = new NAudio.Wave.WaveFileWriter(input, new NAudio.Wave.WaveFormat(48000, 16, 2)))
+            for (int i = 0; i < 96000; i++) { var v = 0.3f * MathF.Sin(i * 0.05f); writer.WriteSample(v); writer.WriteSample(v); }
+        await using var mock = new MockSoundpad { AllXml = MockSoundpad.Sounds.Replace(@"C:\Private\airhorn.wav", input), CategoryXml = MockSoundpad.Categories.Replace(@"C:\Private\airhorn.wav", input) };
+        using var pipe = new SoundpadPipe(mock.Name, true); using var bridge = new Bridge(pipe, new StateStore(folder)); await bridge.Poll(true);
+        Assert.True((await bridge.Execute(Cmd("beginSession"), "host")).Ok);
+        var airhorn = bridge.Snapshot.Library.Sounds.Single(s => s.Name == "Airhorn");
+        var copy = await bridge.Execute(Cmd("trimAudio") with { SoundId = airhorn.Id, PositionMs = 0, EndMs = 1000, Action = "speed", Speed = 1.5, KeepPitch = true }, "host");
+        Assert.True(copy.Ok, copy.Error);
+        Assert.Contains(bridge.Snapshot.Library.Sounds, s => s.Temporary && s.Name == "Airhorn (1.5x speed, same pitch)");
+        var preview = await bridge.Execute(Cmd("trimPreview") with { SoundId = airhorn.Id, PositionMs = 0, EndMs = 1000 }, "host");
+        Assert.True(preview.Ok, preview.Error);
+        Assert.False((await bridge.Execute(Cmd("trimPreview") with { SoundId = airhorn.Id, PositionMs = 0, EndMs = 1000 }, "guest")).Ok);
+        // The original file is untouched, and the copy is a Temp file of the companion's own.
+        Assert.True(File.Exists(input));
+        foreach (var refused in new[] { "sentence:abc", "palette:abc", "no-such-sound" })
+        {
+            var reply = await bridge.Execute(Cmd("trimAudio") with { SoundId = refused, PositionMs = 0, EndMs = 1000 }, "host");
+            Assert.False(reply.Ok); Assert.False(string.IsNullOrEmpty(reply.Error));
+        }
+        var temp = bridge.Snapshot.Library.Sounds.First(s => s.Temporary);
+        Assert.False((await bridge.Execute(Cmd("trimAudio") with { SoundId = airhorn.Id, AssetId = temp.AssetId, PositionMs = 0, EndMs = 1000 }, "host")).Ok);
+        // A Temp sound named by its sound id is copied from its asset, as Edit copy does.
+        Assert.True((await bridge.Execute(Cmd("trimAudio") with { SoundId = temp.Id, PositionMs = 0, EndMs = 500 }, "host")).Ok);
+        // A missing file is refused with a reason.
+        var laugh = bridge.Snapshot.Library.Sounds.First(s => s.Name == "Laugh");
+        var missing = await bridge.Execute(Cmd("trimAudio") with { SoundId = laugh.Id, PositionMs = 0, EndMs = 1000 }, "host");
+        Assert.False(missing.Ok); Assert.Contains("no longer available", missing.Error);
+        // Guests follow the upload permission, as for Temp sources.
+        Assert.True((await bridge.Execute(Cmd("trimAudio") with { SoundId = airhorn.Id, PositionMs = 0, EndMs = 1000 }, "guest")).Ok);
+        Assert.True((await bridge.Execute(Cmd("permissions") with { Permissions = new(GuestUploads: false) }, "host")).Ok);
+        Assert.False((await bridge.Execute(Cmd("trimAudio") with { SoundId = airhorn.Id, PositionMs = 0, EndMs = 1000 }, "guest")).Ok);
+    }
+    [Fact]
     public async Task RecoveryCleanupNeverRemovesUnownedEntriesInExistingTemp()
     {
         var input = Wave(); await using var mock = new MockSoundpad { CategoryXml = MockSoundpad.Categories.Replace("</Categories>", "<Category index=\"9\" name=\"temp\"><Sound index=\"1\" url=\"C:\\Private\\airhorn.wav\"/></Category></Categories>") }; using var pipe = new SoundpadPipe(mock.Name, true);

@@ -1,11 +1,22 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { ImagePlus, Star, FolderPlus, BarChart3, ArrowUp, ArrowDown, Rewind } from 'lucide-react';
+import {
+  ImagePlus,
+  Star,
+  FolderPlus,
+  BarChart3,
+  ArrowUp,
+  ArrowDown,
+  Rewind,
+  SquarePen,
+} from 'lucide-react';
 import { flattenCategories, soundKeys, hasSound, type Snapshot, type Sound } from '../protocol';
 import { moveSound, toggleFavorite, type Workspace } from '../workspace';
 import { Waveform, formatTime, usePlayhead } from './Waveform';
 import { SoundButton } from './SoundButton';
 import { guestHeld, HELD_BY_HOST, intentKey, playback, usePendingIntent } from '../playback';
 import type { Totals } from '../arrange';
+import { SpeedMenu, canQuickSpeed } from './SpeedMenu';
+import { requestEditor } from '../shell';
 type Props = {
   sounds: Sound[];
   state: Snapshot;
@@ -205,18 +216,33 @@ export function SoundCollection({
                 </>
               )}
               <div className="sound-actions" role={mode === 'details' ? 'cell' : undefined}>
-                <button
-                  className="icon-button"
-                  aria-label={`Reverse and play ${sound.name}`}
-                  title={held ? HELD_BY_HOST : 'Reverse & play · temporary copy'}
-                  disabled={!canPlay || (!host && state.permissions.guestTransforms === false)}
-                  aria-disabled={reversing || held || undefined}
-                  onClick={() => {
-                    if (!reversing && !held) void playback.reverse(sound.id);
-                  }}
-                >
-                  <Rewind size={14} />
-                </button>
+                {/*
+                 * Quick actions (Stage G spec 5.3): over the artwork's top right corner on the grid views,
+                 * shown on hover or focus (opacity only, so they stay focusable); in the row elsewhere.
+                 */}
+                <div className="tile-quick">
+                  <button
+                    className="icon-button"
+                    aria-label={`Reverse and play ${sound.name}`}
+                    title={held ? HELD_BY_HOST : 'Reverse & play · temporary copy'}
+                    disabled={!canPlay || (!host && state.permissions.guestTransforms === false)}
+                    aria-disabled={reversing || held || undefined}
+                    onClick={() => {
+                      if (!reversing && !held) void playback.reverse(sound.id);
+                    }}
+                  >
+                    <Rewind size={14} aria-hidden="true" />
+                  </button>
+                  {canQuickSpeed(sound, state, host) && (
+                    <SpeedMenu
+                      sound={sound}
+                      state={state}
+                      host={host}
+                      disabled={!canPlay}
+                      held={held}
+                    />
+                  )}
+                </div>
                 {sound.temporary && (
                   <small className="temp-badge" title={`Added by ${sound.uploadedBy ?? 'Guest'}`}>
                     temp
@@ -257,6 +283,14 @@ export function SoundCollection({
                     <BarChart3 size={14} />
                   </button>
                 )}
+                <button
+                  className="icon-button"
+                  aria-label={`Open editor for ${sound.name}`}
+                  title="Cues, regions, effects, icon and statistics"
+                  onClick={() => requestEditor({ kind: 'sound-edit', soundId: sound.id })}
+                >
+                  <SquarePen size={14} aria-hidden="true" />
+                </button>
                 {host && (
                   <button
                     className="icon-button"

@@ -8,6 +8,7 @@ import {
   ChevronUp,
   ChevronDown,
   OctagonX,
+  Info,
 } from 'lucide-react';
 import { hasSound } from '../protocol';
 import type { Snapshot } from '../protocol';
@@ -16,6 +17,7 @@ import { Waveform, formatTime, usePlayhead } from './Waveform';
 import { guestHeld, HELD_BY_HOST, intentKey, playback, usePendingIntent } from '../playback';
 import { supports } from '../version';
 import { useSentenceStore } from '../library/sentence-store';
+import { requestEditor } from '../shell';
 /** Panic's accessible name; its title adds the shortcut. */
 export const PANIC_LABEL = 'Panic: stop audio and pause guest playback';
 export function Player({
@@ -165,18 +167,18 @@ export function Player({
           {current.status === 'PAUSED' ? <Play size={18} /> : <Pause size={18} />}
         </button>
         <button
-          className="stop"
+          className="stop btn btn-danger"
           disabled={disabled}
           aria-disabled={held || undefined}
           title={held ? HELD_BY_HOST : undefined}
           onClick={() => !held && void playback.stop()}
         >
-          <Square size={15} fill="currentColor" /> Stop
+          <Square size={15} fill="currentColor" aria-hidden="true" /> Stop
         </button>
         {canPanic && (
           // Apart from Stop on purpose (2.35): Stop ends one sound, Panic also holds guest playback.
           <button
-            className="panic"
+            className="panic btn btn-warning"
             aria-label={PANIC_LABEL}
             title={`${PANIC_LABEL} (Shift+Escape)`}
             disabled={!connected}
@@ -201,6 +203,19 @@ export function Player({
         >
           <RotateCcw size={17} />
         </button>
+        {sound && known && (
+          // The playing sound's editor, opened at its statistics (Stage G spec 5.4).
+          <button
+            className="icon-button player-details"
+            aria-label={`Details for ${sound.name}`}
+            title="Statistics, cues, effects and icon"
+            onClick={() =>
+              requestEditor({ kind: 'sound-edit', soundId: sound.id, focus: 'statistics' })
+            }
+          >
+            <Info size={17} aria-hidden="true" />
+          </button>
+        )}
       </div>
       {children}
     </footer>

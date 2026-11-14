@@ -22,7 +22,9 @@ public record Snapshot(int V, long Revision, bool Available, string? Error, Libr
     // 2.41: rises when the voice library, its word index, wanted-word notices or speaker groups change (pages fetch libraryStatus).
     long VoiceLibrary = 0,
     // 2.42: rises when sentences, named palette pieces or performance sets change (pages fetch sentenceList).
-    long Sentences = 0);
+    long Sentences = 0,
+    // 2.43: Kick presses since this companion started (gate kickSession). In memory only: never written to state.json.
+    int CounterSession = 0);
 public record Participant(string Id, string Name);
 public record ParticipantPlays(string Name, long Count);
 public sealed class SoundStatistics

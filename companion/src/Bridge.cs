@@ -58,7 +58,12 @@ public sealed partial class Bridge(ISoundpad pipe, StateStore store) : IDisposab
     }
     public Snapshot Snapshot => new(1, revision, available, error, parsed.Public, playback, disk.Counter, disk.Permissions, 2,
         Convert.ToHexString(System.Security.Cryptography.HMACSHA256.HashData(Convert.FromBase64String(disk.IdentityKey), System.Text.Encoding.UTF8.GetBytes("workspace-host-v2"))).ToLowerInvariant(), disk.StatisticsVersion, typeof(Bridge).Assembly.GetName().Version?.ToString(3), managed?.Public.Revision ?? 0, MimicSnapshot, playbackSuspended,
-        Interlocked.Read(ref draftsRevision), budgets.Revision, tempRecovery > 0 ? tempRecovery : null, Interlocked.Read(ref voicesRevision), Interlocked.Read(ref sentencesRevision)) { Permissions = PublicPermissions };
+        Interlocked.Read(ref draftsRevision), budgets.Revision, tempRecovery > 0 ? tempRecovery : null, Interlocked.Read(ref voicesRevision), Interlocked.Read(ref sentencesRevision), counterSession) { Permissions = PublicPermissions };
+    /// <summary>
+    /// Kick presses since this companion started (2.43, gate kickSession): it moves with the lifetime counter (never
+    /// below 0) and Reset clears both. In memory only, so a restart begins a new session and state.json is unchanged.
+    /// </summary>
+    private int counterSession;
     public string? Website => disk.Website;
     public void SetWebsite(string site) { disk.Website = site; store.Save(disk); }
     private void Publish() { Interlocked.Increment(ref revision); Changed?.Invoke(Snapshot); }
@@ -226,7 +231,7 @@ public sealed partial class Bridge(ISoundpad pipe, StateStore store) : IDisposab
                 if (c.V is not (1 or 2) || !Guid.TryParseExact(c.Id, "D", out _) || counted && (c.At < now - 30000 || c.At > now + 30000)) throw new InvalidDataException("Invalid or expired command.");
                 RequirePlainPermission(c, actor, requester, audience);
                 if (disk.Receipts.ContainsKey(c.Id)) return new("ack", c.Id, true);
-                object? data = null; bool icons = false;
+                object? data = null; bool icons = false; int? sessionCount = null;
                 switch (c.Op)
                 {
                     case "play":
@@ -250,8 +255,11 @@ public sealed partial class Bridge(ISoundpad pipe, StateStore store) : IDisposab
                     case "spotify": if (c.Action is not ("enable" or "disable")) throw new InvalidDataException("Unsupported Spotify setting."); disk.SpotifyEnabled = c.Action == "enable"; break;
                     case "counter":
                         if (c.Delta is not (-1 or 1)) throw new InvalidDataException("Counter delta must be +1 or -1.");
-                        disk.Counter = (int)Math.Clamp((long)disk.Counter + c.Delta.Value, 0, int.MaxValue); break;
-                    case "reset": disk.Counter = 0; break;
+                        var before = disk.Counter;
+                        disk.Counter = (int)Math.Clamp((long)disk.Counter + c.Delta.Value, 0, int.MaxValue);
+                        // The session count takes the change the lifetime count actually made, and stays at 0 or more.
+                        sessionCount = (int)Math.Clamp((long)counterSession + (disk.Counter - before), 0, int.MaxValue); break;
+                    case "reset": disk.Counter = 0; sessionCount = 0; break;
                     case "permissions":
                         var permissions = c.Permissions ?? throw new InvalidDataException("Missing permissions.");
                         // Guest Keep (2.40) lives in keep-settings.json, never in state.json; an older website leaves it as it is.
@@ -290,6 +298,8 @@ public sealed partial class Bridge(ISoundpad pipe, StateStore store) : IDisposab
                 // and written by SaveLater. Everything else is durable before its answer, as before; the icon
                 // folder is scanned for obsolete files only when an icon changed.
                 if (start) SaveLater(); else if (counted) SaveNow(icons);
+                // Only a counter change that reached the disk moves the session count (a failed save reverted it).
+                if (sessionCount is int session) counterSession = session;
                 Publish(); CommandAccepted?.Invoke();
                 return new("ack", c.Id, true, Data: data);
             }

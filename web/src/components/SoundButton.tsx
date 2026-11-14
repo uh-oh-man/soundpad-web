@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
-import { Music2, Play, LoaderCircle } from 'lucide-react';
+import { useEffect, useId, useMemo, useRef, useState } from 'react';
+import { Music2, Play, LoaderCircle, Lock } from 'lucide-react';
 import type { Sound, Snapshot } from '../protocol';
 import { useWaveformData } from '../waveform-cache';
 import { formatTime, wavePath, usePlayhead } from './Waveform';
@@ -64,6 +64,8 @@ export function SoundButton({
     observer.observe(root.current);
     return () => observer.disconnect();
   }, [visible, sound.icon]);
+  // Playing is said once, as a description of the play strip: its name stays "Play from start: X".
+  const describedBy = 'now-playing-' + useId().replace(/:/g, '');
   const content = (
     <>
       <span className="tile-visual" aria-hidden="true">
@@ -107,6 +109,24 @@ export function SoundButton({
       aria-busy={pending}
       data-intent={pending ? 'pending' : undefined}
     >
+      {/* The state as text as well as colour (Stage G spec 5.2); assistive tech hears it elsewhere. */}
+      {pending ? (
+        <span className="tile-chip tile-chip-queued" aria-hidden="true">
+          Queued
+        </span>
+      ) : active ? (
+        <span
+          className={`tile-chip tile-chip-playing ${state.playback.status === 'PAUSED' ? 'is-paused' : ''}`}
+          aria-hidden="true"
+        >
+          <span className="eq" aria-hidden="true">
+            <i />
+            <i />
+            <i />
+          </span>
+          {state.playback.status === 'PAUSED' ? 'Paused' : 'Playing'}
+        </span>
+      ) : null}
       {sound.icon ? (
         <button
           className="tile-art-button"
@@ -158,6 +178,7 @@ export function SoundButton({
         className="tile-play-strip"
         // The name must contain the visible text so voice control ("click play from start") works.
         aria-label={`Play from start: ${sound.name}`}
+        aria-describedby={active ? describedBy : undefined}
         // Busy is aria-disabled, not disabled: Chrome drops focus from a button that becomes disabled.
         disabled={!canPlay}
         aria-disabled={pending || held || undefined}
@@ -165,13 +186,19 @@ export function SoundButton({
         onClick={() => !pending && !held && void play().catch(() => {})}
       >
         {pending ? (
-          <LoaderCircle size={13} className="spinning" />
+          <LoaderCircle size={13} className="spinning" aria-hidden="true" />
+        ) : held ? (
+          <Lock size={13} aria-hidden="true" />
         ) : (
-          <Play size={13} fill="currentColor" />
+          <Play size={13} fill="currentColor" aria-hidden="true" />
         )}
         <span>PLAY FROM START</span>
-        {active && <span className="playing-dot" aria-label="Currently playing" />}
       </button>
+      {active && (
+        <span id={describedBy} className="sr-only">
+          {state.playback.status === 'PAUSED' ? 'Paused' : 'Now playing'}
+        </span>
+      )}
     </div>
   );
 }
