@@ -80,6 +80,7 @@ import {
 import { MimicWave } from './MimicWave';
 import { MimicOverview } from './MimicOverview';
 import { historyPoller } from '../../mimic/history-poll';
+import { mimicKeysApply } from './keys';
 
 // Guests refresh half as often: their requests share the host page's and the companion's request budgets.
 const POLL_MS = 500,
@@ -692,6 +693,7 @@ export function MimicHistory({
   useEffect(() => {
     shortcut.current = (e: KeyboardEvent) => {
       if (!timeline?.sessionId || e.ctrlKey || e.metaKey || e.altKey || e.defaultPrevented) return;
+      if (!mimicKeysApply(e)) return;
       const typing =
         e.target instanceof HTMLElement &&
         e.target.matches(

@@ -4,3 +4,679 @@
  * Temp details layout. Owned by WP-A. Only selectors for WP-A components; overrides studio.css by load
  * order at equal specificity, never with !important.
  */
+
+/* ---- Skip links: out of the grid; each one shows when it has the keyboard (controls.css). ---- */
+.skip-links {
+  position: absolute;
+  width: 0;
+  height: 0;
+}
+
+/* ---- The shell grid, wide screens (spec 4.3) ---- */
+@media (min-width: 1001px) {
+  /* [data-panel] matches studio.css's `.app-shell.is-connected:has(> .demo-banner)` and comes later. */
+  .app-shell.is-connected[data-panel] {
+    --sidebar-cur: var(--sidebar-w);
+    grid-template-columns:
+      var(--sidebar-cur) minmax(480px, 1fr) var(--splitter-w, 0px)
+      var(--editor-w, 0px);
+    grid-template-rows: var(--topbar-h) auto minmax(0, 1fr) auto;
+    grid-template-areas:
+      'top top top top'
+      'banner banner banner banner'
+      'side main split panel'
+      'player player player player';
+  }
+  .app-shell.is-connected[data-rail='true'] {
+    --sidebar-cur: 64px;
+  }
+  .app-shell.is-connected[data-nav='tabs']:is([data-view='voices'], [data-view='sentences']) {
+    --sidebar-cur: 0px;
+  }
+  .app-shell.is-connected[data-panel='docked'] {
+    --splitter-w: 8px;
+    --editor-w: var(--editor-cur, 480px);
+  }
+  /* The element stays (scripts look for it); its children join the shell's grid. */
+  .app-shell.is-connected .workspace {
+    display: contents;
+  }
+  .app-shell.is-connected > .topbar {
+    grid-area: top;
+    height: var(--topbar-h);
+  }
+  .app-shell.is-connected > .demo-banner {
+    grid-area: banner;
+  }
+  .app-shell.is-connected .sidebar {
+    grid-area: side;
+  }
+  .app-shell.is-connected[data-nav='tabs']:is([data-view='voices'], [data-view='sentences'])
+    .sidebar {
+    display: none;
+  }
+  .app-shell.is-connected .board-column {
+    grid-area: main;
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    min-height: 0;
+  }
+  .app-shell.is-connected .board-column > .soundboard {
+    flex: 1 1 auto;
+    min-height: 0;
+    max-width: none;
+    overflow-y: auto;
+    padding-top: 22px;
+  }
+  .app-shell.is-connected .splitter {
+    grid-area: split;
+  }
+  .app-shell.is-connected .editor-panel {
+    grid-area: panel;
+    min-height: 0;
+  }
+  .app-shell.is-connected .player {
+    grid-area: player;
+  }
+}
+
+/* ---- Topbar (spec 4.4) ---- */
+.app-shell > .topbar {
+  background: var(--surface-glass);
+  backdrop-filter: blur(var(--blur));
+  border-bottom: 1px solid var(--line);
+  background-image: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--accent) 5%, transparent),
+    transparent
+  );
+  gap: 16px;
+  padding: 0 24px;
+}
+.topbar .top-actions {
+  gap: 12px;
+}
+.capture-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border: 1px solid color-mix(in srgb, var(--danger) 45%, var(--line));
+  border-radius: var(--radius-pill);
+  color: var(--text-primary);
+  font-size: 12px;
+  white-space: nowrap;
+  max-width: 260px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.capture-chip i {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--danger);
+}
+.capture-short {
+  display: none;
+}
+.activity-button {
+  position: relative;
+}
+.activity-button .badge::before {
+  content: attr(data-count);
+}
+
+/* ---- Section navigation (spec 4.5) ---- */
+.section-nav ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  gap: 4px;
+}
+.section-nav .nav-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 44px;
+  padding: 0 12px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-s);
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 13px;
+  font-weight: 550;
+  text-align: left;
+  justify-content: flex-start;
+}
+.section-nav .nav-item:hover {
+  background: var(--surface-hover);
+  color: var(--text-primary);
+}
+.section-nav .nav-item:is([aria-current='page'], [aria-expanded='true']) {
+  background: var(--accent-soft);
+  border-color: color-mix(in srgb, var(--accent) 40%, transparent);
+  color: var(--text-primary);
+}
+.section-nav .nav-item:is([aria-current='page'], [aria-expanded='true']) svg {
+  color: var(--accent);
+}
+.nav-heading {
+  font-size: 11px;
+  font-weight: 650;
+  letter-spacing: 1.6px;
+  color: var(--text-muted);
+  margin: 0 12px 10px;
+}
+.nav-sidebar {
+  margin-bottom: 22px;
+}
+.nav-sidebar ul {
+  flex-direction: column;
+}
+.nav-topbar ul {
+  flex-direction: row;
+}
+.nav-topbar .nav-item {
+  width: auto;
+  justify-content: center;
+}
+
+/* ---- Sidebar frame and its rail ---- */
+.rail-toggle {
+  align-self: flex-end;
+  margin-bottom: 8px;
+}
+.app-shell[data-rail='true'] .sidebar {
+  padding: 14px 8px;
+  overflow-x: hidden;
+}
+.app-shell[data-rail='true']
+  .sidebar
+  :is(
+    .nav-label,
+    .nav-heading,
+    .category span,
+    .category small,
+    .sidebar-label,
+    .sidebar-heading,
+    .sidebar-empty,
+    .sidebar-bottom,
+    .spotify-player
+  ) {
+  display: none;
+}
+.app-shell[data-rail='true'] .sidebar :is(.category, .nav-item) {
+  justify-content: center;
+  padding: 10px 0;
+}
+/* Text-only rows (Manage personal layout) have no icon to show in the rail. */
+.app-shell[data-rail='true'] .sidebar .category:not(:has(svg, img)) {
+  display: none;
+}
+.app-shell[data-rail='true'] .rail-toggle {
+  align-self: center;
+}
+
+/* ---- Section headers and views (spec 4.6, 4.7; layout only) ---- */
+.board-heading,
+.section-heading {
+  position: relative;
+  isolation: isolate;
+}
+.board-heading > :not(.header-ribbon),
+.section-heading > :not(.header-ribbon) {
+  position: relative;
+  z-index: 1;
+}
+.section-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 15px;
+  margin-bottom: 18px;
+}
+.section-body {
+  min-width: 0;
+}
+/* What the Voices and Sentences windows had from .dialog, as main views. */
+.section-body p {
+  font-size: 12px;
+}
+.section-body h3 {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+/* ---- Board toolbar (spec 4.8): one row on a wide screen, wrapping below 1280 px ---- */
+.board-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  margin: 14px 0 16px;
+}
+.board-toolbar .toolbar,
+.board-toolbar .view-toolbar {
+  margin: 0;
+  gap: 8px;
+}
+.board-toolbar .toolbar {
+  flex: 1 1 200px;
+  max-width: 420px;
+}
+.board-toolbar .search {
+  flex: 1;
+  max-width: 420px;
+  height: 40px;
+}
+.board-toolbar .session-upload {
+  margin: 0;
+}
+.board-toolbar .session-upload small {
+  display: none;
+}
+.board-toolbar .temp-manager {
+  margin: 0;
+}
+/* Open, Temp takes the full width under the row. */
+.board-toolbar .temp-manager[open] {
+  order: 10;
+  flex: 1 1 100%;
+}
+.board-toolbar .grid-caption {
+  margin-left: auto;
+}
+/* The selects carry their own names ("View mode", "Sort sounds"); the words show where there is room. */
+@media (max-width: 1599px) {
+  .board-toolbar .toolbar-word {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+  }
+}
+
+/* ---- Splitter (spec 7.3) ---- */
+.splitter {
+  position: relative;
+  cursor: col-resize;
+  touch-action: none;
+  background: var(--surface-1);
+  border-left: 1px solid var(--line);
+}
+/* A 24 px target for an 8 px bar. */
+.splitter::before {
+  content: '';
+  position: absolute;
+  inset: 0 -8px;
+}
+.splitter-grip {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 2px;
+  height: 36px;
+  border-radius: 2px;
+  background: var(--line-strong);
+  transform: translate(-50%, -50%);
+}
+.splitter:hover .splitter-grip,
+.splitter:focus-visible .splitter-grip {
+  background: var(--accent);
+}
+.splitter:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: -2px;
+  box-shadow: none;
+}
+
+/* ---- Editor panel (spec 7) ---- */
+.editor-panel {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  background: var(--surface-1);
+  container: editor / inline-size;
+}
+.editor-head {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 56px;
+  padding: 8px 12px 8px 20px;
+  border-bottom: 1px solid var(--line);
+  background: var(--surface-1);
+}
+.editor-head h2 {
+  flex: 1;
+  min-width: 0;
+  font-size: 18px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.editor-head h2:focus {
+  outline: none;
+}
+.editor-head h2:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+  box-shadow: none;
+}
+.editor-summary {
+  color: var(--text-muted);
+  font-weight: 450;
+  font-size: 14px;
+}
+.editor-mode {
+  white-space: nowrap;
+  font-size: 13px;
+}
+.editor-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 18px 20px 24px;
+  scrollbar-width: thin;
+  scrollbar-color: var(--line-strong) transparent;
+}
+.editor-body p {
+  font-size: 12px;
+}
+.editor-body h3 {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+/* The copy editor's form fills the panel: one column of fields, the buttons in a row. */
+.editor-panel .temp-trim {
+  margin: 0;
+}
+.sound-editor {
+  display: grid;
+  gap: 18px;
+}
+.sound-editor details {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-s);
+  padding: 8px 12px;
+}
+.sound-editor summary {
+  cursor: pointer;
+  font-weight: 600;
+}
+
+/* ---- Activity (spec 8.3) ---- */
+.activity-view {
+  display: grid;
+  gap: 22px;
+}
+.activity-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 6px;
+}
+.activity-item {
+  display: grid;
+  grid-template-columns: auto auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--accent);
+  border-radius: var(--radius-s);
+  background: var(--surface-2);
+  font-size: 12px;
+}
+.activity-item.notice-error {
+  border-left-color: var(--danger);
+}
+.activity-item.notice-success {
+  border-left-color: var(--success);
+}
+.activity-item time {
+  color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
+}
+.activity-item span {
+  overflow-wrap: anywhere;
+}
+.activity-action {
+  min-height: 28px;
+  padding: 0 10px;
+  font-size: 12px;
+  color: var(--accent-text);
+}
+
+/* ---- Notice dock (spec 8.1) ---- */
+.notice-dock:empty {
+  display: none;
+}
+/* Wide screens: in the board column's flow, under the board, so it never covers anything. */
+.notice-dock {
+  flex: none;
+  max-height: 40%;
+  overflow-y: auto;
+  padding: 8px 16px 10px;
+  border-top: 1px solid var(--line);
+  background: var(--surface-0);
+}
+.notice-dock .notification-stack {
+  position: static;
+  width: auto;
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: stretch;
+}
+.notice-dock .notification-stack .toast {
+  flex: 1 1 220px;
+  width: auto;
+  max-width: 420px;
+  padding: 8px 10px;
+  background: var(--surface-glass);
+  backdrop-filter: blur(var(--blur));
+  animation: notice-dock-in var(--dur-panel) var(--ease-out);
+}
+.notice-more {
+  align-self: center;
+  min-height: 32px;
+  font-size: 12px;
+  pointer-events: auto;
+}
+@keyframes notice-dock-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .notice-dock .notification-stack .toast {
+    animation-name: notice-fade-in;
+  }
+}
+html[data-motion='reduce'] .notice-dock .notification-stack .toast {
+  animation-name: notice-fade-in;
+}
+@keyframes notice-fade-in {
+  from {
+    opacity: 0;
+  }
+}
+/* The start page has no board column: the dock floats at the bottom right. */
+.is-landing > .notice-dock {
+  position: fixed;
+  right: 20px;
+  bottom: 16px;
+  width: min(380px, calc(100vw - 32px));
+  padding: 0;
+  border: 0;
+  background: none;
+  z-index: var(--z-notices);
+}
+.is-landing > .notice-dock .notification-stack {
+  flex-direction: column;
+}
+.is-landing > .notice-dock .notification-stack .toast {
+  max-width: none;
+}
+
+/* ---- Narrow screens (1000 px and below, spec 9) ---- */
+@media (max-width: 1000px) {
+  .app-shell.is-connected .workspace {
+    display: block;
+  }
+  .app-shell.is-connected .sidebar:not(:has(.spotify-player)) {
+    display: none;
+  }
+  .app-shell.is-connected .mobile-categories {
+    display: block;
+  }
+  /* The topbar stays in view, with the sections as a second row of equal buttons. */
+  .app-shell.is-connected > .topbar {
+    position: sticky;
+    top: 0;
+    z-index: var(--z-header);
+    height: auto;
+    min-height: 56px;
+    flex-wrap: wrap;
+    row-gap: 6px;
+    padding: 8px 17px;
+  }
+  .app-shell.is-connected > .topbar .nav-topbar {
+    order: 10;
+    flex: 1 1 100%;
+  }
+  .nav-topbar ul {
+    display: grid;
+    grid-auto-columns: minmax(0, 1fr);
+    grid-auto-flow: column;
+  }
+  .nav-topbar .nav-item {
+    min-width: 44px;
+    padding: 0 6px;
+    gap: 6px;
+  }
+  /* Fixed above the player, at most 2 cards; its height is kept free below the page (--notice-height). */
+  .app-shell.is-connected .notice-dock {
+    position: fixed;
+    left: 12px;
+    right: 12px;
+    bottom: calc(var(--player-height, 0px) + 8px);
+    z-index: var(--z-notices);
+    padding: 0;
+    border: 0;
+    background: none;
+  }
+  .app-shell.is-connected .notice-dock .notification-stack {
+    flex-direction: column;
+  }
+  .app-shell.is-connected .notice-dock .notification-stack .toast {
+    max-width: none;
+    flex: none;
+  }
+  .app-shell.is-connected[data-panel] {
+    padding-bottom: calc(var(--player-height, 160px) + var(--notice-height, 0px) + 15px);
+  }
+  #board {
+    scroll-padding-bottom: calc(var(--player-height, 0px) + var(--notice-height, 0px) + 8px);
+  }
+  /* The editor is a sheet over the board, between the topbar and the player. */
+  .app-shell.is-connected .editor-panel {
+    position: fixed;
+    top: var(--topbar-bottom, 0px);
+    bottom: var(--player-height, 0px);
+    left: 0;
+    right: 0;
+    z-index: var(--z-panel);
+    border-top: 1px solid var(--line);
+    box-shadow: var(--shadow-2);
+  }
+  .app-shell.is-connected .editor-panel .editor-body {
+    padding: 14px 17px calc(var(--notice-height, 0px) + 18px);
+  }
+  /* Show board: a bar above the player that keeps the editor as it was. */
+  .app-shell.is-connected .editor-panel[data-panel-mode='minimized'] {
+    top: auto;
+    height: 52px;
+  }
+  .app-shell.is-connected .editor-panel[data-panel-mode='minimized'] .editor-head {
+    min-height: 52px;
+    border-bottom: 0;
+  }
+  .app-shell.is-connected[data-panel='minimized'] .notice-dock {
+    bottom: calc(var(--player-height, 0px) + 60px);
+  }
+  .board-toolbar .toolbar {
+    max-width: none;
+    flex-basis: 100%;
+  }
+}
+@media (max-width: 700px) {
+  .app-shell.is-connected > .topbar {
+    padding: 8px 12px;
+  }
+  .capture-chip {
+    padding: 4px 8px;
+  }
+  .capture-long {
+    display: none;
+  }
+  .capture-short {
+    display: inline;
+  }
+  .nav-topbar .nav-item {
+    flex-direction: column;
+    gap: 2px;
+    font-size: 11px;
+    padding: 4px 2px;
+  }
+  .board-toolbar {
+    margin: 14px 0 12px;
+  }
+}
+/* "Click to play" is only shown where the row has room; a warning (paused, waiting) always shows. */
+@media (max-width: 1599px) {
+  .board-toolbar .grid-caption[data-ok] {
+    display: none;
+  }
+}
+
+/* ---- Accessibility media ---- */
+@media (prefers-reduced-transparency: reduce) {
+  .app-shell > .topbar,
+  .notice-dock .notification-stack .toast {
+    background: var(--surface-1);
+    backdrop-filter: none;
+  }
+}
+@supports not (backdrop-filter: blur(1px)) {
+  .app-shell > .topbar,
+  .notice-dock .notification-stack .toast {
+    background: var(--surface-1);
+  }
+}
+@media (forced-colors: active) {
+  .section-nav .nav-item:is([aria-current='page'], [aria-expanded='true']) {
+    outline: 2px solid Highlight;
+  }
+  .splitter-grip {
+    background: CanvasText;
+  }
+}

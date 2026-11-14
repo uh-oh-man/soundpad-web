@@ -21,6 +21,7 @@ import { MimicHostControls } from './mimic/MimicHostControls';
 import { MimicRecent } from './mimic/MimicRecent';
 import { MimicLibrary } from './mimic/MimicLibrary';
 import { MimicHistory } from './mimic/MimicHistory';
+import { mimicKeysApply } from './mimic/keys';
 
 const POLL_MS = 500;
 const peekSchema = z.object({
@@ -157,6 +158,7 @@ export function MimicPanel({
   useEffect(() => {
     shortcut.current = (e: KeyboardEvent) => {
       if (!peek || e.ctrlKey || e.metaKey || e.altKey || e.defaultPrevented) return;
+      if (!mimicKeysApply(e)) return;
       // Only real text entry (and menus, which use keys) blocks shortcuts; a ticked checkbox must not.
       const typing =
         e.target instanceof HTMLElement &&

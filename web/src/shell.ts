@@ -57,11 +57,13 @@ export function isEditorRequest(value: unknown): value is EditorRequest {
 
 /** Asks the shell to open the editor panel at `request` (or switch it there). */
 export function requestEditor(request: EditorRequest) {
+  if (typeof window === 'undefined') return; // no page to show it on (unit tests)
   window.dispatchEvent(new CustomEvent<EditorRequest>(OPEN_EDITOR_EVENT, { detail: request }));
 }
 
 /** Asks the shell to show a main view (Soundboard, Voices, Sentences). */
 export function showView(view: ShellView, focus?: string) {
+  if (typeof window === 'undefined') return;
   window.dispatchEvent(
     new CustomEvent<ViewRequest>(SHOW_VIEW_EVENT, { detail: focus ? { view, focus } : { view } }),
   );
