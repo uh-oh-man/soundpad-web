@@ -64,9 +64,10 @@ test('example Mimic: rolling history, a Latest phrase draft, preview and play, t
   await page.getByRole('button', { name: 'Mimic', exact: true }).click();
   const mimic = page.getByRole('dialog', { name: 'Mimic' });
   await mimic.getByRole('button', { name: 'Start listening' }).click();
-  // The history view (2.39): words to click arrive a moment after they are said.
+  // The history view (2.39): words to click arrive a moment after they are said; Latest phrase takes the
+  // newest finished phrase.
   await expect(
-    mimic.getByRole('list', { name: 'Transcript' }).getByRole('button', { name: 'small' }).first(),
+    mimic.getByRole('list', { name: 'Transcript' }).getByRole('button', { name: 'man,' }).first(),
   ).toBeVisible({ timeout: 15000 });
   await expect(mimic.getByRole('button', { name: 'Back 10 s' })).toBeVisible();
   await mimic.getByRole('button', { name: 'Latest phrase' }).click();
