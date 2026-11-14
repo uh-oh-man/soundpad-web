@@ -21,6 +21,7 @@ import {
   Sparkles,
   LogOut,
   BookAudio,
+  MessageSquare,
 } from 'lucide-react';
 import { controller } from './controller';
 import { flattenCategories, type Sound } from './protocol';
@@ -47,6 +48,8 @@ import type { ConnectionInfo } from './network/session';
 import { WhatsNew } from './components/WhatsNew';
 import { MimicPanel } from './components/MimicPanel';
 import { VoicesPanel } from './components/VoicesPanel';
+import { PinnedSentences, SentencesPanel } from './components/SentencesPanel';
+import { useSentenceSync } from './library/sentence-store';
 import { useLibrarySync, useOpenRequests } from './library/voice-store';
 import { requestTemp } from './edit-copy';
 import { removeNewTempAudio } from './remove-temp';
@@ -379,6 +382,7 @@ function App() {
   const [settings, setSettings] = useState(false);
   const [mimicOpen, setMimicOpen] = useState(false);
   const [voicesOpen, setVoicesOpen] = useState(false);
+  const [sentencesOpen, setSentencesOpen] = useState(false);
   const [managing, setManaging] = useState(false);
   const [editing, setEditing] = useState<Sound | null>(null);
   const [organizing, setOrganizing] = useState<Sound | null>(null);
@@ -422,6 +426,12 @@ function App() {
     supports(state.companionVersion, 'voiceLibrary') &&
     (host || controller.relaysLibrary());
   useLibrarySync(state, libraryReady);
+  // Sentences and the speaking palette (2.42): on the library, and (guests) a host page that relays them.
+  const sentencesReady =
+    libraryReady &&
+    supports(state.companionVersion, 'sentences') &&
+    (host || controller.relaysSentences());
+  useSentenceSync(state, sentencesReady);
   // A notice's Jump opens Mimic at that moment; Open shows the recording in Voices.
   useOpenRequests((request) => {
     // One window at a time: the other closes (what it showed is remembered).
@@ -716,6 +726,11 @@ function App() {
                       <BookAudio size={17} /> Voices
                     </button>
                   )}
+                  {sentencesReady && (
+                    <button onClick={() => setSentencesOpen(true)}>
+                      <MessageSquare size={17} /> Sentences
+                    </button>
+                  )}
                   {host && (
                     <>
                       <button
@@ -789,6 +804,7 @@ function App() {
                   )}
                 </div>
               )}
+              {sentencesReady && <PinnedSentences canPlay={canPlay && (host || !suspended)} />}
               {!!view.layouts.length && (
                 <section className="shared-layouts" aria-label="Shared guest layouts">
                   <small>Shared layouts · updates automatically</small>
@@ -1069,6 +1085,11 @@ function App() {
               requestTemp(kind, assetId);
             }}
           />
+        </Modal>
+      )}
+      {sentencesOpen && mode !== 'landing' && sentencesReady && (
+        <Modal label="Sentences" onClose={() => setSentencesOpen(false)}>
+          <SentencesPanel state={state} host={host} connected={connected} canPlay={canPlay} />
         </Modal>
       )}
       {voicesOpen && mode !== 'landing' && libraryReady && (

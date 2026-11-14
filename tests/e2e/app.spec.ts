@@ -4501,3 +4501,153 @@ test('voice library: the review queue labels and keeps new recordings from the k
   expect(list.data.items.map((r) => r.title)).toEqual(['First new']);
   expect(list.data.items[0].voiceId).toMatch(/^[a-f0-9]{32}$/);
 });
+
+// ---- Sentences and the speaking palette (2.42) ------------------------------------------------
+
+/** Kept recordings whose words (from the transcript fixture) are "Fixture tone N". */
+async function recordingsWithWords(page: Page, count = 2) {
+  const dialog = await startListening(page);
+  await dialog.getByLabel('Transcribe Mimic audio').check();
+  await expect(
+    dialog
+      .getByRole('list', { name: 'Transcript' })
+      .getByRole('button', { name: 'Fixture', exact: true })
+      .first(),
+  ).toBeVisible({ timeout: 15000 });
+  await dialog.getByRole('button', { name: 'Close dialog' }).click();
+  for (let i = 1; i <= count; i++) await keepRecentInLibrary(page, `Take ${i}`);
+  await expect
+    .poll(
+      async () =>
+        (
+          (await sendCommand(page, 'librarySearch', { query: 'fixture tone' })) as {
+            data?: { total: number };
+          }
+        ).data?.total ?? 0,
+      { timeout: 30000 },
+    )
+    .toBeGreaterThanOrEqual(count);
+}
+const playingSoundId = (page: Page) =>
+  page.evaluate(async () => {
+    const { controller } = await import(/* @vite-ignore */ '/src/' + 'controller.ts');
+    return controller.getSnapshot().state.playback.soundId as string | null;
+  });
+
+test('sentences: typed from recorded words without playing, a take swapped, a missing word bleeped, played into the game from a slot, kept, pinned and kept again', async ({
+  page,
+  harness,
+}) => {
+  await host(page, harness);
+  await recordingsWithWords(page);
+  await page.getByRole('button', { name: 'Sentences', exact: true }).click();
+  const sentences = page.getByRole('dialog', { name: 'Sentences' });
+  const before = harness.plays.length;
+  await sentences.getByLabel('New sentence').fill('fixture tone zebra');
+  await sentences.getByRole('button', { name: 'New sentence' }).click();
+  const builder = sentences.getByRole('region', { name: /^Sentence / });
+  const timeline = builder.getByRole('group', { name: 'Timeline' });
+  const phrase = timeline.getByRole('button', { name: /^“fixture tone”/ });
+  const zebra = timeline.getByRole('button', { name: /^Missing word “zebra”/ });
+  await expect(phrase).toBeVisible();
+  await expect(zebra).toBeVisible();
+  await expect(builder.getByLabel('Matched words')).toContainText('zebra');
+  await expect(
+    builder.getByRole('status').filter({ hasText: 'not in the voice library' }),
+  ).toBeVisible();
+  // Matching played nothing.
+  expect(harness.plays.slice(before)).toEqual([]);
+  // Swap the phrase's take through its alternatives.
+  await phrase.click();
+  const inspector = builder.getByRole('region', { name: 'Piece “fixture tone”' });
+  const take = inspector.getByText(/^Take \d+ of \d+$/);
+  await expect(take).toBeVisible();
+  const first = await take.textContent();
+  await inspector.getByRole('button', { name: 'Swap take' }).click();
+  await expect(inspector.getByText('Your choice')).toBeVisible();
+  await expect(take).not.toHaveText(first!);
+  // Leave "zebra" missing, as a bleep: never filled in with anything else.
+  await zebra.click();
+  const missing = builder.getByRole('region', { name: /^Piece Missing “zebra”/ });
+  await missing.getByRole('radio', { name: 'Bleep' }).click();
+  await expect(
+    timeline.getByRole('button', { name: /^Missing word “zebra”.*plays as a bleep/ }),
+  ).toBeVisible();
+  // Play into game: the rendered sentence goes into a slot and Soundpad plays that slot (no seek).
+  const playsBefore = harness.plays.length;
+  await builder.getByRole('button', { name: 'Play into game' }).click();
+  await expect.poll(() => harness.plays.slice(playsBefore).join(' ')).toMatch(/DoPlaySound\(\d+\)/);
+  await expect.poll(() => playingSoundId(page)).toMatch(/^sentence:[a-f0-9]{32}$/);
+  expect(harness.plays.slice(playsBefore).join(' ')).not.toMatch(/DoSeekMs/);
+  // Keep, and pin it to the board.
+  await builder.getByRole('button', { name: 'Keep', exact: true }).click();
+  await expect(builder.getByText('Kept · version 1')).toBeVisible();
+  await builder.getByRole('button', { name: 'Pin to board' }).click();
+  await expect(builder.getByRole('button', { name: 'Unpin from board' })).toBeVisible();
+  await sentences.getByRole('button', { name: 'Close dialog' }).click();
+  const tile = page
+    .getByRole('region', { name: 'Pinned sentences' })
+    .getByRole('button', { name: 'Play sentence: fixture tone zebra' });
+  await expect(tile).toBeVisible();
+  const tilePlays = harness.plays.length;
+  await tile.click();
+  await expect.poll(() => harness.plays.slice(tilePlays).join(' ')).toMatch(/DoPlaySound\(\d+\)/);
+  // Edit the kept sentence and keep it again: a new version, the first one still there.
+  await page.getByRole('button', { name: 'Sentences', exact: true }).click();
+  await sentences
+    .getByRole('list', { name: 'Kept sentences' })
+    .getByRole('button', { name: /fixture tone zebra/ })
+    .click();
+  await builder.getByLabel('Sentence text').fill('fixture tone zebra tone');
+  await expect(timeline.getByRole('button', { name: /^“tone”/ })).toBeVisible();
+  await builder.getByRole('button', { name: 'Keep new version' }).click();
+  await expect(builder.getByText('Kept · version 2')).toBeVisible();
+  const versions = builder.getByRole('region', { name: 'Versions' });
+  await expect(versions.getByText(/^Version 2 ·/)).toBeVisible();
+  await expect(versions.getByText(/^Version 1 ·/)).toBeVisible();
+  // Kept sentences are found by the library's combined search, as their own type.
+  await sentences.getByRole('button', { name: 'Close dialog' }).click();
+  await page.getByRole('button', { name: 'Voices', exact: true }).click();
+  const voices = page.getByRole('dialog', { name: 'Voices' });
+  await voices.getByLabel('Search the voice library').fill('zebra');
+  const found = voices
+    .getByRole('list', { name: 'Search results' })
+    .getByRole('listitem')
+    .filter({ hasText: 'fixture tone zebra' });
+  await expect(found.getByText('Sentence', { exact: true })).toBeVisible();
+});
+
+test('palette: a recorded performance of my own palette taps opens as an editable sentence', async ({
+  page,
+  harness,
+}) => {
+  await host(page, harness);
+  await recordingsWithWords(page, 1);
+  await page.getByRole('button', { name: 'Sentences', exact: true }).click();
+  const sentences = page.getByRole('dialog', { name: 'Sentences' });
+  await sentences.getByRole('tab', { name: 'Palette' }).click();
+  await sentences.getByRole('button', { name: 'Record performance' }).click();
+  await expect(sentences.getByText('Recording your performance: 0 taps')).toBeVisible();
+  const palette = sentences.getByRole('list', { name: 'Palette' });
+  await sentences.getByLabel('Search the palette').fill('fixture');
+  await palette
+    .getByRole('button', { name: /^Play “Fixture”/ })
+    .first()
+    .click();
+  await sentences.getByLabel('Search the palette').fill('tone');
+  await palette
+    .getByRole('button', { name: /^Play “tone”/ })
+    .first()
+    .click();
+  await expect(sentences.getByText('Recording your performance: 2 taps')).toBeVisible();
+  await sentences.getByRole('button', { name: 'Stop recording' }).click();
+  await sentences.getByRole('button', { name: 'Open the take as a sentence' }).click();
+  const builder = sentences.getByRole('region', { name: /^Sentence / });
+  await expect(builder.getByLabel('Sentence text')).toHaveValue(/^Fixture tone$/i);
+  const timeline = builder.getByRole('group', { name: 'Timeline' });
+  await expect(timeline.getByRole('button')).toHaveCount(2);
+  // The take is a sentence like any other: a piece moves from the keyboard (Alt+→ nudges it 10 ms).
+  await timeline.getByRole('button').first().focus();
+  await page.keyboard.press('Alt+ArrowRight');
+  await expect(timeline.getByRole('button').first()).toHaveAccessibleName(/at 10 ms/);
+});

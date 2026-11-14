@@ -26,6 +26,9 @@ export const siteRelaysIntents = (site: string | null | undefined) => companionA
 export const siteRelaysDrafts = (site: string | null | undefined) => companionAtLeast(site, 2, 40);
 /** True when the host's page relays the 2.41 voice-library commands (its welcome also says so). */
 export const siteRelaysLibrary = (site: string | null | undefined) => companionAtLeast(site, 2, 41);
+/** True when the host's page relays the 2.42 sentence and palette commands (its welcome also says so). */
+export const siteRelaysSentences = (site: string | null | undefined) =>
+  companionAtLeast(site, 2, 42);
 
 /** Oldest companion that supports every feature of this website. */
 export const REQUIRED_COMPANION = { major: 2, minor: 3, label: '2.3' } as const;
@@ -57,6 +60,7 @@ export const FEATURES = {
   history: [2, 39],
   drafts: [2, 40],
   voiceLibrary: [2, 41],
+  sentences: [2, 42],
 } as const satisfies Record<string, readonly [number, number]>;
 
 /** True when the website changed version since this browser last used it (and it had used it before). */
@@ -93,6 +97,8 @@ const FEATURE_NAMES: Record<keyof typeof FEATURES, string> = {
     'drafts of Mimic clips you can edit before keeping, Latest phrase, private preview for guests, guest Keep with storage budgets, and Temp that stays until you quit',
   voiceLibrary:
     'the voice library: kept clips with voices, tags and their words, word search that plays a single word, wanted words, a review queue, and word search in Soundpad categories you choose',
+  sentences:
+    'sentences built from recorded words on a timeline, a speaking palette with recorded performances, performance sets, and kept sentences with versions that you can pin to the board',
 };
 
 /**

@@ -21,6 +21,7 @@ import {
   siteRelaysDrafts,
   siteRelaysIntents,
   siteRelaysLibrary,
+  siteRelaysSentences,
   supports,
 } from '../version';
 import { sign, verify, type HostIdentity, type Invite } from './identity';
@@ -269,6 +270,8 @@ export class Session {
   private welcomedDrafts = false;
   /** The host page said it relays the 2.41 voice-library commands. */
   private welcomedLibrary = false;
+  /** The host page said it relays the 2.42 sentence and palette commands. */
+  private welcomedSentences = false;
   private olderHostRate = new RateLimit(OLDER_HOST_RATE);
   // Guest connection state (2.37).
   private since = Date.now();
@@ -300,6 +303,10 @@ export class Session {
   /** Guest: whether the host's page relays the 2.41 voice-library commands (as hostRelaysDrafts). */
   get hostRelaysLibrary() {
     return !!this.hostPeer && this.welcomedLibrary;
+  }
+  /** Guest: whether the host's page relays the 2.42 sentence and palette commands. */
+  get hostRelaysSentences() {
+    return !!this.hostPeer && this.welcomedSentences;
   }
   /** Guest: how this page reaches the host now (2.37). */
   get transport(): Transport | undefined {
@@ -932,7 +939,7 @@ export class Session {
         hostNow: Date.now(),
         site: this.site,
         // 2.40: what this page relays beyond what its version says (see hostRelaysDrafts).
-        relays: ['drafts', 'library'],
+        relays: ['drafts', 'library', 'sentences'],
         data: [...this.layouts.values()] as unknown as JsonValue,
       },
       peer,
@@ -1290,6 +1297,9 @@ export class Session {
       this.welcomedLibrary =
         siteRelaysLibrary(this.welcomedSite) ||
         (Array.isArray(m.relays) && m.relays.length <= 16 && m.relays.includes('library'));
+      this.welcomedSentences =
+        siteRelaysSentences(this.welcomedSite) ||
+        (Array.isArray(m.relays) && m.relays.length <= 16 && m.relays.includes('sentences'));
       this.syncClock(m.hostNow, true);
     }
     const reconnected = first && this.everConnected;

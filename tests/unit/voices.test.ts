@@ -299,7 +299,7 @@ describe('permissions, snapshot and gates (2.41)', () => {
     expect(snapshot.permissions.guestLibraryEdit).toBe(false);
     expect(supports('2.40.0', 'voiceLibrary')).toBe(false);
     expect(supports('2.41.0', 'voiceLibrary')).toBe(true);
-    expect(missingFeatures('2.40.3')).toHaveLength(1);
+    expect(missingFeatures('2.40.3')).toHaveLength(2);
     expect(siteRelaysLibrary('2.40.9')).toBe(false);
     expect(siteRelaysLibrary('2.41.0')).toBe(true);
   });

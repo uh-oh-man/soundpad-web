@@ -49,6 +49,8 @@ import {
   useWordPlayer,
 } from './VoiceShared';
 import { PAGE } from './VoiceShared';
+import { useSentenceStore } from '../library/sentence-store';
+import { usePreviewAudio } from '../preview-audio';
 import '../voices.css';
 
 type Props = { state: Snapshot; host: boolean; connected: boolean; canPlay: boolean };
@@ -277,6 +279,13 @@ function LibraryView({
       live = false;
     };
   }, [key, filters.query, status.revision]);
+  // Kept sentences (2.42) are searched by their text here; a voice, tag or favourite filter is about clips.
+  const { list: sentenceList } = useSentenceStore();
+  const kept = useMemo(
+    () => (hasFilters(filters) ? [] : (sentenceList?.sentences ?? [])),
+    [sentenceList, filters],
+  );
+  const sentencePreview = usePreviewAudio();
   const combined = useMemo(
     () =>
       results
@@ -285,9 +294,11 @@ function LibraryView({
             hasFilters(filters) ? [] : state.library.sounds,
             results,
             types,
+            60,
+            kept,
           )
         : [],
-    [results, filters, state.library.sounds, types],
+    [results, filters, state.library.sounds, types, kept],
   );
   const counts = useMemo(
     () =>
@@ -298,10 +309,12 @@ function LibraryView({
               hasFilters(filters) ? [] : state.library.sounds,
               results,
               new Set(['sound', 'clip', 'sentence']),
+              60,
+              kept,
             ),
           )
         : null,
-    [results, filters, state.library.sounds],
+    [results, filters, state.library.sounds, kept],
   );
   const order = list?.items.map((r) => r.id) ?? [];
   const voices = status.voices;
@@ -355,10 +368,7 @@ function LibraryView({
           {results === null ? (
             <p className="muted">Searching…</p>
           ) : combined.length === 0 ? (
-            <p className="muted">
-              Nothing found for “{filters.query}”.{' '}
-              {types.has('sentence') && 'Sentences arrive with the sentence builder.'}
-            </p>
+            <p className="muted">Nothing found for “{filters.query}”.</p>
           ) : (
             <ul className="voices-results" aria-label="Search results">
               {combined.map((item) => {
@@ -418,6 +428,33 @@ function LibraryView({
                     </li>
                   );
                 }
+                if (item.type === 'sentence')
+                  return (
+                    <li key={item.key} className="voices-result">
+                      <span className="type-badge sentence">{TYPE_LABELS.sentence}</span>
+                      <strong className="voices-title">{item.title}</strong>
+                      {item.text !== item.title && <span className="muted">{item.text}</span>}
+                      <button
+                        type="button"
+                        aria-label={`${mode === 'game' ? 'Play' : 'Preview'} sentence ${item.title}`}
+                        onClick={() =>
+                          mode === 'game' && canPlay
+                            ? void controller
+                                .run('sentencePlay', {
+                                  sentenceId: item.id,
+                                  sentence: { version: item.versions },
+                                })
+                                .catch(() => {})
+                            : void sentencePreview.play('sentencePreview', {
+                                sentenceId: item.id,
+                                sentence: { version: item.versions },
+                              })
+                        }
+                      >
+                        {mode === 'game' ? <Play size={14} /> : <Headphones size={14} />}
+                      </button>
+                    </li>
+                  );
                 return null;
               })}
             </ul>
