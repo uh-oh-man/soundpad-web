@@ -77,9 +77,16 @@ export const useTempAssets = () => useSyncExternalStore(subscribe, () => store);
 /** Asks for the list again (after an action that changed it). */
 export const refreshTempAssets = () => set({ refresh: store.refresh + 1 });
 
-/** Keeps the list in step while `enabled` (mounted once, by the app). */
-export function useTempAssetsSync(enabled: boolean, version: number | undefined) {
+/**
+ * Keeps the list in step while `enabled` (mounted once, by the app). `scope` names whose list it is (the
+ * example or a host): when it changes, the old list is dropped at once, so a new session never shows, or
+ * sends, the last session's sources while its own list is on its way (or if fetching it fails).
+ */
+export function useTempAssetsSync(enabled: boolean, version: number | undefined, scope: string) {
   const { refresh } = useTempAssets();
+  useEffect(() => {
+    if (store.data || store.loadError) set({ data: undefined, loadError: '' });
+  }, [scope]);
   useEffect(() => {
     if (!enabled) return;
     let live = true;
@@ -99,9 +106,11 @@ export function useTempAssetsSync(enabled: boolean, version: number | undefined)
       live = false;
       clearTimeout(timer);
     };
-  }, [enabled, version, refresh]);
+  }, [enabled, version, refresh, scope]);
 }
 
+/** Test seam: the list as the page has it now. */
+export const tempAssetsSnapshot = () => store;
 /** Test seam. */
 export function resetTempAssets() {
   store = { loadError: '', refresh: 0 };

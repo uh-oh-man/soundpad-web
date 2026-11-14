@@ -558,6 +558,10 @@ test('keyboard order: skip links, topbar, nav, search, tiles, then the player; S
   await expect(page.getByRole('link', { name: 'Skip to editor' })).toBeFocused();
   await page.keyboard.press('Enter');
   await expect(page.locator('#editor-title')).toBeFocused();
+  // Skip to player lands on the player's first control (2.43 review: it went to "Skip to sounds").
+  await page.getByRole('link', { name: 'Skip to player' }).focus();
+  await page.keyboard.press('Enter');
+  expect(await page.evaluate(() => !!document.activeElement?.closest('footer.player'))).toBe(true);
 });
 
 test('accessibility: axe finds nothing serious in either nav style, the docked panel, the sheet, Activity, High contrast and forced colours', async ({
@@ -864,4 +868,314 @@ test('host style sync: the host’s two pages (separate browsers) share navigati
   } finally {
     await windowContext.close();
   }
+});
+
+// ---- Stage G review fixes (2.43) ----
+
+/** Where the focused element is, against the notice dock and the minimized editor bar. */
+const focusedBox = (page: Page) =>
+  page.evaluate(() => {
+    const el = document.activeElement as HTMLElement | null;
+    const r = el?.getBoundingClientRect();
+    const dock = document
+      .querySelector('.notice-dock .notification-stack')
+      ?.getBoundingClientRect();
+    const panel = document.getElementById('editor-panel')?.getBoundingClientRect();
+    return {
+      inBody: !!el?.closest('.editor-body'),
+      inBoard: !!el?.closest('#board'),
+      bottom: r?.bottom ?? 0,
+      height: r?.height ?? 0,
+      dockTop: dock && dock.height ? dock.top : Infinity,
+      panelTop: panel?.top ?? Infinity,
+    };
+  });
+
+test('phone sheet: Show board keeps the keyboard, the nav shows its view, and focus stays clear of the notices and the bar', async ({
+  page,
+  harness,
+}) => {
+  await page.setViewportSize({ width: 412, height: 860 });
+  await host(page, harness);
+  const panel = await startMimic(page);
+  await expect(panel).toHaveAttribute('data-panel-mode', 'sheet');
+  // Two notices up, then a Tab walk through the sheet: nothing focused ends up under the cards.
+  await page.evaluate(async () => {
+    const { controller } = await import(/* @vite-ignore */ '/src/' + 'controller.ts');
+    controller.notify('Sheet notice one', 'success', { label: 'Undo', run: () => {} });
+    controller.notify('Sheet notice two', 'info');
+  });
+  await expect(page.locator('.notification-stack .toast')).toHaveCount(2);
+  // Over the sheet only a card's buttons take the pointer: a press on its text reaches what is under it.
+  const passes = await page
+    .locator('.notification-stack .toast span')
+    .first()
+    .evaluate((el) => {
+      const r = el.getBoundingClientRect();
+      const hit = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2);
+      return !hit?.closest('.toast');
+    });
+  expect(passes).toBe(true);
+  await page.locator('#editor-title').focus();
+  let checked = 0;
+  for (let i = 0; i < 40; i++) {
+    await page.keyboard.press('Tab');
+    const box = await focusedBox(page);
+    if (!box.inBody || !box.height) continue;
+    checked++;
+    expect(box.bottom, `Tab ${i} under the notices`).toBeLessThanOrEqual(box.dockTop + 1);
+  }
+  expect(checked).toBeGreaterThan(5);
+  // Show board by keyboard: the same button stays focused, now "Show editor", so Space and Escape never
+  // reach the page (they paused playback and closed the panel).
+  await panel.getByRole('button', { name: 'Show board' }).focus();
+  await page.keyboard.press('Enter');
+  await expect(panel).toHaveAttribute('data-panel-mode', 'minimized');
+  await expect(panel.getByRole('button', { name: 'Show editor' })).toBeFocused();
+  await page.keyboard.press('Enter');
+  await expect(panel).toHaveAttribute('data-panel-mode', 'sheet');
+  // The nav's views fold the sheet to its bar, so the chosen view shows and can be used.
+  await nav(page, 'Voices').click();
+  await expect(section(page, 'Voices')).toBeVisible();
+  await expect(panel).toHaveAttribute('data-panel-mode', 'minimized');
+  await expect(page.locator('#board')).not.toHaveAttribute('inert', '');
+  await nav(page, 'Soundboard').click();
+  await expect(panel).toHaveAttribute('data-panel-mode', 'minimized');
+  // With the bar showing, Tab down the board never leaves a control under the bar or the notices.
+  await page.getByLabel('Search sounds').focus();
+  checked = 0;
+  for (let i = 0; i < 30; i++) {
+    await page.keyboard.press('Tab');
+    const box = await focusedBox(page);
+    if (!box.inBoard || !box.height) continue;
+    checked++;
+    expect(box.bottom, `board Tab ${i} under the bar`).toBeLessThanOrEqual(box.panelTop + 1);
+    expect(box.bottom, `board Tab ${i} under the notices`).toBeLessThanOrEqual(box.dockTop + 1);
+  }
+  expect(checked).toBeGreaterThan(5);
+});
+
+test('example on a phone: the editor sheet makes the banner it covers unreachable', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 412, height: 860 });
+  if (!(await startExample(page))) return;
+  await nav(page, 'Mimic').click();
+  await expect(editorPanel(page)).toHaveAttribute('data-panel-mode', 'sheet');
+  await expect(page.locator('.demo-banner')).toHaveAttribute('inert', '');
+  await editorPanel(page).getByRole('button', { name: 'Show board' }).click();
+  await expect(page.locator('.demo-banner')).not.toHaveAttribute('inert', '');
+});
+
+test('Activity: running a notice’s action keeps the keyboard in the list', async ({
+  page,
+  harness,
+}) => {
+  await host(page, harness);
+  await page.evaluate(async () => {
+    const { controller } = await import(/* @vite-ignore */ '/src/' + 'controller.ts');
+    controller.notify('Kept focus copy.', 'success', { label: 'Undo', run: () => {} });
+  });
+  await page.getByRole('button', { name: 'Activity' }).click();
+  const item = editorPanel(page).getByRole('listitem').filter({ hasText: 'Kept focus copy.' });
+  await item.getByRole('button', { name: 'Undo' }).focus();
+  await page.keyboard.press('Enter');
+  await expect(item.getByRole('button', { name: 'Undo' })).toHaveCount(0);
+  await expect(item).toBeFocused();
+  await expect(editorPanel(page)).toBeVisible();
+});
+
+test('error notices are a named group, not role alert (the announcer says them once)', async ({
+  page,
+  harness,
+}) => {
+  await host(page, harness);
+  await page.evaluate(async () => {
+    const { controller } = await import(/* @vite-ignore */ '/src/' + 'controller.ts');
+    controller.notify('Fixture failure.', 'error');
+  });
+  const card = page.locator('.notification-stack .notice-error');
+  await expect(card).toContainText('Fixture failure.');
+  await expect(card).toHaveAttribute('role', 'group');
+  await expect(page.getByRole('group', { name: 'Error notice' })).toContainText('Fixture failure.');
+  await expect(page.locator('.notification-stack [role="alert"]')).toHaveCount(0);
+});
+
+test('two dialogs: Escape closes the newer one only, and the keyboard stays in the other', async ({
+  page,
+  harness,
+}) => {
+  await host(page, harness);
+  const opener = page.getByRole('button', { name: 'Access settings' });
+  await opener.focus();
+  await page.keyboard.press('Enter');
+  const settings = page.getByRole('dialog', { name: 'Session & access' });
+  await expect(settings).toBeVisible();
+  // The companion's quit prompt opens over it (the window's close button, mid-session).
+  await page.evaluate(async () => {
+    const { controller } = await import(/* @vite-ignore */ '/src/' + 'controller.ts');
+    (controller as unknown as { update(p: object): void }).update({
+      quitPrompt: { id: 'a'.repeat(32), clips: 1 },
+    });
+  });
+  const quit = page.getByRole('dialog', { name: 'Quit Soundpad Web' });
+  await expect(quit).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(quit).toHaveCount(0);
+  await expect(settings).toBeVisible();
+  expect(
+    await page.evaluate(() => !!document.activeElement?.closest('[aria-label="Session & access"]')),
+  ).toBe(true);
+  await page.keyboard.press('Escape');
+  await expect(settings).toHaveCount(0);
+  await expect(opener).toBeFocused();
+});
+
+test('a panel brought back by a reload leaves focus where it was', async ({ page, harness }) => {
+  await host(page, harness);
+  await nav(page, 'Mimic').click();
+  await expect(page.locator('#editor-title')).toBeFocused();
+  await page.reload();
+  await expect(mimicPanel(page)).toBeVisible();
+  await expect(playButton(page, 'Airhorn')).toBeEnabled();
+  await page.waitForTimeout(300);
+  await expect(page.locator('#editor-title')).not.toBeFocused();
+  // So the first Tab starts at the top of the page (in Safari, whose Tab skips links, at the topbar).
+  await page.keyboard.press('Tab');
+  expect(
+    await page.evaluate(() => !!document.activeElement?.closest('.skip-links, header.topbar')),
+  ).toBe(true);
+});
+
+test('the capture chip ends in an ellipsis on a desktop and keeps its words for screen readers on a phone', async ({
+  page,
+  harness,
+}) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await host(page, harness);
+  await startMimic(page);
+  const long = page.locator('.capture-chip .capture-long');
+  await expect(long).toHaveCSS('text-overflow', 'ellipsis');
+  await page.setViewportSize({ width: 412, height: 860 });
+  // Out of sight but not display:none, so the status region still has its words.
+  await expect(long).not.toHaveCSS('display', 'none');
+  expect(await long.evaluate((el) => el.getBoundingClientRect().width)).toBeLessThanOrEqual(1);
+  await expect(page.getByRole('status').filter({ hasText: 'Capturing' })).toHaveCount(1);
+});
+
+test('the sound editor asks for Statistics only once they are opened', async ({
+  page,
+  harness,
+}) => {
+  await host(page, harness);
+  await page.evaluate(async () => {
+    const { controller } = await import(/* @vite-ignore */ '/src/' + 'controller.ts');
+    const original = controller.run.bind(controller);
+    const w = window as unknown as { ops: string[] };
+    w.ops = [];
+    // One sound's statistics (the board's own sort asks for all of them, without a sound).
+    controller.run = (async (op: string, ...rest: unknown[]) => {
+      const fields = rest[0] as { soundId?: string } | undefined;
+      w.ops.push(fields?.soundId ? `${op}:${fields.soundId}` : op);
+      return (original as (...a: unknown[]) => unknown)(op, ...rest);
+    }) as typeof controller.run;
+  });
+  const ops = () => page.evaluate(() => (window as unknown as { ops: string[] }).ops);
+  await page.getByRole('button', { name: 'Open editor for Airhorn' }).click();
+  const summary = editorPanel(page).locator('.sound-editor-stats summary');
+  await expect(summary).toBeVisible();
+  // Plays while it is closed fetch nothing either.
+  await playButton(page, 'Airhorn').click();
+  await page.waitForTimeout(600);
+  const one = (list: string[]) => list.some((op) => op.startsWith('statistics:'));
+  expect(one(await ops())).toBe(false);
+  await summary.click();
+  await expect.poll(async () => one(await ops())).toBe(true);
+});
+
+test('leaving the example drops its Temp list, so the next session never shows its sources', async ({
+  page,
+}) => {
+  if (!(await startExample(page))) return;
+  const listed = () =>
+    page.evaluate(async () => {
+      const m = await import(/* @vite-ignore */ '/src/' + 'temp-assets.ts');
+      return m.tempAssetsSnapshot().data !== undefined;
+    });
+  await expect.poll(listed).toBe(true);
+  await page.getByRole('button', { name: 'Leave example' }).click();
+  await expect(page.getByRole('button', { name: 'Try the example' })).toBeVisible();
+  await expect.poll(listed).toBe(false);
+});
+
+test('example at 1440: the compact Spotify row shows its name, the Host’s PC only tag and the reason uncut', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  if (!(await startExample(page))) return;
+  const spotify = page.locator('section.spotify-player');
+  await expect(spotify).toContainText('Spotify unavailable');
+  // Nothing to control in the example: no transport takes the row's width.
+  await expect(spotify.getByRole('button', { name: 'Play or pause Spotify' })).toHaveCount(0);
+  const tag = spotify.locator('.host-only-tag');
+  await expect(tag).toBeVisible();
+  expect(await tag.evaluate((el) => el.scrollWidth <= el.clientWidth + 1)).toBe(true);
+  expect(
+    await spotify.evaluate(
+      (root) =>
+        root.querySelector('.host-only-tag')!.getBoundingClientRect().right <=
+        root.getBoundingClientRect().right + 1,
+    ),
+  ).toBe(true);
+});
+
+test('the companion window with an editor docked keeps Spotify’s Play/Pause and Next in the rail', async ({
+  page,
+  harness,
+}) => {
+  await page.setViewportSize({ width: 1100, height: 800 });
+  await host(page, harness);
+  await page.evaluate(async () => {
+    const { controller } = await import(/* @vite-ignore */ '/src/' + 'controller.ts');
+    const original = controller.run.bind(controller);
+    controller.run = (async (op: string, fields: Record<string, unknown>) =>
+      op === 'spotify'
+        ? {
+            enabled: true,
+            available: true,
+            title: 'Fixture song',
+            artist: 'Fixture artist',
+            status: 'Playing',
+            canToggle: true,
+            canNext: true,
+            canPrevious: true,
+          }
+        : original(op, fields)) as typeof controller.run;
+  });
+  const player = page.getByRole('region', { name: 'Spotify player' });
+  await player.getByLabel('Enable Spotify desktop integration').check();
+  await expect(player.getByRole('button', { name: 'Play or pause Spotify' })).toBeVisible();
+  await nav(page, 'Mimic').click();
+  await expect(page.locator('.app-shell')).toHaveAttribute('data-rail', 'true');
+  for (const name of ['Play or pause Spotify', 'Next Spotify track']) {
+    const button = player.getByRole('button', { name });
+    await expect(button).toBeVisible();
+    expect(await onTop(button), name).toBe(true);
+  }
+});
+
+test('Voices and Sentences: one search field like the board’s, and a New sentence field with room', async ({
+  page,
+  harness,
+}) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await host(page, harness);
+  await nav(page, 'Voices').click();
+  await expect(section(page, 'Voices').getByLabel('Search the voice library')).toHaveCSS(
+    'border-top-width',
+    '0px',
+  );
+  await nav(page, 'Sentences').click();
+  const field = section(page, 'Sentences').getByLabel('New sentence', { exact: true });
+  expect((await field.boundingBox())!.width).toBeGreaterThanOrEqual(280);
 });

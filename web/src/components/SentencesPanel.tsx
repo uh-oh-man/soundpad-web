@@ -237,7 +237,7 @@ function SentenceList({ open, canBuild }: { open: (id: string) => void; canBuild
       )}
       {canBuild && (
         <form
-          className="voices-inline"
+          className="voices-inline sentence-new"
           onSubmit={(e) => {
             e.preventDefault();
             if (busy || !text.trim()) return;

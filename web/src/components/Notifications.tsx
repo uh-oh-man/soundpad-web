@@ -38,8 +38,11 @@ function useNarrow() {
  * ones fold into "N more", which opens Activity. On a narrow screen the dock floats above the player
  * with up to 2 cards and publishes its height as --notice-height, which the page, the board and the
  * editor sheet keep free at the bottom. While a dialog is open the cards move into it, at its foot
- * (2.41). Cards keep role status/alert but do not announce themselves (`aria-live="off"`): the single
- * announcer below says each notice once, wherever its card is.
+ * (2.41). Cards do not announce themselves (`aria-live="off"`): the single announcer below says each
+ * notice once, wherever its card is. Info and success cards keep role status; error cards are a named
+ * group, not role alert, because a browser raises an alert event for every alert element it creates, so
+ * an error was said by the announcer and the card, and again each time a dialog opened or closed and the
+ * cards moved into or out of it.
  */
 export function Notifications() {
   const notices = useNotices();
@@ -94,7 +97,8 @@ function NoticeCard({ notice }: { notice: Notice }) {
   return (
     <div
       className={`toast notice-${notice.kind}`}
-      role={notice.kind === 'error' ? 'alert' : 'status'}
+      role={notice.kind === 'error' ? 'group' : 'status'}
+      aria-label={notice.kind === 'error' ? 'Error notice' : undefined}
       aria-live="off"
       onPointerEnter={() => holdNotice(notice.id, true)}
       onPointerLeave={() => holdNotice(notice.id, false)}

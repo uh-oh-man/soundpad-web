@@ -187,6 +187,9 @@ const HONESTLY_UNAVAILABLE: Partial<Record<Op, string>> = {
   libraryIndex: LIBRARY_UNAVAILABLE.index,
   speakerName: LIBRARY_UNAVAILABLE.speakers,
   speakerLink: LIBRARY_UNAVAILABLE.speakers,
+  // Host style sync (2.43): the example's style stays on this browser; the page never asks (not a host page).
+  uiPrefsGet: UNAVAILABLE.other,
+  uiPrefsSet: UNAVAILABLE.other,
 };
 
 const wav = z.object({ wav: z.string().min(1), seconds: z.number().positive() });
@@ -203,6 +206,8 @@ type Context = {
   voice: string;
   sentence: z.infer<typeof sentenceSchema>;
   named: string;
+  /** One of the example's own sounds (not Temp). */
+  sound: string;
 };
 const group = z.object({ group: z.number().int().positive() });
 const played = z.object({ played: z.literal(true), epoch: z.uuid() });
@@ -303,6 +308,15 @@ const CHECKS: [Op, Check][] = [
     }),
   ],
   ['trimPreview', (c) => ({ fields: { assetId: c.clip, action: 'echo' }, schema: wav })],
+  // 2.43 (soundEdit): Speed and effects on any example sound.
+  [
+    'trimAudio',
+    (c) => ({
+      fields: { soundId: c.sound, action: 'speed', speed: 1.5, keepPitch: true, endMs: 1000 },
+      schema: temp,
+    }),
+  ],
+  ['trimPreview', (c) => ({ fields: { soundId: c.sound, action: 'echo' }, schema: wav })],
   [
     'removeAudio',
     (c) => ({ fields: { assetId: c.clip }, schema: z.object({ removed: z.literal(true) }) }),
@@ -513,6 +527,7 @@ describe('example coverage of DEMO_COMPANION', () => {
       voice: status.voices[0].id,
       sentence,
       named: sentences.named[0].id,
+      sound: state().library.sounds.find((s) => !s.temporary)!.id,
     };
     const problems: string[] = [];
     for (const [op, check] of CHECKS) {
@@ -545,7 +560,12 @@ describe('example coverage of DEMO_COMPANION', () => {
     const { model } = setup();
     const older = new Set([...BASE_OPS, ...scoped(true)]);
     const newer = scoped(false).filter((op) => !older.has(op));
-    expect(newer.length).toBeGreaterThan(0);
+    // Since 2.43 the example reports every feature there is, so nothing is newer; this guards the next one.
+    if (!newer.length) {
+      expect((Object.keys(FEATURES) as Feature[]).filter((f) => !inScope(f))).toEqual([]);
+      model.close();
+      return;
+    }
     const answered: string[] = [];
     for (const op of newer) {
       const outcome = await model.send(command(op), HOST).then(

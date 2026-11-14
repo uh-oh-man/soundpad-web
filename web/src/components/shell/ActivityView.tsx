@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { Check, Info, TriangleAlert, UserMinus, UserPlus, Users } from 'lucide-react';
 import {
   markActivitySeen,
@@ -98,14 +98,31 @@ export function ActivityView() {
   useEffect(() => {
     markActivitySeen();
   }, [history]);
+  // A notice's button leaves once it has run or its 60 s are up. If it had the keyboard, its row takes
+  // it, so focus never drops to the page (where Space would pause playback and Escape close the panel).
+  const list = useRef<HTMLOListElement>(null);
+  const focused = useRef<string | null>(null);
+  useLayoutEffect(() => {
+    const id = focused.current;
+    if (id === null) return;
+    const active = document.activeElement;
+    if (active && active !== document.body) return;
+    focused.current = null;
+    list.current?.querySelector<HTMLElement>(`[data-notice="${id}"]`)?.focus();
+  });
   return (
     <div className="activity-view">
       <section aria-labelledby="activity-notices">
         <h3 id="activity-notices">Notices</h3>
         {history.length ? (
-          <ol className="activity-list">
+          <ol className="activity-list" ref={list}>
             {history.map((h) => (
-              <li key={h.id} className={`activity-item notice-${h.kind}`}>
+              <li
+                key={h.id}
+                className={`activity-item notice-${h.kind}`}
+                data-notice={h.id}
+                tabIndex={-1}
+              >
                 {icon(h.kind)}
                 <time dateTime={new Date(h.at).toISOString()}>{time(h.at)}</time>
                 <span>{h.message}</span>
@@ -113,7 +130,16 @@ export function ActivityView() {
                   <button
                     type="button"
                     className="btn activity-action"
-                    onClick={() => {
+                    onFocus={() => {
+                      focused.current = h.id;
+                    }}
+                    onBlur={(e) => {
+                      if (e.relatedTarget) focused.current = null;
+                    }}
+                    onClick={(e) => {
+                      // The row first: the action may open something else, which then takes focus.
+                      e.currentTarget.closest('li')?.focus();
+                      focused.current = null;
                       runNoticeAction(h.id);
                       setNow(Date.now());
                     }}

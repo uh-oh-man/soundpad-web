@@ -11,6 +11,11 @@ import { FOCUSABLE as focusable, currentOpener, returnFocus } from '../focus-ret
  * and one "Mimic" are exposed at a time.
  */
 let openDialogs = 0;
+/**
+ * The open dialogs, oldest first. Two can be open at once (the companion's Quit prompt over Session &
+ * access): only the newest takes Escape, and when an older one closes, the keyboard stays in the newest.
+ */
+const stack: { current: HTMLElement | null }[] = [];
 const HIDDEN_BEHIND = '#editor-panel, .section-nav';
 function setShellInert(on: boolean) {
   const shell = document.querySelector('.app-shell');
@@ -79,11 +84,15 @@ export function Modal({
   useEffect(() => {
     // Return focus to whatever opened the dialog once it closes.
     const opener = currentOpener();
+    const me = dialog;
+    stack.push(me);
     openDialogs++;
     setShellInert(true);
     dialog.current?.querySelector<HTMLElement>('button')?.focus();
     function escape(event: KeyboardEvent) {
       if (event.key !== 'Escape' || event.defaultPrevented) return;
+      // Only the newest dialog closes; an older one's listener (registered first) leaves the key to it.
+      if (stack[stack.length - 1] !== me) return;
       // Taken: the editor panel behind must not close on the same press.
       event.preventDefault();
       close.current();
@@ -91,10 +100,16 @@ export function Modal({
     document.addEventListener('keydown', escape);
     return () => {
       document.removeEventListener('keydown', escape);
+      const at = stack.indexOf(me);
+      if (at >= 0) stack.splice(at, 1);
       openDialogs = Math.max(0, openDialogs - 1);
       // The page is usable again before focus goes back into it.
       if (!openDialogs) setShellInert(false);
-      returnFocus(opener);
+      const top = stack[stack.length - 1]?.current;
+      const active = document.activeElement;
+      // Another dialog is still open and has the keyboard: leave it there.
+      if (top && active && active !== document.body && top.contains(active)) return;
+      returnFocus(opener, () => top?.querySelector<HTMLElement>(focusable));
     };
   }, []);
   return createPortal(

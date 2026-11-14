@@ -694,6 +694,14 @@ html[data-motion='reduce'] .player.intent-pending .playback-icon {
 .spotify-compact .spotify-meta span {
   color: var(--text-dim);
 }
+/* The example's Host's PC only tag: on its own line under the name, never cut. */
+.spotify-compact .spotify-meta .host-only-tag {
+  align-self: flex-start;
+  overflow: visible;
+  margin: 2px 0;
+  font-size: 11px;
+  color: var(--warning);
+}
 .spotify-compact .spotify-row .icon-button {
   flex: none;
   width: 34px;

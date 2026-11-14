@@ -32,7 +32,8 @@ const SLOW_DRAW_MS = 4;
 const PHONE = '(max-width: 700px)';
 const FORCED = '(forced-colors: active)';
 
-type Seam = { frames: number; state: RibbonState; key: string };
+/** `level`: the level of the last frame drawn (the shots wait for a lifted one). */
+type Seam = { frames: number; state: RibbonState; key: string; level?: number };
 declare global {
   interface Window {
     /** DEV only: what the ribbon drew, for the e2e tests (spec 6.6). */
@@ -158,6 +159,7 @@ export function HeaderRibbon({ playback, hostId, held, active }: HeaderRibbonPro
           frames: l.frames,
           state: l.state,
           key: element!.dataset.ribbonKey ?? '',
+          level,
         };
         try {
           performance.measure('ribbon-draw', { start: started, end: started + spent });

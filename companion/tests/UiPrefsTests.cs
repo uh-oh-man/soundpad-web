@@ -101,6 +101,8 @@ public sealed class UiPrefsTests : IDisposable
     [InlineData("{")]
     [InlineData("[1,2]")]
     [InlineData("")]
+    // A key written twice (hand-edited): JsonObject throws ArgumentException when it is enumerated (2.43 review).
+    [InlineData("{\"version\":1,\"theme\":\"ocean\",\"theme\":\"purple\"}")]
     public async Task ACorruptFileGivesTheDefaultsAndIsNotDeleted(string content)
     {
         File.WriteAllText(UiPath, content);

@@ -26,8 +26,11 @@ export function EditorPanel({
   title: string;
   /** What the minimized bar adds after the title ("draft open"). */
   summary?: string;
-  /** Changes whenever focus should go to the heading again (opening, switching kinds, the nav). */
-  focusKey: string | number;
+  /**
+   * Changes whenever focus should go to the heading again (opening, switching kinds, the nav). 0 means no
+   * one asked: a panel brought back from section memory, or remounted by a reconnect, leaves focus alone.
+   */
+  focusKey: number;
   onClose: () => void;
   onMinimize: () => void;
   onRestore: () => void;
@@ -37,7 +40,7 @@ export function EditorPanel({
   const close = useRef(onClose);
   close.current = onClose;
   useEffect(() => {
-    heading.current?.focus({ preventScroll: true });
+    if (focusKey > 0) heading.current?.focus({ preventScroll: true });
   }, [focusKey]);
   useEffect(() => {
     // Escape closes the panel when it is meant for it: no dialog is open over it, nothing inside used
@@ -73,14 +76,23 @@ export function EditorPanel({
           {title}
           {mode === 'minimized' && summary && <span className="editor-summary"> · {summary}</span>}
         </h2>
-        {mode === 'sheet' && (
-          <button type="button" className="btn editor-mode" onClick={onMinimize}>
-            <Minimize2 size={16} aria-hidden="true" /> Show board
-          </button>
-        )}
-        {mode === 'minimized' && (
-          <button type="button" className="btn editor-mode" onClick={onRestore}>
-            <Maximize2 size={16} aria-hidden="true" /> Show editor
+        {/* One button for both: it stays the same element while its label changes, so the keyboard
+            stays on it (two buttons in two places dropped focus to the page, and Space then paused). */}
+        {(mode === 'sheet' || mode === 'minimized') && (
+          <button
+            type="button"
+            className="btn editor-mode"
+            onClick={mode === 'sheet' ? onMinimize : onRestore}
+          >
+            {mode === 'sheet' ? (
+              <>
+                <Minimize2 size={16} aria-hidden="true" /> Show board
+              </>
+            ) : (
+              <>
+                <Maximize2 size={16} aria-hidden="true" /> Show editor
+              </>
+            )}
           </button>
         )}
         <button type="button" className="icon-button" aria-label="Close dialog" onClick={onClose}>

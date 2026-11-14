@@ -47,6 +47,18 @@ function skipTo(e: MouseEvent<HTMLAnchorElement>, find: () => HTMLElement | null
 }
 
 /**
+ * The player's first control that is shown. FOCUSABLE is a list of selectors, so it is matched inside the
+ * player rather than prefixed with it (".player a, b, c" matched the skip links themselves first).
+ */
+function firstPlayerControl() {
+  const player = document.querySelector('.player');
+  if (!player) return null;
+  return [...player.querySelectorAll<HTMLElement>(FOCUSABLE)].find(
+    (el) => el.getClientRects().length > 0 && !el.closest('[hidden], [inert]'),
+  );
+}
+
+/**
  * The page's regions in their reading order (2.43, spec 4.2): skip links, the topbar, the example
  * banner, the sidebar and the board column (the current view and the notice dock), the splitter and
  * the editor panel, then the player. `.workspace` stays as an element (scripts and tests look for it);
@@ -118,13 +130,7 @@ export function AppShell({
               Skip to editor
             </a>
           )}
-          <a
-            className="skip-link"
-            href="#player"
-            onClick={(e) =>
-              skipTo(e, () => document.querySelector<HTMLElement>(`.player ${FOCUSABLE}`))
-            }
-          >
+          <a className="skip-link" href="#player" onClick={(e) => skipTo(e, firstPlayerControl)}>
             Skip to player
           </a>
         </div>

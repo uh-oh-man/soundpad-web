@@ -231,4 +231,28 @@ describe('ribbon drawing', () => {
           ))
             expect(Math.abs(p.y - 0.55 * 120)).toBeLessThanOrEqual(0.42 * 120 + 1e-9);
   });
+  it('moves the strands as one wave, near-parallel, not a crossing mesh (2.43 review)', () => {
+    // The reference is one smooth layered ribbon: at almost every point all strands rise or fall together.
+    // Spec 6.5's phase step of 0.37 rad spread the phases over most of a cycle, so some rose while others
+    // fell and they crossed in a mesh.
+    const together = (strands: number, level: number, t: number) => {
+      const geom = { width: 1100, height: 120, strands };
+      const frame = { t, level, ripples: [], alpha: 1, palette };
+      const lines = Array.from({ length: strands }, (_, i) => strandPoints(geom, frame, i));
+      let agree = 0;
+      for (let k = 0; k + 1 < lines[0].length; k++) {
+        const signs = new Set(lines.map((l) => Math.sign(l[k + 1].y - l[k].y)));
+        if (signs.size === 1) agree++;
+      }
+      return agree / (lines[0].length - 1);
+    };
+    for (const strands of [14, 8])
+      for (const level of [0, 0.6, 1])
+        for (const t of [0, 1.7, 4.2])
+          // About 0.72-0.89 now (they differ only near the turning points); 0 with the old step.
+          expect(
+            together(strands, level, t),
+            `N=${strands} L=${level} t=${t}`,
+          ).toBeGreaterThanOrEqual(0.7);
+  });
 });

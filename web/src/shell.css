@@ -108,7 +108,15 @@
   font-size: 12px;
   white-space: nowrap;
   max-width: 260px;
+  min-width: 0;
   overflow: hidden;
+}
+/* The ellipsis belongs on the text itself: text-overflow does not reach into a flex child. The full name
+   stays in the chip's title. */
+.capture-chip .capture-long {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
   text-overflow: ellipsis;
 }
 .capture-chip i {
@@ -204,10 +212,41 @@
     .sidebar-label,
     .sidebar-heading,
     .sidebar-empty,
-    .sidebar-bottom,
-    .spotify-player
+    .sidebar-bottom
   ) {
   display: none;
+}
+/* Spotify in the rail: just Play/Pause and Next, stacked, so the companion window keeps Spotify's controls
+   while an editor is docked. With nothing to press (off, or unavailable) the rail shows no Spotify box. */
+.app-shell[data-rail='true'] .sidebar .spotify-player {
+  padding: 4px 0;
+  margin-bottom: 12px;
+  border: 0;
+  background: transparent;
+}
+.app-shell[data-rail='true'] .sidebar .spotify-player:not(:has(.spotify-toggle)) {
+  display: none;
+}
+.app-shell[data-rail='true'] .sidebar .spotify-player .spotify-row {
+  flex-direction: column;
+  gap: 4px;
+}
+.app-shell[data-rail='true']
+  .sidebar
+  .spotify-player
+  :is(
+    .spotify-art-toggle,
+    .spotify-meta,
+    .spotify-more,
+    .spotify-enable,
+    .spotify-scope,
+    .warning
+  ) {
+  display: none;
+}
+.app-shell[data-rail='true'] .sidebar .spotify-player .spotify-row .icon-button {
+  width: 40px;
+  height: 40px;
 }
 .app-shell[data-rail='true'] .sidebar :is(.category, .nav-item) {
   justify-content: center;
@@ -610,6 +649,17 @@ html[data-motion='reduce'] .notice-dock .notification-stack .toast {
   }
   .app-shell.is-connected .editor-panel .editor-body {
     padding: 14px 17px calc(var(--notice-height, 0px) + 18px);
+    /* The sheet's body is its own scroller, under the fixed notice dock: Tab keeps controls above the cards. */
+    scroll-padding-bottom: calc(var(--notice-height, 0px) + 8px);
+  }
+  /* Over the sheet, only a card's buttons take the pointer, as at a dialog's foot (2.41): a press on the
+     rest of a card reaches the sheet control under it. */
+  .app-shell.is-connected[data-panel='sheet'] .notice-dock .notification-stack,
+  .app-shell.is-connected[data-panel='sheet'] .notice-dock .toast {
+    pointer-events: none;
+  }
+  .app-shell.is-connected[data-panel='sheet'] .notice-dock .toast button {
+    pointer-events: auto;
   }
   /* Show board: a bar above the player that keeps the editor as it was. */
   .app-shell.is-connected .editor-panel[data-panel-mode='minimized'] {
@@ -623,6 +673,19 @@ html[data-motion='reduce'] .notice-dock .notification-stack .toast {
   .app-shell.is-connected[data-panel='minimized'] .notice-dock {
     bottom: calc(var(--player-height, 0px) + 60px);
   }
+  /* The minimized bar (52 px, and the dock 60 px up) is room the page keeps free too, for scrolling and for
+     Tab, so a focused tile is never under the bar or the cards above it. */
+  .app-shell.is-connected[data-panel='minimized'] {
+    padding-bottom: calc(var(--player-height, 160px) + var(--notice-height, 0px) + 60px + 15px);
+  }
+  html:has(.app-shell.is-connected[data-panel='minimized']) {
+    scroll-padding-bottom: calc(
+      var(--player-height, 0px) + var(--notice-height, 0px) + 60px + 12px
+    );
+  }
+  .app-shell[data-panel='minimized'] #board {
+    scroll-padding-bottom: calc(var(--player-height, 0px) + var(--notice-height, 0px) + 60px + 8px);
+  }
   .board-toolbar .toolbar {
     max-width: none;
     flex-basis: 100%;
@@ -635,8 +698,17 @@ html[data-motion='reduce'] .notice-dock .notification-stack .toast {
   .capture-chip {
     padding: 4px 8px;
   }
-  .capture-long {
-    display: none;
+  /* Out of sight but still the chip's text, so the status is read on a phone too ("Rec" is hidden from it). */
+  .capture-chip .capture-long {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    padding: 0;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    clip-path: inset(50%);
+    border: 0;
   }
   .capture-short {
     display: inline;

@@ -76,7 +76,8 @@ public sealed partial class UiPrefsStore(string path)
             }
             saved = true;
         }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException) { current = new JsonObject { ["version"] = 1 }; saved = false; }
+        // ArgumentException: a key written twice ({"theme":…,"theme":…}), which JsonObject refuses when it is enumerated.
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException or ArgumentException or InvalidOperationException) { current = new JsonObject { ["version"] = 1 }; saved = false; }
     }
 
     /// <summary>Known fields missing from the file take their defaults; unknown ones stay.</summary>

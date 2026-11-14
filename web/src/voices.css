@@ -88,6 +88,20 @@
 .voices-search input {
   flex: 1 1 auto;
 }
+/* The library's search is one field, as on the board: the .search frame is the box, and the input inside
+   it has no border or fill of its own (the panel's input rule above would give it one). */
+.voices-panel
+  .search.voices-search
+  input:not([type='checkbox']):not([type='radio']):not([type='color']) {
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+/* The search, the filters and the word-click switch are rows of their own, spaced as the board toolbar. */
+.voices-library > :is(.voices-search, .voices-filters, .voices-mode) {
+  margin-bottom: 10px;
+}
 .voices-filters,
 .voices-types,
 .voices-mode,

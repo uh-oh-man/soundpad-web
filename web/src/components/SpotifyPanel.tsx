@@ -108,30 +108,40 @@ export function SpotifyPanel({ host = true }: { host?: boolean }) {
                 {data?.available ? data.title || 'Track name unavailable' : 'Spotify unavailable'}
               </strong>
               {controller.getSnapshot().demo && <HostOnlyTag />}
-              <span title={data?.available ? (data.artist ?? undefined) : undefined}>
+              <span
+                title={
+                  data?.available ? (data.artist ?? undefined) : data?.error || error || undefined
+                }
+              >
                 {data?.available
                   ? data.artist || 'Artist unavailable'
                   : data?.error || error || 'Checking Spotify…'}
               </span>
             </div>
-            <button
-              className="icon-button"
-              aria-label="Play or pause Spotify"
-              disabled={!data?.available || !data.canToggle}
-              aria-disabled={busy || undefined}
-              onClick={() => void request('toggle')}
-            >
-              {data?.status === 'Playing' ? <Pause size={18} /> : <Play size={18} />}
-            </button>
-            <button
-              className="icon-button"
-              aria-label="Next Spotify track"
-              disabled={!data?.available || !data.canNext}
-              aria-disabled={busy || undefined}
-              onClick={() => void request('next')}
-            >
-              <SkipForward size={16} />
-            </button>
+            {/* Without a player to control (unavailable, and always in the example) the row has no
+                transport, so the name, the Host's PC only tag and the reason have the full width. */}
+            {data?.available && (
+              <>
+                <button
+                  className="icon-button spotify-toggle"
+                  aria-label="Play or pause Spotify"
+                  disabled={!data.canToggle}
+                  aria-disabled={busy || undefined}
+                  onClick={() => void request('toggle')}
+                >
+                  {data.status === 'Playing' ? <Pause size={18} /> : <Play size={18} />}
+                </button>
+                <button
+                  className="icon-button spotify-next"
+                  aria-label="Next Spotify track"
+                  disabled={!data.canNext}
+                  aria-disabled={busy || undefined}
+                  onClick={() => void request('next')}
+                >
+                  <SkipForward size={16} />
+                </button>
+              </>
+            )}
           </div>
           {expanded && (
             <div id="spotify-more" className="spotify-more">

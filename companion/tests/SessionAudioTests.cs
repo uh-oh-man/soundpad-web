@@ -103,6 +103,25 @@ public sealed class SessionAudioTests : IDisposable
         Assert.False((await bridge.Execute(Cmd("trimAudio") with { SoundId = airhorn.Id, PositionMs = 0, EndMs = 1000 }, "guest")).Ok);
     }
     [Fact]
+    public async Task ASoundFileThatIsNotAudioIsRefusedWithAReason()
+    {
+        // 2.43 review: any Soundpad file can be a copy source, and one that does not decode says so instead of the
+        // generic "Companion operation failed".
+        var input = Path.Combine(folder, "not-audio.wav");
+        File.WriteAllBytes(input, System.Text.Encoding.ASCII.GetBytes(string.Concat(Enumerable.Repeat("not audio at all ", 512))));
+        await using var mock = new MockSoundpad { AllXml = MockSoundpad.Sounds.Replace(@"C:\Private\airhorn.wav", input), CategoryXml = MockSoundpad.Categories.Replace(@"C:\Private\airhorn.wav", input) };
+        using var pipe = new SoundpadPipe(mock.Name, true); using var bridge = new Bridge(pipe, new StateStore(folder)); await bridge.Poll(true);
+        Assert.True((await bridge.Execute(Cmd("beginSession"), "host")).Ok);
+        var airhorn = bridge.Snapshot.Library.Sounds.Single(s => s.Name == "Airhorn");
+        foreach (var op in new[] { "trimAudio", "trimPreview" })
+        {
+            var reply = await bridge.Execute(Cmd(op) with { SoundId = airhorn.Id, PositionMs = 0, EndMs = 1000, Action = "speed", Speed = 1.5 }, "host");
+            Assert.False(reply.Ok);
+            Assert.Equal("That sound file could not be read.", reply.Error);
+        }
+        Assert.DoesNotContain(bridge.Snapshot.Library.Sounds, s => s.Temporary);
+    }
+    [Fact]
     public async Task RecoveryCleanupNeverRemovesUnownedEntriesInExistingTemp()
     {
         var input = Wave(); await using var mock = new MockSoundpad { CategoryXml = MockSoundpad.Categories.Replace("</Categories>", "<Category index=\"9\" name=\"temp\"><Sound index=\"1\" url=\"C:\\Private\\airhorn.wav\"/></Category></Categories>") }; using var pipe = new SoundpadPipe(mock.Name, true);

@@ -2,6 +2,11 @@
  * Draws the header ribbon (Stage G spec 6.5): layered strands with a bright crest at about 62 % of the
  * width, lifted by the level and nudged by travelling ripples. Pure apart from the 2D context it is
  * given: no shadows or filters, and every point stays within 0.42 of the height from the centre line.
+ *
+ * The strands move as one wave (2.43 review): their phases differ by only STRAND_PHASE, and the layering
+ * comes from the spread and a slightly smaller swing towards the outer strands, so they fan out like the
+ * owner's reference instead of crossing in a mesh (spec 6.5's i·0.37 spread the phases over most of a
+ * cycle).
  */
 
 export type RibbonPalette = { deep: string; strand: string; crest: string };
@@ -44,6 +49,10 @@ const CREST_AT = 0.62;
 const BELL_WIDTH = 0.22;
 const MAX_LIFT = 0.42;
 const TAU = Math.PI * 2;
+/** Phase step between neighbouring strands, in radians. */
+export const STRAND_PHASE = 0.05;
+/** The outermost strands swing this much of the centre strand's amplitude. */
+const OUTER_SWING = 0.85;
 
 export const bell = (x: number, width: number) =>
   Math.exp(-((x / width - CREST_AT) ** 2) / (2 * BELL_WIDTH ** 2));
@@ -53,9 +62,11 @@ export function strandPoints(geom: RibbonGeom, frame: RibbonFrame, i: number) {
   const { width: W, height: H, strands: N } = geom;
   const L = Math.max(0, Math.min(1, frame.level));
   const cy = 0.55 * H;
-  const phase = i * 0.37;
-  const spread = (i - (N - 1) / 2) * (H * 0.018) * (0.35 + L);
-  const amp = (0.1 + 0.32 * L) * H;
+  const phase = i * STRAND_PHASE;
+  const middle = (N - 1) / 2;
+  const spread = (i - middle) * (H * 0.018) * (0.35 + L);
+  const outer = middle > 0 ? Math.abs(i - middle) / middle : 0;
+  const amp = (0.1 + 0.32 * L) * H * (1 - (1 - OUTER_SWING) * outer);
   const speed = W / 0.9;
   const points: { x: number; y: number }[] = [];
   for (let k = 0; k < POINTS; k++) {

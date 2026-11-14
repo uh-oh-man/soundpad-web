@@ -424,3 +424,10 @@ html[data-motion='reduce'] .missing-pulse {
     grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
   }
 }
+
+/* The New sentence field is the view's main entry: it takes the row's room (up to a readable 640 px)
+   instead of its intrinsic width, which cut the placeholder mid-word. */
+.sentence-new input {
+  flex: 1 1 280px;
+  max-width: 640px;
+}

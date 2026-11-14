@@ -106,7 +106,11 @@ public sealed partial class Bridge
             double speed = effect == "speed" ? c.Speed is double s && double.IsFinite(s) && s >= AudioEffects.MinSpeed && s <= AudioEffects.MaxSpeed ? s : throw new InvalidDataException($"Choose a speed from {AudioEffects.MinSpeed}x to {AudioEffects.MaxSpeed}x.") : 1;
             // Decoding, the effect and the WAV run on the audio worker (2.41), never on the thread that took this command.
             bool keepPitch = effect == "speed" && c.KeepPitch;
-            var made = await Heavy(preview ? "trimPreview" : "trimAudio", () => MakeCopy(sourcePath, from, to, effect, speed, keepPitch, preview));
+            MadeCopy made;
+            // Any Soundpad file can be a source now (2.43): one MediaFoundation cannot open (DRM, corrupt, an odd
+            // container) or one that is locked or on a missing drive says so, as the library preview does.
+            try { made = await Heavy(preview ? "trimPreview" : "trimAudio", () => MakeCopy(sourcePath, from, to, effect, speed, keepPitch, preview)); }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Runtime.InteropServices.COMException or ArgumentException) { throw new InvalidDataException("That sound file could not be read."); }
             var (cut, rate, channels, wav) = (made.Cut, made.Rate, made.Channels, made.Wav);
             if (preview) return new("ack", c.Id, true, Data: new { wav = Convert.ToBase64String(wav), seconds = made.Seconds });
             var label = effect switch { "none" => "trimmed", "speed" => $"{speed.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture)}x speed{(keepPitch ? ", same pitch" : "")}", _ => AudioEffects.Names[effect] };

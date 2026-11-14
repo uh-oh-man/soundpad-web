@@ -3,11 +3,12 @@ import { controller } from '../../controller';
 
 /**
  * Stays at the top of the board for the whole example, with the way back to the start (Stage G P0.6:
- * moved out of main.tsx unchanged; WP-C owns it).
+ * moved out of main.tsx; WP-C owns it).
  */
-export function DemoBanner() {
+export function DemoBanner({ inert }: { inert?: boolean }) {
   return (
-    <aside className="demo-banner" aria-label="Example session">
+    // Inert while the phone's editor sheet covers it, like the board: Tab must not reach a hidden button.
+    <aside className="demo-banner" aria-label="Example session" inert={inert}>
       <Sparkles size={18} aria-hidden="true" />
       <span>
         <strong>Example session: nothing here reaches Soundpad.</strong> Sounds play in this

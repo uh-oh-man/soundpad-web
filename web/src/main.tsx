@@ -378,6 +378,8 @@ function App() {
   useTempAssetsSync(
     connected && !needsCompanionUpdate && mode !== 'landing',
     state.managedAudioVersion,
+    // Whose Temp list it is: leaving the example or a session (the landing page) drops the old one.
+    mode === 'landing' ? '' : `${view.demo ? 'example' : 'host'}:${state.hostId ?? ''}`,
   );
 
   /** Opens the panel at `request`, or switches it there; the heading gets the keyboard. */
@@ -415,6 +417,10 @@ function App() {
         : document.getElementById('board'),
     );
   }, [panel]);
+  // A panel that comes back after the landing page (a reconnect) is not a new open: focus stays where it is.
+  useEffect(() => {
+    if (mode === 'landing') setPanelFocus(0);
+  }, [mode]);
   useEditorRequests(openEditor);
   useViewRequests((request) => switchView(request.view));
   useEffect(() => {
@@ -435,6 +441,9 @@ function App() {
     const board = document.getElementById('board');
     if (board) remember(shown, { scrollTop: board.scrollTop });
     setSection(next);
+    // On a phone the editor sheet covers the view: fold it to its bar, so the chosen view shows and can be
+    // used (the editor keeps its state, and "Show editor" brings it back).
+    if (panelMode === 'sheet') setMinimized(true);
   }
   useLayoutEffect(() => {
     const board = document.getElementById('board');
@@ -641,7 +650,7 @@ function App() {
             }}
           />
         }
-        banner={mode !== 'landing' && view.demo ? <DemoBanner /> : undefined}
+        banner={mode !== 'landing' && view.demo ? <DemoBanner inert={sheetShown} /> : undefined}
         sidebar={
           <Sidebar
             state={state}

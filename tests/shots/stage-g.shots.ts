@@ -90,7 +90,31 @@ for (const s of MATRIX)
       await firstTile(page, 'host-board', s);
       await page.getByRole('button', { name: 'Play from start: Airhorn', exact: true }).click();
       await expect(page.locator('.player')).toContainText('Airhorn');
-      await shot(page, 'host-playing', s);
+      // The ribbon lifted by the sound (2.43 review): past the fixture's silent lead-in, at a loud part.
+      // Shot without the usual settle pause, which would let it fall again; before Stage G there is no
+      // ribbon, and the old wait applies.
+      const ribbon = page.locator('.board-heading .header-ribbon');
+      if (await ribbon.count()) {
+        // On a phone the click scrolled the header out of view, where the ribbon does not draw.
+        await page.evaluate(() => scrollTo(0, 0));
+        await expect(ribbon).toHaveAttribute('data-ribbon-state', 'live');
+        await expect
+          .poll(
+            () =>
+              page.evaluate(
+                () =>
+                  (window as unknown as { __soundpadRibbon?: { level?: number } }).__soundpadRibbon
+                    ?.level ?? 0,
+              ),
+            { timeout: 8000 },
+          )
+          .toBeGreaterThan(0.5);
+        await page.screenshot({ path: `${DIR}/${name('host-playing', s)}.png` });
+        // Stopped, it settles back to the flat idle line.
+        await page.getByRole('button', { name: 'Stop', exact: true }).click();
+        await expect(ribbon).toHaveAttribute('data-ribbon-state', 'idle', { timeout: 8000 });
+        await shot(page, 'host-stopped', s);
+      } else await shot(page, 'host-playing', s);
     });
 
     test('host Mimic, Voices, Sentences, Settings', async ({ page, harness }) => {

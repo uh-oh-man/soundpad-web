@@ -119,11 +119,14 @@ export type DemoOptions = {
  * from 2.37 to 2.40 with the recording history (2.39: a virtual history over the example's loop, see
  * `history.ts`) and drafts (2.40: `drafts.ts`, with a simulated guest's selection), then to 2.42 with the voice
  * library (2.41: `voices.ts`, three simulated voices from the example's own clips) and sentences with the
- * speaking palette (2.42: `sentences.ts`). Every op of every feature up to this version is answered here, or
- * refused with an honest reason on the allow-list in tests/unit/demo-coverage.test.ts, which fails when that
- * is not so. Raise it only together with the ops of the features it unlocks, and that test.
+ * speaking palette (2.42: `sentences.ts`), then to 2.43 with Stage G's companion features: Kick's session
+ * count (`counterSession`, kept like the companion does), Speed and effects on any example sound (trimAudio and
+ * trimPreview take a `soundId` source), and host style sync, which the example never uses (its style stays on
+ * this browser, so uiPrefsGet/uiPrefsSet are refused). Every op of every feature up to this version is answered
+ * here, or refused with an honest reason on the allow-list in tests/unit/demo-coverage.test.ts, which fails when
+ * that is not so. Raise it only together with the ops of the features it unlocks, and that test.
  */
-export const DEMO_COMPANION = '2.42.0';
+export const DEMO_COMPANION = '2.43.0';
 export const DEMO_HOST_ID = 'de30'.padEnd(64, '0');
 /** Features that need the host's PC: the example says so instead of pretending. */
 export const UNAVAILABLE = {
@@ -1176,8 +1179,7 @@ export class DemoModel {
     by: { id: string; name: string; source: 'host' | 'guest' },
     guest: boolean,
   ) {
-    const asset = this.asset(c.assetId);
-    const source = this.sound(asset.normal);
+    const { source, name: original } = this.copySource(c);
     const edit = this.edit(c, this.engine.duration(source.id));
     const mine = c.autoplay ? ++this.intent : 0;
     const id = soundIdFor(this.nextSound++);
@@ -1190,7 +1192,7 @@ export class DemoModel {
       c.name?.trim() ||
       (words.length && this.mimic.transcribing && edit.toMs - edit.fromMs <= 30000
         ? words.map((w) => w.w).join(' ')
-        : `${asset.name} (${suffix(edit)})`)
+        : `${original} (${suffix(edit)})`)
     ).slice(0, 100);
     const made = this.addUpload(id, name, length, by, words);
     this.publish();
@@ -1203,9 +1205,33 @@ export class DemoModel {
   }
 
   private trimPreview(c: Command) {
-    const asset = this.asset(c.assetId);
-    const edit = this.edit(c, this.engine.duration(asset.normal));
-    return this.engine.previewClip(asset.normal, edit, 20000);
+    const { source } = this.copySource(c);
+    const edit = this.edit(c, this.engine.duration(source.id));
+    return this.engine.previewClip(source.id, edit, 20000);
+  }
+
+  /**
+   * What a copy is made from: a Temp asset, or (2.43, gate soundEdit) any sound on the board, as the companion
+   * takes them. A Temp sound named by its sound id is copied from its asset; sentences and palette words are not
+   * sounds to edit.
+   */
+  private copySource(c: Command) {
+    if ((c.assetId === undefined) === (c.soundId === undefined))
+      throw Error('Choose one source to copy.');
+    if (c.assetId !== undefined) {
+      const asset = this.asset(c.assetId);
+      return { source: this.sound(asset.normal), name: asset.name };
+    }
+    const id = String(c.soundId);
+    if (id.startsWith('sentence:') || id.startsWith('palette:'))
+      throw Error(
+        'Sentences and palette words are made from recordings; edit them in Sentences or Voices instead.',
+      );
+    const sound = this.sound(id);
+    const asset = sound.assetId ? this.assets.find((a) => a.id === sound.assetId) : undefined;
+    return asset
+      ? { source: this.sound(asset.normal), name: asset.name }
+      : { source: sound, name: sound.name };
   }
 
   /** Uploads go straight into Temp, decoded by this browser. */

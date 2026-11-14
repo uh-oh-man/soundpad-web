@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react';
 import type { Snapshot } from '../../protocol';
 import type { Workspace } from '../../workspace';
 import { supports } from '../../version';
@@ -35,6 +36,13 @@ export function SoundEditor({
   onDone: () => void;
 }) {
   const { data } = useTempAssets();
+  // Statistics are fetched only while their section is open: closed, a play by anyone would refetch them
+  // (through the host, for a guest) for nothing.
+  const [statsOpen, setStatsOpen] = useState(focus === 'statistics');
+  // "Details for X" while this editor is open asks for them again.
+  useEffect(() => {
+    if (focus === 'statistics') setStatsOpen(true);
+  }, [focus]);
   const sound = state.library.sounds.find((s) => s.id === soundId);
   if (!sound)
     return (
@@ -95,10 +103,17 @@ export function SoundEditor({
           <IconEditor sound={sound} close={() => {}} />
         </details>
       )}
-      <details className="sound-editor-stats" open={focus === 'statistics'}>
-        <summary>Statistics</summary>
-        <Statistics sound={sound} version={state.statisticsVersion ?? 0} />
-      </details>
+      {/* Statistics need protocol 2, as the tile's Statistics button does. */}
+      {(state.protocol ?? 1) >= 2 && (
+        <details
+          className="sound-editor-stats"
+          open={statsOpen}
+          onToggle={(e) => setStatsOpen(e.currentTarget.open)}
+        >
+          <summary>Statistics</summary>
+          {statsOpen && <Statistics sound={sound} version={state.statisticsVersion ?? 0} />}
+        </details>
+      )}
     </div>
   );
 }
