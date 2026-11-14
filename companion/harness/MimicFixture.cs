@@ -27,6 +27,7 @@ public sealed class MimicFixture : IMimicCapture
     /// prefill, the first delivery after Start goes in one piece (up to 20 s), so the history dates its first frame
     /// correctly; unit tests (no prefill) keep one-second pieces.
     /// </summary>
+    private long sinceDrain;
     public void Pump()
     {
         lock (gate)
@@ -34,14 +35,15 @@ public sealed class MimicFixture : IMimicCapture
             if (sink == null) return;
             long due = (long)(Stopwatch.GetElapsedTime(started).TotalSeconds * Rate) - written;
             var block = new float[written == 0 && PrefillSeconds > 0 ? Math.Max(Rate, (int)Math.Min(due, 20L * Rate)) : Rate];
-            long sinceDrain = 0;
             while (due > 0)
             {
                 int n = (int)Math.Min(due, block.Length);
                 for (int i = 0; i < n; i++) block[i] = Sample(written + i);
                 sink.Write(block.AsSpan(0, n));
                 written += n; due -= n; sinceDrain += n;
-                if (sinceDrain >= 20L * Rate) { sink.Drain(); sinceDrain = 0; }
+                // Counted across calls (a test advancing 10 s and then 15 s overran the 30 s in-memory tail on a slow
+                // CI disk, 2.39.0): the writer is waited for every 10 s delivered, however the audio was asked for.
+                if (sinceDrain >= 10L * Rate) { sink.Drain(); sinceDrain = 0; }
             }
         }
     }
