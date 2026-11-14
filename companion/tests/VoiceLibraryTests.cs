@@ -474,11 +474,246 @@ public sealed class VoiceLibraryTests : IDisposable
             int id = groups.GetProperty("groups")[0].GetProperty("id").GetInt32();
             Assert.StartsWith("Speaker", groups.GetProperty("groups")[0].GetProperty("label").GetString());
             var voice = Body(await Ok(bridge.Execute(Cmd("libraryVoice") with { Action = "create", Name = "Beeper" }, "host"))).GetProperty("voice").GetProperty("id").GetString()!;
-            await Ok(bridge.Execute(Cmd("speakerName") with { GroupId = id, Name = "The beeper" }, "host"));
+            // A group number from another recording is another speaker (2.41 review).
+            Assert.Contains("restarted", await Refused(bridge.Execute(Cmd("speakerLink") with { GroupId = id, VoiceId = voice, SourceId = "another-recording" }, "host")));
+            await Ok(bridge.Execute(Cmd("speakerName") with { GroupId = id, Name = "The beeper", SourceId = rig.Session }, "host"));
             var linked = Body(await Ok(bridge.Execute(Cmd("speakerLink") with { GroupId = id, VoiceId = voice }, "host"))).GetProperty("groups")[0];
             Assert.Equal(("The beeper", voice), (linked.GetProperty("label").GetString(), linked.GetProperty("voiceId").GetString()));
         }
         await Ok(bridge.Execute(Cmd("librarySettings") with { GroupSpeakers = false }, "host"));
         Assert.Empty(Body(await Ok(bridge.Execute(Cmd("speakerGroups"), "host"))).GetProperty("groups").EnumerateArray());
+    }
+
+    // ---- Review of 2.41 (second pass) -------------------------------------------------------------------------
+
+    [Fact]
+    public async Task ALongBackgroundFileGivesTheSpeechEngineBackBetweenItsPieces()
+    {
+        // 60 s: three pieces of at most 25 s. A live subtitle (or copy naming) waiting meanwhile runs after the first.
+        var gate = new SemaphoreSlim(1, 1); var order = new List<string>(); Task? live = null;
+        var spans = await WhisperEngine.InPieces(new float[60 * MimicTranscriber.SpeechRate], gate, piece =>
+        {
+            lock (order) order.Add("piece " + piece.Length / MimicTranscriber.SpeechRate);
+            live ??= Task.Run(async () => { await gate.WaitAsync(); lock (order) order.Add("live"); gate.Release(); });
+            return Task.FromResult<IReadOnlyList<TranscribedSpan>>([new(TimeSpan.Zero, TimeSpan.FromSeconds(1), "word")]);
+        }, CancellationToken.None);
+        await live!;
+        Assert.Equal(["piece 25", "live", "piece 25", "piece 10"], order);
+        Assert.Equal([0.0, 25.0, 50.0], spans.Select(s => s.Start.TotalSeconds));
+        Assert.Equal(1, gate.CurrentCount);
+    }
+
+    [Fact]
+    public async Task KeepInVoiceLibrarySaysSoAndKeepsTheDraftWhenTheLibraryCannotTakeTheClip()
+    {
+        await using var rig = new Rig(folder); var bridge = rig.Bridge;
+        await rig.Host();
+        rig.Advance(6);
+        var library = bridge.VoiceLibraryStore;
+        // The library's file cannot be written (its temporary name is taken by a folder).
+        var blocker = Path.Combine(library.Folder, "voice-library.v1.json.tmp");
+        Directory.CreateDirectory(blocker);
+        string draftId = Body(await Ok(bridge.Execute(Cmd("draftCreate") with { StartFrame = S(1.8), EndFrame = S(3), SourceId = rig.Session }, "host"))).GetProperty("id").GetString()!;
+        var error = await Refused(bridge.Execute(Cmd("draftKeep") with { DraftId = draftId, Action = "library" }, "host"));
+        Assert.Contains("could not be added to the voice library", error);
+        Assert.Equal(0, library.Count);
+        // The draft stays open and pinned, so the person can try again.
+        Assert.Contains(Body(await Ok(bridge.Execute(Cmd("draftList"), "host"))).GetProperty("drafts").EnumerateArray(), d => d.GetProperty("id").GetString() == draftId);
+        Assert.Contains("draft:" + draftId, bridge.History!.Pins(HistoryAccess.Host).Keys);
+        // Once the library can save again, the same draft goes into it.
+        Directory.Delete(blocker);
+        var kept = Body(await Ok(bridge.Execute(Cmd("draftKeep") with { DraftId = draftId, Action = "library" }, "host")));
+        Assert.NotNull(library.Get(kept.GetProperty("recordingId").GetString()!));
+    }
+
+    [Fact]
+    public async Task TheSnapshotNeverWaitsForTheVoiceLibrary()
+    {
+        await using var rig = new Rig(folder); var bridge = rig.Bridge;
+        await rig.Host(listen: false);
+        var library = bridge.VoiceLibraryStore;
+        // Hold the library's lock, as a save of a large library file does.
+        var gate = typeof(VoiceLibrary).GetField("gate", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!.GetValue(library)!;
+        using var held = new ManualResetEventSlim(); using var release = new ManualResetEventSlim();
+        var holder = new Thread(() => { lock (gate) { held.Set(); release.Wait(); } }) { IsBackground = true };
+        holder.Start(); held.Wait();
+        try
+        {
+            var snapshot = Task.Run(() => bridge.Snapshot);
+            Assert.True(await Task.WhenAny(snapshot, Task.Delay(3000)) == snapshot, "the snapshot waited for the library's lock");
+            Assert.True((await snapshot).Permissions.GuestLibraryEdit);
+        }
+        finally { release.Set(); holder.Join(); }
+    }
+
+    [Fact]
+    public void WordsRecognisedForDiscardedAudioAreNeverAddedBack()
+    {
+        var transcript = TranscriptWords.Open(folder, "session");
+        transcript.Add([new(0, S(1), S(1.5), "Old", 0.9f, 0, true, true, WordStatus.Done, 1)], new(0, S(2)));
+        transcript.Add([new(0, S(5), S(5.5), "New", 0.9f, 0, true, true, WordStatus.Done, 2)], new(S(4), S(6)));
+        Assert.Equal([1L], transcript.DropBefore(S(3)));
+        // A recognition of the discarded audio that was already running finishes now: nothing of it is kept.
+        Assert.Empty(transcript.Add([new(0, S(2.1), S(2.5), "Late", 0.9f, 0, true, true, WordStatus.Done, 3)], new(S(2), S(2.9))));
+        // One that straddles the boundary keeps only what is after it.
+        var added = transcript.Add([new(0, S(2.8), S(3.1), "Edge", 0.9f, 0, true, true, WordStatus.Done, 4), new(0, S(3.2), S(3.6), "After", 0.9f, 0, true, true, WordStatus.Done, 4)], new(S(2.5), S(4)));
+        Assert.Equal(["After"], added.Select(w => w.Text));
+        Assert.Equal(["After", "New"], transcript.Between(0, S(10)).Select(w => w.Word.Text));
+        Assert.Equal([new HistoryRange(S(3), S(6))], transcript.Covered);
+        var file = File.ReadAllText(Path.Combine(TranscriptWords.FolderFor(folder, "session"), "words.jsonl"));
+        Assert.DoesNotContain("Late", file);
+        Assert.DoesNotContain("Edge", file);
+    }
+
+    private static Action<MockSoundpad> PointAt(string sounds) => mock =>
+    {
+        mock.AllXml = MockSoundpad.Sounds.Replace(@"C:\Private\", sounds + @"\");
+        mock.CategoryXml = MockSoundpad.Categories.Replace(@"C:\Private\", sounds + @"\");
+    };
+
+    [Fact]
+    public async Task AFinishedIndexPassStartsAgainForFilesChangedSince()
+    {
+        var sounds = Path.Combine(folder, "sounds"); Directory.CreateDirectory(sounds);
+        foreach (var name in new[] { "airhorn", "laugh", "other-laugh", "long" }) Burst(Path.Combine(sounds, name + ".wav"));
+        await using var rig = new Rig(folder, PointAt(sounds)); var bridge = rig.Bridge;
+        await rig.Host(listen: false);
+        await Ok(bridge.Execute(Cmd("libraryIndex") with { Categories = ["Reactions"] }, "host"));
+        Assert.True(await bridge.DrainLibraryWorker(TimeSpan.FromSeconds(20)));
+        Assert.Equal(2, rig.Engine.Calls);
+        // laugh.wav is saved again at the same path while the companion runs.
+        var laugh = Path.Combine(sounds, "laugh.wav");
+        File.SetLastWriteTimeUtc(Burst(laugh, 1.0), DateTime.UtcNow.AddMinutes(1));
+        bridge.CategoryRescanMs = 0;
+        Assert.True(await bridge.DrainLibraryWorker(TimeSpan.FromSeconds(20)));
+        Assert.Equal(3, rig.Engine.Calls);
+        Assert.InRange(bridge.SoundWordStore.Get(laugh)!.Words![0].StartMs, 900, 1100);
+    }
+
+    [Fact]
+    public async Task OnlyTheCategoriesIndexedNowAreSearchedOrHeardByGuestsAndGuestsAddOnlyThose()
+    {
+        var sounds = Path.Combine(folder, "sounds"); Directory.CreateDirectory(sounds);
+        foreach (var name in new[] { "airhorn", "laugh", "other-laugh", "long" }) Burst(Path.Combine(sounds, name + ".wav"));
+        await using var rig = new Rig(folder, PointAt(sounds)); var bridge = rig.Bridge;
+        await rig.Host(listen: false);
+        await Ok(bridge.Execute(Cmd("libraryIndex") with { Categories = ["Reactions"] }, "host"));
+        Assert.True(await bridge.DrainLibraryWorker(TimeSpan.FromSeconds(20)));
+        // laugh.wav is in Reactions; other-laugh.wav (also titled Laugh) only in Favorites, with airhorn.wav.
+        var catalog = bridge.Snapshot.Library;
+        var reactions = catalog.Categories.First(c => c.Name == "Reactions");
+        string laugh = catalog.Sounds.First(s => s.Name == "Laugh" && reactions.SoundIds.Contains(s.Id)).Id;
+        string other = catalog.Sounds.First(s => s.Name == "Laugh" && s.Id != laugh).Id;
+        string airhorn = catalog.Sounds.First(s => s.Name == "Airhorn").Id;
+        Assert.Equal(2, Body(await Ok(rig.As(Alice, Cmd("librarySearch") with { Query = "fixture", Kind = "sound" }))).GetProperty("total").GetInt32());
+        await Ok(rig.As(Alice, Cmd("libraryPreview") with { SoundId = laugh }));
+        // A sound in no indexed category: a guest can neither hear it privately nor add it (and then hear it).
+        Assert.Contains("Only the host", await Refused(rig.As(Alice, Cmd("libraryAdd") with { SoundId = other })));
+        Assert.False((await rig.As(Alice, Cmd("libraryPreview") with { SoundId = other })).Ok);
+        Assert.Equal(0, bridge.VoiceLibraryStore.Count);
+        // The host takes Reactions out of the index (Favorites holds airhorn too): laugh is no longer found or heard.
+        await Ok(bridge.Execute(Cmd("libraryIndex") with { Categories = ["Favorites"], Action = "pause" }, "host"));
+        var found = Body(await Ok(rig.As(Alice, Cmd("librarySearch") with { Query = "fixture", Kind = "sound" })));
+        Assert.Equal([airhorn], found.GetProperty("results").EnumerateArray().Select(r => r.GetProperty("soundId").GetString()));
+        Assert.False((await rig.As(Alice, Cmd("libraryPreview") with { SoundId = laugh })).Ok);
+        // The host may still add any sound.
+        await Ok(bridge.Execute(Cmd("libraryAdd") with { SoundId = other }, "host"));
+    }
+
+    [Fact]
+    public async Task PossibleMatchesInTheHistoryReachOnlyGuestsAllowedMimic()
+    {
+        await using var rig = new Rig(folder); var bridge = rig.Bridge;
+        await rig.Host();
+        bridge.NoteGuest(Alice, "peer-Alice", rig.Now);
+        var voice = Body(await Ok(bridge.Execute(Cmd("libraryVoice") with { Action = "create", Name = "Robo" }, "host"))).GetProperty("voice").GetProperty("id").GetString()!;
+        await Ok(bridge.Execute(Cmd("libraryWanted") with { Action = "add", VoiceId = voice, Query = "tone" }, "host"));
+        await Ok(bridge.Execute(Cmd("mimicTranscribe") with { Action = "enable" }, "host"));
+        rig.Advance(6);
+        await rig.Recognised(1.8, 3);
+        static JsonElement[] History(JsonElement status) => [.. status.GetProperty("notices").EnumerateArray().Where(n => n.GetProperty("kind").GetString() == "history")];
+        JsonElement[] seen = [];
+        for (int i = 0; i < 100 && seen.Length == 0; i++) { await Task.Delay(50); seen = History(Body(await Ok(rig.As(Alice, Cmd("libraryStatus"))))); }
+        Assert.NotEmpty(seen); // allowed Mimic, and it was said after she joined
+        await Ok(bridge.Execute(Cmd("permissions") with { Permissions = new(GuestMimic: false) }, "host"));
+        Assert.Empty(History(Body(await Ok(rig.As(Alice, Cmd("libraryStatus"))))));
+        Assert.NotEmpty(History(Body(await Ok(bridge.Execute(Cmd("libraryStatus"), "host")))));
+    }
+
+    [Fact]
+    public async Task TheAuditSentToPeopleCarriesNoFilePathsOrParticipantIds()
+    {
+        await using var rig = new Rig(folder); var bridge = rig.Bridge;
+        await rig.Host(listen: false);
+        var library = bridge.VoiceLibraryStore;
+        var (r, _) = library.Add(Recording(folder, "Secret file name"), [new(0, 400, "yes", 1, false)], "host", "Host");
+        var (voice, _) = library.CreateVoice("Sam", null, Alice.Id, "Alice");
+        library.AddWanted(voice.Id, "hello", Alice.Id, "Alice");
+        long removed = Body(await Ok(bridge.Execute(Cmd("libraryRemove") with { RecordingIds = [r.Id] }, "host"))).GetProperty("group").GetInt64();
+        foreach (var reply in new[] { await Ok(rig.As(Bob, Cmd("libraryAudit"))), await Ok(rig.As(Bob, Cmd("libraryAudit") with { RecordingId = r.Id })) })
+        {
+            var raw = Body(reply).GetRawText();
+            Assert.DoesNotContain("Secret file name.wav", raw);
+            Assert.DoesNotContain("path", raw);
+            Assert.DoesNotContain(Alice.Id, raw);
+            Assert.Contains("Secret file name", raw); // which recording it was, by its title
+        }
+        // Undo still has everything (kept on this PC): the recording comes back with its file.
+        await Ok(bridge.Execute(Cmd("libraryUndo") with { AuditId = removed }, "host"));
+        Assert.Equal(Path.Combine(folder, "Secret file name.wav"), library.Get(r.Id)!.Path);
+    }
+
+    [Fact]
+    public void TheLibraryNeverSavesAFileItWouldRefuseToLoadAndItsAuditStaysBounded()
+    {
+        var library = new VoiceLibrary(folder, new WordIndex()) { SaveLimit = 20_000, AuditLimit = 4_000 };
+        var (one, _) = library.Add(Recording(folder, "One"), null, "host", "Host");
+        var (two, _) = library.Add(Recording(folder, "Two"), null, "host", "Host");
+        var main = Path.Combine(folder, "library", "voice-library.v1.json");
+        var saved = File.ReadAllBytes(main);
+        // 4,000 Cyrillic characters are written as \uXXXX: about 24 KB, more than this library may hold.
+        var text = new string('\u0436', VoiceLibrary.MaxText);
+        Assert.Contains("larger than", Assert.Throws<InvalidDataException>(() => library.Edit([one.Id], new LibraryEdit(CorrectedText: text), "host", "Host")).Message);
+        Assert.Null(library.Get(one.Id)!.CorrectedText);
+        Assert.Equal(saved, File.ReadAllBytes(main));
+        Assert.Null(new VoiceLibrary(folder, new WordIndex()).Problem);
+        // A corrected text is one recording's: never many at once.
+        Assert.Throws<InvalidDataException>(() => library.Edit([one.Id, two.Id], new LibraryEdit(CorrectedText: "hi"), "host", "Host"));
+        // The audit file starts over while the companion runs, once it passes its limit.
+        var audit = Path.Combine(folder, "library", "voice-audit.v1.jsonl");
+        for (int i = 0; i < 40; i++) library.Edit([one.Id], new LibraryEdit(Title: "Title " + i), "host", "Host");
+        Assert.True(File.Exists(Path.Combine(folder, "library", "voice-audit.v1.old.jsonl")));
+        Assert.True(!File.Exists(audit) || new FileInfo(audit).Length <= 4_000);
+    }
+
+    [Fact]
+    public async Task AGuestChangesTheLibraryAtALimitedPace()
+    {
+        await using var rig = new Rig(folder); var bridge = rig.Bridge;
+        await rig.Host(listen: false);
+        var (r, _) = bridge.VoiceLibraryStore.Add(Recording(folder, "Shared"), null, "host", "Host");
+        bridge.UseLibraryWriteLimit(new RateWindow(2, TimeSpan.FromMinutes(1)));
+        await Ok(rig.As(Alice, Cmd("libraryEdit") with { RecordingId = r.Id, Favorite = true }));
+        await Ok(rig.As(Alice, Cmd("libraryEdit") with { RecordingId = r.Id, Favorite = false }));
+        Assert.Contains("Too many changes", await Refused(rig.As(Alice, Cmd("libraryEdit") with { RecordingId = r.Id, Favorite = true })));
+        await Ok(rig.As(Bob, Cmd("libraryEdit") with { RecordingId = r.Id, Favorite = true })); // per guest
+        await Ok(bridge.Execute(Cmd("libraryEdit") with { RecordingId = r.Id, Favorite = false }, "host")); // never the host
+    }
+
+    [Fact]
+    public void AfterTheBackupIsLoadedNewChangesNeverReuseAnAuditId()
+    {
+        var library = new VoiceLibrary(folder, new WordIndex());
+        var (r, _) = library.Add(Recording(folder, "Original"), null, "host", "Host");
+        long renamed = library.Edit([r.Id], new LibraryEdit(Title: "Renamed"), "host", "Host");
+        // The main file is damaged: the previous version loads, with an audit counter older than its audit trail.
+        File.WriteAllText(Path.Combine(folder, "library", "voice-library.v1.json"), "{ not json");
+        var again = new VoiceLibrary(folder, new WordIndex());
+        Assert.Equal("Original", again.Get(r.Id)!.Title);
+        long next = again.Edit([r.Id], new LibraryEdit(Title: "Again"), "host", "Host");
+        Assert.True(next > renamed);
+        // So Undo takes back exactly that change.
+        again.Undo(next, "host", "Host", true);
+        Assert.Equal("Original", again.Get(r.Id)!.Title);
     }
 }

@@ -308,7 +308,7 @@ public sealed partial class Bridge
                             if (c.Action == "library")
                             {
                                 var recording = await KeepIntoLibrary(imported, actor, participant, requester, audience, source, null);
-                                return new("ack", c.Id, true, Data: new { assetId = imported, recordingId = recording?.Id });
+                                return new("ack", c.Id, true, Data: new { assetId = imported, recordingId = recording.Id });
                             }
                         }
                         return c.Autoplay ? await Autoplay(reply with { Id = c.Id }, c, actor, participant, requester, audience, intent) : reply with { Id = c.Id };

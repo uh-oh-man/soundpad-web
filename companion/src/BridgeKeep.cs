@@ -47,7 +47,7 @@ public sealed partial class Bridge
     /// <summary>Test seam and harness: guest budgets as they stand.</summary>
     public GuestBudgets Budgets => budgets;
 
-    private Permissions PublicPermissions => disk.Permissions with { GuestKeep = Keep.GuestKeep, GuestLibraryEdit = LibrarySettingsNow.GuestLibraryEdit };
+    private Permissions PublicPermissions => disk.Permissions with { GuestKeep = Keep.GuestKeep, GuestLibraryEdit = LibrarySettingsNow?.GuestLibraryEdit };
 
     private void SaveKeep(KeepSettings next)
     {
@@ -256,11 +256,16 @@ public sealed partial class Bridge
     /// Keep permanently into the voice library (2.41: a draft's "Keep in voice library"): the host's destination for
     /// everyone; a guest within their budget, while the host allows guest Keep. The caller holds no gate.
     /// </summary>
-    private async Task<LibraryRecording?> KeepIntoLibrary(string assetId, string actor, Participant? participant, string? requester, string? audience, LibrarySource source, IReadOnlyList<LibraryWord>? words)
+    /// <exception cref="InvalidDataException">Refused before anything was kept (the clip stays in Temp); or, marked
+    /// <see cref="KeptOutsideLibrary"/>, kept permanently but the voice library could not take it (2.41 review).</exception>
+    private async Task<LibraryRecording> KeepIntoLibrary(string assetId, string actor, Participant? participant, string? requester, string? audience, LibrarySource source, IReadOnlyList<LibraryWord>? words)
     {
         bool host = actor == "host";
         if (!host && (!Keep.GuestKeep || !sessionAccepting || (audioAudience != null && audience != audioAudience) || requester != null && revokedAudioPeers.ContainsKey(requester)))
             throw new InvalidDataException("The host has not allowed guests to keep clips.");
+        // A library that cannot take it (damaged files, full) refuses before the clip leaves Temp (2.41 review).
+        if (Voices.CannotAdd is { } refusal) throw new InvalidDataException(refusal);
+        libraryKeepProblem.TryRemove(assetId, out _);
         await audioGate.EnterAsync(PriorityGate.Lane.Normal);
         try
         {
@@ -274,6 +279,13 @@ public sealed partial class Bridge
         }
         finally { audioGate.Release(); }
         await gate.EnterAsync(PriorityGate.Lane.Normal); try { await RefreshInner(); Publish(); } finally { gate.Release(); }
-        return Voices.FindByAsset(assetId);
+        // Kept, but the library could not take it (its file could not be saved, say): said so, never "in the library".
+        if (Voices.FindByAsset(assetId) is { } recording) return recording;
+        var kept = new InvalidDataException("The clip was kept, but it could not be added to the voice library"
+            + (libraryKeepProblem.TryRemove(assetId, out var why) ? ": " + why.TrimEnd('.') + "." : ".") + " Add it from Voices once that is fixed.");
+        kept.Data[KeptOutsideLibrary] = true;
+        throw kept;
     }
+    /// <summary>Marks the refusal of <see cref="KeepIntoLibrary"/> that comes after the clip was kept (it is no longer in Temp).</summary>
+    private const string KeptOutsideLibrary = "keptOutsideLibrary";
 }

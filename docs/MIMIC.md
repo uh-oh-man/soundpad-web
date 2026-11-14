@@ -11,6 +11,7 @@ Mimic came from a separate desktop project, **Voice Replay Studio**: a rolling "
 | Word timing and stored words (2.39) | `companion/src/WordTiming.cs`, `TranscriptWords.cs` |
 | The history view (2.39) | `web/src/components/mimic/MimicHistory.tsx`, `MimicOverview.tsx`, `web/src/mimic/history.ts` |
 | Live transcript (Whisper) | `companion/src/MimicTranscript.cs` |
+| Voice library, word search, speaker groups (2.41) | `companion/src/VoiceLibrary.cs`, `VoiceLibraryEdits.cs`, `BridgeVoices.cs`, `WordIndex.cs`, `SoundWords.cs`, `SpeakerGrouping.cs`; website `web/src/library/`, `components/VoicesPanel.tsx`, `VoicesTabs.tsx`, `VoiceShared.tsx` |
 | F6 hotkey | `companion/src/MimicHotkey.cs` |
 | Commands, permissions, clips, recent list | `companion/src/BridgeMimic.cs` |
 | Edit copy (trim and voice effects) | `companion/src/BridgeTrim.cs` |
@@ -48,6 +49,11 @@ The companion's console window logs these events with the time, including who ma
    A selection freezes the view so the moment stays put. The **30 s / 10 s / 5 s** buttons under the waveform zoom in on the most recent seconds, like Voice Replay Studio's Live Buffer views, which makes short moments easier to pick, especially on a phone. Your browser remembers the zoom. A selection that starts earlier than the zoomed view shows the whole buffer, so it is never off-screen.
 3. The host can press **Preview** to hear the selection on their own PC only. It plays in the host's browser tab, never through Soundpad or to guests, and saves nothing.
 4. Optionally type a name; otherwise the transcript's words, or the time, are used. Then press **Capture** (or **Enter**): since 2.40 that opens a draft of your own to adjust, preview, play into the game and **Keep in Temp** (press Enter again). With a companion before 2.40, **Mimic it** adds the clip to Temp at once and **Mimic & play** (**Shift+Enter**) also plays it. **Esc** clears the selection; press it again to close the window.
+5. Since 2.41 a draft can also go straight to **Keep in voice library**: it is kept permanently, with its words copied from the subtitles, the draft closes, and the notice has **Open** to show it in **Voices** (see the [README](../README.md#voice-library)). Guests need **Keep clips** for this, as for any keep. If the library cannot take the clip (it is full, or its file cannot be saved), the window says so and the draft stays open. **Jump**, word-search results and **Last N s** put an open draft away first; they never move its edges.
+
+**Search the recording (2.41).** **Find words said in this recording** searches the history's subtitles for a word or phrase and lists where it was said; click a result to select it. Guests only find what they may see. A selection, a draft and a search always belong to the recording they were made on: when Mimic or the companion restarts, they go, and nothing made on one recording can play, keep, share or preview another.
+
+**Group speakers (experimental, 2.41).** Off by default; the host turns it on in **Voices → Word index**. Mimic then groups the history's phrases by who seems to be speaking, from the sound of the voice only, and leaves a phrase **Unassigned** when unsure. Anyone allowed Mimic and allowed to edit the voice library can name a group or link it to a voice; nothing is named automatically. It has been measured on synthetic speech only.
 
 Everyone gets a short notice when anyone makes a clip, F6 included. The host's notice has **Undo** (2.29+), which takes the clip straight back out of Temp (stopping it first if it is playing). Since 2.32 the guest who made a clip gets Undo on its notice too, for their own clips only, while the host lets guests add audio. **Just mimicked** lists the session's last 5 clips, with who made them, a **Replay** button, a **Reverse** button to hear it backwards, and an **Effect** menu (2.18.1+): Chipmunk, Slow-mo, Echo or Slow, same voice. The effect menu makes that copy and plays it at once; guests need the host's permission to add audio. The **Edit** button (scissors, 2.21+) closes the window and opens that clip's **Edit copy** in Temp, as Voice Replay Studio opens a new capture in its editor. The host's **Keep** button (bookmark, 2.26+) opens Temp's **Keep permanently** confirmation for that clip, since Voice Replay Studio keeps every capture in its library.
 
@@ -80,7 +86,8 @@ Like Voice Replay Studio's trim, it saves a new Temp sound and never changes the
 - **Lines appear when the speaker pauses** (0.4 s), so no sentence is split; splitting made Whisper guess missing words. After 15 s of unbroken speech it cuts anyway and holds back the unfinished sentence. Silent stretches are skipped, which saves CPU and avoids words invented from silence.
 - **Light on a gaming PC.** It uses 2 CPU threads on PCs with 8+ cores, otherwise 1. On the owner's PC, 11 s of speech took 2.7 s with 2 threads (4× faster than real time), with the same transcript as with 4 threads.
 - **English only**, with the same confidence filters as Voice Replay Studio.
-- Up to 2.38, turning transcripts off, stopping, ending hosting and quitting discarded the text. Since 2.39 the words stay with their audio in the history and go when it goes: when that audio leaves the history window, on **Discard**, and when the companion quits. Only a clip's name is kept after that.
+- Up to 2.38, turning transcripts off, stopping, ending hosting and quitting discarded the text. Since 2.39 the words stay with their audio in the history and go when it goes: when that audio leaves the history window, on **Discard**, and when the companion quits. Only a clip's name is kept after that, unless the clip is in the voice library (2.41), which keeps a copy of its words with it.
+- **Saved, or told (2.41).** If subtitles or a correction cannot be written to disk, the host sees it in Mimic's host controls. They are kept while the companion runs and written again automatically once the disk works.
 
 ## Privacy and safety
 
@@ -89,10 +96,12 @@ Like Voice Replay Studio's trim, it saves a new Temp sound and never changes the
 - **Everyone can see it.** Everyone gets a notice when Mimic starts (with the source) and stops, anyone joining while it is on is told immediately, every participant's header shows **Mimic on** while it runs, and every new clip is announced.
 - **Audio stays on the host PC.** Guests receive 300 peak levels for the waveform and, if the host enables it, the transcript text. If transcripts stop (turned off, or the speech engine fails), the stored lines are cleared at once, so guests stop receiving them. While transcripts are on, clips saved with the hotkey are named after their words, and those names show in everyone's Temp and **Just mimicked**. Clips are cut and imported on the host.
 - **Separate permissions.** Clipping needs **Guest Mimic**, playing needs **Remote playback**, and Edit copy needs uploads. Only the host chooses the source, transcripts and F6.
-- **Kept on disk until quit (2.39).** The recording history is written to `%LOCALAPPDATA%\SoundpadWeb\history\` and its words to `transcripts\` beside it, on the host PC only, for as long as the companion runs, within the chosen window. Quitting deletes both, also when Windows logs off or shuts down. If the companion crashes, the next start recovers that history (the host is told, with **Discard**). Stopping capture keeps the history until quit, with an honest gap.
+- **Kept on disk until quit (2.39).** The recording history is written to `%LOCALAPPDATA%\SoundpadWeb\history\` and its words to `transcripts\` beside it, on the host PC only, for as long as the companion runs, within the chosen window. Quitting deletes both, also when Windows logs off or shuts down. If the companion crashes, the next start recovers that history (the host is told, with **Discard**). Since 2.41 **Discard** removes only what the crash recovered: everything recorded since the companion started again stays, with its subtitles and drafts, and words still being recognised for the discarded part are never added back. With an older companion it removes the whole history, and the confirmation says so. Stopping capture keeps the history until quit, with an honest gap.
 - **Guests see only what was recorded since they joined.** The companion enforces this on every query (waveform, words, clips, previews, and the timing details), unless the host uses **Share with guests** for an earlier part. A guest the host disconnects or turns away starts again from their next admission.
-- **Bounded.** Each guest can add at most 6 new files per minute, the same limit as uploads, within Temp's 32 files / 256 MiB. A clip is at most 30 s. Each guest can add at most 6 new files per minute, the same limit as uploads, within Temp's 32 files / 256 MiB. Edit copies run one at a time, and the guest's permissions are checked before any decoding.
+- **Bounded.** Each guest can add at most 6 new files per minute, the same limit as uploads, within Temp's 32 files / 256 MiB. A clip is at most 30 s. Edit copies run one at a time, and the guest's permissions are checked before any decoding.
 - **Light on the host, however many guests.** The waveform is computed at most every 100 ms and shared by everyone: at most about 3% of a CPU core on the owner's PC.
+- **Possible matches (2.41).** When Mimic hears a voice's wanted word, the notice says what was said, so it reaches only people allowed to use Mimic.
+- **Slow work never holds up Stop (2.41).** Clips, previews and edited copies are made on two low-priority threads, so Play, Stop and Panic pressed meanwhile are answered at once.
 - **Be fair to the people you record.** Mimic captures other people's voices. Tell your session it is on; the badge exists for that reason.
 
 ## Companion versions
@@ -118,6 +127,10 @@ The website always serves the newest version and hides anything the host's compa
 | Trimmed copies named after their words | 2.24 |
 | Undo that stops only its own clip | 2.30 |
 | Undo for guests on their own clips and copies | 2.32 |
+| Recording history, word-by-word subtitles | 2.39 |
+| Drafts, Latest phrase, guest preview and Keep | 2.40 |
+| Discard keeps what was recorded since a crash | 2.41 |
+| Voice library, history search, speaker groups | 2.41 |
 
 ## Protocol
 

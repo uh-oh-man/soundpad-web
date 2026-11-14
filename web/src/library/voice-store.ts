@@ -86,9 +86,12 @@ export function noticeText(n: LibraryNotice) {
 
 /**
  * Keeps the store in step while `enabled` (a 2.41 companion, and a host page that relays it). New
- * notices since this page looked are shown once, without sound; older ones are not announced.
+ * notices since this page looked are shown once, without sound; older ones are not announced. A
+ * history match is shown only to someone who may open Mimic (`canMimic`), since it says what was said.
  */
-export function useLibrarySync(state: Snapshot, enabled: boolean) {
+export function useLibrarySync(state: Snapshot, enabled: boolean, canMimic: boolean) {
+  const mimic = useRef(canMimic);
+  mimic.current = canMimic;
   const seen = useRef<number | null>(null);
   const revision = state.voiceLibrary ?? 0;
   useEffect(() => {
@@ -110,6 +113,7 @@ export function useLibrarySync(state: Snapshot, enabled: boolean) {
           }
           for (const n of notices) {
             if (n.id <= seen.current) continue;
+            if (n.kind === 'history' && !mimic.current) continue;
             controller.notify(
               noticeText(n),
               'info',

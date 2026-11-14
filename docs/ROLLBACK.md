@@ -6,6 +6,7 @@ Every release stays on GitHub permanently, so any earlier version can be restore
 
 | Version | What it is | Git tag | Download |
 | --- | --- | --- | --- |
+| 2.41.0 | The voice library | `v2.41.0` | [Release](https://github.com/uh-oh-man/soundpad-web/releases/tag/v2.41.0) |
 | 2.40.0 | Drafts, and guests who can keep | `v2.40.0` | [Release](https://github.com/uh-oh-man/soundpad-web/releases/tag/v2.40.0) |
 | 2.39.0 | Ten minutes of history, word by word | `v2.39.0` | [Release](https://github.com/uh-oh-man/soundpad-web/releases/tag/v2.39.0) |
 | 2.38.0 | Try the example | `v2.38.0` | [Release](https://github.com/uh-oh-man/soundpad-web/releases/tag/v2.38.0) |
@@ -110,6 +111,8 @@ Your data in `%LOCALAPPDATA%\SoundpadWeb` keeps working (Temp's 16 MiB per-sound
 - Mimic clips are ordinary Temp entries, so older companions manage, keep or clean them up like any upload.
 - Up to 2.38 the Mimic buffer is never written to disk (see 2.39.0 below).
 - 2.36.0 adds `companion.log`, `window.json` and `webview2\` (the window's browser profile). Older versions ignore them; delete them if you go back for good. `state.json` is unchanged.
+- 2.41.0 adds the voice library to `library\` (the default folder for kept sounds): `voice-library.v1.json` and its backup `voice-library.v1.bak.json`, `voice-words.v1.jsonl`, `voice-audit.v1.jsonl` (rotated to `voice-audit.v1.old.jsonl` past 32 MiB) and `sound-words.v1.jsonl`. Older companions ignore them and leave them alone; your kept sounds stay where they are. If you go back for good you can delete those files, or keep them: upgrading again picks the library up where it was. `state.json` and the managed-audio journal are unchanged. Mimic's **Discard** after a crash (2.41) writes silence over the discarded part of `history\` in the same format, so an older companion recovering that history after another crash finds silence there, never the discarded audio.
+- 2.41.0 also changes how the host's page recognises guests (a key kept in each guest's browser). Going back to a 2.40 website makes guests new to the host once, as the update itself did: let them in and set their own permissions again.
 - 2.40.0 adds `keep-settings.json` and `guest-kept.json` (the guest Keep destination and what each guest kept). Older companions ignore them. From 2.40 End hosting no longer clears Temp; an older companion you go back to clears it at its next start or End hosting, as it always did.
 - 2.39.0 adds `history\` and `transcripts\` (the recording history and its words, deleted when the companion quits normally) and `mimic-settings.json`. Older companions ignore all three; if you go back after a crash, delete `history\` and `transcripts\` yourself, because an older companion will not remove them. `state.json` and the journal are unchanged.
 - 2.37.0 adds `slots\` (three small slot files and `slots.json`). The slot files sit in the companion's Temp category in Soundpad while it runs and are removed with it. If you go back to an older companion while slot files are still in that category (after a crash), it sees them as sounds it did not make and leaves the category alone, and Temp asks you to remove its entries in Soundpad; nothing of yours is touched. The state and journal formats are unchanged.

@@ -254,9 +254,9 @@ public sealed partial class Bridge(ISoundpad pipe, StateStore store) : IDisposab
                         // Guest Keep (2.40) lives in keep-settings.json, never in state.json; an older website leaves it as it is.
                         if (permissions.GuestKeep is bool guestKeep && guestKeep != Keep.GuestKeep) SaveKeep(Keep with { GuestKeep = guestKeep });
                         // Guest library editing (2.41) lives in the voice library's own file, never in state.json.
-                        if (permissions.GuestLibraryEdit is bool libraryEdit && libraryEdit != LibrarySettingsNow.GuestLibraryEdit)
+                        if (permissions.GuestLibraryEdit is bool libraryEdit)
                         {
-                            try { Voices.UpdateSettings(s => s with { GuestLibraryEdit = libraryEdit }); }
+                            try { if (libraryEdit != Voices.Settings.GuestLibraryEdit) Voices.UpdateSettings(s => s with { GuestLibraryEdit = libraryEdit }); }
                             catch (InvalidDataException ex) { Log("The voice library setting could not be saved: " + ex.Message); }
                         }
                         disk.Permissions = permissions with { GuestKeep = null, GuestLibraryEdit = null }; break;

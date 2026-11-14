@@ -7,6 +7,7 @@ import {
   parseSnapshot,
   ackSchema,
   isGuestAllowed,
+  guestReply,
   RateLimit,
   type Command,
   type Snapshot,
@@ -275,7 +276,7 @@ export class Session {
   private guessed = new Map<string, Participant>();
   /** Host (2.41): the challenge each connection's guest signs to prove their key. */
   private challenges = new Map<string, string>();
-  /** Host (2.41): identities given to guests that proved no key, by their page load (profile id and nonce). */
+  /** Host (2.41): identities given to guests that proved no key, by their connection (transport peer id). */
   private unverifiedIds = new Map<string, string>();
   /** Host (2.41): participant ids that are not backed by a key. */
   private unverified = new Set<string>();
@@ -915,13 +916,14 @@ export class Session {
    * Host (2.41): who a hello from a connection that is not in yet comes from. A key with a valid proof over this
    * connection's challenge is that key's identity, whatever name or profile id the hello also carries. A key
    * without a valid proof is answered with the challenge (undefined: nothing to decide yet). No key at all is a
-   * page older than 2.41: an unverified guest, new to the host on every page load, so nothing granted to one
-   * identity is ever reused by another that merely claims it.
+   * page older than 2.41: an unverified guest, new to the host on every connection, so nothing granted to one
+   * identity is ever reused by another that merely claims it. Keyed by the transport peer id, which only that
+   * connection has: its hello (profile id, page nonce) reaches every peer in the room and can be copied (2.41
+   * review). An old page's direct and relay connections therefore count as two guests.
    */
   private async identify(
     peer: string,
     m: Message,
-    person: Participant,
   ): Promise<{ id: string; verified: boolean } | undefined> {
     if (m.key !== undefined) {
       if (typeof m.key !== 'string' || !GUEST_KEY_PATTERN.test(m.key)) throw Error('Invalid key');
@@ -944,11 +946,10 @@ export class Session {
       this.send({ v: 1, type: 'challenge', nonce: m.nonce, challenge }, peer);
       return undefined;
     }
-    const load = `${person.id}:${m.nonce}`;
-    let id = this.unverifiedIds.get(load);
+    let id = this.unverifiedIds.get(peer);
     if (!id) {
       id = crypto.randomUUID();
-      remember(this.unverifiedIds, load, id);
+      remember(this.unverifiedIds, peer, id);
     }
     return { id, verified: false };
   }
@@ -1258,7 +1259,7 @@ export class Session {
         if (known && participant.id !== known.id) participant = { ...participant, id: known.id };
         if (!this.accepted.has(peer)) {
           // 2.41: the id every decision follows is the one the guest's key proves, never the one it declares.
-          const who = await this.identify(peer, m, participant);
+          const who = await this.identify(peer, m);
           if (!who || this.stopped || this.denied.has(peer)) return;
           if (this.accepted.has(peer)) return; // let in meanwhile by another hello on this connection
           participant = { id: who.id, name: participant.name };
@@ -1314,7 +1315,8 @@ export class Session {
       // The enforcement point for per-guest permissions (2.37). The companion checks the
       // session-wide permissions again, but it cannot tell guests apart: it trusts this page for who
       // sent a command. So this page checks each guest's own permissions, for every relayed command.
-      if (!isGuestAllowed(c, { ...this.current(), permissions: this.permissionsOf(peer) })) {
+      const own = { ...this.current(), permissions: this.permissionsOf(peer) };
+      if (!isGuestAllowed(c, own)) {
         this.send(
           { v: 1, type: 'ack', id: c.id, ok: false, error: 'The host has disabled this action.' },
           peer,
@@ -1323,12 +1325,11 @@ export class Session {
       }
       try {
         const person = this.people.get(peer);
-        const data = (await this.execute(
+        const data = guestReply(
           c,
-          peer,
-          person,
-          person && this.joined.get(person.id),
-        )) as JsonValue;
+          await this.execute(c, peer, person, person && this.joined.get(person.id)),
+          own,
+        ) as JsonValue;
         this.send({ v: 1, type: 'ack', id: c.id, ok: true, data }, peer);
         this.broadcast();
       } catch (e) {

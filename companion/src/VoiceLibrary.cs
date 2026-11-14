@@ -122,6 +122,13 @@ public sealed partial class VoiceLibrary
     private readonly WordIndex index;
     private readonly Func<long> now;
     private LibraryFile file = new();
+    /// <summary>The settings as last loaded or saved, read without the lock (2.41 review: the snapshot reads them).</summary>
+    private volatile LibrarySettings settingsNow = new();
+    /// <summary>The largest library file a save writes (tests lower it): Load refuses anything larger.</summary>
+    internal long SaveLimit { get; init; } = MaxFileBytes;
+    /// <summary>The audit file starts over (the old one kept once) when an append takes it past this (tests lower it).</summary>
+    internal long AuditLimit { get; init; } = AuditRotateBytes;
+    public const long AuditRotateBytes = 32L * 1024 * 1024;
     private readonly Dictionary<string, LibraryRecording> byId = new(StringComparer.Ordinal);
     private readonly Dictionary<string, LibraryWord[]> words = new(StringComparer.Ordinal);
     private readonly List<LibraryAudit> audit = [];
@@ -179,6 +186,7 @@ public sealed partial class VoiceLibrary
         }
         if (loaded == null && File.Exists(MainPath)) { Blocked = true; Problem = problem; return; }
         file = loaded ?? new LibraryFile();
+        settingsNow = file.Settings;
         Problem = problem;
         foreach (var r in file.Recordings) byId[r.Id] = r;
         LoadWords();
@@ -216,12 +224,15 @@ public sealed partial class VoiceLibrary
         if (!File.Exists(AuditPath)) return;
         try
         {
-            if (new FileInfo(AuditPath).Length > 32L * 1024 * 1024) { RotateAudit(); return; }
+            if (new FileInfo(AuditPath).Length > AuditLimit) { RotateAudit(); return; }
             foreach (var text in File.ReadLines(AuditPath))
             {
                 try { if (JsonSerializer.Deserialize<LibraryAudit>(text, Json.Options) is { } entry && entry.Id > 0) audit.Add(entry); }
                 catch (JsonException) { }
             }
+            // The library file may be older than its audit (its backup was loaded): new changes must never reuse an
+            // audit id, or Undo would take two unrelated changes for one (2.41 review).
+            if (audit.Count > 0) file.NextAudit = Math.Max(file.NextAudit, audit.Max(a => a.Id) + 1);
             if (audit.Count > 2000) audit.RemoveRange(0, audit.Count - 2000);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
@@ -291,11 +302,14 @@ public sealed partial class VoiceLibrary
         Validate(file);
         Directory.CreateDirectory(Folder);
         var temporary = MainPath + ".tmp";
+        // Never a file Load would refuse (2.41 review): the change is refused instead, and the caller puts it back.
+        var bytes = JsonSerializer.SerializeToUtf8Bytes(file, Json.Options);
+        if (bytes.Length > SaveLimit) throw new InvalidDataException($"The voice library would be larger than {SaveLimit / (1024 * 1024)} MiB. Shorten or remove some recordings' text first.");
         try
         {
             using (var stream = new FileStream(temporary, FileMode.Create, FileAccess.Write, FileShare.None))
             {
-                JsonSerializer.Serialize(stream, file, Json.Options);
+                stream.Write(bytes);
                 stream.Flush(true);
             }
             if (File.Exists(MainPath)) File.Replace(temporary, MainPath, BackupPath, true);
@@ -312,7 +326,12 @@ public sealed partial class VoiceLibrary
 
     private void Append(string path, IEnumerable<string> lines)
     {
-        try { Directory.CreateDirectory(Folder); File.AppendAllLines(path, lines); }
+        try
+        {
+            Directory.CreateDirectory(Folder); File.AppendAllLines(path, lines);
+            // The audit trail is bounded while the companion runs too (2.41 review), not only at the next launch.
+            if (path == AuditPath && new FileInfo(path).Length > AuditLimit) RotateAudit();
+        }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { Problem = "The voice library could not be saved: " + ex.Message; }
     }
 
@@ -325,7 +344,17 @@ public sealed partial class VoiceLibrary
 
     // ---- Recordings -----------------------------------------------------------------------------------------
 
-    public LibrarySettings Settings { get { lock (gate) return file.Settings; } }
+    public LibrarySettings Settings => settingsNow;
+    /// <summary>Why a recording cannot be added now (blocked, or full), or null; checked before a clip is kept for the library.</summary>
+    public string? CannotAdd
+    {
+        get
+        {
+            lock (gate)
+                return Blocked ? Problem ?? "The voice library file could not be read. It was left untouched."
+                    : file.Recordings.Count >= MaxRecordings ? $"The voice library holds at most {MaxRecordings} recordings." : null;
+        }
+    }
     public int Count { get { lock (gate) return file.Recordings.Count; } }
     public LibraryVoice[] Voices { get { lock (gate) return [.. file.Voices]; } }
     public WantedWord[] Wanted { get { lock (gate) return [.. file.Wanted]; } }

@@ -19,6 +19,7 @@ import {
   NOTHING_PICKED,
   NO_FILTERS,
   TYPE_LABELS,
+  canEditLibrary,
   cleanTag,
   combineResults,
   countTypes,
@@ -62,7 +63,7 @@ type Tab = 'library' | 'review' | 'words' | 'voices' | 'index';
  * categories whose words are indexed. Every change can be undone and is recorded with who made it.
  */
 export function VoicesPanel({ state, host, connected, canPlay }: Props) {
-  const { status } = useVoiceStore();
+  const { status: shared } = useVoiceStore();
   const [tab, setTab] = useState<Tab>('library');
   const [openId, setOpenId] = useState<string | null>(null);
   useEffect(() => {
@@ -76,7 +77,11 @@ export function VoicesPanel({ state, host, connected, canPlay }: Props) {
     setTab('library');
     setOpenId(request.recordingId);
   });
-  if (!status) return <p className="muted">Loading the voice library…</p>;
+  if (!shared) return <p className="muted">Loading the voice library…</p>;
+  // Every tab reads `canEdit` from here: it includes the host's setting for this guest (2.41 review).
+  const status = { ...shared, canEdit: canEditLibrary(shared, state.permissions, host) };
+  // A single word into the game is a region play: a guest also needs seeking (2.41 review).
+  const canRegion = canPlay && connected && (host || state.permissions.guestSeeking !== false);
   const tabs: [Tab, string][] = [
     ['library', 'Library'],
     ['review', `Review${status.unreviewed ? ` (${status.unreviewed})` : ''}`],
@@ -119,6 +124,7 @@ export function VoicesPanel({ state, host, connected, canPlay }: Props) {
             id={openId}
             status={status}
             canPlay={canPlay && connected}
+            canRegion={canRegion}
             back={() => setOpenId(null)}
           />
         ) : (
@@ -126,6 +132,7 @@ export function VoicesPanel({ state, host, connected, canPlay }: Props) {
             state={state}
             status={status}
             canPlay={canPlay && connected}
+            canRegion={canRegion}
             open={setOpenId}
           />
         ))}
@@ -222,11 +229,13 @@ function LibraryView({
   state,
   status,
   canPlay,
+  canRegion,
   open,
 }: {
   state: Snapshot;
   status: LibraryStatus;
   canPlay: boolean;
+  canRegion: boolean;
   open: (id: string) => void;
 }) {
   const [filters, setFilters] = useState<Filters>(NO_FILTERS);
@@ -239,7 +248,7 @@ function LibraryView({
   const [results, setResults] = useState<SearchResult[] | null>(null);
   const [picked, setPicked] = useState<Picked>(NOTHING_PICKED);
   const [mode, setMode] = useWordMode();
-  const player = useWordPlayer(canPlay);
+  const player = useWordPlayer(canPlay, canRegion);
   // The search runs a moment after typing stops.
   useEffect(() => {
     const timer = setTimeout(() => setFilters((f) => ({ ...f, query: typed.trim() })), 250);
@@ -330,7 +339,7 @@ function LibraryView({
         )}
       </label>
       <FilterBar status={status} filters={filters} set={setFilters} />
-      <WordModeSwitch mode={mode} set={setMode} canPlay={canPlay} />
+      <WordModeSwitch mode={mode} set={setMode} canPlay={canPlay} canRegion={canRegion} />
       {filters.query ? (
         <>
           <div className="voices-types" role="group" aria-label="Result types">
@@ -598,17 +607,19 @@ function RecordingDetail({
   id,
   status,
   canPlay,
+  canRegion,
   back,
 }: {
   id: string;
   status: LibraryStatus;
   canPlay: boolean;
+  canRegion: boolean;
   back: () => void;
 }) {
   const [data, setData] = useState<z.infer<typeof getSchema> | null>(null);
   const [gone, setGone] = useState(false);
   const [mode, setMode] = useWordMode();
-  const player = useWordPlayer(canPlay);
+  const player = useWordPlayer(canPlay, canRegion);
   const [title, setTitle] = useState('');
   const [text, setText] = useState('');
   const [tag, setTag] = useState('');
@@ -702,7 +713,12 @@ function RecordingDetail({
         {source}, kept by {r.byName} · {formatDuration(r.durationMs)}
         {!r.soundId && ' · not in Soundpad right now (preview only)'}
       </p>
-      <WordModeSwitch mode={mode} set={setMode} canPlay={canPlay && !!r.soundId} />
+      <WordModeSwitch
+        mode={mode}
+        set={setMode}
+        canPlay={canPlay && !!r.soundId}
+        canRegion={canRegion && !!r.soundId}
+      />
       <div className="voices-words" aria-label="Words">
         {data.words.length ? (
           data.words.map((w, i) => (

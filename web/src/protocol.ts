@@ -525,6 +525,23 @@ export function isGuestAllowed(c: Command, s: Snapshot) {
     ? s.permissions.remotePlayback
     : c.op === 'counter' && s.permissions.guestCounter;
 }
+/**
+ * What a guest's reply may carry (2.41 review). A "possible match" history notice says what was
+ * said in the host's recording, as a transcript would, so it reaches only a guest allowed Mimic.
+ * The companion checks the session-wide permission; this page checks the guest's own (`s` holds
+ * them), which the companion cannot see.
+ */
+export function guestReply(c: Command, data: unknown, s: Snapshot): unknown {
+  if (c.op !== 'libraryStatus' || s.permissions.guestMimic === true) return data;
+  if (!data || typeof data !== 'object' || !('notices' in data) || !Array.isArray(data.notices))
+    return data;
+  return {
+    ...data,
+    notices: data.notices.filter(
+      (n: unknown) => !!n && typeof n === 'object' && 'kind' in n && n.kind === 'recording',
+    ),
+  };
+}
 export const participantSchema = z
   .object({
     id: z.uuid(),

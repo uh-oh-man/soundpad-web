@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   NOTHING_PICKED,
   NO_FILTERS,
+  canEditLibrary,
   combineResults,
   countTypes,
   describeAudit,
@@ -24,6 +25,7 @@ import {
 import {
   commandSchema,
   EMPTY,
+  guestReply,
   isGuestAllowed,
   parseSnapshot,
   type Sound,
@@ -302,6 +304,47 @@ describe('permissions, snapshot and gates (2.41)', () => {
     expect(missingFeatures('2.40.3')).toHaveLength(2); // the voice library and the 2.41 review fixes
     expect(siteRelaysLibrary('2.40.9')).toBe(false);
     expect(siteRelaysLibrary('2.41.0')).toBe(true);
+  });
+
+  it('gives history matches only to a guest allowed Mimic, by their own setting (2.41 review)', () => {
+    const notices = [
+      { id: 1, kind: 'recording', recordingId: hex(1) },
+      { id: 2, kind: 'history', sessionId: 's', startFrame: 1, endFrame: 2 },
+    ];
+    const reply = { revision: 3, notices };
+    const status = c('libraryStatus');
+    expect(guestReply(status, reply, base)).toEqual(reply);
+    const noMimic = { ...base, permissions: { ...base.permissions, guestMimic: false } };
+    expect(guestReply(status, reply, noMimic)).toEqual({ revision: 3, notices: [notices[0]] });
+    // Other replies pass as they are.
+    expect(guestReply(c('libraryList'), reply, noMimic)).toBe(reply);
+  });
+
+  const statusOf = (canEdit: boolean) =>
+    statusSchema.parse({
+      revision: 1,
+      blocked: false,
+      problem: null,
+      count: 0,
+      unreviewed: 0,
+      pending: 0,
+      voices: [],
+      unassigned: 0,
+      tags: [],
+      wanted: [],
+      canEdit,
+      settings: { guestLibraryEdit: canEdit, groupSpeakers: false, indexPaused: false },
+      index: { total: 0, indexed: 0, failed: 0, paused: false, current: null, active: false },
+      worker: '',
+      notices: [],
+    });
+  it('lets a guest edit only when both the companion and the host’s own setting for them allow it', () => {
+    const status = statusOf(true);
+    expect(canEditLibrary(status, {}, false)).toBe(true);
+    expect(canEditLibrary(status, { guestLibraryEdit: false }, false)).toBe(false);
+    expect(canEditLibrary(status, { guestLibraryEdit: false }, true)).toBe(true);
+    expect(canEditLibrary(statusOf(false), {}, false)).toBe(false);
+    expect(canEditLibrary(null, {}, true)).toBe(false);
   });
 });
 

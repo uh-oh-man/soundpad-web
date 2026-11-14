@@ -66,6 +66,18 @@ export const statusSchema = z.object({
   notices: z.array(noticeSchema).max(100),
 });
 export type LibraryStatus = z.infer<typeof statusSchema>;
+/**
+ * Whether this person may change the library (2.41 review). The companion answers for the session
+ * (`canEdit`); a guest's own "Edit the voice library" setting is the host page's, which the
+ * companion cannot see, and comes in the guest's snapshot permissions.
+ */
+export function canEditLibrary(
+  status: LibraryStatus | null | undefined,
+  permissions: { guestLibraryEdit?: boolean },
+  host: boolean,
+) {
+  return !!status?.canEdit && (host || permissions.guestLibraryEdit !== false);
+}
 export const recordingSchema = z.object({
   id,
   title: z.string().max(200),

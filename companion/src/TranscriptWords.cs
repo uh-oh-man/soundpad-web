@@ -31,6 +31,11 @@ public sealed class TranscriptWords
     private readonly Dictionary<long, WordCorrection> corrections = [];
     private long nextId = 1, nextPhrase = 1;
     private int dropped;
+    /// <summary>
+    /// The first frame words may still describe (2.41 review): set by <see cref="DropBefore"/>, so a recognition that
+    /// was already running when the recovered history was discarded cannot add its words back.
+    /// </summary>
+    private long floor;
     public string Folder { get; }
     private string WordsPath => Path.Combine(Folder, "words.jsonl");
     private string CorrectionsPath => Path.Combine(Folder, "corrections.json");
@@ -91,7 +96,9 @@ public sealed class TranscriptWords
         List<TranscriptWord> added;
         lock (gate)
         {
-            added = recognised.Select(w => w with { Id = nextId++ }).ToList();
+            // Nothing below the floor: that audio was discarded while it was being recognised.
+            if (stretch.StartFrame < floor) stretch = new(floor, Math.Max(floor, stretch.EndFrame));
+            added = recognised.Where(w => w.Start >= floor).Select(w => w with { Id = nextId++ }).ToList();
             foreach (var w in added)
             {
                 int at = words.FindLastIndex(x => x.Start <= w.Start) + 1;
@@ -243,19 +250,23 @@ public sealed class TranscriptWords
     /// <summary>
     /// Drops words and recognised stretches before <paramref name="start"/> (2.41: the recovered history was discarded
     /// and the audio before this frame is gone), with their corrections, and rewrites the files when anything changed.
-    /// A word straddling <paramref name="start"/> goes too: part of its audio is gone.
+    /// A word straddling <paramref name="start"/> goes too: part of its audio is gone. Words recognised later for
+    /// audio before it are refused (<see cref="Add"/>). Returns the phrases that lost words.
     /// </summary>
-    public void DropBefore(long start)
+    public HashSet<long> DropBefore(long start)
     {
         lock (gate)
         {
+            floor = Math.Max(floor, start);
             int before = words.Count;
+            var phrases = words.Where(w => w.Start < start).Select(w => w.PhraseId).ToHashSet();
             words.RemoveAll(w => w.Start < start);
             foreach (var id in corrections.Keys.Where(id => !words.Any(w => w.Id == id)).ToArray()) corrections.Remove(id);
             var kept = covered.Where(c => c.EndFrame > start).Select(c => new HistoryRange(Math.Max(c.StartFrame, start), c.EndFrame)).ToList();
             bool changed = words.Count != before || kept.Count != covered.Count || kept.Where((k, i) => k != covered[i]).Any();
             covered.Clear(); covered.AddRange(kept);
             if (changed) RewriteLocked();
+            return phrases;
         }
     }
 

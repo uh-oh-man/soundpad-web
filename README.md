@@ -20,11 +20,13 @@ You can still open the website in Chrome or Edge on the same PC as an extra view
 
 ## Try it first
 
-Press **Try the example** on the [website](https://uh-oh-man.github.io/soundpad-web/) to see every feature with example sounds, in your browser only. Nothing is sent to Soundpad and you need no companion for it.
+Press **Try the example** on the [website](https://uh-oh-man.github.io/soundpad-web/) to try the soundboard, edited copies, Mimic and simulated guests with example sounds, in your browser only. Nothing is sent to Soundpad and you need no companion for it. The example still shows the older 30-second Mimic.
 
 ## Join a session
 
 Open the invite link in a modern browser (Chrome, Edge, Firefox or Safari, on a computer or phone) and pick a name. Tapping a sound plays it on the **host's** PC, not on your device.
+
+Your browser keeps a private key for Soundpad Web, so the host knows it is you after a reload or a reconnect, and nobody can take your place by using your name. **Settings → Connection details → This browser** says whether that works in your browser (a private window may not keep it). The host sees **Unverified** next to a guest whose page is older than 2.41; reloading fixes it.
 
 ## Mimic
 
@@ -33,20 +35,34 @@ Open the invite link in a modern browser (Chrome, Edge, Firefox or Safari, on a 
 The host chooses an app (for example Discord) or an output device. The companion keeps a rolling **recording history** on the host PC (10 minutes by default, deleted when it quits; companions before 2.39 kept 30 seconds in memory). Anyone allowed can then:
 
 - open **Mimic**, look back through the history with word-by-word subtitles, and select a moment by dragging, clicking words, or **Latest phrase** / **Last 10 seconds**;
-- **Capture** it as a draft of their own (since 2.40), adjust it, **Preview** it privately, **Play into game**, and **Keep in Temp**; guests allowed to keep clips can keep them too, within the budget the host sets;
+- **Capture** it as a draft of their own (since 2.40), adjust it, **Preview** it privately, **Play into game**, and **Keep in Temp** or **Keep in voice library**; guests allowed to keep clips can keep them too, within the budget the host sets;
+- **Find words said in this recording** to jump to where something was said;
 - from **Just mimicked**: replay, reverse, play with an effect (Chipmunk, Slow-mo, Echo, Slow same voice), or open the clip in **Edit copy** with one press. The host can also **Keep** a clip permanently from there, or **Undo** one made by mistake from its notice.
 
 The host can also press a hotkey **in any app** to save the last few seconds mid-game: F6 by default, or F7–F10 if a game already uses F6. The waveform zooms to the last 30, 10 or 5 seconds for picking short moments. Mimic is off until the host starts it, never records a microphone, and everyone is told when it listens. Clips you saved in the Voice Replay Studio desktop app can be imported into the session from the Mimic window too. Full guide: [docs/MIMIC.md](docs/MIMIC.md).
 
+## Voice library
+
+**Voices** (beside **Mimic**, companion 2.41+) holds every clip you keep permanently, with the words said in it. Clips kept from Temp, from a Mimic draft, by a guest, or when the companion asks before quitting all go in; sounds kept earlier are added with **Add to voice library** in Temp. In it you can:
+
+- search for a word or an exact phrase across your Soundpad sounds and voice clips, and click a word to hear exactly that word, privately (**Preview here**) or in the game (**Play into game**);
+- give recordings a title, tags, a favourite star and a **voice** (who it sounds like), and correct their text; every change has **Undo**, and the library remembers who changed what;
+- sort new recordings quickly in **Review**, from the keyboard (Space plays, 1–9 picks a voice, F favourites, Enter keeps, S skips);
+- note **wanted words** for a voice, and get a quiet notice with **Jump** when Mimic hears one;
+- (host) choose Soundpad categories in **Word index** to make their sounds searchable by their words. The companion transcribes them on your PC one file at a time, can pause, and only reads your files.
+
+Guests can look, search and listen by default; changing the library needs the **Edit the voice library** permission (on by default, can be turned off per guest). Removing a recording from the library never deletes its file. **Group speakers (experimental)**, off by default, groups Mimic's phrases by who seems to speak so a person can name them.
+
 ## Features
 
 - **Mimic**, described above, merged from the Voice Replay Studio desktop app.
+- **Voice library**, described above: kept clips with their words, voices and tags, and word search that plays a single word.
 - Real named-pipe Soundpad integration, including Steam and standalone distributions using the same RC API.
 - Ordered, nested categories, native category icons, cross-category search, duplicate titles and empty categories.
 - Play, prominent Stop, accurate vendor playback status and progress where available. When two people click at once, the newest click wins: older ones never play late and show no error.
 - **Panic** (host): a separate button beside Stop, or **Shift+Escape**. It stops the sound and pauses guest playback until you press **Resume guest playback**; the session, Mimic and Temp carry on.
 - Up to 12 authorized guests per session, independent cryptographic host sessions, pinned host identity and invitation rotation.
-- Host-controlled permissions for playback, the Kick counter, seeking, Spotify, uploads, reverse and Mimic; guests default to playback enabled and counter editing disabled.
+- Host-controlled permissions for playback, the Kick counter, seeking, Spotify, uploads, reverse, Mimic, keeping clips and editing the voice library, for everyone or per guest; guests default to playback enabled and counter editing disabled.
 - Authoritative persistent Kick counter with duplicate-request protection.
 - Five personal views, real local waveform analysis, epoch-checked seeking, pause/resume, cues, regions and zoom.
 - **Temp:** session uploads (with **Undo** on the notice if you picked the wrong file), reversed variants, trimmed or effect copies (including any speed from 0.05× to 20×, optionally keeping the pitch), and **Keep permanently** with host confirmation. **Edit copy** works like Voice Replay Studio's editor: drag on the waveform to choose the part, **Zoom to selection** for fine edges, and (host) **Preview** it with **Loop** before saving. **Save & play** makes the copy and plays it at once, and the host can **Undo** it from the notice that follows. With Mimic transcripts on, a plain trim is named after its own words. A search appears once Temp has more than six sources. Everything temporary is removed from Soundpad and from disk when hosting ends, even if you close the companion window, or any time with **Clear all temporary audio**.
@@ -63,7 +79,7 @@ More screenshots: [Phone](docs/screenshots/v23-phone.png) · [Original Purple](d
 
 Treat an invitation as a password. Anyone with it can join and use the permissions you enable. **Session & access → Replace invite** revokes the previous invitation and disconnects existing guests. Disconnecting one peer alone does not invalidate a bearer invitation; that person could return with a new browser identity.
 
-Guests receive sound titles, category names/order/membership/icons, custom icons, playback status, counter and permissions. Host library audio is not sent to guests. Guest uploads travel directly to the host; local paths, native access tokens and host signing keys stay local. Shared organization and enabled Spotify metadata/artwork are visible to session participants. There are no analytics, third-party fonts, arbitrary file endpoints, shell commands or arbitrary Soundpad API access. Managed imports are the only production library mutations; native entry removal is deliberately deferred when atomic ownership cannot be established. WebRTC exposes network connection information to peers; signaling relays see network metadata and encrypted session descriptions.
+Guests receive sound titles, category names/order/membership/icons, custom icons, playback status, counter and permissions, and (since 2.41) the voice library's titles, tags, voices and words. Host library audio is not sent to guests, except private previews of up to 30 seconds of voice-library recordings and of sounds in the categories the host indexes for word search; they play in the guest's own browser and are never offered as a download. Guests never receive the host's file paths. Each guest's browser keeps its own private key, which never leaves it; the host's page checks it on every connection so permissions follow the right person. Guest uploads travel directly to the host; local paths, native access tokens and host signing keys stay local. Shared organization and enabled Spotify metadata/artwork are visible to session participants. There are no analytics, third-party fonts, arbitrary file endpoints, shell commands or arbitrary Soundpad API access. Managed imports are the only production library mutations; native entry removal is deliberately deferred when atomic ownership cannot be established. WebRTC exposes network connection information to peers; signaling relays see network metadata and encrypted session descriptions.
 
 **Mimic** is off until the host starts it and never records a microphone. Everyone is told when it starts and stops, and a **Mimic on** badge shows while it listens. Its audio stays on the host PC: guests allowed to use Mimic receive waveform levels and, if the host turns transcripts on, the transcript text. Speech recognition runs locally. Guest Mimic is off by default. See [Mimic privacy](docs/MIMIC.md#privacy-and-safety).
 
@@ -92,7 +108,7 @@ Every release stays on GitHub. Download any older `SoundpadWeb.exe` from [Releas
 | Part | Where | What it does |
 | --- | --- | --- |
 | Website | `web/` | The static React site on GitHub Pages: soundboard, Temp, Mimic window, host settings. Guests only ever need this. |
-| Windows companion | `companion/` | One portable `SoundpadWeb.exe` on the host PC. It talks to Soundpad, manages Temp audio, and runs Mimic: capture, local Whisper transcript, the F6–F10 hotkey, preview, trim and effects. |
+| Windows companion | `companion/` | One portable `SoundpadWeb.exe` on the host PC. It talks to Soundpad, manages Temp audio, runs Mimic (capture, local Whisper transcript, the F6–F10 hotkey, preview, trim and effects) and keeps the voice library and its word index. |
 | Voice Replay Studio | `mimic/` | The original Mimic desktop app (V1.1), kept intact with its own [README](mimic/README.md), tests and licenses. |
 | Docs | `docs/` | [Mimic](docs/MIMIC.md), [rolling back](docs/ROLLBACK.md), [developers](docs/DEVELOPERS.md), API research, protocol and verification notes. Version histories: [2.3](docs/V2.3.md), [V2](docs/V2.md). |
 

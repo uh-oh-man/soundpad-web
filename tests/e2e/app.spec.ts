@@ -1881,6 +1881,33 @@ test('Mimic drafts: Capture opens a draft, an edge drags into the audio around i
   expect(((await sendCommand(page, 'draftList')).data as DraftReply).drafts).toHaveLength(0);
 });
 
+test('Mimic drafts: Last N s with a draft open puts the draft away and never moves its edges', async ({
+  page,
+  harness,
+}) => {
+  // Review of 2.41: the quick select (like Jump and a search result) picked the new range for the open draft.
+  await host(page, harness);
+  await page.getByRole('button', { name: 'Mimic', exact: true }).click();
+  const dialog = page.getByRole('dialog', { name: 'Mimic' });
+  await dialog.getByRole('button', { name: 'Start listening' }).click();
+  await page.waitForTimeout(5600);
+  await dialog.getByRole('button', { name: 'Last 3 s', exact: true }).click();
+  await dialog.getByRole('button', { name: 'Capture', exact: true }).click();
+  const draft = dialog.getByRole('region', { name: 'Draft' });
+  await expect(draft.locator('.mimic-range')).toContainText('3.0 s');
+  const before = ((await sendCommand(page, 'draftList')).data as DraftReply).drafts;
+  expect(before).toHaveLength(1);
+  await dialog.getByRole('button', { name: 'Last 5 s', exact: true }).click();
+  await expect(draft).toHaveCount(0);
+  await expect(dialog.locator('.mimic-range')).toContainText('5.0 s');
+  // Well past the moment a moved edge would be saved: the draft is as it was.
+  await page.waitForTimeout(1000);
+  const after = ((await sendCommand(page, 'draftList')).data as DraftReply).drafts;
+  expect(after.map((d) => [d.id, d.startFrame, d.endFrame])).toEqual(
+    before.map((d) => [d.id, d.startFrame, d.endFrame]),
+  );
+});
+
 test('Mimic drafts: a guest previews privately only what was recorded since joining, and the host sees and copies their selection', async ({
   page,
   harness,

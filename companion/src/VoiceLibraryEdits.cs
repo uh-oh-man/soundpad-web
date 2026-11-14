@@ -61,6 +61,8 @@ public sealed partial class VoiceLibrary
             var title = edit.Title != null ? Clip(edit.Title, MaxTitle) : null;
             if (edit.Title != null && title!.Length == 0) throw new InvalidDataException("Give the recording a title.");
             string? corrected = edit.CorrectedText == null ? null : Clip(edit.CorrectedText, MaxText);
+            // A corrected text describes one recording; many at once would only multiply the file and its audit (2.41 review).
+            if (corrected != null && targets.Count > 1) throw new InvalidDataException("Correct the text of one recording at a time.");
             var setTags = edit.Tags != null ? CleanTags(edit.Tags) : null;
             var addTags = CleanTags(edit.AddTags); var removeTags = CleanTags(edit.RemoveTags);
             var changes = new List<AuditChange>(); var undo = new List<Action>(); var redo = new List<Action>();
@@ -206,6 +208,7 @@ public sealed partial class VoiceLibrary
             if (after.IndexCategories.Count > MaxCategories) throw new InvalidDataException($"Choose at most {MaxCategories} categories.");
             file.Settings = after;
             try { SaveLocked(); } catch { file.Settings = before; throw; }
+            settingsNow = after;
             Raise();
             return after;
         }

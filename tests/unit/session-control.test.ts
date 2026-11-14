@@ -701,6 +701,30 @@ describe('guest identity (2.41)', () => {
     expect(second.types()).not.toContain('welcome');
   });
 
+  it('an unverified guest’s place cannot be taken by copying their hello (2.41 review)', async () => {
+    const net = new MemoryNetwork(),
+      a = await createIdentity(),
+      old = person('Old');
+    const h = page(net, a, 'host', { host: true, policy: { admission: 'ask' } });
+    await advance(100);
+    const first = rawPeer(net, a, 'old-1');
+    await advance(100);
+    await first.hello({ person: old });
+    await until(() => h.requests().length === 1);
+    const firstId = h.requests()[0].id;
+    await h.session.letIn(firstId);
+    await until(() => first.types().includes('welcome'));
+    // Every peer in the room sees a hello: its profile id and page nonce. Another holder of the invitation
+    // copies both into a keyless hello of their own; the host still asks about them as somebody new.
+    const copy = rawPeer(net, a, 'copier');
+    await advance(100);
+    await copy.hello({ person: old, nonce: first.nonce });
+    await until(() => h.requests().length === 1);
+    expect(h.requests()[0].id).not.toBe(firstId);
+    expect(copy.types()).not.toContain('welcome');
+    expect(h.guests()).toEqual(['old-1']);
+  });
+
   it('a guest let in over the relay keeps her place and her own permissions when direct starts working', async () => {
     const hub = goodHub(),
       net = new MemoryNetwork(true),

@@ -345,7 +345,9 @@ public sealed partial class Bridge
                     if (library && Field(saved, "assetId") is string keptId)
                     {
                         var source = new LibrarySource { Kind = "history", SessionId = h.SessionId, StartFrame = draft.Start, EndFrame = draft.End, Rate = h.Rate };
-                        try { recordingId = (await KeepIntoLibrary(keptId, actor, participant, requester, audience, source, WordsFromHistory(source)))?.Id; }
+                        try { recordingId = (await KeepIntoLibrary(keptId, actor, participant, requester, audience, source, WordsFromHistory(source))).Id; }
+                        // Kept, but not in the library: the draft stays open (and pinned) so nothing is lost.
+                        catch (InvalidDataException ex) when (ex.Data.Contains(KeptOutsideLibrary)) { DraftsChanged(); return new("ack", c.Id, false, ex.Message); }
                         catch (InvalidDataException ex) { DraftsChanged(); return new("ack", c.Id, false, ex.Message + " The clip is in Temp."); }
                     }
                     bool close = c.Op == "draftKeep" && c.Action is "close" or "library";

@@ -259,7 +259,8 @@ public sealed partial class Bridge
             ReleaseDrafts(d => d.SessionId == h.SessionId && d.Start < boundary);
             try { foreach (var owner in h.DiscardBefore(boundary)) Log($"A selection on the recovered history was let go ({owner})"); }
             catch (HistoryException) { return false; }
-            transcriber.DropBefore(h, boundary);
+            var phrases = transcriber.DropBefore(h, boundary);
+            DropVoicesBefore(h.SessionId, boundary, phrases);
             ownReplays.DropBefore(h.SessionId, boundary);
             lock (sharedRanges)
             {

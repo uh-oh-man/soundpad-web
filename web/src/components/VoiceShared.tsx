@@ -72,8 +72,12 @@ export function useWordMode() {
   ] as const;
 }
 
-/** Plays words: a private preview of exactly that word, or the same exact slice into the game. */
-export function useWordPlayer(canPlay: boolean) {
+/**
+ * Plays words: a private preview of exactly that word, or the same exact slice into the game. A
+ * slice is a region play, which a guest also needs seeking for (`canRegion`, 2.41 review); without it
+ * a word is previewed here instead, while whole sounds still play into the game.
+ */
+export function useWordPlayer(canPlay: boolean, canRegion = canPlay) {
   const preview = usePreviewAudio();
   return {
     previewing: preview.previewing,
@@ -85,7 +89,7 @@ export function useWordPlayer(canPlay: boolean) {
       last = first,
     ) {
       const range = playRange(first, last);
-      if (mode === 'game' && target.soundId && canPlay)
+      if (mode === 'game' && target.soundId && canPlay && canRegion)
         void playback.region(target.soundId, range.positionMs, range.endMs);
       else
         void preview.play(
@@ -112,10 +116,13 @@ export function WordModeSwitch({
   mode,
   set,
   canPlay,
+  canRegion = canPlay,
 }: {
   mode: WordMode;
   set: (m: WordMode) => void;
   canPlay: boolean;
+  /** Single words into the game (a region play); see useWordPlayer. */
+  canRegion?: boolean;
 }) {
   return (
     <div className="voices-mode" role="radiogroup" aria-label="Word clicks">
@@ -139,6 +146,9 @@ export function WordModeSwitch({
         />
         <Play size={13} aria-hidden="true" /> Play into game
       </label>
+      {mode === 'game' && canPlay && !canRegion && (
+        <span className="muted">Single words play here only: the host has turned off seeking.</span>
+      )}
     </div>
   );
 }

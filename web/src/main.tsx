@@ -424,7 +424,7 @@ function App() {
     connected &&
     supports(state.companionVersion, 'voiceLibrary') &&
     (host || controller.relaysLibrary());
-  useLibrarySync(state, libraryReady);
+  useLibrarySync(state, libraryReady, canMimic);
   // A notice's Jump opens Mimic at that moment; Open shows the recording in Voices.
   useOpenRequests((request) => {
     // One window at a time: the other closes (what it showed is remembered).

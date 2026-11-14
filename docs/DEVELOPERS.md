@@ -31,6 +31,8 @@ For development, run `npm run dev`, then:
 
 This connects to real Soundpad if running. Routine browser tests instead launch a completely separate mock pipe via `companion/harness`; fixtures never ship in the EXE. Optional real Nostr/WebRTC browser integration tests: `$env:LIVE_RELAY='1'; npm run test:e2e -- --grep 'live Nostr'`. They still use a mock Soundpad, so no real audio plays. CI's default tests do not depend on public relay availability. The separate **Live relay guest tests** workflow runs them weekly (Mondays), on demand and when its file changes.
 
+Responsiveness under load (2.41): `SoundpadWeb.Harness.exe --playback-bench --slow-work [--transcribe-burn-ms N]` runs the 2.35 playback bench against the mock with keep-pitch copies, previews, Mimic recording with simulated recognition load and Panic presses, and reports how long the receive loop was held and how fast Stop and Panic were answered.
+
 Mimic checks (Windows):
 
 ```powershell
@@ -58,7 +60,7 @@ Public [Nostr relays via Trystero](https://trystero.dev/) establish the connecti
 
 ## Where data is kept
 
-Counter, permissions, statistics, icon references and an opaque-identity key live in `%LOCALAPPDATA%\SoundpadWeb\state.json`. Icon images live beside it in `icons/`; waveform caches live in `waveforms/`. Managed uploads/reversed WAVs and the schema-3 recovery journal live in `managed-audio/`; permanent copies default to `library/` beside it. Legacy `session-audio/` records are backed up before migration. Previously accepted legacy files are preserved until the host confirms durable promotion; do not manually delete them. Small settings are saved atomically; unreadable data stops startup instead of silently resetting your counter. Browser refresh retains the session within the same host tab. Restarting the EXE or ending the host tab starts a new invitation session. Other people's hosts have separate state and secrets.
+Counter, permissions, statistics, icon references and an opaque-identity key live in `%LOCALAPPDATA%\SoundpadWeb\state.json`. Icon images live beside it in `icons/`; waveform caches live in `waveforms/`. Managed uploads/reversed WAVs and the schema-3 recovery journal live in `managed-audio/`; permanent copies default to `library/` beside it. Since 2.41 `library/` also holds the voice library: `voice-library.v1.json` (the previous version is kept as `voice-library.v1.bak.json` on each save; a save that would exceed 64 MiB is refused), `voice-words.v1.jsonl` (recording words), `voice-audit.v1.jsonl` (who changed what; rotated to `voice-audit.v1.old.jsonl` past 32 MiB) and `sound-words.v1.jsonl` (the category word index, keyed by path, size and modification time). They are separate from `state.json` and the journal, whose formats did not change. Guest browsers keep their identity key in IndexedDB (`soundpad-web-keys`, store `keys`, record `guest-v1`; the private key is non-extractable). Legacy `session-audio/` records are backed up before migration. Previously accepted legacy files are preserved until the host confirms durable promotion; do not manually delete them. Small settings are saved atomically; unreadable data stops startup instead of silently resetting your counter. Browser refresh retains the session within the same host tab. Restarting the EXE or ending the host tab starts a new invitation session. Other people's hosts have separate state and secrets.
 
 ## Technical notes and limitations
 

@@ -71,7 +71,12 @@ import { refreshDrafts, useDraftStore } from '../../mimic/draft-store';
 import { recall, remember } from '../../sections';
 import { z } from 'zod';
 import { requestOpen, takeOpen, useOpenRequests, useVoiceStore } from '../../library/voice-store';
-import { historySearchSchema, speakerGroupsSchema, type SpeakerGroups } from '../../library/voices';
+import {
+  canEditLibrary,
+  historySearchSchema,
+  speakerGroupsSchema,
+  type SpeakerGroups,
+} from '../../library/voices';
 import { MimicWave } from './MimicWave';
 import { MimicOverview } from './MimicOverview';
 import { historyPoller } from '../../mimic/history-poll';
@@ -370,9 +375,13 @@ export function MimicHistory({
     }, SAVE_EDGES_MS);
   }
 
-  /** A new selection (frames). Selecting while live holds the view still, so the selection stays where it was made. */
-  function select(next: FrameRange | null) {
-    if (open) {
+  /**
+   * A new selection (frames). Selecting while live holds the view still, so the selection stays where it was made.
+   * `fresh` (2.41 review): a new selection right after the open draft was put away (Jump, a search result, Last N s).
+   * `open` still holds that draft in this render, and its edges must not move to the new selection.
+   */
+  function select(next: FrameRange | null, fresh = false) {
+    if (open && !fresh) {
       // Editing the open draft: dragging an edge or picking words moves its edges. Clearing closes it (it stays in the history).
       if (!next) {
         closeDraft();
@@ -777,7 +786,7 @@ export function MimicHistory({
     jumpTo.current = null;
     if (target.sessionId !== timeline.sessionId) return;
     if (open) closeDraft();
-    select(target.range);
+    select(target.range, true);
   }, [timeline?.sessionId, jumpKick]);
 
   if (!timeline) return <p className="muted">Loading the recording history…</p>;
@@ -993,7 +1002,7 @@ export function MimicHistory({
                         type="button"
                         onClick={() => {
                           if (open) closeDraft();
-                          select({ startFrame: m.startFrame, endFrame: m.endFrame });
+                          select({ startFrame: m.startFrame, endFrame: m.endFrame }, true);
                         }}
                       >
                         {at !== null && <time>{formatClock(at)}</time>} “{m.context || m.text}”
@@ -1015,7 +1024,8 @@ export function MimicHistory({
               key={g.id}
               group={g}
               voices={libraryStatus?.voices ?? []}
-              canEdit={libraryStatus?.canEdit ?? false}
+              canEdit={canEditLibrary(libraryStatus, state.permissions, host)}
+              sessionId={sessionId}
             />
           ))}
           {speakers.groups.length === 0 && <span className="muted">none yet</span>}
@@ -1084,6 +1094,7 @@ export function MimicHistory({
               if (open) closeDraft();
               select(
                 selectionFrames(lastSeconds(s, WINDOW_MS), windowStart(displayEnd, rate), rate),
+                true,
               );
             }}
           >
@@ -1296,11 +1307,15 @@ function SpeakerControls({
   group,
   voices,
   canEdit,
+  sessionId,
 }: {
   group: SpeakerGroups['groups'][number];
   voices: { id: string; name: string }[];
   canEdit: boolean;
+  /** The recording the group belongs to (2.41 review): group numbers start again with each one. */
+  sessionId: string | null;
 }) {
+  const sourceId = sessionId ?? undefined;
   const [name, setName] = useState(group.name ?? '');
   return (
     <form
@@ -1308,7 +1323,7 @@ function SpeakerControls({
       onSubmit={(e) => {
         e.preventDefault();
         void controller
-          .run('speakerName', { groupId: group.id, name: name.trim() })
+          .run('speakerName', { groupId: group.id, name: name.trim(), sourceId })
           .catch(() => {});
       }}
     >
@@ -1330,7 +1345,7 @@ function SpeakerControls({
             value={group.voiceId ?? ''}
             onChange={(e) =>
               void controller
-                .run('speakerLink', { groupId: group.id, voiceId: e.target.value })
+                .run('speakerLink', { groupId: group.id, voiceId: e.target.value, sourceId })
                 .catch(() => {})
             }
           >

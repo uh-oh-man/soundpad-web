@@ -2,6 +2,52 @@
 
 Notable changes to Soundpad Web. Versions follow the website's `package.json`; the Windows companion is versioned separately and only needs updating when a release says so.
 
+## 2.41.0 — The voice library
+
+**Update the companion** for this one. With an older companion, **Voices** is hidden, and Mimic's **Discard** after a crash warns that it removes the whole recording history. Guests' browser keys, the new place for notices, scrubbing and word clicks are in the website and work with any companion.
+
+### Added
+
+- **The voice library.** A new **Voices** button beside **Mimic** opens every clip you kept, as a recording with where it came from and the words said in it. Clips kept from Temp, a draft's new **Keep in voice library**, a guest's Keep and the quit prompt's **Keep selected** all go in. Words come from Mimic's subtitles when the clip came from the history; otherwise the companion finds them in the background, at the Gaming setting. Sounds kept before this release are added by hand with **Add to voice library** in Temp; nothing is added by itself. Removing a recording from the library never deletes its file.
+- **Titles, tags, favourites and voices.** Give a recording a title, tags, a favourite star and a **voice** (a name, colour and initials for who it sounds like), and correct its text without losing the word timings. Select several recordings to set their voice or tags at once. Every change has **Undo** on its notice, and the library keeps a list of who changed what.
+- **Find any word.** One search finds a word or an exact phrase across your Soundpad sounds and voice clips, with a badge saying which is which. Click a word to hear just that word: **Preview here** in your own browser, or **Play into game**. **Words** lists every word said, for one voice or all of them.
+- **Wanted words.** Note a word or phrase you want a voice to say. Voices shows whether you already have it, and when Mimic hears it, people allowed to use Mimic get a quiet "possible match" notice with **Jump** to that moment.
+- **Search the recording.** In Mimic, **Find words said in this recording** searches the history's subtitles, within what you may see.
+- **Word index of Soundpad categories** (host). In **Word index**, choose categories whose sounds should be found by their words. The companion works through them one file at a time on this PC, can be paused, carries on where it stopped and skips files that have not changed. It only reads your files.
+- **Review queue.** **Review** shows new recordings one at a time to sort from the keyboard: Space plays, 1–9 picks a voice, F favourites, Enter keeps and moves on, S or Right skips, Left goes back.
+- **Group speakers (experimental)**, off by default (host, in **Word index**). Mimic groups the history's phrases by who seems to be speaking, and leaves a phrase **Unassigned** when unsure. A person names a group or links it to a voice; nothing is named automatically. Measured on synthetic speech only so far.
+- **Guests are known by their browser.** Each guest's browser now keeps a private key, and the host's page checks it on every connection. A reload, a reconnect, or a switch between a direct and a relayed connection keeps a guest's place, permissions, history start, drafts and Keep budget, and nobody can take those over by copying another guest's name or profile. **Settings → Connection details** has a **This browser** line saying whether the host will know you after a reload, and a browser that cannot keep the key says so once.
+- **New permission: Edit the voice library** (on by default, and can be turned off per guest). Without it, guests can look, search and listen but change nothing. Guests may make up to 60 library changes a minute; the host is never limited.
+
+### Changed
+
+- **Discard after a crash keeps what is new.** Mimic's **Discard** on the "Recovered … of history" notice now removes only the audio the crash recovered. Everything recorded since the companion started again stays, with its subtitles and drafts, and the confirmation says so. Words still being recognised for the discarded part are never added back.
+- **Stop and Panic stay prompt during slow work.** Making an edited copy (including keep-pitch speed changes), a preview or a Mimic clip no longer holds up Play, Stop or Panic pressed meanwhile. In a test with a long keep-pitch copy and speech recognition running, Stop's slowest answer fell from 0.7 s to 37 ms and Panic's from 0.27 s to 36 ms. A copy "and play" that someone overtook is still saved, and never plays over the newer sound. Long background transcription also lets live subtitles in between its pieces.
+- **Notices sit bottom right, above the player**, clear of Settings, Leave example, Mimic, Stop and Panic. In an open window they appear at its foot, never over its Close button; Tab reaches their Undo, and a drag on the waveform under one goes through to the waveform. Every window's title and Close button stay in view while it scrolls.
+- **Edits stay with their recording.** When Mimic or the companion restarts, the old selection, open draft, preview, waveform and words go at once, so nothing selected on one recording can play, keep, share or preview another.
+- **Jump**, word-search results and **Last N s** put an open draft away instead of moving its edges.
+- Dragging Mimic's overview moves the outline at once and fetches the waveform and words where it stops, without piling up requests.
+- Clicking a word next to where a guest joined, the oldest recorded audio or a gap never takes audio from the other side, and says why when the word itself is not all there.
+- When subtitles or a correction cannot be saved to disk, the host sees it in Mimic. They are kept while the companion runs and saved automatically once the disk works again.
+- The host sees **Unverified** on guests and requests from pages older than 2.41. Such a guest counts as new on every page load until they reload Soundpad Web, and their direct and relayed connections count as two guests.
+- "Possible match" notices reach only people allowed to use Mimic. For a guest the host does not allow seeking, a clicked word plays in their own browser only, and Voices says so.
+- **Keep in voice library** that the library cannot take (it is full, or its file cannot be saved) now says so and leaves the draft open, instead of keeping the clip outside the library.
+- Corrected text is changed on one recording at a time.
+- The example: the start page says what you can try, leaving it says what is cleared (favourites and view settings stay), its guests are marked simulated, its Mimic is labelled as the older 30-second Mimic until the example is redesigned, and the hotkey says it only works on the host's PC.
+- The voice library is saved in `%LOCALAPPDATA%\SoundpadWeb\library\` (where kept sounds go by default): the library, its words, its list of changes (at most two files of 32 MiB) and the category word index. `state.json` and Temp's records are unchanged.
+
+**One-time on update:** guests a 2.40 host page let in, or gave their own **Off** settings, are new to a 2.41 host page. Let them in or set them again.
+
+### Reviewed
+
+A review of 2.40 by Codex found nine problems, all fixed here: any invitation holder could take over another guest's admission, permissions, history start, drafts and budget by copying their profile id; **Discard** after a crash also removed what was recorded since; a selection could carry over to a new recording; slow audio work delayed Stop and Panic; notices covered Mimic's Close and Leave example; scrubbing restarted every fetch on each pointer move; word clicks could take audio from before a guest joined or across a gap; failed subtitle saves were silent; and the example promised more than it showed (its Mimic is now labelled as the older one until the example is redesigned).
+
+A review of the voice library before release found 17 more, all fixed: "possible match" notices reached guests not allowed Mimic; a guest could hear any Soundpad sound by adding it to the library (guests now add and preview only sounds in categories indexed now, and a category taken out of the index is no longer searched); the list of changes sent guests the host's file paths and other guests' ids; Voices ignored a guest's own **Edit the voice library: Off** and single words ignored **Seeking & pause: Off**; the library could save a file too big to load again, and its list of changes grew without limit; **Keep in voice library** reported success when the library could not take the clip; words recognised for discarded audio could come back; a long background transcription held up live subtitles; Jump and quick selections moved an open draft's edges; a guest on an older page could be impersonated by copying their hello; and four smaller ones (the session view waiting for the library, a change id reused after a backup was loaded, the category index stopping after one pass, and speaker naming without a recording check).
+
+### Tests
+
+- 30 new companion tests (the voice library, its limits and audit, guest scoping of search, previews and notices, the category index, speaker groups, Discard keeping new capture, commands refused on another recording, Stop and Panic during slow work, unsaved subtitles), 28 new website unit tests (guest keys and proofs, the voice library's rules, scrubbing, word clamping), and 8 new browser tests (four for the voice library, notices never covering controls, scrubbing with Stop and Play prompt, a selection and draft not carrying over to a new recording, and Last N s with a draft open).
+
 ## 2.40.0 — Drafts, and guests who can keep
 
 **Update the companion** for this one. With an older companion, Mimic's **Mimic it** works as before.

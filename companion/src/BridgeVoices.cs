@@ -53,6 +53,11 @@ public sealed partial class Bridge
     private long voicesRevision;
     /// <summary>Where Temp clips of this launch came from, so keeping one records its provenance.</summary>
     private readonly ConcurrentDictionary<string, LibrarySource> provenance = new();
+    /// <summary>Changes to the voice library per minute, per guest (2.41 review).</summary>
+    public const int GuestLibraryWritesPerMinute = 60;
+    private RateWindow libraryWriteRate = new(GuestLibraryWritesPerMinute, TimeSpan.FromMinutes(1));
+    /// <summary>Test seam: another limit for guests' library changes.</summary>
+    internal void UseLibraryWriteLimit(RateWindow limit) => libraryWriteRate = limit;
 
     private VoiceLibrary Voices
     {
@@ -63,10 +68,11 @@ public sealed partial class Bridge
                 if (voiceLibrary != null) return voiceLibrary;
                 // The sound index shares the word index; both are loaded together so a search sees everything.
                 soundWords ??= new SoundWords(store.DirectoryPath, wordIndex);
-                voiceLibrary = new VoiceLibrary(store.DirectoryPath, wordIndex, () => utcNow());
-                voiceLibrary.Changed += VoicesChanged;
-                if (voiceLibrary.PendingCount > 0 || voiceLibrary.Settings.IndexCategories.Count > 0) _ = Task.Run(SignalWorker);
-                return voiceLibrary;
+                var loaded = new VoiceLibrary(store.DirectoryPath, wordIndex, () => utcNow());
+                loaded.Changed += VoicesChanged;
+                Volatile.Write(ref voiceLibrary, loaded);
+                if (loaded.PendingCount > 0 || loaded.Settings.IndexCategories.Count > 0) _ = Task.Run(SignalWorker);
+                return loaded;
             }
         }
     }
@@ -75,7 +81,27 @@ public sealed partial class Bridge
     public VoiceLibrary VoiceLibraryStore => Voices;
     public SoundWords SoundWordStore => SoundIndex;
     private void VoicesChanged() { Interlocked.Increment(ref voicesRevision); Publish(); }
-    private LibrarySettings LibrarySettingsNow { get { try { return Voices.Settings; } catch (Exception ex) when (ex is not OutOfMemoryException) { return new(); } } }
+    /// <summary>
+    /// The library's settings for the snapshot and the history's word handlers (2.41 review): never waits for the
+    /// library. Its lock is held across a whole rewrite of its file, and its first load reads every library file; the
+    /// snapshot is made on the receive loop, ahead of Stop and Panic. Until the library has loaded (in the background,
+    /// started here) this is null, and the snapshot then says nothing about guest library editing.
+    /// </summary>
+    private LibrarySettings? LibrarySettingsNow
+    {
+        get
+        {
+            if (Volatile.Read(ref voiceLibrary) is { } library) return library.Settings;
+            if (Interlocked.Exchange(ref voicesLoading, 1) == 0 && Volatile.Read(ref disposed) == 0)
+                _ = Task.Run(() =>
+                {
+                    try { _ = Voices; Publish(); }
+                    catch (Exception ex) when (ex is not OutOfMemoryException) { Interlocked.Exchange(ref voicesLoading, 0); }
+                });
+            return null;
+        }
+    }
+    private int voicesLoading;
 
     /// <summary>The sound id Soundpad's list gives a file (as LibraryParser makes it for a path's first entry).</summary>
     private string FirstSoundIdOf(string path) => Convert.ToHexString(HMACSHA256.HashData(Convert.FromBase64String(disk.IdentityKey), Encoding.UTF8.GetBytes(path.Replace('/', '\\').ToUpperInvariant() + "\n0"))).ToLowerInvariant();
@@ -135,7 +161,7 @@ public sealed partial class Bridge
         {
             var asset = Audio.AssetById(assetId);
             var variant = asset.Variants.LastOrDefault(v => v.Permanent && v.Current) ?? asset.Variants.LastOrDefault(v => v.Permanent);
-            if (variant == null) return null;
+            if (variant == null) { libraryKeepProblem[assetId] = "The clip is not kept yet."; return null; }
             source ??= provenance.GetValueOrDefault(assetId) ?? new LibrarySource { Kind = asset.Origin == "native" ? "soundpad" : "upload" };
             words ??= WordsFromHistory(source);
             var (recording, added) = Voices.Add(new LibraryRecording { AssetId = asset.Id, Path = variant.Path, Bytes = variant.Bytes, DurationMs = DurationOf(variant.Path), Title = asset.Name, Source = source }, words, by, byName);
@@ -146,8 +172,16 @@ public sealed partial class Bridge
             }
             return recording;
         }
-        catch (Exception ex) when (ex is not OutOfMemoryException) { Log("A kept clip could not be added to the voice library: " + ex.Message); return null; }
+        catch (Exception ex) when (ex is not OutOfMemoryException)
+        {
+            Log("A kept clip could not be added to the voice library: " + ex.Message);
+            if (libraryKeepProblem.Count > 256) libraryKeepProblem.Clear();
+            libraryKeepProblem[assetId] = ex.Message;
+            return null;
+        }
     }
+    /// <summary>Why the last <see cref="LibraryFromKeep"/> of a clip added nothing (for "Keep in voice library" to say so).</summary>
+    private readonly ConcurrentDictionary<string, string> libraryKeepProblem = new();
 
     // ---- Commands ------------------------------------------------------------------------------------------------
 
@@ -174,12 +208,17 @@ public sealed partial class Bridge
             var library = Voices;
             var person = Person(actor, participant); string by = PersonKey(actor, participant, requester);
             bool canEdit = host || library.Settings.GuestLibraryEdit;
-            void RequireEdit() { if (!canEdit) throw new InvalidDataException("The host has not allowed guests to edit the voice library."); }
+            void RequireEdit()
+            {
+                if (!canEdit) throw new InvalidDataException("The host has not allowed guests to edit the voice library.");
+                // Every change rewrites the library file and adds to its audit trail (2.41 review): a guest's pace is limited.
+                if (!host && !libraryWriteRate.TryTake(by)) throw new InvalidDataException("Too many changes to the voice library. Wait a minute and try again.");
+            }
             void RequireHost() { if (!host) throw new InvalidDataException("Only the host can change that."); }
             string[] Ids() => c.RecordingIds is { Length: > 0 } many ? many : c.RecordingId is { } one ? [one] : throw new InvalidDataException("Choose a recording.");
             switch (c.Op)
             {
-                case "libraryStatus": return Ok(c, Status(host, actor, participant, requester, canEdit));
+                case "libraryStatus": return Ok(c, Status(host, actor, participant, requester, audience, canEdit));
                 case "libraryList":
                     {
                         var (total, items) = library.List(FilterOf(c), c.Offset ?? 0, Math.Clamp(c.Limit ?? 50, 1, MaxLibraryPage));
@@ -240,6 +279,9 @@ public sealed partial class Bridge
                         if (c.SoundId == null || !parsed.Paths.TryGetValue(c.SoundId, out var path)) throw new InvalidDataException("That sound is no longer in Soundpad. Refresh and choose it again.");
                         var sound = parsed.Public.Sounds.First(s => s.Id == c.SoundId);
                         if (library.FindByPath(path) is { } existing) return Ok(c, new { recordingId = existing.Id, added = false });
+                        // A guest adds only what they could already hear privately (2.41 review): a recording is previewable
+                        // by everyone, so any other Soundpad sound would hand them its audio.
+                        if (!host && !GuestPreviewable(path)) throw new InvalidDataException("Only the host can add that sound to the voice library.");
                         var source = sound.AssetId != null && provenance.TryGetValue(sound.AssetId, out var known) ? known : new LibrarySource { Kind = "soundpad", SoundId = c.SoundId };
                         var indexed = SoundIndex.Get(path) is { Words: { } list } entry && new FileInfo(path) is { Exists: true } info && entry.Size == info.Length && entry.Modified == info.LastWriteTimeUtc.Ticks ? list : null;
                         var (recording, added) = library.Add(new LibraryRecording { AssetId = sound.AssetId, Path = path, Bytes = File.Exists(path) ? new FileInfo(path).Length : 0, DurationMs = sound.DurationMs ?? DurationOf(path), Title = sound.Name, Source = source }, (IReadOnlyList<LibraryWord>?)indexed ?? WordsFromHistory(source), by, person.Name);
@@ -276,9 +318,27 @@ public sealed partial class Bridge
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { return new("ack", c.Id, false, "The voice library could not read or save its files: " + ex.Message); }
     }
     private static Reply Ok(Command c, object data) => new("ack", c.Id, true, Data: data);
-    private static object AuditView(LibraryAudit a) => new { a.Id, a.Group, a.At, a.ByName, a.Target, a.TargetId, a.Field, a.Before, a.After, a.UndoOf };
+    private static object AuditView(LibraryAudit a) => new { a.Id, a.Group, a.At, a.ByName, a.Target, a.TargetId, a.Field, Before = PublicRecord(a, a.Before), After = PublicRecord(a, a.After), a.UndoOf };
+    /// <summary>
+    /// A whole recording or wanted word in the audit (2.41 review): its 'record' entries keep everything for Undo, on
+    /// this PC only. What is sent says only which one it was: never the file path (with the Windows user name), the
+    /// asset, the provenance or who added it (a participant id).
+    /// </summary>
+    private static string? PublicRecord(LibraryAudit a, string? json)
+    {
+        if (json == null || a.Field != "record" || a.Target is not ("recording" or "wanted")) return json;
+        string[] keep = a.Target == "recording" ? ["id", "title"] : ["id", "voiceId", "text"];
+        var result = new System.Text.Json.Nodes.JsonObject();
+        try
+        {
+            if (System.Text.Json.Nodes.JsonNode.Parse(json) is System.Text.Json.Nodes.JsonObject whole)
+                foreach (var name in keep) if (whole[name] is { } value) result[name] = value.DeepClone();
+        }
+        catch (System.Text.Json.JsonException) { }
+        return result.ToJsonString();
+    }
 
-    private object Status(bool host, string actor, Participant? participant, string? requester, bool canEdit)
+    private object Status(bool host, string actor, Participant? participant, string? requester, string? audience, bool canEdit)
     {
         var library = Voices;
         var counts = library.VoiceCounts();
@@ -307,20 +367,30 @@ public sealed partial class Bridge
             settings = new { s.GuestLibraryEdit, s.GroupSpeakers, indexCategories = host ? s.IndexCategories : null, s.IndexPaused },
             index = IndexProgress(host),
             worker = workerStatus,
-            notices = Notices(actor, participant, requester),
+            notices = Notices(actor, participant, requester, audience),
         };
     }
 
     // ---- Search and vocabulary ----------------------------------------------------------------------------------
 
-    /// <summary>The sound files of the indexed categories still in Soundpad: document key → (sound id, title). Host paths stay here.</summary>
+    /// <summary>
+    /// The sound files of the categories indexed now, still in Soundpad: document key → (sound id, title). Host paths
+    /// stay here. A category taken out of the index (or a sound moved out of one) is no longer searched or previewed
+    /// (2.41 review), though its words stay on file in case it is chosen again.
+    /// </summary>
     private Dictionary<string, (string SoundId, string Title)> IndexedSounds()
     {
         var catalog = parsed; var result = new Dictionary<string, (string, string)>(StringComparer.Ordinal);
+        var settings = Voices.Settings;
+        if (settings.IndexCategories.Count == 0) return result;
+        var selected = SelectedSoundFiles(settings).Select(f => SoundWords.Key(f.Path)).ToHashSet(StringComparer.Ordinal);
         var titles = catalog.Public.Sounds.ToDictionary(s => s.Id, s => s.Name);
-        foreach (var (id, path) in catalog.Paths) result.TryAdd(SoundWords.Key(path), (id, titles.GetValueOrDefault(id) ?? System.IO.Path.GetFileNameWithoutExtension(path)));
+        foreach (var (id, path) in catalog.Paths)
+            if (selected.Contains(SoundWords.Key(path))) result.TryAdd(SoundWords.Key(path), (id, titles.GetValueOrDefault(id) ?? System.IO.Path.GetFileNameWithoutExtension(path)));
         return result;
     }
+    /// <summary>A Soundpad sound guests may hear privately or add to the library: indexed, in a category indexed now.</summary>
+    private bool GuestPreviewable(string path) => SoundIndex.Has(path) && IndexedSounds().ContainsKey(SoundWords.Key(path));
 
     private object Search(Command c)
     {
@@ -399,7 +469,7 @@ public sealed partial class Bridge
         bool host = actor == "host";
         string path;
         if (c.RecordingId != null) path = (Voices.Get(c.RecordingId) ?? throw new InvalidDataException("That recording is no longer in the voice library.")).Path;
-        else if (c.SoundId != null && parsed.Paths.TryGetValue(c.SoundId, out var soundPath) && (host || SoundIndex.Has(soundPath))) path = soundPath;
+        else if (c.SoundId != null && parsed.Paths.TryGetValue(c.SoundId, out var soundPath) && (host || GuestPreviewable(soundPath))) path = soundPath;
         else throw new InvalidDataException("Choose a recording to preview.");
         long from = Math.Max(0, c.PositionMs ?? 0), to = c.EndMs is long end && end > from ? end : from + PreviewMaxMs;
         if (to - from > PreviewMaxMs) to = from + PreviewMaxMs;
@@ -484,11 +554,34 @@ public sealed partial class Bridge
         }
     }
 
-    /// <summary>Notices the asker may see: recordings for everyone; history matches only where they may see the history.</summary>
-    private LibraryNotice[] Notices(string actor, Participant? participant, string? requester)
+    /// <summary>
+    /// The recovered history before <paramref name="boundary"/> was discarded (2.41 review): its possible-match notices
+    /// go, and so do the speaker groupings of the phrases that lost words there.
+    /// </summary>
+    private void DropVoicesBefore(string sessionId, long boundary, IReadOnlyCollection<long> phrases)
+    {
+        int removed;
+        lock (notices) removed = notices.RemoveAll(n => n.Kind == "history" && n.SessionId == sessionId && n.StartFrame is long s && s < boundary);
+        lock (speakerGate)
+            if (speakers is { } session && session.SessionId == sessionId)
+                foreach (var id in phrases)
+                    if (session.Phrases.Remove(id, out var group) && group is int g && session.Counts.TryGetValue(g, out var count))
+                    {
+                        if (count <= 1) session.Counts.Remove(g); else session.Counts[g] = count - 1;
+                    }
+        if (removed > 0 || phrases.Count > 0) Interlocked.Increment(ref voicesRevision); // historyDiscard publishes
+    }
+
+    /// <summary>
+    /// Notices the asker may see: recordings for everyone; history matches only for a guest the host allows Mimic, and
+    /// only where they may see the history (a match says what was said, as a transcript would). The host page also
+    /// drops history notices for a guest whose own Mimic permission is off, which the companion cannot see.
+    /// </summary>
+    private LibraryNotice[] Notices(string actor, Participant? participant, string? requester, string? audience)
     {
         LibraryNotice[] all; lock (notices) all = [.. notices];
         if (actor == "host") return all;
+        if (!GuestMimicAllowed(requester, audience)) return [.. all.Where(n => n.Kind == "recording")];
         var h = history; HistoryAccess? access = null;
         try { if (h != null) access = AccessFor(actor, participant, requester, h); } catch (Exception ex) when (ex is HistoryException or InvalidDataException) { }
         return [.. all.Where(n => n.Kind == "recording" || access != null && n.SessionId == h!.SessionId && n.StartFrame is long s && n.EndFrame is long e && access.Allows(s, e))];
@@ -530,6 +623,9 @@ public sealed partial class Bridge
     private readonly HashSet<string> failedRecordings = [];
     private Queue<(string Path, string Title)>? categoryQueue;
     private string? categoryQueueKey;
+    private long categoryQueueAt;
+    /// <summary>How often a finished pass over the indexed categories starts again, for files changed or unreadable since (tests set 0).</summary>
+    internal int CategoryRescanMs { get; set; } = 60000;
     private long lastProgressPublish;
     /// <summary>Breathing space between two files (tests set 0).</summary>
     internal int WorkerPauseMs { get; set; } = 400;
@@ -583,7 +679,7 @@ public sealed partial class Bridge
 
     private object IndexProgress(bool host)
     {
-        var settings = LibrarySettingsNow;
+        var settings = Voices.Settings;
         var files = settings.IndexCategories.Count == 0 ? [] : SelectedSoundFiles(settings);
         var index = SoundIndex;
         int indexed = files.Count(f => index.Has(f.Path)), failed = files.Count(f => index.Get(f.Path)?.Error != null);
@@ -632,11 +728,26 @@ public sealed partial class Bridge
         var files = SelectedSoundFiles(settings);
         string key = string.Join("\n", files.Select(f => f.Path));
         lock (workerGate)
-            if (categoryQueue == null || categoryQueueKey != key) { categoryQueue = new(files.Where(f => !SoundIndex.Has(f.Path)).Concat(files.Where(f => SoundIndex.Has(f.Path)))); categoryQueueKey = key; }
+        {
+            // A finished pass starts again now and then, so a file re-saved at the same path (or one that could not be
+            // read for a moment) is indexed again; Done skips everything unchanged.
+            bool rescan = categoryQueue is { Count: 0 } && Environment.TickCount64 - categoryQueueAt >= CategoryRescanMs;
+            if (categoryQueue == null || categoryQueueKey != key || rescan)
+            {
+                categoryQueue = new(files.Where(f => !SoundIndex.Has(f.Path)).Concat(files.Where(f => SoundIndex.Has(f.Path))));
+                categoryQueueKey = key; categoryQueueAt = Environment.TickCount64;
+            }
+        }
         while (true)
         {
             (string Path, string Title) next;
-            lock (workerGate) { if (categoryQueue!.Count == 0) { workerStatus = ""; return false; } next = categoryQueue.Dequeue(); }
+            lock (workerGate)
+            {
+                // libraryIndex (pause, resume, other categories) drops the queue under this lock; the next pass rebuilds it.
+                if (categoryQueue is not { } queue) return true;
+                if (queue.Count == 0) { workerStatus = ""; return false; }
+                next = queue.Dequeue();
+            }
             FileInfo info;
             try { info = new FileInfo(next.Path); if (!info.Exists) continue; } catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException) { continue; }
             long size = info.Length, modified = info.LastWriteTimeUtc.Ticks;
@@ -652,7 +763,13 @@ public sealed partial class Bridge
                 if (info.Length != size || info.LastWriteTimeUtc.Ticks != modified) { workerCurrent = null; return true; }
                 entry = new(next.Path, size, modified, [.. words], null, utcNow());
             }
-            catch (Exception ex) when (ex is InvalidDataException or IOException or UnauthorizedAccessException or System.Runtime.InteropServices.COMException or ArgumentException)
+            catch (Exception ex) when (ex is IOException and not EndOfStreamException or UnauthorizedAccessException)
+            {
+                // Locked or unreadable for now (another program has it open): not recorded, so the next pass tries again.
+                workerCurrent = null; ProgressChanged(true);
+                return true;
+            }
+            catch (Exception ex) when (ex is InvalidDataException or EndOfStreamException or System.Runtime.InteropServices.COMException or ArgumentException)
             {
                 entry = new(next.Path, size, modified, null, ex is InvalidDataException ? ex.Message : "The file could not be read.", utcNow());
             }
@@ -689,7 +806,7 @@ public sealed partial class Bridge
 
     private void GroupSpeakersLater(HistoryStore h, IReadOnlyList<TranscriptWord> added)
     {
-        if (!LibrarySettingsNow.GroupSpeakers) return;
+        if (LibrarySettingsNow?.GroupSpeakers != true) return;
         var phrases = added.GroupBy(w => w.PhraseId).Select(g => (Id: g.Key, Start: g.Min(w => w.Start), End: g.Max(w => w.End))).ToList();
         _ = Task.Run(async () =>
         {
@@ -734,8 +851,10 @@ public sealed partial class Bridge
         bool host = actor == "host";
         if (c.Op != "speakerGroups")
         {
-            if (!host && !LibrarySettingsNow.GuestLibraryEdit) throw new InvalidDataException("The host has not allowed guests to edit the voice library.");
+            if (!host && !Voices.Settings.GuestLibraryEdit) throw new InvalidDataException("The host has not allowed guests to edit the voice library.");
             if (h == null || c.GroupId is not int group) throw new InvalidDataException("Choose a speaker group.");
+            // Group numbers start again with each recording: one from another recording is another speaker (2.41 review).
+            if (c.SourceId != null && c.SourceId != h.SessionId) throw new InvalidDataException("Mimic restarted since you looked. Look again.");
             string? voiceId = null;
             if (c.Op == "speakerLink" && !string.IsNullOrEmpty(c.VoiceId))
             {
@@ -750,7 +869,7 @@ public sealed partial class Bridge
             }
             ProgressChanged(true);
         }
-        var settings = LibrarySettingsNow;
+        var settings = Voices.Settings;
         lock (speakerGate)
         {
             var s = h != null && speakers?.SessionId == h.SessionId ? speakers : null;

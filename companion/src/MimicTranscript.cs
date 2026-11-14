@@ -43,22 +43,28 @@ public sealed class WhisperEngine(string modelPath, string? sharedModelPath = nu
     public void UseMode(SubtitleMode next) => mode = next;
     /// <summary>Background files (2.41) always use the Gaming settings: one thread, below normal priority, whatever the subtitles setting.</summary>
     [ThreadStatic] private static bool background;
-    public async Task<IReadOnlyList<TranscribedSpan>> TranscribeBackground(float[] samples16k, CancellationToken cancel)
+    public Task<IReadOnlyList<TranscribedSpan>> TranscribeBackground(float[] samples16k, CancellationToken cancel) =>
+        InPieces(samples16k, busy, piece => OnOwnThread(piece, cancel, gaming: true), cancel);
+    /// <summary>
+    /// Recognises a long file piece by piece, taking <paramref name="busy"/> for each piece only (2.41), so live
+    /// subtitles, on-demand history requests and copy naming get the engine between pieces instead of waiting for
+    /// the whole file (up to 10 minutes of audio).
+    /// </summary>
+    internal static async Task<IReadOnlyList<TranscribedSpan>> InPieces(float[] samples16k, SemaphoreSlim busy, Func<float[], Task<IReadOnlyList<TranscribedSpan>>> recognise, CancellationToken cancel)
     {
-        await busy.WaitAsync(cancel);
-        try
+        var all = new List<TranscribedSpan>();
+        for (int at = 0; at < samples16k.Length; at += PieceSeconds * MimicTranscriber.SpeechRate)
         {
-            var all = new List<TranscribedSpan>();
-            for (int at = 0; at < samples16k.Length; at += PieceSeconds * MimicTranscriber.SpeechRate)
-            {
-                int length = samples16k.Length <= MaxCallSeconds * MimicTranscriber.SpeechRate ? samples16k.Length : Math.Min(PieceSeconds * MimicTranscriber.SpeechRate, samples16k.Length - at);
-                var piece = length == samples16k.Length ? samples16k : samples16k.AsSpan(at, length).ToArray();
-                foreach (var span in await OnOwnThread(piece, cancel, gaming: true)) all.Add(Shift(span, at));
-                if (length == samples16k.Length) break;
-            }
-            return all;
+            int length = samples16k.Length <= MaxCallSeconds * MimicTranscriber.SpeechRate ? samples16k.Length : Math.Min(PieceSeconds * MimicTranscriber.SpeechRate, samples16k.Length - at);
+            var piece = length == samples16k.Length ? samples16k : samples16k.AsSpan(at, length).ToArray();
+            await busy.WaitAsync(cancel);
+            IReadOnlyList<TranscribedSpan> spans;
+            try { spans = await recognise(piece); }
+            finally { busy.Release(); }
+            foreach (var span in spans) all.Add(Shift(span, at));
+            if (length == samples16k.Length) break;
         }
-        finally { busy.Release(); }
+        return all;
     }
     private static readonly string[] NativeLibraries = ["ggml-base-whisper.dll", "ggml-cpu-whisper.dll", "ggml-whisper.dll", "whisper.dll"];
     private static readonly object nativeGate = new();
@@ -316,12 +322,26 @@ public sealed class MimicTranscriber(ITranscriptEngine engine) : IDisposable
         PruneIfDue(source, transcript);
     }
 
-    /// <summary>2.41: the words of <paramref name="source"/> before <paramref name="start"/> go (their audio was discarded).</summary>
-    public void DropBefore(HistoryStore source, long start)
+    /// <summary>
+    /// 2.41: the words of <paramref name="source"/> before <paramref name="start"/> go (their audio was discarded), and
+    /// so do requests for that audio; a recognition already running there adds nothing (the transcript's floor).
+    /// Returns the phrases that lost words.
+    /// </summary>
+    public HashSet<long> DropBefore(HistoryStore source, long start)
     {
         TranscriptWords? transcript;
-        lock (gate) { if (!ReferenceEquals(source, store)) return; transcript = words; }
-        transcript?.DropBefore(start);
+        lock (gate)
+        {
+            if (!ReferenceEquals(source, store)) return [];
+            transcript = words;
+            for (int i = requests.Count - 1; i >= 0; i--)
+            {
+                var r = requests[i];
+                if (r.EndFrame <= start) requests.RemoveAt(i);
+                else if (r.StartFrame < start) requests[i] = new(start, r.EndFrame);
+            }
+        }
+        return transcript?.DropBefore(start) ?? [];
     }
 
     /// <summary>
