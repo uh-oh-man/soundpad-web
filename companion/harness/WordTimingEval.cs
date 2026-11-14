@@ -156,7 +156,8 @@ public static partial class WordTimingEval
 
     // ---- fixtures and ground truth -----------------------------------------------------------------------------
 
-    private static List<Fixture> LoadFixtures(string folder)
+    /// <summary>Fixtures with ground truth (also used by WordPipelineEval.cs, the 2.38 production pipeline check).</summary>
+    public static List<Fixture> LoadFixtures(string folder)
     {
         var list = new List<Fixture>();
         foreach (var path in Directory.GetFiles(folder, "*.json").OrderBy(p => p, StringComparer.Ordinal))

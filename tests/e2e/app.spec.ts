@@ -1431,6 +1431,11 @@ test('Mimic: host listens, everyone sees it, and a selection becomes a playable 
     page.getByRole('button', { name: 'Play from start: Fixture mimic', exact: true }),
   ).toBeEnabled();
   await page.getByRole('button', { name: 'Mimic', exact: true }).click();
+  // The recording history view (2.38) starts at the newest 10 s; these drags measure the 30 s view.
+  await dialog
+    .getByRole('group', { name: 'Waveform zoom' })
+    .getByRole('button', { name: '30 s', exact: true })
+    .click();
   // Dragging selects an exact range; Clear returns to the live view.
   const canvas = dialog.locator('.mimic-wave canvas');
   const box = (await canvas.boundingBox())!;
@@ -1513,7 +1518,7 @@ test('Mimic: host listens, everyone sees it, and a selection becomes a playable 
   await expect(page.getByLabel('Allow guest Mimic')).not.toBeChecked();
 });
 
-test('Mimic transcript: lines appear, a click selects them, and they name the clip', async ({
+test('Mimic transcript: words appear, a click and a Shift-click select them, and they name the clip', async ({
   page,
   harness,
 }) => {
@@ -1523,18 +1528,34 @@ test('Mimic transcript: lines appear, a click selects them, and they name the cl
   await dialog.getByRole('button', { name: 'Start listening' }).click();
   await dialog.getByLabel('Transcribe Mimic audio').check();
   const transcript = dialog.getByRole('list', { name: 'Transcript' });
-  const line = transcript.getByRole('button', { name: /Fixture tone \d+/ }).first();
-  await expect(line).toBeVisible({ timeout: 15000 });
-  const words = (await line.locator('span').innerText()).trim();
-  await line.click();
-  await expect(line).toHaveAttribute('aria-pressed', 'true');
+  // Each sentence is a row of word buttons (2.38): "Fixture" "tone" "N".
+  const sentence = transcript
+    .getByRole('listitem')
+    .filter({ has: page.getByRole('button', { name: 'Fixture', exact: true }) })
+    .first();
+  await expect(sentence).toBeVisible({ timeout: 15000 });
+  const buttons = sentence.getByRole('button');
+  await expect(buttons).toHaveCount(3);
+  const words = (await buttons.allInnerTexts()).map((w) => w.trim()).join(' ');
+  expect(words).toMatch(/^Fixture tone \d+$/);
+  // A click selects one word; Shift-click on another selects everything from the first to it.
+  await buttons.first().click();
+  await expect(buttons.first()).toHaveAttribute('aria-pressed', 'true');
+  await expect(buttons.last()).toHaveAttribute('aria-pressed', 'false');
+  await expect(dialog.getByLabel('Clip name')).toHaveAttribute('placeholder', 'Fixture');
+  await buttons.last().click({ modifiers: ['Shift'] });
+  for (const button of await buttons.all())
+    await expect(button).toHaveAttribute('aria-pressed', 'true');
   await expect(dialog.getByLabel('Clip name')).toHaveAttribute('placeholder', words);
   await dialog.getByRole('button', { name: 'Mimic it' }).click();
   await expect(
     page.getByRole('button', { name: `Play from start: ${words}`, exact: true }),
   ).toBeEnabled();
+  // Turning transcripts off stops recognising; the words already recognised stay with the history.
   await dialog.getByLabel('Transcribe Mimic audio').uncheck();
-  await expect(transcript).toHaveCount(0);
+  await expect(
+    transcript.getByRole('button', { name: 'Fixture', exact: true }).first(),
+  ).toBeVisible();
 });
 
 test('Mimic keyboard: number keys grab recent audio, Enter mimics, Escape clears before closing', async ({
@@ -1568,6 +1589,150 @@ test('Mimic keyboard: number keys grab recent audio, Enter mimics, Escape clears
   await expect(dialog).toBeVisible();
   await page.keyboard.press('Escape');
   await expect(dialog).toHaveCount(0);
+});
+
+/** What historyTimeline answers (2.38), as far as these tests read it. */
+type HistoryView = {
+  sessionId: string;
+  rate: number;
+  liveFrame: number;
+  fromFrame: number | null;
+  available: { startFrame: number; endFrame: number }[];
+};
+
+test('Mimic history: go back, select words in older audio, clip them, and see gaps honestly', async ({
+  page,
+  harness,
+}) => {
+  test.slow(); // it needs some real history: the fixture source speaks in real time
+  await host(page, harness);
+  await page.getByRole('button', { name: 'Mimic', exact: true }).click();
+  const dialog = page.getByRole('dialog', { name: 'Mimic' });
+  await dialog.getByRole('button', { name: 'Start listening' }).click();
+  await dialog.getByLabel('Transcribe Mimic audio').check();
+  // The main waveform starts at the newest 10 s; the overview holds the whole history.
+  const wave = dialog.getByRole('slider', { name: /^Mimic buffer, showing/ });
+  await expect(wave).toHaveAccessibleName(/showing the last 10 seconds/);
+  const overview = dialog.getByRole('slider', { name: /Recording history overview/ });
+  await expect(overview).toBeVisible();
+  await expect(dialog.getByRole('button', { name: 'Live', exact: true })).toHaveAttribute(
+    'aria-pressed',
+    'true',
+  );
+  // Let some history build up (the fixture plays a tone every 2 s), then go back in time.
+  await page.waitForTimeout(14000);
+  await dialog.getByRole('button', { name: 'Back 10 s' }).click();
+  await expect(dialog.getByRole('button', { name: 'Go live' })).toBeVisible();
+  await expect(wave).toHaveAccessibleName(/ending \d+ s before live/);
+  await expect(overview).toHaveAttribute('aria-valuetext', /before live/);
+  // Recording carries on while the view stays where it was: live keeps moving away from it.
+  const when = dialog.locator('.mimic-when');
+  await expect(when).toContainText(/\d+ s behind live/);
+  const behind = async () => Number((await when.innerText()).match(/(\d+) s behind live/)?.[1]);
+  const before = await behind();
+  await expect.poll(behind, { timeout: 8000 }).toBeGreaterThan(before);
+  // The older part's words: one sentence selected by its first word and a Shift-click on its last.
+  const transcript = dialog.getByRole('list', { name: 'Transcript' });
+  const sentence = transcript
+    .getByRole('listitem')
+    .filter({ has: page.getByRole('button', { name: 'Fixture', exact: true }) })
+    .first();
+  await expect(sentence).toBeVisible({ timeout: 20000 });
+  const buttons = sentence.getByRole('button');
+  const words = (await buttons.allInnerTexts()).map((w) => w.trim()).join(' ');
+  expect(words).toMatch(/^Fixture tone \d+$/);
+  await buttons.first().click();
+  await buttons.last().click({ modifiers: ['Shift'] });
+  await expect(dialog.getByLabel('Clip name')).toHaveAttribute('placeholder', words);
+  // Hovering a word marks it (and the waveform under it).
+  await buttons.nth(1).hover();
+  await expect(buttons.nth(1)).toHaveClass(/hover/);
+  await dialog.getByRole('button', { name: 'Mimic it' }).click();
+  await expect(
+    page.getByRole('button', { name: `Play from start: ${words}`, exact: true }),
+  ).toBeEnabled();
+  // Go live returns to the newest audio.
+  await dialog.getByRole('button', { name: 'Go live' }).click();
+  await expect(dialog.getByRole('button', { name: 'Live', exact: true })).toBeVisible();
+  await expect(wave).toHaveAccessibleName(/showing the last 10 seconds/);
+  // Stopping keeps the history; when recording resumes, the stop shows as a gap, not as silence.
+  await dialog.getByRole('button', { name: 'Stop listening' }).click();
+  await expect(when).toContainText('recording stopped');
+  await expect(wave).toBeVisible();
+  await page.waitForTimeout(2000);
+  await dialog.getByRole('button', { name: 'Start listening' }).click();
+  await expect(dialog.getByRole('list', { name: 'Gaps in the recording' })).toContainText(
+    /Stopped · \d+ s missing/,
+    { timeout: 15000 },
+  );
+});
+
+test('Mimic history: a guest sees only what was recorded since they joined, unless the host shares it', async ({
+  page,
+  harness,
+}) => {
+  await useLocalGuests(page);
+  await host(page, harness);
+  await page.getByRole('button', { name: 'Access settings' }).click();
+  await page.getByLabel('Allow guest Mimic').check();
+  await page.keyboard.press('Escape');
+  await page.getByRole('button', { name: 'Mimic', exact: true }).click();
+  const dialog = page.getByRole('dialog', { name: 'Mimic' });
+  await dialog.getByRole('button', { name: 'Start listening' }).click();
+  await expect(dialog.getByRole('status').first()).toContainText('Listening to Fixture');
+  await page.waitForTimeout(6000); // six seconds the guest was not there for
+  await page.keyboard.press('Escape');
+  const guest = await joinGuest(page);
+  const hostView = (await sendCommand(page, 'historyTimeline')).data as HistoryView;
+  expect(hostView.available[0].startFrame).toBe(0);
+  const guestView = (await sendCommand(guest, 'historyTimeline')).data as HistoryView;
+  expect(guestView.fromFrame).toBeGreaterThan(guestView.rate * 5);
+  for (const r of guestView.available)
+    expect(r.startFrame).toBeGreaterThanOrEqual(guestView.fromFrame!);
+  // The companion refuses audio from before the join, whatever a page sends, and shows none of it.
+  const sourceId = guestView.sessionId;
+  const early = await sendCommand(guest, 'mimicClip', {
+    startFrame: 0,
+    endFrame: guestView.rate,
+    sourceId,
+  });
+  expect(early.error).toMatch(/before you joined/);
+  const range = { startFrame: 0, endFrame: guestView.fromFrame!, bins: 20, sourceId };
+  const theirs = (await sendCommand(guest, 'historyLevels', range)).data as { levels: number[] };
+  expect(theirs.levels.every((v) => v === 0)).toBe(true);
+  const hosts = (await sendCommand(page, 'historyLevels', range)).data as { levels: number[] };
+  expect(hosts.levels.some((v) => v !== 0)).toBe(true);
+  // The guest's window says so, and clipping what was said since the join works.
+  await guest.getByRole('button', { name: 'Mimic', exact: true }).click();
+  const guestDialog = guest.getByRole('dialog', { name: 'Mimic' });
+  await expect(guestDialog.getByText('You see what was recorded since you joined')).toBeVisible();
+  await guest.waitForTimeout(6000); // "Last 3 s" must lie wholly after the join
+  await guestDialog.getByRole('button', { name: 'Last 3 s' }).click();
+  await guestDialog.getByLabel('Clip name').fill('Since I joined');
+  await guestDialog.getByRole('button', { name: 'Mimic it' }).click();
+  await expect(playButton(page, 'Since I joined')).toBeEnabled({ timeout: TEMP_READY });
+  // The host shares the start of the history: exactly that part opens to guests.
+  expect(
+    (await sendCommand(guest, 'historyShare', { startFrame: 0, endFrame: hostView.rate * 2 }))
+      .error,
+  ).toBeTruthy();
+  expect(
+    (await sendCommand(page, 'historyShare', { startFrame: 0, endFrame: hostView.rate * 2 })).error,
+  ).toBeUndefined();
+  const shared = await sendCommand(guest, 'mimicClip', {
+    startFrame: 0,
+    endFrame: guestView.rate / 2,
+    sourceId,
+    name: 'Shared start',
+  });
+  expect(shared.error).toBeUndefined();
+  await expect(playButton(page, 'Shared start')).toBeEnabled({ timeout: TEMP_READY });
+  const outside = await sendCommand(guest, 'mimicClip', {
+    startFrame: hostView.rate * 3,
+    endFrame: hostView.rate * 4,
+    sourceId,
+  });
+  expect(outside.error).toMatch(/before you joined/);
 });
 
 test('live Nostr/WebRTC: guests see Mimic only when allowed and can clip from it', async ({
@@ -1612,7 +1777,7 @@ test('live Nostr/WebRTC: guests see Mimic only when allowed and can clip from it
     await expect(
       dialog
         .getByRole('list', { name: 'Transcript' })
-        .getByRole('button', { name: /Fixture tone/ })
+        .getByRole('button', { name: 'Fixture', exact: true }) // one button per word (2.38)
         .first(),
     ).toBeVisible({ timeout: 20000 });
     await dialog.getByRole('button', { name: 'Last 3 s' }).click();

@@ -83,6 +83,9 @@ internal static class Program
                 .GetCustomAttributes(typeof(System.Reflection.AssemblyMetadataAttribute), false)
                 .Cast<System.Reflection.AssemblyMetadataAttribute>().FirstOrDefault(a => a.Key == "WebsiteUrl")?.Value;
             bridge.MimicLog += message => Console.WriteLine($"[{DateTime.Now:HH:mm:ss}] Mimic: {message}");
+            // Recording history left by a launch that did not close normally is recovered (the host can discard it);
+            // anything else left over is removed (2.38). This instance holds the data folder's lock, so nothing else uses it.
+            bridge.RecoverHistory();
             var site = Arg("--site") ?? bridge.Website ?? Environment.GetEnvironmentVariable("SOUNDPAD_WEB_URL") ?? builtInWebsite;
             if (string.IsNullOrWhiteSpace(site))
             {

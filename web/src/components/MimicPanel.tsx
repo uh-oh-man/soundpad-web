@@ -20,6 +20,7 @@ import { MimicWave } from './mimic/MimicWave';
 import { MimicHostControls } from './mimic/MimicHostControls';
 import { MimicRecent } from './mimic/MimicRecent';
 import { MimicLibrary } from './mimic/MimicLibrary';
+import { MimicHistory } from './mimic/MimicHistory';
 
 const POLL_MS = 500;
 const peekSchema = z.object({
@@ -59,6 +60,9 @@ export function MimicPanel({
   const mimic = state.mimic;
   const active = !!mimic?.active;
   const allowed = host || state.permissions.guestMimic === true;
+  // A 2.38 companion keeps a rolling recording history: its own view replaces the live 30 s buffer below.
+  const historyMode = supports(state.companionVersion, 'history');
+  const recorded = !!mimic?.history?.sessionId;
   const [peek, setPeek] = useState<MimicPeek | null>(null);
   const [selection, setSelection] = useState<Selection | null>(null);
   const [name, setName] = useState('');
@@ -81,7 +85,7 @@ export function MimicPanel({
   // chosen moment stays put; the companion keeps extra history so it is still there on "Mimic it".
   const frozen = !!selection;
   useEffect(() => {
-    if (!active || !allowed || !connected || frozen) return;
+    if (!active || !allowed || !connected || frozen || historyMode) return;
     let live = true;
     let timer: ReturnType<typeof setTimeout>;
     const tick = async () => {
@@ -98,7 +102,7 @@ export function MimicPanel({
       live = false;
       clearTimeout(timer);
     };
-  }, [active, allowed, connected, frozen]);
+  }, [active, allowed, connected, frozen, historyMode]);
   useEffect(() => {
     if (!active) {
       setPeek(null);
@@ -185,11 +189,20 @@ export function MimicPanel({
 
   return (
     <div className="mimic-panel">
-      <p className="mimic-intro">
-        Mimic keeps the last 30 seconds of one app or output device on the host's PC, in memory
-        only. Select what someone just said and turn it into a sound. It never records a microphone,
-        and everyone in the session can see when it is listening.
-      </p>
+      {historyMode ? (
+        <p className="mimic-intro">
+          Mimic records one app or output device on the host's PC and keeps the last{' '}
+          {Math.round((mimic?.history?.seconds ?? 600) / 60)} minutes there until the companion
+          closes. Go back to anything said in that time and turn it into a sound. It never records a
+          microphone, and everyone in the session can see when it is listening.
+        </p>
+      ) : (
+        <p className="mimic-intro">
+          Mimic keeps the last 30 seconds of one app or output device on the host's PC, in memory
+          only. Select what someone just said and turn it into a sound. It never records a
+          microphone, and everyone in the session can see when it is listening.
+        </p>
+      )}
       <div className={`mimic-status ${active ? 'live' : ''}`} role="status">
         <i />
         {active ? `Listening to ${mimic?.source ?? 'a source'}` : (mimic?.status ?? 'Off')}
@@ -197,6 +210,8 @@ export function MimicPanel({
       {host && <MimicHostControls state={state} connected={connected} />}
       {!allowed ? (
         <p className="muted">The host has not enabled Mimic for guests.</p>
+      ) : historyMode && (active || recorded) ? (
+        <MimicHistory state={state} host={host} connected={connected} canPlay={canPlay} />
       ) : !active ? (
         <p className="muted">
           {host ? 'Choose a source and start listening.' : 'Waiting for the host to start Mimic.'}

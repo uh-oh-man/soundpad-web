@@ -398,6 +398,10 @@ function App() {
 
   // Mimic records other people's voices, so everyone is told when it starts, changes source or
   // stops, and anyone joining while it is on is told right away.
+  // How much a 2.38 companion keeps (its recording history), or the 30 s of older ones.
+  const kept = state.mimic?.history
+    ? `the last ${Math.round(state.mimic.history.seconds / 60)} min`
+    : 'the last 30 s';
   const listeningTo =
     mode !== 'landing' && state.mimic?.active ? (state.mimic.source ?? 'a source') : null;
   const heardListening = useRef<string | null>(null);
@@ -407,7 +411,7 @@ function App() {
       controller.notify(
         host
           ? `Mimic is listening to ${listeningTo}. Everyone in the session can see this.`
-          : `The host's Mimic is listening to ${listeningTo} (the last 30 s, kept on their PC).`,
+          : `The host's Mimic is listening to ${listeningTo} (${kept}, kept on their PC).`,
       );
     else if (heardListening.current) controller.notify('Mimic stopped listening.');
     heardListening.current = listeningTo;
@@ -516,7 +520,7 @@ function App() {
           {mimicListening && (
             <button
               className="mimic-badge"
-              title={`Mimic is keeping the last 30 seconds of ${state.mimic?.source ?? 'a source'} on the host's PC`}
+              title={`Mimic is keeping ${kept} of ${state.mimic?.source ?? 'a source'} on the host's PC`}
               disabled={!canMimic}
               onClick={() => setMimicOpen(true)}
             >

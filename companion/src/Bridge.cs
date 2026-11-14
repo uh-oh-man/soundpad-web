@@ -34,7 +34,10 @@ public sealed partial class Bridge(ISoundpad pipe, StateStore store) : IDisposab
         // Playback statistics still waiting for their deferred write go to disk now (2.35).
         Interlocked.Exchange(ref disposed, 1);
         if (Volatile.Read(ref stateDirty) != 0) { try { Task.Run(FlushState).Wait(TimeSpan.FromSeconds(2)); } catch (Exception) { /* the last durable save stands */ } }
-        hotkey.Dispose(); waveformService.Dispose(); transcriber.Dispose(); mimicCapture.Dispose(); pcm.Dispose();
+        hotkey.Dispose(); waveformService.Dispose(); transcriber.Dispose();
+        // An ordinary quit deletes this launch's recording history and transcript (2.38); after a crash it is recovered instead.
+        try { CloseHistory(); } catch (Exception ex) when (ex is not OutOfMemoryException) { /* removed with the next launch's recovery */ }
+        mimicCapture.Dispose(); pcm.Dispose();
     }
     public Snapshot Snapshot => new(1, revision, available, error, parsed.Public, playback, disk.Counter, disk.Permissions, 2,
         Convert.ToHexString(System.Security.Cryptography.HMACSHA256.HashData(Convert.FromBase64String(disk.IdentityKey), System.Text.Encoding.UTF8.GetBytes("workspace-host-v2"))).ToLowerInvariant(), disk.StatisticsVersion, typeof(Bridge).Assembly.GetName().Version?.ToString(3), managed?.Public.Revision ?? 0, MimicSnapshot, playbackSuspended);
@@ -72,6 +75,9 @@ public sealed partial class Bridge(ISoundpad pipe, StateStore store) : IDisposab
     }
     public async Task Poll(bool library)
     {
+        // Keep the recording history moving through silence even when nobody is looking (2.38): loopback delivers
+        // nothing while its source is quiet, and the history takes silence in small steps.
+        try { mimicCapture.Pump(); } catch (Exception ex) when (ex is not OutOfMemoryException) { }
         // Soundpad's own statistics files are read before the gate is taken (2.35), so a play never waits for them.
         if (library) await Task.Run(nativeStatistics.Refresh);
         // Skipped while the gate stays busy, as before. It waits a moment first (2.35): the deferred state save
@@ -121,6 +127,8 @@ public sealed partial class Bridge(ISoundpad pipe, StateStore store) : IDisposab
         if (c.Op == "trimAudio") return await TrimAudio(c, actor, participant, requester, audience, intent: intent);
         if (c.Op == "trimPreview") return await TrimAudio(c, actor, participant, requester, audience, preview: true);
         if (c.Op == "endSession" && actor == "host") { StopMimic(); Publish(); }
+        // A new hosting session starts with nobody admitted to the recording history and nothing shared (2.38).
+        if (c.Op == "beginSession" && actor == "host") ForgetGuests();
         var query = await Query(c, actor); if (query != null) return query;
         if (c.Op == "stop") return await ExecuteStop(c, actor, requester, audience, intent);
         if (c.Op == "panic") return await ExecutePanic(c, actor, intent);

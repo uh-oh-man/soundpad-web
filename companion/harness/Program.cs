@@ -5,6 +5,7 @@ if (args.FirstOrDefault() == "--real-slice-audio-probe") { Environment.ExitCode 
 if (args.FirstOrDefault() == "--real-exact-playback-probe") { Environment.ExitCode = await RealExactPlaybackProbe.Run(); return; }
 if (args.FirstOrDefault() == "--real-slot-probe") { Environment.ExitCode = await RealSlotProbe.Run(); return; }
 if (args.FirstOrDefault() == "--word-timing-eval" && args.Length >= 2) { await WordTimingEval.Run(args); return; } // see WordTimingEval.cs
+if (args.FirstOrDefault() == "--word-pipeline-eval" && args.Length >= 2) { Environment.ExitCode = await WordPipelineEval.Run(args); return; } // see WordPipelineEval.cs (2.38)
 if (args.FirstOrDefault() == "--mock-only")
 {
     await using var isolated = new MockSoundpad(); isolated.DurationMs = 600000;
@@ -31,8 +32,9 @@ if (args.FirstOrDefault() == "--mimic-probe")
     var sources = capture.Sources();
     foreach (var s in sources) Console.WriteLine(s.Kind + "	" + s.Name);
     var pick = args.Length > 1 ? sources.First(s => s.Id == args[1] || s.Name.Contains(args[1], StringComparison.OrdinalIgnoreCase)) : sources.First(s => s.Kind == "output");
-    await capture.Start(pick, 5); await Task.Delay(2000);
-    var ring = capture.Ring!; var levels = ring.Levels(ring.Written, ring.Rate * 2L, 20);
+    var ring = new MimicRing(capture.Rate, 5);
+    await capture.Start(pick, ring); await Task.Delay(2000);
+    capture.Pump(); var levels = ring.Levels(ring.Written, ring.Rate * 2L, 20);
     Console.WriteLine(Json.Write(new { source = pick.Name, capture.Status, capture.Running, frames = ring.Written, capture.Packets, rate = ring.Rate, peak = levels.Max() }));
     return;
 }
@@ -48,20 +50,28 @@ if (args.FirstOrDefault() == "--mimic-stream-transcript" && args.Length == 2)
     var audio = MimicTranscriber.Resample(mono.ToArray(), provider.WaveFormat.SampleRate, 48000);
     var data = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "SoundpadWeb");
     using var transcriber = new MimicTranscriber(new WhisperEngine(Path.Combine(data, "models", "ggml-base.en.bin"), null, Path.Combine(data, "native", "whisper-1.9.1")));
-    var ring = new MimicRing(48000, 45);
-    ring.WriteSilence(48000);
-    await transcriber.Enable(() => ring, false);
-    var clock = System.Diagnostics.Stopwatch.StartNew();
-    for (int offset = 0; offset < audio.Length; offset += 480)
+    // A throwaway history in a temporary folder (2.38), never the companion's own data folder.
+    var (store, words, folder) = HistorySinkFixture.Temporary(48000);
+    try
     {
-        ring.Write(audio.AsSpan(offset, Math.Min(480, audio.Length - offset)));
-        var due = TimeSpan.FromSeconds((offset + 480) / 48000.0) - clock.Elapsed;
-        if (due > TimeSpan.Zero) await Task.Delay(due);
+        transcriber.Attach(store, words);
+        store.AppendSilence(48000);
+        await transcriber.Enable(() => store, false);
+        await Task.Delay(700); // the loop attaches at "now"
+        var clock = System.Diagnostics.Stopwatch.StartNew();
+        for (int offset = 0; offset < audio.Length; offset += 480)
+        {
+            store.Append(audio.AsSpan(offset, Math.Min(480, audio.Length - offset)));
+            var due = TimeSpan.FromSeconds((offset + 480) / 48000.0) - clock.Elapsed;
+            if (due > TimeSpan.Zero) await Task.Delay(due);
+        }
+        for (int i = 0; i < 30; i++) { store.AppendSilence(4800); await Task.Delay(100); } // 3 s of trailing silence, like a pause
+        long end = store.LiveFrame;
+        foreach (var line in transcriber.Lines(store, HistoryAccess.Host, 0, end)) Console.WriteLine($"[{line.StartMs / 1000.0:0.00} s - {line.EndMs / 1000.0:0.00} s] {line.Text}");
+        foreach (var (word, _) in transcriber.WordsBetween(store, HistoryAccess.Host, 0, end)) Console.WriteLine($"  {word.Start / 48.0:0} - {word.End / 48.0:0} ms  {word.Text}  p={word.Probability:0.00} stretch={word.StretchMs} {word.Status}");
+        Console.WriteLine($"Streamed {audio.Length / 48000.0:0.0} s in {clock.Elapsed.TotalSeconds:0.0} s.");
     }
-    for (int i = 0; i < 30; i++) { ring.WriteSilence(4800); await Task.Delay(100); } // 3 s of trailing silence, like a pause
-    long end = ring.Written;
-    foreach (var line in transcriber.Lines(ring, end - 48000L * 30, end)) Console.WriteLine($"[{line.StartMs / 1000.0:0.00} s - {line.EndMs / 1000.0:0.00} s] {line.Text}");
-    Console.WriteLine($"Speech starts at {(end - 48000L * 30 < 48000 ? (48000 - (end - 48000L * 30)) / 48.0 : 0):0} ms into the window; streamed {audio.Length / 48000.0:0.0} s in {clock.Elapsed.TotalSeconds:0.0} s.");
+    finally { transcriber.Disable(); HistorySinkFixture.Delete(store, folder); }
     return;
 }
 if (args.FirstOrDefault() == "--cleanup-real-categories")
@@ -292,9 +302,11 @@ if (args.FirstOrDefault() == "--mimic-silent-selftest" && args.Length == 2)
     // test reports that instead of passing.
     var data = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "SoundpadWeb");
     using var capture = new WasapiMimicCapture();
-    await capture.Start(new MimicSource("app:" + Environment.ProcessId, "App: this test", "app"), 45);
+    var (store, words, folder) = HistorySinkFixture.Temporary(capture.Rate);
+    await capture.Start(new MimicSource("app:" + Environment.ProcessId, "App: this test", "app"), new HistorySinkFixture(store));
     using var transcriber = new MimicTranscriber(new WhisperEngine(Path.Combine(data, "models", "ggml-base.en.bin"), null, Path.Combine(data, "native", "whisper-1.9.1")));
-    await transcriber.Enable(() => capture.Ring, false);
+    transcriber.Attach(store, words);
+    await transcriber.Enable(() => { capture.Pump(); return store; }, false);
     using var file = new NAudio.Wave.WaveFileReader(args[1]);
 #pragma warning disable CS0618 // WasapiOut's stream Volume is the simplest guaranteed-silent player for this diagnostic
     using var output = new NAudio.Wave.WasapiOut(NAudio.CoreAudioApi.AudioClientShareMode.Shared, 100);
@@ -305,12 +317,14 @@ if (args.FirstOrDefault() == "--mimic-silent-selftest" && args.Length == 2)
     output.Play();
     while (output.PlaybackState == NAudio.Wave.PlaybackState.Playing) await Task.Delay(100);
     await Task.Delay(4000); // let the pause after the speech trigger a transcript chunk
-    var ring = capture.Ring!; long end = ring.Written;
-    var levels = ring.Levels(end, (long)ring.Rate * 20, 40);
-    Console.WriteLine($"Capture: {capture.Status}, {capture.Packets} packets, peak level {levels.Max()} / 1000");
-    var lines = transcriber.Lines(ring, end - (long)ring.Rate * 30, end);
+    capture.Pump(); long end = store.LiveFrame;
+    var pairs = store.Levels(HistoryAccess.Host, Math.Max(0, end - (long)store.Rate * 20), Math.Max(1, end), 40);
+    int peak = pairs.Select(v => Math.Abs((int)v)).DefaultIfEmpty(0).Max() * 1000 / short.MaxValue;
+    Console.WriteLine($"Capture: {capture.Status}, {capture.Packets} packets, peak level {peak} / 1000");
+    var lines = transcriber.Lines(store, HistoryAccess.Host, Math.Max(0, end - (long)store.Rate * 30), end);
     foreach (var line in lines) Console.WriteLine($"[{line.StartMs / 1000.0:0.00} s - {line.EndMs / 1000.0:0.00} s] {line.Text}");
-    Console.WriteLine(lines.Length > 0 ? "RESULT: real capture + transcript chain works" : levels.Max() == 0 ? "RESULT: inconclusive (Windows captured the muted stream as silence)" : "RESULT: audio captured but no transcript");
+    Console.WriteLine(lines.Length > 0 ? "RESULT: real capture + transcript chain works" : peak == 0 ? "RESULT: inconclusive (Windows captured the muted stream as silence)" : "RESULT: audio captured but no transcript");
+    capture.Stop(); transcriber.Disable(); HistorySinkFixture.Delete(store, folder);
     return;
 }
 if (args.FirstOrDefault() == "--whisper-bench" && args.Length == 2)
@@ -397,7 +411,7 @@ if (args.FirstOrDefault() == "--capture-bench")
     var tone = new NAudio.Wave.SampleProviders.SignalGenerator(48000, 2) { Frequency = 440, Gain = 0.3 };
     output.Init(new NAudio.Wave.SampleProviders.SampleToWaveProvider(tone)); output.Volume = 0f; if (args.Length == 1) output.Play();
 #pragma warning restore CS0618
-    await capture.Start(pick, 45);
+    await capture.Start(pick, new MimicRing(capture.Rate, 45));
     await Task.Delay(2000);
     var proc = System.Diagnostics.Process.GetCurrentProcess();
     var cpu0 = proc.TotalProcessorTime; var alloc0 = GC.GetTotalAllocatedBytes(); var gen0 = GC.CollectionCount(0);

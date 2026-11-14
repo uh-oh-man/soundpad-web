@@ -277,7 +277,17 @@ export class LocalBridge {
       }
     };
   }
-  send(command: Command, actor = 'host', participant?: Participant, requester?: string) {
+  /**
+   * `joinedAt` (2.38, relayed guest commands only): when this page first admitted the guest, so the companion
+   * shows them the recording history from then on. Older companions ignore it.
+   */
+  send(
+    command: Command,
+    actor = 'host',
+    participant?: Participant,
+    requester?: string,
+    joinedAt?: number,
+  ) {
     return new Promise<unknown>((resolve, reject) => {
       if (this.socket?.readyState !== WebSocket.OPEN) {
         reject(new Disconnected('Companion is unavailable.'));
@@ -316,7 +326,14 @@ export class LocalBridge {
       if (!control) this.waiting++;
       else this.controls.set(owner, (this.controls.get(owner) ?? 0) + 1);
       this.socket.send(
-        JSON.stringify({ actor, command, participant, requester, audience: this.audience }),
+        JSON.stringify({
+          actor,
+          command,
+          participant,
+          requester,
+          audience: this.audience,
+          joinedAt,
+        }),
       );
     });
   }

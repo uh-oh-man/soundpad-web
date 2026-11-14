@@ -187,6 +187,10 @@ public sealed class LocalServer(Bridge bridge, string origin, string? ownerKey =
                         string? requester = root.TryGetProperty("requester", out var requestPeer) ? requestPeer.GetString() : null;
                         string? audience = root.TryGetProperty("audience", out var requestAudience) ? requestAudience.GetString() : null;
                         if (requester?.Length > 128 || audience?.Length > 64) throw new InvalidDataException("Invalid request ownership.");
+                        // When the owner page first admitted this guest (2.38), so the recording history shows them only what
+                        // was recorded since. The Bridge keeps the first value per participant; a later one never lowers it.
+                        if (actor == "guest")
+                            bridge.NoteGuest(person, requester, root.TryGetProperty("joinedAt", out var joined) && joined.ValueKind == JsonValueKind.Number && joined.TryGetInt64(out long joinedAt) ? joinedAt : null);
                         // Expensive work is admitted sixteen at a time. Playback control never counts against that.
                         SemaphoreSlim? slot = null;
                         if (command.Op is "mimicSources" or "mimicStart" or "mimicClip" or "mimicLibrary" or "mimicLibraryImport" or "mimicTranscribe" or "trimAudio" or "trimPreview" or "waveform" or "spotify" or "audioAssets" or "keepAudio" or "removeAudio" or "retryAudio" or "retryCleanup" or "cleanupCategories" or "clearTemp" or "beginSession" or "endSession")

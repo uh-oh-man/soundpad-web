@@ -223,6 +223,11 @@ export class Session {
   private lapsed = new Map<string, number>();
   /** When each participant's last connection left, so a reload keeps their place for a while. */
   private left = new Map<string, number>();
+  /**
+   * Host: when each participant was first let in by this page (2.38). Relayed with their commands so the
+   * companion shows them the recording history from then on; a reconnect never moves it.
+   */
+  private joined = new Map<string, number>();
   /** Participants for peers whose hello named nobody (pages older than names), stable per peer. */
   private guessed = new Map<string, Participant>();
   /** Guest: the verified host connection in use, and every verified one (direct and relay). */
@@ -279,7 +284,12 @@ export class Session {
     private identity: Invite,
     private host: HostIdentity | undefined,
     private current: () => Snapshot,
-    private execute: (c: Command, peer: string, person?: Participant) => Promise<unknown>,
+    private execute: (
+      c: Command,
+      peer: string,
+      person?: Participant,
+      joinedAt?: number,
+    ) => Promise<unknown>,
     private receive: (s: Snapshot) => void,
     private status: (s: string) => void,
     private guests: (ids: string[], links: Record<string, Transport>) => void,
@@ -853,6 +863,7 @@ export class Session {
     this.accepted.add(peer);
     this.people.set(peer, participant);
     this.left.delete(participant.id);
+    if (!this.joined.has(participant.id)) this.joined.set(participant.id, Date.now());
     if (this.requests.delete(participant.id)) this.lobbyChanged();
     if (!this.policy.admitted.includes(participant.id))
       this.setPolicy(
@@ -1110,7 +1121,13 @@ export class Session {
         return;
       }
       try {
-        const data = (await this.execute(c, peer, this.people.get(peer))) as JsonValue;
+        const person = this.people.get(peer);
+        const data = (await this.execute(
+          c,
+          peer,
+          person,
+          person && this.joined.get(person.id),
+        )) as JsonValue;
         this.send({ v: 1, type: 'ack', id: c.id, ok: true, data }, peer);
         this.broadcast();
       } catch (e) {

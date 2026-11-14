@@ -2,9 +2,8 @@ namespace SoundpadWeb;
 
 public sealed partial class Bridge
 {
+    /// <summary>The live view of pre-2.38 websites (the newest 30 s, 300 buckets) and the longest clip.</summary>
     public const int MimicWindowMs = 30000, MimicBuckets = 300, MimicMinimumMs = 150;
-    /// <summary>Audio kept beyond the visible window, so a selection survives the round trip from a guest.</summary>
-    public const int MimicGraceSeconds = 15;
     private IMimicCapture mimicCapture = new WasapiMimicCapture();
     private MimicTranscriber transcriber = new(new WhisperEngine(
         Path.Combine(store.DirectoryPath, "models", "ggml-base.en.bin"),
@@ -24,7 +23,7 @@ public sealed partial class Bridge
     public const int RecentClips = 5;
     private readonly List<MimicClipInfo> recentClips = [];
     private MimicClipInfo[] RecentSnapshot { get { lock (recentClips) return [.. recentClips]; } }
-    private MimicState MimicSnapshot => new(mimicCapture.Running, mimicCapture.SourceName, mimicCapture.Status, MimicWindowMs, transcriber.Enabled, transcriber.ModelReady, transcriber.Status, hotkey.Active, hotkeyStatus, RecentSnapshot, hotkeySeconds, hotkey.Name);
+    private MimicState MimicSnapshot => new(mimicCapture.Running, mimicCapture.SourceName, mimicCapture.Status, MimicWindowMs, transcriber.Enabled, transcriber.ModelReady, transcriber.Status, hotkey.Active, hotkeyStatus, RecentSnapshot, hotkeySeconds, hotkey.Name, HistorySnapshot());
 
     /// <summary>Replaces the system-wide hotkey; tests use a fixture that can be "pressed" directly.</summary>
     public void UseHotkey(IGlobalHotkey key) { hotkey.Dispose(); hotkey = key; }
@@ -35,40 +34,59 @@ public sealed partial class Bridge
     public event Action<string>? MimicLog;
     private void Log(string message) => MimicLog?.Invoke(message);
 
-    private void StopMimic() { if (mimicCapture.Running) Log("Hosting ended: stopped listening and discarded the buffer"); mimicCapture.Stop(); transcriber.Disable(); hotkey.Unregister(); hotkeyStatus = "Off"; lock (recentClips) recentClips.Clear(); lock (peekGate) lastPeek = null; }
+    /// <summary>
+    /// End hosting: capture, transcripts and the hotkey stop, guests and shares are forgotten. The recording history
+    /// itself stays until the companion closes (2.38), with a "stopped" gap.
+    /// </summary>
+    private void StopMimic()
+    {
+        if (mimicCapture.Running) Log("Hosting ended: stopped listening; the recording history stays until the companion closes");
+        StopCapture();
+        transcriber.Disable(); hotkey.Unregister(); hotkeyStatus = "Off"; lock (recentClips) recentClips.Clear(); lock (peekGate) lastPeek = null;
+        ForgetGuests();
+    }
+    private void StopCapture()
+    {
+        mimicCapture.Stop();
+        history?.EndRun(HistoryGapReason.Stopped);
+        sourceLost = false;
+    }
 
     /// <summary>The host pressed the hotkey: save the last few seconds (3–30, host's choice), like Voice Replay Studio's F6.</summary>
     public async Task HotkeyPressed()
     {
         try
         {
-            var ring = mimicCapture.Ring ?? throw new InvalidDataException($"{hotkey.Name} was pressed while Mimic was not listening.");
+            var h = CurrentHistory();
+            if (h == null || !mimicCapture.Running) throw new InvalidDataException($"{hotkey.Name} was pressed while Mimic was not listening.");
             int seconds = hotkeySeconds;
-            long stop = ring.Written, start = Math.Max(0, stop - (long)ring.Rate * seconds);
-            var words = string.Join(" ", transcriber.Lines(ring, start, stop).Select(l => l.Text.Trim())).Trim();
-            var reply = await SaveMimic(ring, start, stop, words.Length > 0 ? words : null, "Host", true, "host", audioAudience);
+            long stop = h.LiveFrame, start = Math.Max(0, stop - (long)h.Rate * seconds);
+            var words = string.Join(" ", transcriber.Lines(h, HistoryAccess.Host, start, stop).Select(l => l.Text.Trim())).Trim();
+            var reply = await SaveMimic(h, HistoryAccess.Host, start, stop, words.Length > 0 ? words : null, "Host", true, "host", audioAudience);
             hotkeyStatus = reply.Ok ? $"Saved the last {seconds} s at {DateTime.Now:HH:mm:ss}" : reply.Error ?? "Could not save.";
             if (!reply.Ok) Log($"{hotkey.Name}: {hotkeyStatus}");
         }
         catch (InvalidDataException ex) { hotkeyStatus = ex.Message; Log($"{hotkey.Name}: {ex.Message}"); }
+        catch (HistoryException ex) { hotkeyStatus = HistoryMessage(ex, true); Log($"{hotkey.Name}: {hotkeyStatus}"); }
         Publish(); CommandAccepted?.Invoke();
     }
 
-    private async Task<Reply> SaveMimic(MimicRing ring, long start, long stop, string? name, string by, bool host, string owner, string? audience)
+    /// <summary>Saves [start, stop) of the history, as <paramref name="access"/> may read it, as a Temp sound. Pins nothing.</summary>
+    private async Task<Reply> SaveMimic(HistoryStore h, HistoryAccess access, long start, long stop, string? name, string by, bool host, string owner, string? audience)
     {
-        if (stop - start < (long)ring.Rate * MimicMinimumMs / 1000) throw new InvalidDataException("Mimic had not started listening yet at that moment.");
-        var samples = ring.Read(start, stop);
+        if (stop - start < (long)h.Rate * MimicMinimumMs / 1000) throw new InvalidDataException("Mimic had not started listening yet at that moment.");
+        var samples = h.Read(access, start, (int)(stop - start));
         if (samples.All(s => Math.Abs(s) < 0.0005f)) throw new InvalidDataException("That selection is silent. Nothing was saved.");
         name = string.IsNullOrWhiteSpace(name) ? "Mimic " + DateTime.Now.ToString("HH.mm.ss") : name.Trim();
         if (name.Length > 100) name = name[..99].TrimEnd() + "…";
-        var reply = await Upload(MimicRing.Wav(samples, ring.Rate), name + ".wav", by, host, owner, audience, mimic: true);
+        var reply = await Upload(MimicRing.Wav(samples, h.Rate), name + ".wav", by, host, owner, audience, mimic: true);
         if (reply.Ok && reply.Data?.GetType().GetProperty("assetId")?.GetValue(reply.Data) is string assetId)
         {
             lock (recentClips)
             {
                 recentClips.RemoveAll(c => c.AssetId == assetId);
                 recentClips.Insert(0, new(assetId, name, by, DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()));
-                Log($"{by} mimicked \"{name}\" ({samples.Length / (double)ring.Rate:0.0} s), now in Temp");
+                Log($"{by} mimicked \"{name}\" ({samples.Length / (double)h.Rate:0.0} s), now in Temp");
                 if (recentClips.Count > RecentClips) recentClips.RemoveRange(RecentClips, recentClips.Count - RecentClips);
             }
             Publish();
@@ -77,44 +95,80 @@ public sealed partial class Bridge
     }
 
     /// <summary>Replaces the speech engine; tests use a deterministic fixture instead of Whisper.</summary>
-    public void UseTranscriptEngine(ITranscriptEngine engine) { transcriber.Dispose(); transcriber = new(engine); }
+    public void UseTranscriptEngine(ITranscriptEngine engine)
+    {
+        transcriber.Dispose(); transcriber = new(engine);
+        transcriber.UseMode(SubtitleModes.Parse(Settings.Subtitles) ?? SubtitleMode.Gaming);
+        var h = history; transcriber.Attach(h, h == null ? null : TranscriptWords.Open(HistoryRoot, h.SessionId));
+    }
 
     /// <summary>Replaces the capture backend; tests and the e2e harness use a deterministic fixture source.</summary>
     public void UseMimicCapture(IMimicCapture capture) { mimicCapture.Dispose(); mimicCapture = capture; }
 
     private readonly object peekGate = new();
-    private (MimicRing Ring, long End, int[] Levels)? lastPeek;
+    private (string SessionId, long End, string Access, int[] Levels)? lastPeek;
 
     /// <summary>
-    /// Waveform levels for the window ending now, computed at most every 100 ms and shared by every viewer.
-    /// One computation scans the whole 30 s window (~3 ms) under the buffer lock; twelve guests polling
-    /// at the session rate limit would otherwise cost ~40% of a core and stall capture writes.
+    /// The newest 30 s as pre-2.38 websites show it. The end is shared by every viewer for 100 ms, so selections made
+    /// by different people line up; levels come from the history's peak pyramid (no sample scan) and are clipped to
+    /// what each person may see.
     /// </summary>
-    private (long End, int[] Levels) PeekLevels(MimicRing ring, long frames)
+    private (long End, int[] Levels) PeekLevels(HistoryStore h, HistoryAccess access, long frames)
     {
+        string key = access.IsHost ? "host" : access.FromFrame + ":" + string.Join(",", access.SharedRanges.Select(r => r.StartFrame + "-" + r.EndFrame));
         lock (peekGate)
         {
-            long now = ring.Written;
-            if (lastPeek is { } cached && ReferenceEquals(cached.Ring, ring) && now - cached.End < ring.Rate / 10)
-                return (cached.End, cached.Levels);
-            var levels = ring.Levels(now, frames, MimicBuckets);
-            lastPeek = (ring, now, levels);
-            return (now, levels);
+            long now = h.LiveFrame;
+            long end = lastPeek is { } cached && cached.SessionId == h.SessionId && now - cached.End < h.Rate / 10 && now >= cached.End ? cached.End : now;
+            if (lastPeek is { } same && same.SessionId == h.SessionId && same.End == end && same.Access == key) return (end, same.Levels);
+            var levels = LegacyLevels(h, access, end, frames, MimicBuckets);
+            lastPeek = (h.SessionId, end, key, levels);
+            return (end, levels);
         }
     }
 
-    /// <summary>The buffer frames a person selected in a peek they saw (see docs/MIMIC.md, Protocol).</summary>
-    private (MimicRing Ring, long Start, long Stop) Selection(Command c)
+    /// <summary>Peak 0–1000 per bucket for the window ending at <paramref name="end"/>; time before frame 0 or not visible is 0.</summary>
+    private static int[] LegacyLevels(HistoryStore h, HistoryAccess access, long end, long frames, int buckets)
     {
-        var ring = mimicCapture.Ring ?? throw new InvalidDataException("Mimic is not listening.");
-        if (c.SourceId != null && c.SourceId != ring.Id) throw new InvalidDataException("Mimic restarted since you selected that. Select it again.");
-        if (c.MimicEnd is not long end || c.PositionMs is not long from || c.EndMs is not long to || from < 0 || to > MimicWindowMs || to - from < MimicMinimumMs) throw new InvalidDataException($"Select between {MimicMinimumMs} ms and {MimicWindowMs / 1000} seconds of audio.");
-        long windowStart = end - (long)ring.Rate * MimicWindowMs / 1000;
-        // Time before capture started has no audio; trim it instead of treating it as expired.
-        return (ring, Math.Max(0, windowStart + from * ring.Rate / 1000), windowStart + to * ring.Rate / 1000);
+        var result = new int[buckets];
+        long start = end - frames;
+        int first = 0;
+        while (first < buckets && start + frames * first / buckets < 0) first++;
+        if (first >= buckets) return result;
+        long from = start + frames * first / buckets;
+        if (end <= from) return result;
+        var pairs = h.Levels(access, from, end, buckets - first);
+        for (int b = first; b < buckets; b++)
+        {
+            int i = b - first, peak = Math.Max(Math.Abs((int)pairs[2 * i]), Math.Abs((int)pairs[2 * i + 1]));
+            result[b] = (int)Math.Round(Math.Min(1000, peak * 1000.0 / short.MaxValue));
+        }
+        return result;
     }
 
-    private static bool IsMimic(string op) => op is "mimicSources" or "mimicStart" or "mimicStop" or "mimicPeek" or "mimicClip" or "mimicTranscribe" or "mimicHotkey" or "mimicPreview" or "mimicLibrary" or "mimicLibraryImport";
+    /// <summary>
+    /// The history frames a person selected (see docs/MIMIC.md, Protocol): either explicit frames (2.38) or, as older
+    /// websites send it, a range of the 30 s peek they saw. Up to 30 s from anywhere in the history.
+    /// </summary>
+    private (HistoryStore History, long Start, long Stop) Selection(Command c)
+    {
+        var h = CurrentHistory() ?? throw new InvalidDataException("Mimic is not listening.");
+        if (c.SourceId != null && c.SourceId != h.SessionId) throw new InvalidDataException("Mimic restarted since you selected that. Select it again.");
+        if (c.StartFrame is long a && c.EndFrame is long b)
+        {
+            if (a < 0 || (b - a) * 1000 < (long)h.Rate * MimicMinimumMs || (b - a) * 1000 > (long)h.Rate * MimicWindowMs) throw new InvalidDataException($"Select between {MimicMinimumMs} ms and {MimicWindowMs / 1000} seconds of audio.");
+            return (h, a, b);
+        }
+        if (c.MimicEnd is not long end || c.PositionMs is not long from || c.EndMs is not long to || from < 0 || to > MimicWindowMs || to - from < MimicMinimumMs) throw new InvalidDataException($"Select between {MimicMinimumMs} ms and {MimicWindowMs / 1000} seconds of audio.");
+        long windowStart = end - (long)h.Rate * MimicWindowMs / 1000;
+        // Time before capture started has no audio; trim it instead of treating it as expired.
+        return (h, Math.Max(0, windowStart + from * h.Rate / 1000), windowStart + to * h.Rate / 1000);
+    }
+
+    private static bool IsMimic(string op) => op is "mimicSources" or "mimicStart" or "mimicStop" or "mimicPeek" or "mimicClip" or "mimicTranscribe" or "mimicHotkey" or "mimicPreview" or "mimicLibrary" or "mimicLibraryImport"
+        or "historyTimeline" or "historyLevels" or "historyTranscript" or "historyShare" or "historyUnshare" or "historySettings" or "historyDiscard" or "historyCorrect";
+    /// <summary>What a guest with Guest Mimic may ask of Mimic; everything else is the host's.</summary>
+    private static bool GuestMimicOp(string op) => op is "mimicPeek" or "mimicClip" or "historyTimeline" or "historyLevels" or "historyTranscript";
 
     private VoiceReplayLibrary voiceReplay = new();
     /// <summary>Points at another Voice Replay Studio data folder; tests use a temporary one.</summary>
@@ -123,6 +177,8 @@ public sealed partial class Bridge
     private bool GuestMimicAllowed(string? requester, string? audience) =>
         disk.Permissions.GuestMimic && (audioAudience == null || sessionAccepting && audience == audioAudience) && (requester == null || !revokedAudioPeers.ContainsKey(requester));
 
+    private static string StableSourceName(string name) => System.Text.RegularExpressions.Regex.Replace(name, @"\s*\[\d+\]$", "");
+
     private async Task<Reply> ExecuteMimic(Command c, string actor, Participant? participant, string? requester, string? audience, Intent? intent = null)
     {
         try
@@ -130,18 +186,33 @@ public sealed partial class Bridge
             long now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
             if (c.V is not (1 or 2) || !Guid.TryParseExact(c.Id, "D", out _) || Math.Abs(now - c.At) > 30000) throw new InvalidDataException("Invalid or expired command.");
             bool host = actor == "host";
-            if (!host && c.Op is not ("mimicPeek" or "mimicClip")) throw new InvalidDataException("Only the host can choose what Mimic listens to.");
+            if (!host && !GuestMimicOp(c.Op)) throw new InvalidDataException("Only the host can choose what Mimic listens to.");
             if (!host && !GuestMimicAllowed(requester, audience)) throw new InvalidDataException("The host has not enabled Mimic for guests.");
+            if (ExecuteHistory(c, actor, participant, requester) is { } answered) return answered;
             switch (c.Op)
             {
                 case "mimicSources":
-                    return new("ack", c.Id, true, Data: new { sources = mimicCapture.Sources() });
+                    {
+                        var sources = mimicCapture.Sources();
+                        // The source chosen last time (2.38): by id, or for an app by its name without the process id.
+                        var remembered = sources.FirstOrDefault(s => s.Id == Settings.SourceId)
+                            ?? (Settings.SourceName is { } named ? sources.FirstOrDefault(s => s.Kind == "app" && StableSourceName(s.Name) == StableSourceName(named)) : null);
+                        return new("ack", c.Id, true, Data: new { sources, remembered = remembered?.Id });
+                    }
                 case "mimicStart":
-                    var source = mimicCapture.Sources().FirstOrDefault(s => s.Id == c.SourceId) ?? throw new InvalidDataException("That source is no longer available. Refresh the list.");
-                    await mimicCapture.Start(source, MimicWindowMs / 1000 + MimicGraceSeconds);
-                    Log($"Listening to {source.Name} (last 30 s kept in memory only)");
-                    Publish(); CommandAccepted?.Invoke();
-                    return new("ack", c.Id, true);
+                    {
+                        // Only a listed source: outputs are render endpoints and apps are windows, never an input.
+                        var source = mimicCapture.Sources().FirstOrDefault(s => s.Id == c.SourceId) ?? throw new InvalidDataException("That source is no longer available. Refresh the list.");
+                        var h = EnsureHistory(mimicCapture.Rate);
+                        // Changing source while recording leaves an honest gap between the two.
+                        if (mimicCapture.Running) h.EndRun(HistoryGapReason.Stopped);
+                        await mimicCapture.Start(source, new HistorySink(this));
+                        sourceLost = false;
+                        SaveSettings(Settings with { SourceId = source.Id, SourceName = source.Name });
+                        Log($"Listening to {source.Name} (the last {Settings.HistorySeconds / 60.0:0.#} minutes stay on this PC until the companion closes)");
+                        Publish(); CommandAccepted?.Invoke();
+                        return new("ack", c.Id, true);
+                    }
                 case "mimicHotkey":
                     if (c.PositionMs is long lengthMs)
                     {
@@ -174,26 +245,28 @@ public sealed partial class Bridge
                     Publish();
                     return new("ack", c.Id, true);
                 case "mimicStop":
-                    mimicCapture.Stop(); lock (peekGate) lastPeek = null; Log("Stopped listening; the buffer was discarded"); Publish();
+                    StopCapture(); lock (peekGate) lastPeek = null; Log("Stopped listening; the recording history is kept until the companion closes"); Publish();
                     return new("ack", c.Id, true);
                 case "mimicTranscribe":
+                    transcriber.UseMode(SubtitleModes.Parse(Settings.Subtitles) ?? SubtitleMode.Gaming);
                     if (c.Action == "disable") { transcriber.Disable(); Log("Transcripts off"); }
-                    else if (c.Action == "enable") { await transcriber.Enable(() => mimicCapture.Ring, false); Log("Transcripts on (speech is recognized on this PC)"); }
-                    else if (c.Action == "download") { if (transcriber.ModelReady) await transcriber.Enable(() => mimicCapture.Ring, false); else transcriber.BeginDownload(() => mimicCapture.Ring, Publish); }
+                    else if (c.Action == "enable") { await transcriber.Enable(CurrentHistory, false); Log("Transcripts on (speech is recognized on this PC)"); }
+                    else if (c.Action == "download") { if (transcriber.ModelReady) await transcriber.Enable(CurrentHistory, false); else transcriber.BeginDownload(CurrentHistory, Publish); }
                     else throw new InvalidDataException("Unsupported transcript setting.");
                     Publish();
                     return new("ack", c.Id, true);
                 case "mimicPeek":
                     {
-                        var ring = mimicCapture.Ring ?? throw new InvalidDataException("Mimic is not listening.");
-                        long frames = (long)ring.Rate * MimicWindowMs / 1000;
-                        var (end, levels) = PeekLevels(ring, frames);
-                        return new("ack", c.Id, true, Data: new MimicPeek(end, ring.Rate, MimicWindowMs, levels, mimicCapture.Running, transcriber.Lines(ring, end - frames, end), ring.Id));
+                        var h = CurrentHistory() ?? throw new InvalidDataException("Mimic is not listening.");
+                        var access = AccessFor(actor, participant, requester, h);
+                        long frames = (long)h.Rate * MimicWindowMs / 1000;
+                        var (end, levels) = PeekLevels(h, access, frames);
+                        return new("ack", c.Id, true, Data: new MimicPeek(end, h.Rate, MimicWindowMs, levels, mimicCapture.Running, transcriber.Lines(h, access, end - frames, end), h.SessionId));
                     }
                 case "mimicClip":
                     {
-                        var (ring, start, stop) = Selection(c);
-                        var result = (await SaveMimic(ring, start, stop, c.Name, Person(actor, participant).Name, host, requester ?? participant?.Id ?? actor, audience)) with { Id = c.Id };
+                        var (h, start, stop) = Selection(c);
+                        var result = (await SaveMimic(h, AccessFor(actor, participant, requester, h), start, stop, c.Name, Person(actor, participant).Name, host, requester ?? participant?.Id ?? actor, audience)) with { Id = c.Id };
                         // "Mimic & play" as one command (2.35): plays only if nothing newer was asked for meanwhile.
                         return c.Autoplay ? await Autoplay(result, c, actor, participant, requester, audience, intent) : result;
                     }
@@ -201,9 +274,9 @@ public sealed partial class Bridge
                     {
                         // Host only (checked above): the audio goes to the host's own browser tab over loopback, to be
                         // heard on that PC. It never reaches guests or Soundpad.
-                        var (ring, start, stop) = Selection(c);
-                        if (stop - start < (long)ring.Rate * MimicMinimumMs / 1000) throw new InvalidDataException("Mimic had not started listening yet at that moment.");
-                        return new("ack", c.Id, true, Data: new { wav = Convert.ToBase64String(MimicRing.Wav(ring.Read(start, stop), ring.Rate)) });
+                        var (h, start, stop) = Selection(c);
+                        if (stop - start < (long)h.Rate * MimicMinimumMs / 1000) throw new InvalidDataException("Mimic had not started listening yet at that moment.");
+                        return new("ack", c.Id, true, Data: new { wav = Convert.ToBase64String(MimicRing.Wav(h.Read(HistoryAccess.Host, start, (int)(stop - start)), h.Rate)) });
                     }
                 case "mimicLibrary":
                     // Host only (checked above): clips saved in Voice Replay Studio on this PC, read without changing them.
@@ -220,5 +293,7 @@ public sealed partial class Bridge
             }
         }
         catch (InvalidDataException ex) { Publish(); return new("ack", c.Id, false, ex.Message); }
+        // HistoryException does not derive from InvalidDataException (it is sealed): an expired moment is an answer, never a dropped socket.
+        catch (HistoryException ex) { return new("ack", c.Id, false, HistoryMessage(ex, actor == "host")); }
     }
 }

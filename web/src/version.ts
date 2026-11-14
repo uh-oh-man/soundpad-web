@@ -47,6 +47,7 @@ export const FEATURES = {
   intents: [2, 35],
   desktopSession: [2, 36],
   sessionControl: [2, 37],
+  history: [2, 38],
 } as const satisfies Record<string, readonly [number, number]>;
 
 /** True when the website changed version since this browser last used it (and it had used it before). */
@@ -78,6 +79,7 @@ const FEATURE_NAMES: Record<keyof typeof FEATURES, string> = {
   desktopSession:
     'the companion window that keeps your session running when the browser tab closes',
   sessionControl: 'guest admission, places and permissions that survive a reload of the host page',
+  history: 'a rolling recording history of up to an hour, with clickable word-by-word subtitles',
 };
 
 /**
