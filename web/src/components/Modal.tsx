@@ -1,23 +1,26 @@
 import { useEffect, useRef, useSyncExternalStore, type ReactNode } from 'react';
+import { createPortal } from 'react-dom';
 import { X } from 'lucide-react';
-
-const focusable =
-  'button:not(:disabled),input:not(:disabled),select:not(:disabled),textarea:not(:disabled),a[href],[tabindex]:not([tabindex="-1"])';
+import { FOCUSABLE as focusable, currentOpener, returnFocus } from '../focus-return';
 
 /**
- * The control last pressed with a pointer. Safari doesn't focus buttons on click, so when a dialog
- * opens from a click, focus is still on the page body; this lets the dialog return focus to the
- * button that opened it anyway.
+ * While any dialog is open (2.43) the page behind it is `inert`: the board, the sidebar and the
+ * non-modal editor panel can't be reached by Tab or pointer. Dialogs render into <body>, outside the
+ * shell, so they stay usable. Playwright and some assistive technology still list inert content, so the
+ * editor panel and the section nav are also hidden from them (aria-hidden): exactly one "Close dialog"
+ * and one "Mimic" are exposed at a time.
  */
-let lastPressed: HTMLElement | null = null;
-if (typeof document !== 'undefined')
-  document.addEventListener(
-    'pointerdown',
-    (e) => {
-      lastPressed = e.target instanceof Element ? e.target.closest<HTMLElement>(focusable) : null;
-    },
-    true,
-  );
+let openDialogs = 0;
+const HIDDEN_BEHIND = '#editor-panel, .section-nav';
+function setShellInert(on: boolean) {
+  const shell = document.querySelector('.app-shell');
+  if (!shell) return;
+  if (on) shell.setAttribute('inert', '');
+  else shell.removeAttribute('inert');
+  for (const element of shell.querySelectorAll(HIDDEN_BEHIND))
+    if (on) element.setAttribute('aria-hidden', 'true');
+    else element.removeAttribute('aria-hidden');
+}
 
 /**
  * Where notices go while a dialog is open (2.41): inside the newest dialog, at its foot, instead of
@@ -75,19 +78,26 @@ export function Modal({
   }, []);
   useEffect(() => {
     // Return focus to whatever opened the dialog once it closes.
-    const active = document.activeElement;
-    const opener = active instanceof HTMLElement && active !== document.body ? active : lastPressed;
+    const opener = currentOpener();
+    openDialogs++;
+    setShellInert(true);
     dialog.current?.querySelector<HTMLElement>('button')?.focus();
     function escape(event: KeyboardEvent) {
-      if (event.key === 'Escape' && !event.defaultPrevented) close.current();
+      if (event.key !== 'Escape' || event.defaultPrevented) return;
+      // Taken: the editor panel behind must not close on the same press.
+      event.preventDefault();
+      close.current();
     }
     document.addEventListener('keydown', escape);
     return () => {
       document.removeEventListener('keydown', escape);
-      if (opener?.isConnected) opener.focus();
+      openDialogs = Math.max(0, openDialogs - 1);
+      // The page is usable again before focus goes back into it.
+      if (!openDialogs) setShellInert(false);
+      returnFocus(opener);
     };
   }, []);
-  return (
+  return createPortal(
     <div
       className="scrim"
       // Only a press that starts and ends on the backdrop closes, so drags out of the dialog don't.
@@ -126,6 +136,7 @@ export function Modal({
         {children}
         <div className="dialog-notices" ref={noticeSlot} />
       </section>
-    </div>
+    </div>,
+    document.body,
   );
 }
