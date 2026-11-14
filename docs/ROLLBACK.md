@@ -6,6 +6,7 @@ Every release stays on GitHub permanently, so any earlier version can be restore
 
 | Version | What it is | Git tag | Download |
 | --- | --- | --- | --- |
+| 2.38.0 | Try the example | `v2.38.0` | [Release](https://github.com/uh-oh-man/soundpad-web/releases/tag/v2.38.0) |
 | 2.37.0 | Sturdier connections, exact starts | `v2.37.0` | [Release](https://github.com/uh-oh-man/soundpad-web/releases/tag/v2.37.0) |
 | 2.36.0 | Hosting without a browser tab | `v2.36.0` | [Release](https://github.com/uh-oh-man/soundpad-web/releases/tag/v2.36.0) |
 | 2.35.0 | The newest click wins | `v2.35.0` | [Release](https://github.com/uh-oh-man/soundpad-web/releases/tag/v2.35.0) |

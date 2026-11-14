@@ -18,6 +18,10 @@ A static website plus one portable Windows program on the host PC. No accounts, 
 
 You can still open the website in Chrome or Edge on the same PC as an extra view of your session (it shows the same guests and invite). Closing that tab does not affect guests. Closing the Soundpad Web window quits the companion and ends the session. If Windows lacks the WebView2 Runtime (it is part of Windows 11), the companion falls back to opening your browser as before; keep that tab open then. To update, close the old companion and run the new EXE.
 
+## Try it first
+
+Press **Try the example** on the [website](https://uh-oh-man.github.io/soundpad-web/) to see every feature with example sounds, in your browser only. Nothing is sent to Soundpad and you need no companion for it.
+
 ## Join a session
 
 Open the invite link in a modern browser (Chrome, Edge, Firefox or Safari, on a computer or phone) and pick a name. Tapping a sound plays it on the **host's** PC, not on your device.

@@ -2,6 +2,16 @@
 
 Notable changes to Soundpad Web. Versions follow the website's `package.json`; the Windows companion is versioned separately and only needs updating when a release says so.
 
+## 2.38.0 — Try the example
+
+Website only; works with every companion. The companion reports 2.38.0 in this release, with no other change.
+
+### Added
+
+- **Try the example** on the start screen. It opens an example session that runs entirely in your browser, with 19 example sounds (effects, a Sousa march and two Apollo 11 recordings), so you can see what Soundpad Web does before setting anything up. Nothing is sent to Soundpad: the sounds play in the browser, the guests are simulated, and **Leave example** forgets everything.
+- What it shows: categories with artwork, search, all five views and waveforms; play, pause, seek, cue starts, regions and repeat; the newest click winning and Panic; the Kick counter and statistics; Temp with reverse, Edit copy with any speed and Keep pitch, preview and Undo; a simulated guest "Alex" who joins and sometimes plays a sound, and "Sam" asking to join when you choose Ask me first, with per-guest permissions; and Mimic "listening" to the Apollo 11 clips with a transcript you can clip from. Things that need your PC (Keep permanently, Spotify, the Mimic hotkey, Voice Replay Studio import, invitations) say so instead of pretending.
+- The example sounds are public domain or CC0; where each one comes from is listed in `web/public/demo/CREDITS.md`. They are downloaded only when you open the example.
+
 ## 2.37.0 — Sturdier connections, exact starts
 
 **Update the companion** for exact starts and for keeping the host's session choices across a reload of its window. The rest works with any companion.
