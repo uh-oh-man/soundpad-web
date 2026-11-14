@@ -768,7 +768,14 @@ test('V2: 10000-sound library keeps rendering bounded and search responsive', as
     const loadMs = performance.now() - start;
     await expect(page.locator('.sound-entry')).toHaveCount(120);
     const search = performance.now();
-    await page.getByLabel('Search sounds').fill('Benchmark fixture 10000');
+    // Playwright's WebKit sometimes drops the text it types here while the page is still busy with the
+    // 10,000-sound board: the box keeps focus, but no input event ever reaches the page (1 run in 5 on the
+    // owner's PC with a second suite running, 2.41.0). Typed again, it holds.
+    const searchBox = page.getByLabel('Search sounds');
+    await expect(async () => {
+      await searchBox.fill('Benchmark fixture 10000');
+      await expect(searchBox).toHaveValue('Benchmark fixture 10000', { timeout: 1000 });
+    }).toPass({ timeout: 10000 });
     await expect(
       page.getByRole('button', { name: 'Play from start: Benchmark fixture 10000', exact: true }),
     ).toBeVisible();
