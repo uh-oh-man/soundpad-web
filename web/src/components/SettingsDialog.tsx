@@ -4,7 +4,7 @@ import type { Snapshot } from '../protocol';
 import { SessionAccess } from './SessionAccess';
 import { ConnectionDetails } from './ConnectionDetails';
 import { missingFeatures, supports } from '../version';
-import { hostCopy } from '../hosting';
+import { DEMO_COPY, hostCopy } from '../hosting';
 import { themes, type Theme, type useAppearance } from '../appearance';
 
 const COMPANION_DOWNLOAD = `${(import.meta.env.VITE_REPOSITORY_URL as string | undefined) || 'https://github.com/uh-oh-man/soundpad-web'}/releases/latest/download/SoundpadWeb.exe`;
@@ -91,7 +91,10 @@ export function SettingsDialog({
   const host = view.mode === 'host';
   const v2 = (state.protocol ?? 1) >= 2;
   // Who keeps the session running (2.36): this tab, the companion window, or another page this tab views.
-  const copy = hostCopy(view.hosting, state.companionVersion, view.ownerWindow);
+  // The example session runs in this tab and reaches no Soundpad, and says so.
+  const copy = view.demo
+    ? DEMO_COPY
+    : hostCopy(view.hosting, state.companionVersion, view.ownerWindow);
   return (
     <>
       <section className="appearance-setting" aria-label="Appearance">
@@ -219,7 +222,8 @@ export function SettingsDialog({
               void controller.leave();
             }}
           >
-            <LogOut size={16} /> {host ? 'End hosting' : 'Leave session'}
+            <LogOut size={16} />{' '}
+            {view.demo ? 'Leave example' : host ? 'End hosting' : 'Leave session'}
           </button>
         )}
       </div>

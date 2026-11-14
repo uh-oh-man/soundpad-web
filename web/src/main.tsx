@@ -18,6 +18,8 @@ import {
   Radio,
   Mic2,
   OctagonPause,
+  Sparkles,
+  LogOut,
 } from 'lucide-react';
 import { controller } from './controller';
 import { flattenCategories, type Sound } from './protocol';
@@ -25,7 +27,7 @@ import { z } from 'zod';
 import { useWorkspace, viewModes, type Workspace } from './workspace';
 import { arrangeSounds, boardTitle, type Totals } from './arrange';
 import { APP_VERSION_LABEL, REQUIRED_COMPANION, companionAtLeast, supports } from './version';
-import { hostCopy } from './hosting';
+import { DEMO_COPY, hostCopy } from './hosting';
 import { SoundCollection } from './components/SoundCollection';
 import { Player } from './components/Player';
 import { IconEditor } from './components/IconEditor';
@@ -197,8 +199,10 @@ function statusLabel(
   available: boolean,
   status: string,
   relayed = false,
+  demo = false,
 ) {
   if (mode === 'landing') return 'Not connected';
+  if (demo) return 'Example session';
   if (!connected) return status.split('.')[0];
   if (!available) return 'Soundpad unavailable';
   // Through the relay (2.37) everything works, only slower; the header says so.
@@ -301,6 +305,7 @@ function Landing({ view }: { view: ReturnType<typeof controller.getSnapshot> }) 
         </span>
       </div>
       <p className="join-note">Joining a friend? Open their invitation link to connect.</p>
+      <TryExample loading={view.status === 'Loading the example'} />
       {repositoryUrl && /^https:\/\/github\.com\/[\w.-]+\/[\w.-]+\/?$/.test(repositoryUrl) && (
         <a className="text-link" href={repositoryUrl} target="_blank" rel="noreferrer">
           Source & downloads <ArrowUpRight size={15} />
@@ -315,6 +320,47 @@ function Landing({ view }: { view: ReturnType<typeof controller.getSnapshot> }) 
         <ShieldCheck size={16} /> Audio stays on the host. Only commands travel between browsers.
       </div>
     </main>
+  );
+}
+
+/**
+ * "Try the example": a host session with example sounds that runs entirely in this page, so a
+ * visitor can see every feature before installing anything. Its code loads only when pressed.
+ */
+function TryExample({ loading }: { loading: boolean }) {
+  return (
+    <div className="try-example">
+      <button
+        aria-describedby="try-example-note"
+        // Busy stays focusable (aria-disabled); presses are ignored until the example has loaded.
+        aria-disabled={loading || undefined}
+        aria-busy={loading || undefined}
+        onClick={() => !loading && void controller.startDemo()}
+      >
+        <Sparkles size={17} aria-hidden="true" />
+        {loading ? 'Loading the example…' : 'Try the example'}
+      </button>
+      <p id="try-example-note">
+        See every feature with example sounds. Nothing is sent to Soundpad; sounds play in this
+        browser.
+      </p>
+    </div>
+  );
+}
+
+/** Stays at the top of the board for the whole example, with the way back to the start. */
+function DemoBanner() {
+  return (
+    <aside className="demo-banner" aria-label="Example session">
+      <Sparkles size={18} aria-hidden="true" />
+      <span>
+        <strong>Example session: nothing here reaches Soundpad.</strong> Sounds play in this
+        browser, the guests are simulated, and leaving forgets everything.
+      </span>
+      <button onClick={() => void controller.leave()}>
+        <LogOut size={15} aria-hidden="true" /> Leave example
+      </button>
+    </aside>
   );
 }
 
@@ -511,6 +557,7 @@ function App() {
               state.available,
               status,
               view.connection?.transport === 'relay',
+              view.demo,
             )}
           </span>
           {mimicListening && (
@@ -558,6 +605,7 @@ function App() {
         <Landing view={view} />
       ) : (
         <>
+          {view.demo && <DemoBanner />}
           <div className="workspace">
             <Sidebar
               state={state}
@@ -570,7 +618,11 @@ function App() {
               selectMine={selectMine}
               update={personal.update}
               manage={() => setManaging(true)}
-              hostNote={hostCopy(view.hosting, state.companionVersion, view.ownerWindow).sidebar}
+              hostNote={
+                view.demo
+                  ? DEMO_COPY.sidebar
+                  : hostCopy(view.hosting, state.companionVersion, view.ownerWindow).sidebar
+              }
             />
             <main className="soundboard">
               <WhatsNew projectUrl={repositoryUrl || PROJECT_URL} />
@@ -913,7 +965,11 @@ function App() {
                 </div>
               )}
               <div className="board-footer">
-                <span>Audio plays through the host’s Soundpad</span>
+                <span>
+                  {view.demo
+                    ? 'Example sounds play in this browser'
+                    : 'Audio plays through the host’s Soundpad'}
+                </span>
                 <ProjectFooter />
               </div>
             </main>

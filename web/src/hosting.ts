@@ -48,3 +48,12 @@ export function hostCopy(
     foot: 'Keep the host tab and companion open. Closing either ends guest control.',
   };
 }
+
+/** What the example session says instead: it runs in this tab and reaches no Soundpad. */
+export const DEMO_COPY = {
+  place: 'tab' as Hosting,
+  note: undefined as string | undefined,
+  sidebar: 'Example session: it runs in this tab and nothing reaches Soundpad.',
+  status: 'An example running in this browser. No companion or Soundpad is involved.',
+  foot: 'Leaving the example forgets everything done in it.',
+};
