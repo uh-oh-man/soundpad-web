@@ -26,12 +26,24 @@ function localStyle(): Style {
     headerAnimation: readPref('headerAnimation'),
   };
 }
-function applyStyle(style: Style) {
-  if (readPref('nav') !== style.navStyle) writePref('nav', style.navStyle);
-  if (currentTheme() !== style.theme) applyTheme(style.theme as Theme);
-  if (readPref('motion') !== style.motion) writePref('motion', style.motion);
-  if (readPref('contrast') !== style.contrast) writePref('contrast', style.contrast);
-  if (readPref('headerAnimation') !== style.headerAnimation)
+/** True while ui.json is being applied here, so applying it is never taken for a change to send back. */
+let applying = false;
+function applyStyle(style: Style, except: Set<keyof Style>) {
+  applying = true;
+  try {
+    applyStyleNow(style, except);
+  } finally {
+    applying = false;
+  }
+}
+function applyStyleNow(style: Style, except: Set<keyof Style>) {
+  const skip = (key: keyof Style) => except.has(key);
+  if (!skip('navStyle') && readPref('nav') !== style.navStyle) writePref('nav', style.navStyle);
+  if (!skip('theme') && currentTheme() !== style.theme) applyTheme(style.theme as Theme);
+  if (!skip('motion') && readPref('motion') !== style.motion) writePref('motion', style.motion);
+  if (!skip('contrast') && readPref('contrast') !== style.contrast)
+    writePref('contrast', style.contrast);
+  if (!skip('headerAnimation') && readPref('headerAnimation') !== style.headerAnimation)
     writePref('headerAnimation', style.headerAnimation);
 }
 
@@ -79,6 +91,9 @@ async function pull() {
   try {
     do {
       again = false;
+      // What this page shows when the request leaves: a choice made while it is on its way wins over
+      // what comes back, and is sent afterwards (it is never overwritten by an older ui.json).
+      const before = localStyle();
       let reply;
       try {
         reply = uiPrefsReplySchema.parse(await controller.run('uiPrefsGet', {}, { quiet: true }));
@@ -86,15 +101,19 @@ async function pull() {
         return;
       }
       if (!syncing) return;
+      const now = localStyle();
+      const changedMeanwhile = new Set(STYLE_KEYS.filter((key) => now[key] !== before[key]));
       if (!reply.saved) {
         // No shared style yet: this page's choices become it.
         remote = reply.prefs;
-        await send({ ...localStyle(), activeDraft: null });
+        await send({ ...now, activeDraft: null });
       } else {
-        // Remember ui.json first, so applying it locally is not taken for a change to send back.
         remote = reply.prefs;
-        applyStyle(reply.prefs);
+        applyStyle(reply.prefs, changedMeanwhile);
         emit();
+        const mine: Partial<Style> = {};
+        for (const key of changedMeanwhile) Object.assign(mine, { [key]: now[key] });
+        if (changedMeanwhile.size) await send(mine);
       }
     } while (again);
   } finally {
@@ -121,7 +140,7 @@ export function useHostStyleSync(state: Snapshot, enabled: boolean) {
   useEffect(() => {
     if (!enabled) return;
     const changed = () => {
-      if (!syncing || !remote || fetching) return;
+      if (!syncing || !remote || fetching || applying) return;
       const change = changedStyle();
       if (Object.keys(change).length) void send(change);
     };

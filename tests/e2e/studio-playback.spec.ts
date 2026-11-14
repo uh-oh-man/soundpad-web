@@ -129,19 +129,19 @@ test.describe('header ribbon', () => {
     for (const name of ['Airhorn', 'Laugh', 'Airhorn', 'Laugh', 'Airhorn'])
       await playButton(page, name).click();
     await expect(ribbon(page)).toHaveAttribute('data-ribbon-state', /live|waiting/);
+    const airhorn = await page.evaluate(async () => {
+      const { controller } = await import(/* @vite-ignore */ '/src/' + 'controller.ts');
+      const { state } = controller.getSnapshot();
+      return state.library.sounds.find((s: { name: string }) => s.name === 'Airhorn').id;
+    });
+    // The key follows what the companion reports, and settles on the newest play (Airhorn): an earlier
+    // play may be reported for a moment first (Stage G integration: that moment made this flaky).
     await expect
       .poll(async () => {
         const key = await ribbon(page).getAttribute('data-ribbon-key');
-        return !!key && key === (await reportedKey(page));
+        return !!key && key === (await reportedKey(page)) && key.includes(airhorn);
       })
       .toBe(true);
-    expect(await ribbon(page).getAttribute('data-ribbon-key')).toContain(
-      await page.evaluate(async () => {
-        const { controller } = await import(/* @vite-ignore */ '/src/' + 'controller.ts');
-        const { state } = controller.getSnapshot();
-        return state.library.sounds.find((s: { name: string }) => s.name === 'Airhorn').id;
-      }),
-    );
   });
 
   test('waits for a sentence or a play the page did not start, with no key to animate', async ({

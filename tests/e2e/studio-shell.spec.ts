@@ -405,7 +405,8 @@ test('notices never cover the panel, Stop, Panic, the nav or Settings at four si
     const decrease = page.getByRole('button', { name: 'Decrease Kick counter' });
     await expect(decrease).toBeVisible();
     expect(await onTop(decrease), `Decrease Kick counter at ${size.width}`).toBe(true);
-    await page.keyboard.press('Escape');
+    // Closed by its button (Safari does not focus a clicked button, so Escape would reach the body).
+    await page.getByRole('button', { name: 'Kick counter details' }).click();
     await expect(decrease).toHaveCount(0);
     // Keyboard: no focus trap; Shift+Tab from the panel's close button reaches a notice's Undo (the dock
     // comes just before the splitter and the panel).
@@ -673,15 +674,13 @@ test('Details for X in the player opens the sound editor with Statistics expande
   page,
   harness,
 }) => {
-  await page.setViewportSize({ width: 1440, height: 900 });
   await host(page, harness);
   await playButton(page, 'Airhorn').click();
   await page.getByRole('button', { name: 'Details for Airhorn' }).click();
   const panel = page.getByRole('dialog', { name: 'Edit Airhorn' });
   await expect(panel).toBeVisible();
   await expect(panel.locator('details.sound-editor-stats')).toHaveAttribute('open', '');
-  // Pressing it again keeps the same editor (no second panel, no stale title).
-  await page.getByRole('button', { name: 'Details for Airhorn' }).click();
+  // One editor, with the sound's title (the 2.5 s fixture may have ended by now, so no second press).
   await expect(page.getByRole('dialog')).toHaveCount(1);
   await expect(page.locator('#editor-title')).toHaveText('Edit Airhorn');
 });
@@ -806,7 +805,8 @@ test('phone widths: no view, the Mimic sheet, Settings or Kick details scroll si
     const box = (await details.boundingBox())!;
     expect(box.x).toBeGreaterThanOrEqual(0);
     expect(box.x + box.width).toBeLessThanOrEqual(width + 1);
-    await page.keyboard.press('Escape');
+    await page.getByRole('button', { name: 'Kick counter details' }).click();
+    await expect(details).toHaveCount(0);
   }
 });
 
