@@ -3800,3 +3800,82 @@ test('per-guest permissions: one guest’s playback is off while another’s sti
   await page.getByRole('button', { name: 'Close dialog' }).click();
   await expect(playButton(ann, 'Airhorn')).toBeEnabled();
 });
+
+test('example session: plays example sounds in this browser, edits a copy, and leaves', async ({
+  page,
+  harness,
+}) => {
+  // The example never reaches the companion, Soundpad or a relay: no socket but the dev server's own.
+  const sockets: string[] = [];
+  page.on('websocket', (socket) => {
+    const url = new URL(socket.url());
+    if (!(url.host === '127.0.0.1:5173' && url.pathname === '/')) sockets.push(socket.url());
+  });
+  await page.goto('/');
+  await expect(page.getByRole('button', { name: /Play / })).toHaveCount(0);
+  await expect(page.locator('#try-example-note')).toHaveText(
+    'See every feature with example sounds. Nothing is sent to Soundpad; sounds play in this browser.',
+  );
+  await page.getByRole('button', { name: 'Try the example' }).click();
+  await expect(page.getByRole('complementary', { name: 'Example session' })).toContainText(
+    'Example session: nothing here reaches Soundpad.',
+  );
+  await expect(page.locator('header .status')).toHaveText('Example session');
+  // Every example sound and category is there, and playing one shows it in the player.
+  await expect(
+    page.getByRole('navigation', { name: 'Sound categories' }).getByRole('button'),
+  ).toHaveCount(6);
+  // The example is the first library here with artwork. Artwork tiles are named "Play artwork <name>"
+  // while they show "<name>" and a hint, which axe's label-content-name-mismatch flags; that naming is
+  // older than the example and other tests rely on it, so the rule is left out here.
+  const { violations } = await new AxeBuilder({ page })
+    .disableRules(['label-content-name-mismatch'])
+    .analyze();
+  expect(
+    violations
+      .filter((v) => v.impact === 'serious' || v.impact === 'critical')
+      .map((v) => `${v.id} (${v.nodes.map((n) => n.target.join(' ')).join(', ')})`),
+  ).toEqual([]);
+  const march = page.getByRole('button', {
+    name: "Play from start: Columbia's Pride (Sousa)",
+    exact: true,
+  });
+  await expect(march).toBeEnabled();
+  await march.click();
+  await expect(page.locator('.player-track')).toContainText("Columbia's Pride (Sousa)");
+  await expect(page.locator('.player-track')).toContainText('Requested by Host · playing');
+  // The newest click wins.
+  await page.getByRole('button', { name: 'Play from start: Boing', exact: true }).click();
+  await expect(page.locator('.player-track strong')).toHaveText('Boing');
+  // Temp: reverse a sound, then make an edited copy of it.
+  await page.getByRole('button', { name: 'Reverse and play Dog Bark' }).click();
+  await expect(page.locator('.player-track strong')).toHaveText('Dog Bark (reversed)');
+  await page.locator('#temp-manager > summary').click();
+  const source = page.locator('.temp-source').filter({ hasText: 'Dog Bark' });
+  await source.getByRole('button', { name: 'Edit copy' }).click();
+  const form = page.getByRole('form', { name: 'Edit a copy of Dog Bark' });
+  await form.getByLabel('Effect').selectOption('speed');
+  await form.getByLabel('Exact speed (×)').fill('2');
+  await form.getByLabel('Keep pitch').check();
+  await form.getByRole('button', { name: 'Save copy' }).click();
+  await expect(page.getByText('Copy added to Temp. The original is unchanged.')).toBeVisible();
+  await expect(
+    page.getByRole('button', {
+      name: 'Play from start: Dog Bark (2x speed, same pitch)',
+      exact: true,
+    }),
+  ).toBeVisible();
+  // Keep needs the host's PC, and says so.
+  await source.getByRole('button', { name: 'Keep reversed permanently' }).click();
+  await page.getByRole('button', { name: 'Confirm permanent save' }).click();
+  await expect(page.locator('#temp-manager [role="alert"]')).toContainText(
+    'Not available in the example',
+  );
+  // Leaving returns to the start page, with nothing left playing.
+  await page.getByRole('button', { name: 'Leave example' }).click();
+  await expect(page.getByRole('button', { name: 'Try the example' })).toBeVisible();
+  await expect(page.getByText('Not connected', { exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: /Play / })).toHaveCount(0);
+  expect(sockets).toEqual([]);
+  expect(harness.plays).toEqual([]);
+});

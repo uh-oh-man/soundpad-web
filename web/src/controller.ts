@@ -8,7 +8,7 @@ import {
   type Command,
   type Snapshot,
 } from './protocol';
-import { acceptWaveform } from './waveform-cache';
+import { acceptWaveform, clearWaveforms } from './waveform-cache';
 import { waveformSchema } from './protocol';
 import {
   LocalBridge,
@@ -47,6 +47,8 @@ import {
 import { notify, type NoticeAction, type NoticeKind } from './notifications';
 import { APP_VERSION, companionAtLeast, supports } from './version';
 import type { SharedLayout, Organization } from './shared-layout';
+// Types only: the example session's code is loaded on demand (see `startDemo`), never with this page.
+import type { DemoModel } from './demo/model';
 type View = {
   layouts: SharedLayout[];
   mode: 'landing' | 'host' | 'guest';
@@ -74,7 +76,13 @@ type View = {
   policy: SessionPolicy;
   /** Host (2.37): each listed guest connection (by peer id) is direct or through the relay. */
   links: Record<string, Transport>;
+  /** The example session: a host page that runs entirely in this browser; nothing reaches Soundpad. */
+  demo: boolean;
 };
+/** What Settings shows as the example's invitation; it is not a link and nothing can join with it. */
+export const DEMO_INVITE = 'Example session: there is no invitation to share.';
+/** What the guest room offers the session controls; the example session stands in for it. */
+type Room = Pick<Session, 'letIn' | 'turnAway' | 'setPolicy' | 'getPolicy' | 'disconnect'>;
 /** Largest session settings message a 2.37 companion keeps (LocalServer.MaxSessionSettingsBytes). */
 export const SESSION_SETTINGS_BYTES = 65536;
 /** Shown when a view is asked to change who is in the session; only the owner page can (2.37). */
@@ -124,10 +132,18 @@ export class Controller {
     requests: [],
     policy: { ...DEFAULT_POLICY },
     links: {},
+    demo: false,
   };
   private listeners = new Set<() => void>();
   private bridge?: LocalBridge;
   private session?: Session;
+  /** The example session, when one runs; then there is no bridge and no guest room. */
+  private demo?: DemoModel;
+  private demoStarting = false;
+  /** The guest room, or the example standing in for it. */
+  private room(): Room | undefined {
+    return this.demo ?? this.session;
+  }
   private identity?: HostIdentity;
   private address?: BridgeAddress;
   /**
@@ -389,6 +405,83 @@ export class Controller {
   async checkNetwork() {
     await this.session?.checkNetwork();
   }
+  /**
+   * "Try the example" on the landing page: a host session that runs entirely in this page, with
+   * example sounds played by this browser. It never contacts the companion, Soundpad or any relay.
+   * Its code and sounds load only now, so the normal page never downloads them.
+   */
+  async startDemo() {
+    if (this.view.mode !== 'landing' || this.demoStarting) return;
+    this.demoStarting = true;
+    const before = this.view.status;
+    this.update({ status: 'Loading the example' });
+    try {
+      const { startDemo } = await import('./demo');
+      let demo: DemoModel | undefined = undefined;
+      const current = () => !!demo && this.demo === demo;
+      demo = await startDemo({
+        state: (state) => current() && this.update({ state: this.visibleState(state) }),
+        session: ({ guests, people, links, requests, policy }) => {
+          if (!current()) return;
+          this.policy = policy;
+          this.update({ guests, people, links, requests, policy });
+        },
+        notify: (message, kind) => current() && this.notify(message, kind),
+      });
+      if (this.view.mode !== 'landing') {
+        demo.close();
+        return;
+      }
+      this.demo = demo;
+      this.live = true;
+      this.policy = demo.getPolicy();
+      this.update({
+        mode: 'host',
+        status: 'Host ready',
+        demo: true,
+        invite: DEMO_INVITE,
+        hosting: 'tab',
+        ownerWindow: true,
+        guests: [],
+        people: {},
+        links: {},
+        requests: [],
+        layouts: [],
+        policy: this.policy,
+        connection: undefined,
+      });
+      demo.begin();
+    } catch (e) {
+      this.update({ status: before });
+      this.notify(`The example could not start. ${errorMessage(e)}`, 'error');
+    } finally {
+      this.demoStarting = false;
+    }
+  }
+  /** Leaves the example for the landing page; the example forgets everything that happened in it. */
+  private endDemo() {
+    const demo = this.demo;
+    this.demo = undefined;
+    this.live = false;
+    demo?.close();
+    clearWaveforms();
+    this.policy = { ...DEFAULT_POLICY };
+    this.pendingPermissions = undefined;
+    this.update({
+      layouts: [],
+      mode: 'landing',
+      state: EMPTY,
+      status: 'Not connected',
+      guests: [],
+      people: {},
+      invite: '',
+      demo: false,
+      connection: undefined,
+      requests: [],
+      policy: this.policy,
+      links: {},
+    });
+  }
   confirmName(name: string) {
     if (!this.view.needsName || !name.trim() || !this.pendingInvite) return;
     this.rename(name);
@@ -525,7 +618,7 @@ export class Controller {
   }
   /** True when this page may change who is in the session; a view says where to do it instead. */
   private owns() {
-    if (this.role !== 'view') return !!this.session;
+    if (this.role !== 'view') return !!this.room();
     this.notify(this.view.ownerWindow ? OWNER_ONLY.window : OWNER_ONLY.tab);
     return false;
   }
@@ -533,7 +626,8 @@ export class Controller {
   letIn(id: string) {
     if (!this.owns()) return;
     const away = this.policy.turnedAway.find((p) => p.id === id);
-    void this.session!.letIn(id)
+    void this.room()!
+      .letIn(id)
       .then(() => {
         if (away) this.notify(`${away.name} can join again when they open the invitation.`);
       })
@@ -541,17 +635,17 @@ export class Controller {
   }
   /** Host (2.37): turns a waiting guest away. */
   turnAway(id: string) {
-    if (this.owns()) this.session!.turnAway(id);
+    if (this.owns()) this.room()!.turnAway(id);
   }
   /** Host (2.37): "Let guests in at once" or "Ask me first". */
   setAdmission(admission: SessionPolicy['admission']) {
-    if (this.owns()) this.session!.setPolicy({ ...this.session!.getPolicy(), admission });
+    if (this.owns()) this.room()!.setPolicy({ ...this.room()!.getPolicy(), admission });
   }
   /** Host (2.37): how many guests may be in at once, 1 to 12 (extra places come on top). */
   setCapacity(capacity: number) {
     if (!this.owns() || !Number.isInteger(capacity) || capacity < 1 || capacity > MAX_PLACES)
       return;
-    this.session!.setPolicy({ ...this.session!.getPolicy(), capacity });
+    this.room()!.setPolicy({ ...this.room()!.getPolicy(), capacity });
   }
   /**
    * Host (2.37): one guest's own setting for one permission; undefined is "Same as everyone". Keyed
@@ -560,7 +654,7 @@ export class Controller {
   setGuestPermission(peer: string, key: PermissionKey, value: boolean | undefined) {
     const id = this.view.people[peer]?.id;
     if (!id || !this.owns()) return;
-    const policy = this.session!.getPolicy();
+    const policy = this.room()!.getPolicy();
     const own = { ...policy.overrides[id] };
     if (value === undefined) delete own[key];
     else own[key] = value;
@@ -568,7 +662,7 @@ export class Controller {
     delete overrides[id];
     if (Object.keys(own).length) overrides[id] = own;
     // The newest choices win when the list is at its bound, so the companion never refuses it.
-    this.session!.setPolicy({
+    this.room()!.setPolicy({
       ...policy,
       overrides: Object.fromEntries(Object.entries(overrides).slice(-LIST)),
     });
@@ -706,6 +800,11 @@ export class Controller {
     return this.view.mode === 'host' ? APP_VERSION : (this.session?.hostSite ?? '');
   }
   private dispatch(c: Command) {
+    if (this.demo)
+      return this.demo.send(c, {
+        ...this.view.profile,
+        name: this.view.profile.name === 'Guest' ? 'Host' : this.view.profile.name,
+      });
     if (this.view.mode === 'host') {
       if (!this.live) return Promise.reject(new Disconnected('Companion is disconnected.'));
       return this.bridge!.send(c, 'host', {
@@ -728,6 +827,11 @@ export class Controller {
       if (!file.size || file.size > 16 * 1024 * 1024) throw Error('Choose audio up to 16 MiB.');
       const bytes = new Uint8Array(await file.arrayBuffer());
       const send = () => {
+        if (this.demo)
+          return this.demo.upload(bytes, file.name, {
+            ...this.view.profile,
+            name: this.view.profile.name === 'Guest' ? 'Host' : this.view.profile.name,
+          });
         if (this.view.mode === 'host' && this.live)
           return this.bridge!.upload(
             bytes,
@@ -779,6 +883,12 @@ export class Controller {
     }
   }
   async copyInvite() {
+    if (this.demo) {
+      this.notify(
+        'This is an example, so there is no invitation to share. To host for real, start the companion on your PC.',
+      );
+      return;
+    }
     if (!this.view.invite) {
       this.notify('Session is still starting. Try again in a moment.');
       return;
@@ -791,6 +901,11 @@ export class Controller {
     }
   }
   async rotate() {
+    if (this.demo) {
+      this.demo.rotate();
+      this.notify('Invitation replaced. Previous guests have been disconnected.', 'success');
+      return;
+    }
     if (this.role === 'view') {
       // The owner replaces it (2.36); this view shows the new invitation when the owner reports it.
       if (this.bridge?.post({ type: 'ownerAction', action: 'rotate' }))
@@ -823,9 +938,10 @@ export class Controller {
       return;
     }
     void this.run('revokePeer', { ownerId: peer }).catch(() => {});
-    this.session?.disconnect(peer);
+    this.room()?.disconnect(peer);
   }
   async leave() {
+    if (this.demo) return this.endDemo();
     const wasHost = this.view.mode === 'host';
     try {
       // A view never ends the session (2.36): the owner runs it, and End hosting is not offered there.

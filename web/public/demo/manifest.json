@@ -1,0 +1,426 @@
+[
+  {
+    "id": "air-horn",
+    "title": "Air Horn",
+    "file": "air-horn.mp3",
+    "art": "art/air-horn.png",
+    "category": "Reactions",
+    "durationMs": 2377,
+    "sizeBytes": 38378,
+    "licence": "CC0 1.0",
+    "source": "https://freesound.org/people/mcpable/sounds/131930/",
+    "sourceFile": "https://cdn.freesound.org/previews/131/131930_1542102-hq.mp3",
+    "sourceTitle": "Industrial Air Horn",
+    "author": "mcpable (Freesound)",
+    "licenceNote": "The Freesound sound page shows Creative Commons 0 (https://creativecommons.org/publicdomain/zero/1.0/). The file is Freesound's public 128 kbps MP3 preview (no login needed).",
+    "accessed": "2026-11-13",
+    "changes": "Trimmed 0.28 s of leading silence, 5 ms fade-in, peak-normalized to -1 dBFS, re-encoded as MP3 128 kbps."
+  },
+  {
+    "id": "applause",
+    "title": "Applause",
+    "file": "applause.mp3",
+    "category": "Reactions",
+    "durationMs": 9404,
+    "sizeBytes": 150551,
+    "licence": "Public domain",
+    "source": "https://commons.wikimedia.org/wiki/File:Applause_ii.ogg",
+    "sourceFile": "https://upload.wikimedia.org/wikipedia/commons/transcoded/0/09/Applause_ii.ogg/Applause_ii.ogg.mp3",
+    "sourceTitle": "Applause ii (PDSounds #405, \"applause-II\")",
+    "author": "thore (via PDSounds.org; moved to Wikimedia Commons by Fæ)",
+    "licenceNote": "Commons licence box: {{PD-author|thore}} (released into the public domain by the author), permission {{PD-pdsounds.org}}. The file is Wikimedia's MP3 transcode of the Ogg original.",
+    "accessed": "2026-11-13",
+    "changes": "Trimmed the quiet first 1.45 s, 40 ms fade-in, 500 ms fade-out, peak-normalized to -1 dBFS, re-encoded as MP3 128 kbps."
+  },
+  {
+    "id": "audience-laugh",
+    "title": "Audience Laugh",
+    "file": "audience-laugh.mp3",
+    "category": "Reactions",
+    "durationMs": 7632,
+    "sizeBytes": 122543,
+    "licence": "CC0 1.0",
+    "source": "https://freesound.org/people/HowardV/sounds/581528/",
+    "sourceFile": "https://cdn.freesound.org/previews/581/581528_1654262-hq.mp3",
+    "sourceTitle": "live audience comedy show genuine laughter_moderate.wav",
+    "author": "HowardV (Freesound)",
+    "licenceNote": "The Freesound sound page shows Creative Commons 0 (https://creativecommons.org/publicdomain/zero/1.0/). The file is Freesound's public 128 kbps MP3 preview (no login needed).",
+    "accessed": "2026-11-13",
+    "changes": "Kept 8.8 s to the end (7.6 s), 200 ms fade-in, 300 ms fade-out, peak-normalized to -1 dBFS, re-encoded as MP3 128 kbps."
+  },
+  {
+    "id": "crowd-cheer",
+    "title": "Crowd Cheer",
+    "file": "crowd-cheer.mp3",
+    "category": "Reactions",
+    "durationMs": 6432,
+    "sizeBytes": 103343,
+    "licence": "CC0 1.0",
+    "source": "https://freesound.org/people/Krizin/sounds/651646/",
+    "sourceFile": "https://cdn.freesound.org/previews/651/651646_5315864-hq.mp3",
+    "sourceTitle": "Crowd Cheer 5",
+    "author": "Krizin (Freesound)",
+    "licenceNote": "The Freesound sound page shows Creative Commons 0 (https://creativecommons.org/publicdomain/zero/1.0/). The file is Freesound's public 128 kbps MP3 preview (no login needed).",
+    "accessed": "2026-11-13",
+    "changes": "60 ms fade-in, 400 ms fade-out, peak-normalized to -1 dBFS, re-encoded as MP3 128 kbps."
+  },
+  {
+    "id": "wrong-buzzer",
+    "title": "Wrong Answer",
+    "file": "wrong-buzzer.mp3",
+    "art": "art/wrong-buzzer.png",
+    "category": "Reactions",
+    "durationMs": 1149,
+    "sizeBytes": 18779,
+    "licence": "CC0 1.0",
+    "source": "https://freesound.org/people/-Andreas/sounds/648462/",
+    "sourceFile": "https://cdn.freesound.org/previews/648/648462_11771918-hq.mp3",
+    "sourceTitle": "Wrong Answer",
+    "author": "-Andreas (Freesound)",
+    "licenceNote": "The Freesound sound page shows Creative Commons 0 (https://creativecommons.org/publicdomain/zero/1.0/). The file is Freesound's public 128 kbps MP3 preview (no login needed).",
+    "accessed": "2026-11-13",
+    "changes": "30 ms fade-out, peak-normalized to -1 dBFS, re-encoded as MP3 128 kbps."
+  },
+  {
+    "id": "rimshot",
+    "title": "Rimshot",
+    "file": "rimshot.mp3",
+    "category": "Reactions",
+    "durationMs": 2011,
+    "sizeBytes": 32540,
+    "licence": "CC0 1.0",
+    "source": "https://freesound.org/people/OverlookHotelRecords/sounds/271208/",
+    "sourceFile": "https://cdn.freesound.org/previews/271/271208_4709749-hq.mp3",
+    "sourceTitle": "Baddum Tish - Comedy Rimshots - classic rim shot.wav",
+    "author": "OverlookHotelRecords (Freesound)",
+    "licenceNote": "The Freesound sound page shows Creative Commons 0 (https://creativecommons.org/publicdomain/zero/1.0/). The file is Freesound's public 128 kbps MP3 preview (no login needed).",
+    "accessed": "2026-11-13",
+    "changes": "Cut the first \"ba-dum tish\" (0-1.95 s) from the 62 s collection, 200 ms fade-out, peak-normalized to -1 dBFS, re-encoded as MP3 128 kbps."
+  },
+  {
+    "id": "cymbal-crash",
+    "title": "Cymbal Crash",
+    "file": "cymbal-crash.mp3",
+    "category": "Impacts",
+    "durationMs": 5564,
+    "sizeBytes": 89252,
+    "licence": "CC0 1.0",
+    "source": "https://freesound.org/people/Logicogonist/sounds/807998/",
+    "sourceFile": "https://cdn.freesound.org/previews/807/807998_3797507-hq.mp3",
+    "sourceTitle": "crash Zildjian 16 inches bassized very long",
+    "author": "Logicogonist (Freesound)",
+    "licenceNote": "The Freesound sound page shows Creative Commons 0 (https://creativecommons.org/publicdomain/zero/1.0/). The file is Freesound's public 128 kbps MP3 preview (no login needed). The uploader made it from https://freesound.org/people/minorr/sounds/104220/ (minorr), which is also CC0 (checked).",
+    "accessed": "2026-11-13",
+    "changes": "Ended at 5.5 s with a 400 ms fade-out, normalized to -2.5 dBFS before encoding (this dense source overshoots when decoded; decoded peak is about -0.7 dBFS), MP3 128 kbps."
+  },
+  {
+    "id": "firecracker",
+    "title": "Firecracker",
+    "file": "firecracker.mp3",
+    "art": "art/firecracker.png",
+    "category": "Impacts",
+    "durationMs": 2352,
+    "sizeBytes": 38063,
+    "licence": "CC0 1.0",
+    "source": "https://freesound.org/people/unfa/sounds/609588/",
+    "sourceFile": "https://cdn.freesound.org/previews/609/609588_1038806-hq.mp3",
+    "sourceTitle": "Firecracker Explosion",
+    "author": "unfa (Freesound)",
+    "licenceNote": "The Freesound sound page shows Creative Commons 0 (https://creativecommons.org/publicdomain/zero/1.0/). The file is Freesound's public 128 kbps MP3 preview (no login needed).",
+    "accessed": "2026-11-13",
+    "changes": "300 ms fade-out, peak-normalized to -1 dBFS, re-encoded as MP3 128 kbps."
+  },
+  {
+    "id": "door-knock",
+    "title": "Door Knock",
+    "file": "door-knock.mp3",
+    "category": "Impacts",
+    "durationMs": 2011,
+    "sizeBytes": 32540,
+    "licence": "CC0 1.0",
+    "source": "https://freesound.org/people/wjtaylor/sounds/268500/",
+    "sourceFile": "https://cdn.freesound.org/previews/268/268500_4989900-hq.mp3",
+    "sourceTitle": "door_knock.wav",
+    "author": "wjtaylor (Freesound)",
+    "licenceNote": "The Freesound sound page shows Creative Commons 0 (https://creativecommons.org/publicdomain/zero/1.0/). The file is Freesound's public 128 kbps MP3 preview (no login needed).",
+    "accessed": "2026-11-13",
+    "changes": "Trimmed 0.15 s of leading silence, 50 ms fade-out, peak-normalized to -1 dBFS, re-encoded as MP3 128 kbps."
+  },
+  {
+    "id": "service-bell",
+    "title": "Service Bell",
+    "file": "service-bell.mp3",
+    "art": "art/service-bell.png",
+    "category": "Impacts",
+    "durationMs": 3960,
+    "sizeBytes": 63791,
+    "licence": "CC0 1.0",
+    "source": "https://freesound.org/people/iwanPlays/sounds/532751/",
+    "sourceFile": "https://cdn.freesound.org/previews/532/532751_7108319-hq.mp3",
+    "sourceTitle": "hotel bell",
+    "author": "iwanPlays (Freesound)",
+    "licenceNote": "The Freesound sound page shows Creative Commons 0 (https://creativecommons.org/publicdomain/zero/1.0/). The file is Freesound's public 128 kbps MP3 preview (no login needed). The uploader edited it from https://freesound.org/people/EpicWizard/sounds/325193/ (EpicWizard), which is also CC0 (checked).",
+    "accessed": "2026-11-13",
+    "changes": "300 ms fade-out, peak-normalized to -1 dBFS, re-encoded as MP3 128 kbps."
+  },
+  {
+    "id": "boing",
+    "title": "Boing",
+    "file": "boing.mp3",
+    "art": "art/boing.png",
+    "category": "Cartoon",
+    "durationMs": 2232,
+    "sizeBytes": 36143,
+    "licence": "CC0 1.0",
+    "source": "https://freesound.org/people/reelworldstudio/sounds/161122/",
+    "sourceFile": "https://cdn.freesound.org/previews/161/161122_2750714-hq.mp3",
+    "sourceTitle": "Cartoon Boing.wav",
+    "author": "reelworldstudio (Freesound)",
+    "licenceNote": "The Freesound sound page shows Creative Commons 0 (https://creativecommons.org/publicdomain/zero/1.0/). The file is Freesound's public 128 kbps MP3 preview (no login needed).",
+    "accessed": "2026-11-13",
+    "changes": "Trimmed 0.08 s of leading silence, 300 ms fade-out, peak-normalized to -1 dBFS (+24 dB, the source is quiet), re-encoded as MP3 128 kbps."
+  },
+  {
+    "id": "whoosh",
+    "title": "Whoosh",
+    "file": "whoosh.mp3",
+    "art": "art/whoosh.png",
+    "category": "Cartoon",
+    "durationMs": 2208,
+    "sizeBytes": 35759,
+    "licence": "CC0 1.0",
+    "source": "https://freesound.org/people/BennettFilmTeacher/sounds/486234/",
+    "sourceFile": "https://cdn.freesound.org/previews/486/486234_7254895-hq.mp3",
+    "sourceTitle": "Whoosh For Whip Zoom",
+    "author": "BennettFilmTeacher (Freesound)",
+    "licenceNote": "The Freesound sound page shows Creative Commons 0 (https://creativecommons.org/publicdomain/zero/1.0/). The file is Freesound's public 128 kbps MP3 preview (no login needed).",
+    "accessed": "2026-11-13",
+    "changes": "100 ms fade-out, peak-normalized to -1 dBFS, re-encoded as MP3 128 kbps."
+  },
+  {
+    "id": "cat-meow",
+    "title": "Cat Meow",
+    "file": "cat-meow.mp3",
+    "art": "art/cat-meow.png",
+    "category": "Animals",
+    "durationMs": 1541,
+    "sizeBytes": 25034,
+    "licence": "CC0 1.0",
+    "source": "https://freesound.org/people/tuberatanka/sounds/110011/",
+    "sourceFile": "https://cdn.freesound.org/previews/110/110011_1537422-hq.mp3",
+    "sourceTitle": "cat meow",
+    "author": "tuberatanka (Freesound)",
+    "licenceNote": "The Freesound sound page shows Creative Commons 0 (https://creativecommons.org/publicdomain/zero/1.0/). The file is Freesound's public 128 kbps MP3 preview (no login needed).",
+    "accessed": "2026-11-13",
+    "changes": "Trimmed 0.1 s of leading noise, 20 ms fade-in, 200 ms fade-out, peak-normalized to -1 dBFS, re-encoded as MP3 128 kbps."
+  },
+  {
+    "id": "dog-bark",
+    "title": "Dog Bark",
+    "file": "dog-bark.mp3",
+    "category": "Animals",
+    "durationMs": 4056,
+    "sizeBytes": 65327,
+    "licence": "CC0 1.0",
+    "source": "https://freesound.org/people/aunrea/sounds/495658/",
+    "sourceFile": "https://cdn.freesound.org/previews/495/495658_7932944-hq.mp3",
+    "sourceTitle": "Dog Bark",
+    "author": "aunrea (Freesound)",
+    "licenceNote": "The Freesound sound page shows Creative Commons 0 (https://creativecommons.org/publicdomain/zero/1.0/). The file is Freesound's public 128 kbps MP3 preview (no login needed).",
+    "accessed": "2026-11-13",
+    "changes": "100 ms fade-out, normalized to -1.5 dBFS before encoding (decoded peak about -1 dBFS), MP3 128 kbps."
+  },
+  {
+    "id": "drum-roll",
+    "title": "Drum Roll",
+    "file": "drum-roll.mp3",
+    "art": "art/drum-roll.png",
+    "category": "Music",
+    "durationMs": 8304,
+    "sizeBytes": 133295,
+    "licence": "CC0 1.0",
+    "source": "https://freesound.org/people/Scheffler/sounds/201211/",
+    "sourceFile": "https://cdn.freesound.org/previews/201/201211_78957-hq.mp3",
+    "sourceTitle": "Drum Roll Please.wav",
+    "author": "Scheffler (Freesound)",
+    "licenceNote": "The Freesound sound page shows Creative Commons 0 (https://creativecommons.org/publicdomain/zero/1.0/). The file is Freesound's public 128 kbps MP3 preview (no login needed).",
+    "accessed": "2026-11-13",
+    "changes": "Trimmed the silent first 2.35 s and ended at 10.6 s with a 1.5 s fade-out of the cymbal tail, peak-normalized to -1 dBFS, re-encoded as MP3 128 kbps."
+  },
+  {
+    "id": "fanfare",
+    "title": "Fanfare",
+    "file": "fanfare.mp3",
+    "category": "Music",
+    "durationMs": 5808,
+    "sizeBytes": 93359,
+    "licence": "CC0 1.0",
+    "source": "https://freesound.org/people/qubodup/sounds/855457/",
+    "sourceFile": "https://cdn.freesound.org/previews/855/855457_71257-hq.mp3",
+    "sourceTitle": "Real Trumpet Fanfare 1",
+    "author": "qubodup (Freesound)",
+    "licenceNote": "The Freesound sound page shows Creative Commons 0 (https://creativecommons.org/publicdomain/zero/1.0/). The file is Freesound's public 128 kbps MP3 preview (no login needed). The uploader took it from a U.S. Marine Corps (Marine Barracks Washington) B-roll video, a U.S. government work.",
+    "accessed": "2026-11-13",
+    "changes": "400 ms fade-out, peak-normalized to -1 dBFS, re-encoded as MP3 128 kbps."
+  },
+  {
+    "id": "sousa-columbias-pride",
+    "title": "Columbia's Pride (Sousa)",
+    "file": "sousa-columbias-pride.mp3",
+    "art": "art/sousa-columbias-pride.png",
+    "category": "Music",
+    "durationMs": 35304,
+    "sizeBytes": 424079,
+    "licence": "Public domain",
+    "source": "https://commons.wikimedia.org/wiki/File:Sousa%27s_%22Columbia%27s_Pride%22_-_United_States_Marine_Band_(2018).mp3",
+    "sourceFile": "https://upload.wikimedia.org/wikipedia/commons/9/96/Sousa%27s_%22Columbia%27s_Pride%22_-_United_States_Marine_Band_%282018%29.mp3",
+    "sourceTitle": "Sousa's \"Columbia's Pride\" (1914), United States Marine Band (2018)",
+    "author": "John Philip Sousa (composer, 1914); \"The President's Own\" United States Marine Band, conducted by Jason K. Fettig (performance, 2018)",
+    "licenceNote": "Commons licence box: composition {{PD-old-auto-expired|1932}}; performance and recording {{PD-USGov-Military-Marines}} (work of the U.S. Marine Band). Originally published at https://www.marineband.marines.mil/Audio-Resources/The-Complete-Marches-of-John-Philip-Sousa/",
+    "accessed": "2026-11-13",
+    "changes": "Excerpt 0-35.25 s of the 68.4 s march (introduction and first strains, ending on the chord before the trio), 400 ms fade-out, peak-normalized to -1 dBFS, re-encoded as MP3 96 kbps stereo."
+  },
+  {
+    "id": "apollo11-small-step",
+    "title": "One Small Step (Apollo 11)",
+    "file": "apollo11-small-step.mp3",
+    "art": "art/apollo11-small-step.png",
+    "category": "Speech",
+    "durationMs": 6713,
+    "sizeBytes": 53887,
+    "licence": "Public domain",
+    "source": "https://nssdc.gsfc.nasa.gov/planetary/lunar/apollo11.html",
+    "sourceFile": "https://nssdc.gsfc.nasa.gov/planetary/lunar/a11step.aiff",
+    "sourceTitle": "Apollo 11: \"That's one small step for man, one giant leap for mankind.\" (a11step.aiff)",
+    "author": "NASA (Neil Armstrong, 21 July 1969 UTC)",
+    "licenceNote": "NASA mission audio, a work of the U.S. government (not subject to copyright in the U.S.). Also on Commons as File:Phrase_de_Neil_Armstrong.oga with {{PD-USGov-NASA}}.",
+    "accessed": "2026-11-13",
+    "changes": "Decoded the 8-bit signed 22,254 Hz AIFF, ended at 6.66 s (before a static click) with an 80 ms fade-out, resampled to 44.1 kHz mono, peak-normalized to -1 dBFS, MP3 64 kbps mono. The radio hiss is original.",
+    "transcript": {
+      "text": "That's one small step for man, one giant leap for mankind.",
+      "words": [
+        {
+          "w": "That's",
+          "startMs": 100,
+          "endMs": 290
+        },
+        {
+          "w": "one",
+          "startMs": 320,
+          "endMs": 540
+        },
+        {
+          "w": "small",
+          "startMs": 860,
+          "endMs": 1170
+        },
+        {
+          "w": "step",
+          "startMs": 1180,
+          "endMs": 1510
+        },
+        {
+          "w": "for",
+          "startMs": 1700,
+          "endMs": 1810
+        },
+        {
+          "w": "man,",
+          "startMs": 1850,
+          "endMs": 2180
+        },
+        {
+          "w": "one",
+          "startMs": 3810,
+          "endMs": 4000
+        },
+        {
+          "w": "giant",
+          "startMs": 4870,
+          "endMs": 5120
+        },
+        {
+          "w": "leap",
+          "startMs": 5240,
+          "endMs": 5400
+        },
+        {
+          "w": "for",
+          "startMs": 5570,
+          "endMs": 5670
+        },
+        {
+          "w": "mankind.",
+          "startMs": 5750,
+          "endMs": 6550
+        }
+      ],
+      "textSource": "Wording as printed on the NASA NSSDC page https://nssdc.gsfc.nasa.gov/planetary/lunar/apollo11.html (NASA's Apollo Lunar Surface Journal writes \"for (a) man\").",
+      "timing": "Approximate (about +-0.15 s): word boundaries placed at dips in speech-band (300-3400 Hz) energy measured in 20 ms frames (pauses and stop-consonant closures), then shifted +20 ms for the MP3 encoder delay (measured by comparing the source and the decoded MP3). Not checked by ear."
+    }
+  },
+  {
+    "id": "apollo11-eagle-landed",
+    "title": "The Eagle Has Landed (Apollo 11)",
+    "file": "apollo11-eagle-landed.mp3",
+    "art": "art/apollo11-eagle-landed.png",
+    "category": "Speech",
+    "durationMs": 3161,
+    "sizeBytes": 25599,
+    "licence": "Public domain",
+    "source": "https://nssdc.gsfc.nasa.gov/planetary/lunar/apollo11.html",
+    "sourceFile": "https://nssdc.gsfc.nasa.gov/planetary/lunar/a11landing.aiff",
+    "sourceTitle": "Apollo 11: \"Houston, Tranquility Base here. The Eagle has landed.\" (a11landing.aiff)",
+    "author": "NASA (Neil Armstrong, 20 July 1969)",
+    "licenceNote": "NASA mission audio, a work of the U.S. government (not subject to copyright in the U.S.).",
+    "accessed": "2026-11-13",
+    "changes": "Decoded the 8-bit signed 22,254 Hz AIFF, ended at 3.10 s (before a static burst) with a 60 ms fade-out, resampled to 44.1 kHz mono, peak-normalized to -1 dBFS, MP3 64 kbps mono. The radio hiss is original.",
+    "transcript": {
+      "text": "Houston, Tranquility Base here. The Eagle has landed.",
+      "words": [
+        {
+          "w": "Houston,",
+          "startMs": 300,
+          "endMs": 680
+        },
+        {
+          "w": "Tranquility",
+          "startMs": 740,
+          "endMs": 1380
+        },
+        {
+          "w": "Base",
+          "startMs": 1440,
+          "endMs": 1620
+        },
+        {
+          "w": "here.",
+          "startMs": 1620,
+          "endMs": 1740
+        },
+        {
+          "w": "The",
+          "startMs": 2040,
+          "endMs": 2140
+        },
+        {
+          "w": "Eagle",
+          "startMs": 2140,
+          "endMs": 2440
+        },
+        {
+          "w": "has",
+          "startMs": 2440,
+          "endMs": 2640
+        },
+        {
+          "w": "landed.",
+          "startMs": 2700,
+          "endMs": 3000
+        }
+      ],
+      "textSource": "Wording as printed on the NASA NSSDC page https://nssdc.gsfc.nasa.gov/planetary/lunar/apollo11.html",
+      "timing": "Approximate (about +-0.15 s): word boundaries placed at dips in speech-band (300-3400 Hz) energy measured in 20 ms frames (pauses and stop-consonant closures), then shifted +20 ms for the MP3 encoder delay (measured by comparing the source and the decoded MP3). Not checked by ear."
+    }
+  }
+]

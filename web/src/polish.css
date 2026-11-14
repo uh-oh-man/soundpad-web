@@ -1142,3 +1142,63 @@ html {
 .connection-banner button {
   margin-left: 8px;
 }
+/* "Try the example" on the landing page, and the example session's banner. */
+.try-example {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 14px;
+  max-width: 600px;
+  margin: 18px 0 8px;
+}
+.try-example p {
+  flex: 1 1 260px;
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+/* Between the header and the workspace, so it comes first on phones too (above Spotify there). */
+.demo-banner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  margin: 12px 34px 0;
+  padding: 9px 13px;
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--text-primary);
+  border: 1px solid color-mix(in srgb, var(--accent) 40%, var(--line));
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--accent) 9%, var(--surface-1));
+}
+.demo-banner svg {
+  flex: none;
+  color: var(--accent);
+}
+.demo-banner span {
+  flex: 1 1 220px;
+  min-width: 0;
+}
+.demo-banner button {
+  flex: none;
+}
+@media (min-width: 1001px) {
+  .app-shell.is-connected:has(> .demo-banner) {
+    grid-template-rows: 78px auto minmax(0, 1fr) auto;
+  }
+  .app-shell.is-connected:has(> .demo-banner) .player {
+    grid-row: 4;
+  }
+}
+@media (max-width: 1050px) {
+  .demo-banner {
+    margin: 12px 24px 0;
+  }
+}
+@media (max-width: 700px) {
+  .demo-banner {
+    margin: 12px 17px 0;
+    font-size: 12px;
+  }
+}
