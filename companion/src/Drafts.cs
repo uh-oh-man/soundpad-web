@@ -221,6 +221,8 @@ public sealed class GuestBudgets(string? totalsPath = null, Func<long>? clock = 
     {
         public string Name = "Guest";
         public long SessionKept, ExtraTemp, ExtraKept;
+        /// <summary>Bytes of Keeps under way (<see cref="ReserveKeep"/>), counted as kept until they finish.</summary>
+        public long PendingKept;
         public BudgetRequestView? Request;
     }
     private readonly Dictionary<string, Guest> guests = [];
@@ -300,11 +302,33 @@ public sealed class GuestBudgets(string? totalsPath = null, Func<long>? clock = 
     {
         lock (guests)
         {
+            return CheckKeepLocked(guest, For(guest, name), bytes, settings);
+        }
+    }
+    private string? CheckKeepLocked(string guest, Guest g, long bytes, KeepSettings settings)
+    {
+        long kept = KeptUsed(guest, g, settings) + g.PendingKept, limit = KeptLimit(g, settings);
+        if (kept + bytes > limit) return Ask(guest, g, "kept", kept + bytes - limit, Waiting + " Keeping this would pass your permanent allowance.");
+        return null;
+    }
+
+    /// <summary>
+    /// <see cref="CheckKeep"/> and, when it fits, holds the bytes at once (review, 2.42): Keeps at the same moment see
+    /// each other. The caller notes the Keep (<see cref="NoteKept"/>) when it succeeds, and always releases the hold.
+    /// </summary>
+    public string? ReserveKeep(string guest, string? name, long bytes, KeepSettings settings)
+    {
+        lock (guests)
+        {
             var g = For(guest, name);
-            long kept = KeptUsed(guest, g, settings), limit = KeptLimit(g, settings);
-            if (kept + bytes > limit) return Ask(guest, g, "kept", kept + bytes - limit, Waiting + " Keeping this would pass your permanent allowance.");
+            if (CheckKeepLocked(guest, g, bytes, settings) is { } refusal) return refusal;
+            g.PendingKept += bytes;
             return null;
         }
+    }
+    public void ReleaseKeep(string guest, long bytes)
+    {
+        lock (guests) if (guests.TryGetValue(guest, out var g)) g.PendingKept = Math.Max(0, g.PendingKept - bytes);
     }
 
     public void NoteTemp(string guest, string? name, string assetId, long bytes)

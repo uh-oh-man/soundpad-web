@@ -4888,3 +4888,73 @@ test('palette: a recorded performance of my own palette taps opens as an editabl
   await page.keyboard.press('Alt+ArrowRight');
   await expect(timeline.getByRole('button').first()).toHaveAccessibleName(/at 10 ms/);
 });
+
+test('sentences (2.42 review): Space selects a lone piece, Escape closes, nudges add up, the player names the sentence, text typed just before Keep is kept, and removing a pause keeps the focus', async ({
+  page,
+  harness,
+}) => {
+  await host(page, harness);
+  await recordingsWithWords(page, 1);
+  await page.getByRole('button', { name: 'Sentences', exact: true }).click();
+  const sentences = page.getByRole('dialog', { name: 'Sentences' });
+  await sentences.getByLabel('New sentence').fill('fixture');
+  await sentences.getByRole('button', { name: 'New sentence' }).click();
+  const builder = sentences.getByRole('region', { name: /^Sentence / });
+  const timeline = builder.getByRole('group', { name: 'Timeline' });
+  const word = timeline.getByRole('button', { name: /^“fixture”/i });
+  await expect(word).toBeVisible();
+  // A piece with no neighbour is selected from the keyboard, and its inspector opens.
+  await word.focus();
+  await page.keyboard.press('Space');
+  await expect(word).toHaveAttribute('aria-pressed', 'true');
+  await expect(builder.getByRole('region', { name: /^Piece “fixture”/i })).toBeVisible();
+  // Escape clears the selection first; with nothing selected it closes the window.
+  await page.keyboard.press('Escape');
+  await expect(word).toHaveAttribute('aria-pressed', 'false');
+  await page.keyboard.press('Escape');
+  await expect(sentences).toBeHidden();
+  await page.getByRole('button', { name: 'Sentences', exact: true }).click();
+  await sentences
+    .getByRole('list', { name: 'Sentences in progress' })
+    .getByRole('button', { name: /fixture/ })
+    .click();
+  const listed = (await sendCommand(page, 'sentenceList')) as {
+    data?: { sentences: { id: string; text: string }[] };
+  };
+  const id = listed.data!.sentences.find((s) => s.text === 'fixture')!.id;
+  const stored = async () =>
+    (
+      (await sendCommand(page, 'sentenceGet', { sentenceId: id })) as {
+        data: {
+          pieces: { kind: string; offsetMs: number }[];
+          versions: { n: number; text: string }[];
+        };
+      }
+    ).data;
+  // Quick nudges all count, though each reply comes later.
+  await word.focus();
+  for (let i = 0; i < 3; i++) await page.keyboard.press('Alt+ArrowRight');
+  await expect(word).toHaveAccessibleName(/at 30 ms/);
+  await expect
+    .poll(async () => (await stored()).pieces.find((p) => p.kind === 'word')?.offsetMs)
+    .toBe(30);
+  // Played into the game, an untitled sentence is named by its text.
+  await sendCommand(page, 'sentenceEdit', {
+    sentenceId: id,
+    sentence: { do: 'insertPause', offsetMs: 1000, durationMs: 4000 },
+  });
+  await builder.getByRole('button', { name: 'Play into game' }).click();
+  await expect(page.getByText('Sentence: fixture', { exact: true })).toBeVisible();
+  // Text typed just before Keep is what is kept.
+  await builder.getByLabel('Sentence text').fill('fixture tone');
+  await builder.getByRole('button', { name: 'Keep', exact: true }).click();
+  await expect(builder.getByText('Kept · version 1')).toBeVisible();
+  expect((await stored()).versions[0].text).toBe('fixture tone');
+  // Removing a pause from the keyboard leaves the focus on the timeline (on a neighbour).
+  const pause = timeline.getByRole('button', { name: /^Pause, 4000 ms/ });
+  await pause.click();
+  await page.keyboard.press('Delete');
+  await expect(pause).toHaveCount(0);
+  // The pause was last: the piece before it has the focus now.
+  await expect(timeline.getByRole('button', { name: /^“tone”/ })).toBeFocused();
+});

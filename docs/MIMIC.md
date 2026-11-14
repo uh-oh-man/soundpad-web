@@ -131,6 +131,7 @@ The website always serves the newest version and hides anything the host's compa
 | Drafts, Latest phrase, guest preview and Keep | 2.40 |
 | Discard keeps what was recorded since a crash | 2.41 |
 | Voice library, history search, speaker groups | 2.41 |
+| Sentences, speaking palette, performances and sets ([guide](SENTENCES.md)) | 2.42 |
 
 ## Protocol
 

@@ -18,6 +18,24 @@ public sealed partial class Bridge
     private long sentencesRevision;
     private volatile bool slotsForSentences;
     private RateWindow paletteRate = new(GuestPaletteTapsPerMinute, TimeSpan.FromMinutes(1));
+    /// <summary>
+    /// Changes to the sentences file per minute, per guest (review, 2.42): every change rewrites the whole file, like the
+    /// voice library's (2.41). Room for typing, which saves at most about three times a second.
+    /// </summary>
+    public const int GuestSentenceWritesPerMinute = 240;
+    private RateWindow sentenceWriteRate = new(GuestSentenceWritesPerMinute, TimeSpan.FromMinutes(1));
+    /// <summary>Test seam: another limit for guests' sentence changes.</summary>
+    internal void UseSentenceWriteLimit(RateWindow limit) => sentenceWriteRate = limit;
+    /// <summary>Room in the shared lists that guests' changes leave for the host's own (review, 2.42).</summary>
+    public const int HostReserveSentences = 400, HostReserveNamed = 1000;
+    /// <summary>A guest's sentence nobody kept is removed once untouched this long (review, 2.42): the host cannot see it.</summary>
+    public const long GuestUnkeptMs = 14L * 24 * 3600 * 1000;
+    /// <summary>One sentence or palette render for the game at a time (review, 2.42), like exact slices' render slot.</summary>
+    private readonly SemaphoreSlim sentenceRenderSlot = new(1, 1);
+    /// <summary>Guests whose sentence Keep is under way: one at a time each.</summary>
+    private readonly ConcurrentDictionary<string, byte> keepingSentence = new(StringComparer.Ordinal);
+    /// <summary>Slot registration failed for a reason other than a missing quiet moment: no new try (and no wait) before this.</summary>
+    private long slotsFailedUntil;
     private readonly ConcurrentDictionary<string, (long Length, long Modified, string Hash)> fileHashes = new(StringComparer.OrdinalIgnoreCase);
 
     private SentenceStore SentenceData
@@ -85,18 +103,23 @@ public sealed partial class Bridge
             bool host = actor == "host";
             if (!host && (audioAudience != null && (!sessionAccepting || audience != audioAudience) || requester != null && revokedAudioPeers.ContainsKey(requester))) throw new InvalidDataException("This guest session authorization changed.");
             var person = Person(actor, participant); string key = PersonKey(actor, participant, requester);
-            bool canBuild = host || LibrarySettingsNow.GuestLibraryEdit;
+            // Sentence commands run off the socket's receive loop (Offloaded), so waiting here for the library is fine.
+            bool canBuild = host || GuestsMayBuild();
             var input = c.Sentence ?? new SentenceInput();
+            // Every change rewrites the sentences file: a guest's pace is limited (review, 2.42).
+            bool writes = c.Op is "sentenceCreate" or "sentenceText" or "sentenceEdit" or "sentenceDiscard" or "sentenceKeep" or "paletteMark"
+                || c.Op == "performance" && c.Action == "stop" || c.Op == "performanceSets" && c.Action is "create" or "update" or "delete" or "activate";
+            if (!host && writes && !sentenceWriteRate.TryTake(key)) throw new InvalidDataException("Too many changes to sentences. Wait a moment and try again.");
             switch (c.Op)
             {
                 case "sentenceList": return Ok(c, ListSentences(key, host, canBuild));
-                case "sentenceCreate": return Ok(c, await Task.Run(() => CreateSentence(c, input, key, person, canBuild)));
-                case "sentenceGet": return Ok(c, await Task.Run(() => SentenceView(c.SentenceId, key, host, canBuild)));
-                case "sentenceText": return Ok(c, await Task.Run(() => ChangeSentence(c.SentenceId, key, host, canBuild, s => SentenceComposer.Rematch(s, Text(input.Text), Corpus()))));
-                case "sentenceEdit": return Ok(c, await Task.Run(() => EditSentence(c, input, key, host, canBuild)));
-                case "sentenceAlternatives": return Ok(c, await Task.Run(() => SentenceAlternatives(c.SentenceId, c.Sentence?.Pieces?.FirstOrDefault(), key, host)));
+                case "sentenceCreate": return Ok(c, CreateSentence(c, input, key, person, canBuild));
+                case "sentenceGet": return Ok(c, SentenceView(c.SentenceId, key, host, canBuild));
+                case "sentenceText": return Ok(c, ChangeSentence(c.SentenceId, key, host, canBuild, s => SentenceComposer.Rematch(s, Text(input.Text), Corpus())));
+                case "sentenceEdit": return Ok(c, EditSentence(c, input, key, host, canBuild));
+                case "sentenceAlternatives": return Ok(c, SentenceAlternatives(c.SentenceId, c.Sentence?.Pieces?.FirstOrDefault(), key, host, canBuild));
                 case "sentenceDiscard": return Ok(c, DiscardSentence(c.SentenceId, key, host));
-                case "sentencePreview": return Ok(c, await PreviewSentence(c, input, actor, participant, requester, key, host));
+                case "sentencePreview": return Ok(c, await PreviewSentence(c, input, actor, participant, requester, key, host, canBuild));
                 case "sentenceKeep": return Ok(c, await KeepSentence(c.SentenceId, key, host, canBuild, person));
                 case "sentencePlay": return await PlaySentence(c, input, actor, participant, requester, audience, intent, key, host);
                 case "paletteSearch": return Ok(c, await Task.Run(() => PaletteSearch(c, input, key)));
@@ -107,10 +130,25 @@ public sealed partial class Bridge
             }
             throw new InvalidDataException("Unsupported command.");
         }
+        catch (OperationCanceledException) when (intent?.Withdrawn.IsCancellationRequested == true) { return Superseded(c, "newer"); }
         catch (SentenceRender.MissingSourceException ex) { return new("ack", c.Id, false, ex.Message, new { pieceId = ex.PieceId }); }
         catch (SliceRangeException ex) { return new("ack", c.Id, false, ex.Message); }
         catch (InvalidDataException ex) { return new("ack", c.Id, false, ex.Message); }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { return new("ack", c.Id, false, "The sentences could not read or save their files: " + ex.Message); }
+    }
+
+    /// <summary>
+    /// Whether the host lets guests build sentences (the library's edit setting). Until the library has loaded this
+    /// loads it (review, 2.42: it used to fail as a crash); a library that cannot load is answered clearly.
+    /// </summary>
+    private bool GuestsMayBuild()
+    {
+        if (LibrarySettingsNow is { } settings) return settings.GuestLibraryEdit;
+        try { return Voices.Settings.GuestLibraryEdit; }
+        catch (Exception ex) when (ex is IOException or InvalidDataException or UnauthorizedAccessException or System.Text.Json.JsonException)
+        {
+            throw new InvalidDataException("The voice library is still loading. Try again in a moment.");
+        }
     }
 
     private static string Text(string? text)
@@ -124,6 +162,28 @@ public sealed partial class Bridge
     private static bool CanSee(SentenceProject s, string key, bool host) => s.Owner == key || s.Kept || host && s.Owner == "host";
     /// <summary>Its maker may change it (while the host lets guests build); the host may change any kept sentence.</summary>
     private static bool CanChange(SentenceProject s, string key, bool host, bool canBuild) => s.Owner == key && (host || canBuild) || host && s.Kept;
+    /// <summary>
+    /// What a viewer sees of a sentence it may see (review, 2.42): its maker, and whoever may change it, see the live
+    /// revision; everyone else sees the latest kept version, so edits nobody kept yet stay private, as with Play.
+    /// </summary>
+    private static SentenceProject Visible(SentenceProject s, string key, bool host, bool canBuild) =>
+        s.Owner == key || CanChange(s, key, host, canBuild) || s.Versions.Count == 0 ? s : new SentenceProject
+        {
+            Id = s.Id, Owner = s.Owner, OwnerName = s.OwnerName, Title = s.Title, Created = s.Created, Updated = s.Versions[^1].At, Revision = s.Revision,
+            Origin = s.Origin, Pinned = s.Pinned, Versions = s.Versions, Text = s.Versions[^1].Text, Pieces = s.Versions[^1].Pieces, Settings = s.Versions[^1].Settings,
+        };
+    /// <summary>A guest's unkept sentences untouched for <see cref="GuestUnkeptMs"/> go: the host never sees them to discard them.</summary>
+    private void SweepGuestDrafts(SentenceFile f)
+    {
+        long cutoff = utcNow() - GuestUnkeptMs;
+        f.Sentences.RemoveAll(s => !s.Kept && s.Owner != "host" && s.Updated < cutoff);
+    }
+    /// <summary>Room for one more unkept sentence of this person; guests leave <see cref="HostReserveSentences"/> for the host.</summary>
+    private static void RequireRoom(SentenceFile f, string key, bool host)
+    {
+        if (f.Sentences.Count(s => s.Owner == key && !s.Kept) >= MaxSentencesPerPerson) throw new InvalidDataException($"You have {MaxSentencesPerPerson} unkept sentences. Keep or discard some first.");
+        if (f.Sentences.Count >= SentenceStore.MaxSentences - (host ? 0 : HostReserveSentences)) throw new InvalidDataException("The sentence list is full.");
+    }
 
     private object ListSentences(string key, bool host, bool canBuild) => SentenceData.Read(f => new
     {
@@ -131,7 +191,7 @@ public sealed partial class Bridge
         canBuild,
         canKeep = host || Keep.GuestKeep,
         problem = SentenceData.Problem,
-        sentences = f.Sentences.Where(s => CanSee(s, key, host)).OrderByDescending(s => s.Updated).Select(s => new
+        sentences = f.Sentences.Where(s => CanSee(s, key, host)).Select(s => Visible(s, key, host, canBuild)).OrderByDescending(s => s.Updated).Select(s => new
         {
             s.Id, s.Title, text = s.Text.Length > 300 ? s.Text[..299] + "…" : s.Text, s.OwnerName, mine = s.Owner == key, s.Kept, s.Pinned, s.Updated, s.Origin,
             versions = s.Versions.Count, durationMs = s.Versions.Count > 0 ? s.Versions[^1].DurationMs : 0,
@@ -153,14 +213,15 @@ public sealed partial class Bridge
             Settings = new SentenceSettings { Seed = RandomNumberGenerator.GetInt32(int.MaxValue), Chaos = Math.Clamp(input.Chaos ?? 45, 0, 100), VoiceIds = [.. (input.VoiceIds ?? [.. active.VoiceIds]).Where(SentenceStore.ValidId).Distinct().Take(256)] },
         };
         SentenceComposer.Rematch(project, text, Corpus());
+        bool host = key == "host";
         SentenceData.Change(f =>
         {
-            if (f.Sentences.Count(s => s.Owner == key && !s.Kept) >= MaxSentencesPerPerson) throw new InvalidDataException($"You have {MaxSentencesPerPerson} unkept sentences. Keep or discard some first.");
-            if (f.Sentences.Count >= SentenceStore.MaxSentences) throw new InvalidDataException("The sentence list is full.");
+            SweepGuestDrafts(f);
+            RequireRoom(f, key, host);
             f.Sentences.Add(project); return 0;
-        });
+        }, !host);
         SentencesChanged();
-        return SentenceView(project.Id, key, key == "host", canBuild);
+        return SentenceView(project.Id, key, host, canBuild);
     }
     private static string Clip(string text, int max)
     {
@@ -178,7 +239,7 @@ public sealed partial class Bridge
             change(s);
             s.Revision++; s.Updated = utcNow();
             return 0;
-        });
+        }, !host);
         SentencesChanged();
         var view = SentenceView(id, key, host, canBuild);
         return extra == null ? view : new { sentence = view, result = extra };
@@ -374,7 +435,7 @@ public sealed partial class Bridge
             // A kept sentence goes from the list only by the host's hand; its audio files stay on disk.
             if (s.Kept ? !host : s.Owner != key && !host) throw new InvalidDataException(s.Kept ? "Only the host can remove a kept sentence." : "Only its maker can discard this sentence.");
             f.Sentences.Remove(s); return 0;
-        });
+        }, !host);
         SentencesChanged();
         return new { removed = true };
     }
@@ -409,7 +470,7 @@ public sealed partial class Bridge
 
     private object SentenceView(string? id, string key, bool host, bool canBuild)
     {
-        var s = SentenceData.Read(f => { var found = FindSentence(f, id); return CanSee(found, key, host) ? SentenceStore.Copy(found) : throw new InvalidDataException("That sentence is no longer there."); });
+        var s = Visible(SentenceCopy(id, key, host), key, host, canBuild);
         var library = Voices;
         var latest = s.Versions.Count > 0 ? s.Versions[^1] : null;
         var tokens = SentenceComposer.Tokens(s.Text);
@@ -448,9 +509,9 @@ public sealed partial class Bridge
         };
     }
 
-    private object SentenceAlternatives(string? id, string? pieceId, string key, bool host)
+    private object SentenceAlternatives(string? id, string? pieceId, string key, bool host, bool canBuild)
     {
-        var s = SentenceData.Read(f => { var found = FindSentence(f, id); return CanSee(found, key, host) ? SentenceStore.Copy(found) : throw new InvalidDataException("That sentence is no longer there."); });
+        var s = Visible(SentenceCopy(id, key, host), key, host, canBuild);
         var p = PieceOf(s, pieceId); var corpus = Corpus(); var library = Voices;
         var takes = p.Kind is "word" or "named" ? SentenceComposer.Alternatives(s, p, corpus) : [];
         int current = SentenceComposer.CurrentAlternative(p, takes);
@@ -469,18 +530,38 @@ public sealed partial class Bridge
 
     // ---- Rendering, preview and play -----------------------------------------------------------------------------
 
-    /// <summary>Renders pieces (a copy) from the library recordings they name, decoding each file once (the PCM cache).</summary>
-    private async Task<SentenceRender.Result> RenderPieces(IReadOnlyList<SentencePiece> pieces, SentenceSettings settings, bool? cleanup = null)
+    /// <summary>
+    /// Renders pieces (a copy) from the library recordings they name, decoding each file once (the PCM cache), and
+    /// hands the result to <paramref name="then"/>. Both run on the audio worker (review, 2.42), never at normal
+    /// priority on the thread pool. A sentence laid out longer than the limit is refused before anything is decoded;
+    /// <paramref name="cancel"/> stops a render nobody waits for any more.
+    /// </summary>
+    private async Task<T> RenderPieces<T>(IReadOnlyList<SentencePiece> pieces, SentenceSettings settings, Func<SentenceRender.Result, T> then, bool? cleanup = null, CancellationToken cancel = default)
     {
+        if (SentenceRender.LaidOutMs(pieces, settings) > SentenceRender.MaxSentenceMs) throw new InvalidDataException($"A sentence can be at most {SentenceRender.MaxSentenceMs / 1000:0} seconds long.");
         var library = Voices; var sources = new Dictionary<string, ISliceSource>(StringComparer.Ordinal);
         foreach (var id in pieces.SelectMany(p => p.Parts ?? (p.Source != null ? [p.Source] : [])).Select(x => x.RecordingId).Distinct())
         {
+            cancel.ThrowIfCancellationRequested();
             var r = library.Get(id);
             if (r == null || !File.Exists(r.Path)) continue; // the renderer names the piece
             try { sources[id] = await pcm.Get(r.Path); }
             catch (Exception ex) when (ex is IOException or InvalidDataException or UnauthorizedAccessException or ArgumentException or NotSupportedException) { }
         }
-        return await Task.Run(() => SentenceRender.Render(pieces, settings, id => sources.TryGetValue(id, out var source) ? source : throw new KeyNotFoundException(id), cleanup));
+        return await Heavy("sentence render", () => then(SentenceRender.Render(pieces, settings, id => sources.TryGetValue(id, out var source) ? source : throw new KeyNotFoundException(id), cleanup, cancel)), cancel);
+    }
+
+    /// <summary>
+    /// A render for the game: one at a time (review, 2.42), and given up as soon as a newer intent, Stop or Panic
+    /// arrives, whether it is still waiting for its turn or rendering. Null when it was given up.
+    /// </summary>
+    private async Task<T?> RenderForGame<T>(Intent intent, Func<CancellationToken, Task<T>> render) where T : class
+    {
+        try { await sentenceRenderSlot.WaitAsync(intent.Withdrawn.Token); }
+        catch (OperationCanceledException) { return null; }
+        try { return await render(intent.Withdrawn.Token); }
+        catch (OperationCanceledException) when (intent.Withdrawn.IsCancellationRequested) { return null; }
+        finally { sentenceRenderSlot.Release(); }
     }
 
     private SentenceProject SentenceCopy(string? id, string key, bool host) => SentenceData.Read(f =>
@@ -489,9 +570,9 @@ public sealed partial class Bridge
         return CanSee(s, key, host) ? SentenceStore.Copy(s) : throw new InvalidDataException("That sentence is no longer there.");
     });
 
-    private async Task<object> PreviewSentence(Command c, SentenceInput input, string actor, Participant? participant, string? requester, string key, bool host)
+    private async Task<object> PreviewSentence(Command c, SentenceInput input, string actor, Participant? participant, string? requester, string key, bool host, bool canBuild)
     {
-        var s = SentenceCopy(c.SentenceId, key, host);
+        var s = Visible(SentenceCopy(c.SentenceId, key, host), key, host, canBuild);
         if (!host && !previewing.TryAdd(key, 0)) throw new InvalidDataException("Your last preview is still being made.");
         try
         {
@@ -500,9 +581,12 @@ public sealed partial class Bridge
             if (input.Version is int n)
             {
                 var v = s.Versions.FirstOrDefault(x => x.N == n) ?? throw new InvalidDataException("That version is no longer there.");
-                var audio = ReadKept(s.Id, v);
-                if (!SliceWav.TryRead(audio, out _)) throw new InvalidDataException("That version's audio could not be read.");
-                wav = host ? audio : KeptPreview(audio);
+                wav = await Heavy("sentence preview", () =>
+                {
+                    var audio = ReadKept(s.Id, v);
+                    if (!SliceWav.TryRead(audio, out _)) throw new InvalidDataException("That version's audio could not be read.");
+                    return host ? audio : KeptPreview(audio);
+                });
             }
             else
             {
@@ -529,8 +613,7 @@ public sealed partial class Bridge
                     pieces = s.Pieces;
                 }
                 bool? cleanup = input.Variant switch { "original" => false, "cleaned" => true, _ => null };
-                var rendered = await RenderPieces(pieces, s.Settings, cleanup);
-                wav = SentenceRender.PreviewWav(rendered.Audio, host ? null : GuestPreviewRate, PreviewMaxMs);
+                wav = await RenderPieces(pieces, s.Settings, rendered => SentenceRender.PreviewWav(rendered.Audio, host ? null : GuestPreviewRate, PreviewMaxMs), cleanup);
             }
             return new { wav = Convert.ToBase64String(wav), revision = s.Revision };
         }
@@ -555,44 +638,58 @@ public sealed partial class Bridge
 
     private async Task<Reply> PlaySentence(Command c, SentenceInput input, string actor, Participant? participant, string? requester, string? audience, Intent? intent, string key, bool host)
     {
-        if (intent == null) throw new InvalidDataException(disk.Permissions.RemotePlayback ? "Guest playback permission or session authorization changed." : "Remote playback is disabled.");
+        if (intent == null) throw new InvalidDataException(!disk.Permissions.RemotePlayback ? "Remote playback is disabled."
+            : input.Version is null && !disk.Permissions.GuestSeeking ? GuestPartsRefusal : "Guest playback permission or session authorization changed.");
         // The revision asked for: edits made while it renders or plays are heard on the next Play.
         var s = SentenceCopy(c.SentenceId, key, host);
         if (SentenceRenderHold is { } hold) await hold();
         if (!IsNewest(intent)) return Superseded(c, "newer");
-        byte[] wav; int? version = null;
-        if (input.Version is not null || !CanChange(s, key, host, true) && s.Kept)
+        byte[]? wav; int? version = null;
+        bool kept = input.Version is not null || !CanChange(s, key, host, true) && s.Kept;
+        if (kept)
         {
             var v = input.Version is int wanted ? s.Versions.FirstOrDefault(x => x.N == wanted) : s.Versions.LastOrDefault();
             if (v == null) throw new InvalidDataException("That version is no longer there.");
-            wav = ReadKept(s.Id, v); version = v.N;
+            wav = await Heavy("sentence read", () => ReadKept(s.Id, v)); version = v.N;
         }
-        else wav = (await RenderPieces(s.Pieces, s.Settings)).Audio.ToWav();
-        return await PlayInGame(c, wav, "sentence:" + s.Id, actor, participant, intent, new { revision = s.Revision, version });
+        else
+        {
+            // Rendered words can be any part of a recording: a guest also needs seeking (like a region; review, 2.42).
+            if (!host && !disk.Permissions.GuestSeeking) throw new InvalidDataException(GuestPartsRefusal);
+            wav = await RenderForGame(intent, cancel => RenderPieces(s.Pieces, s.Settings, rendered => rendered.Audio.ToWav(), cancel: cancel));
+            if (wav == null) return Superseded(c, "newer");
+        }
+        return await PlayInGame(c, wav, "sentence:" + s.Id, actor, participant, requester, audience, intent, !kept, new { revision = s.Revision, version });
     }
+    private const string GuestPartsRefusal = "Guest seeking is disabled, so guests can play only kept sentences into the game.";
 
     /// <summary>
     /// Registers the slot files for sentences and palette taps (also when exact cue starts are off), at a quiet
-    /// moment as always: never while Soundpad plays. Waits up to about two seconds.
+    /// moment as always: never while Soundpad plays. Waits up to about two seconds; not at all when registration
+    /// failed for another reason a moment ago (review, 2.42: every Play used to start it over and wait the full time).
     /// </summary>
     private async Task<bool> EnsureSentenceSlots(Intent intent)
     {
         if (SlotsReady) return true;
-        slotsForSentences = true; slotsWanted = true; Interlocked.Exchange(ref slotsRetryAt, 0);
+        slotsForSentences = true; slotsWanted = true;
+        if (Environment.TickCount64 < Interlocked.Read(ref slotsFailedUntil)) return false;
+        Interlocked.Exchange(ref slotsRetryAt, 0);
         for (int i = 0; i < 20 && !SlotsReady && IsNewest(intent); i++)
         {
             await RegisterSlotsIfDue();
-            if (!SlotsReady) await Task.Delay(100);
+            if (SlotsReady || Environment.TickCount64 < Interlocked.Read(ref slotsFailedUntil)) break;
+            await Task.Delay(100);
         }
         return SlotsReady;
     }
 
     /// <summary>
     /// Plays rendered audio into the game from a slot file, through the same newest-intent arbitration as every
-    /// start: a newer intent, Stop or Panic that arrived meanwhile wins, and this plays nothing. The playback the
-    /// website sees is labelled <paramref name="label"/> ("sentence:…" or "palette:…").
+    /// start: a newer intent, Stop or Panic that arrived meanwhile wins, and this plays nothing. So does a guest whose
+    /// permission changed meanwhile (revoked, Remote playback or, for <paramref name="parts"/>, seeking turned off).
+    /// The playback the website sees is labelled <paramref name="label"/> ("sentence:…" or "palette:…").
     /// </summary>
-    private async Task<Reply> PlayInGame(Command c, byte[] wav, string label, string actor, Participant? participant, Intent intent, object extra)
+    private async Task<Reply> PlayInGame(Command c, byte[] wav, string label, string actor, Participant? participant, string? requester, string? audience, Intent intent, bool parts, object extra)
     {
         if (!IsNewest(intent)) return Superseded(c, "newer");
         if (!SliceWav.TryRead(wav, out var format) || format.Frames == 0) throw new InvalidDataException("There is nothing to play.");
@@ -622,6 +719,9 @@ public sealed partial class Bridge
             try
             {
                 if (!IsNewest(intent)) return Superseded(c, "newer");
+                // Checked again after the slow part (review, 2.42), as Temp and kept plays do: revokePeer and permission
+                // changes reserve no intent, so they do not withdraw a start that is under way.
+                if (actor != "host" && !(sessionAccepting && GuestStillAllowed(actor, requester, audience) && !playbackSuspended && (!parts || disk.Permissions.GuestSeeking))) return Superseded(c, "suspended");
                 if (!available) throw new InvalidDataException("Soundpad is unavailable. Open it normally; reconnection is automatic.");
                 string list;
                 try { list = await Pipe.Request("GetSoundlist()", intent.Withdrawn.Token); }
@@ -659,38 +759,66 @@ public sealed partial class Bridge
         var s = SentenceData.Read(f => { var found = FindSentence(f, id); return CanChange(found, key, host, canBuild) ? SentenceStore.Copy(found) : throw new InvalidDataException("Only its maker or the host can keep this sentence."); });
         if (!host && !Keep.GuestKeep) throw new InvalidDataException("The host has not allowed guests to keep audio.");
         if (s.Versions.Count >= SentenceStore.MaxVersions) throw new InvalidDataException($"This sentence has {SentenceStore.MaxVersions} versions. Make a new sentence for more.");
-        if (SentenceRenderHold is { } hold) await hold();
-        var rendered = await RenderPieces(s.Pieces, s.Settings);
-        var wav = rendered.Audio.ToWav();
-        // Each version pins the revisions of its sources: the recordings' ids, their files' content hashes, the frames.
-        var library = Voices; var pins = new List<PinnedSource>();
-        foreach (var part in rendered.Parts)
+        // One Keep at a time per guest (review, 2.42): each renders a whole sentence.
+        if (!host && !keepingSentence.TryAdd(key, 0)) throw new InvalidDataException("Your last Keep is still being saved.");
+        long reserved = 0;
+        try
         {
-            var r = library.Get(part.RecordingId) ?? throw new SentenceRender.MissingSourceException(part.PieceId, "A recording of this sentence left the voice library meanwhile.");
-            var fileHash = FileHash(r.Path) ?? throw new SentenceRender.MissingSourceException(part.PieceId, "A recording of this sentence could not be read.");
-            pins.Add(new() { PieceId = part.PieceId, RecordingId = part.RecordingId, Hash = fileHash, StartFrame = part.StartFrame, EndFrame = part.EndFrame, Rate = part.Rate });
-        }
-        string guestName = person.Name;
-        if (!host && budgets.CheckKeep(key, guestName, wav.Length, Keep) is { } refusal) { Publish(); throw new InvalidDataException(refusal); }
-        int n = s.Versions.Count == 0 ? 1 : s.Versions[^1].N + 1;
-        var (file, hash) = SentenceData.WriteAudio(s.Id, n, wav);
-        SentenceData.Change(f =>
-        {
-            var live = FindSentence(f, id);
-            if (live.Versions.Any(v => v.N == n)) throw new InvalidDataException("Someone kept this sentence at the same moment. Keep it again.");
-            live.Versions.Add(new SentenceVersion
+            if (SentenceRenderHold is { } hold) await hold();
+            // Each version pins the revisions of its sources: the recordings' ids, their files' content hashes, the frames.
+            var library = Voices;
+            var (rendered, wav, pins) = await RenderPieces(s.Pieces, s.Settings, result =>
             {
-                N = n, At = utcNow(), By = key, ByName = person.Name, Text = s.Text, Pieces = s.Pieces, Settings = s.Settings, File = file, Hash = hash, Bytes = wav.Length,
-                DurationMs = (long)Math.Round(rendered.Audio.DurationMs), Sources = pins,
+                var list = new List<PinnedSource>();
+                foreach (var part in result.Parts)
+                {
+                    var r = library.Get(part.RecordingId) ?? throw new SentenceRender.MissingSourceException(part.PieceId, "A recording of this sentence left the voice library meanwhile.");
+                    var fileHash = FileHash(r.Path) ?? throw new SentenceRender.MissingSourceException(part.PieceId, "A recording of this sentence could not be read.");
+                    list.Add(new() { PieceId = part.PieceId, RecordingId = part.RecordingId, Hash = fileHash, StartFrame = part.StartFrame, EndFrame = part.EndFrame, Rate = part.Rate });
+                }
+                return (result, result.Audio.ToWav(), list);
             });
-            if (string.IsNullOrEmpty(live.Title)) live.Title = Clip(s.Text, 60);
-            live.Updated = utcNow();
-            return 0;
-        });
-        if (!host) budgets.NoteKept(key, guestName, wav.Length);
-        Log($"{person.Name} kept the sentence \"{Clip(s.Text, 60)}\" (version {n})");
-        SentencesChanged();
-        return new { version = n, durationMs = (long)Math.Round(rendered.Audio.DurationMs), revision = s.Revision };
+            string guestName = person.Name;
+            // The allowance is checked and held in one step (review, 2.42), so Keeps at the same moment cannot all pass.
+            if (!host)
+            {
+                if (budgets.ReserveKeep(key, guestName, wav.Length, Keep) is { } refusal) { Publish(); throw new InvalidDataException(refusal); }
+                reserved = wav.Length;
+            }
+            int n = s.Versions.Count == 0 ? 1 : s.Versions[^1].N + 1;
+            var (file, hash, created) = SentenceData.WriteAudio(s.Id, n, wav);
+            try
+            {
+                SentenceData.Change(f =>
+                {
+                    var live = FindSentence(f, id);
+                    if (live.Versions.Any(v => v.N == n)) throw new InvalidDataException("Someone kept this sentence at the same moment. Keep it again.");
+                    live.Versions.Add(new SentenceVersion
+                    {
+                        N = n, At = utcNow(), By = key, ByName = person.Name, Text = s.Text, Pieces = s.Pieces, Settings = s.Settings, File = file, Hash = hash, Bytes = wav.Length,
+                        DurationMs = (long)Math.Round(rendered.Audio.DurationMs), Sources = pins,
+                    });
+                    if (string.IsNullOrEmpty(live.Title)) live.Title = Clip(s.Text, 60);
+                    live.Updated = utcNow();
+                    return 0;
+                }, !host);
+            }
+            catch
+            {
+                // Nothing records the file this Keep wrote (review, 2.42): it goes again, and nothing is charged.
+                if (created) SentenceData.RemoveAudio(s.Id, file);
+                throw;
+            }
+            if (!host) budgets.NoteKept(key, guestName, wav.Length);
+            Log($"{person.Name} kept the sentence \"{Clip(s.Text, 60)}\" (version {n})");
+            SentencesChanged();
+            return new { version = n, durationMs = (long)Math.Round(rendered.Audio.DurationMs), revision = s.Revision };
+        }
+        finally
+        {
+            if (reserved > 0) budgets.ReleaseKeep(key, reserved);
+            if (!host) keepingSentence.TryRemove(key, out _);
+        }
     }
 
     // ---- Palette -------------------------------------------------------------------------------------------------
@@ -757,21 +885,27 @@ public sealed partial class Bridge
         }
         if (c.Action == "game")
         {
-            if (intent == null) throw new InvalidDataException(disk.Permissions.RemotePlayback ? "Guest playback permission or session authorization changed." : "Remote playback is disabled.");
+            // A word into the game is a part of a recording: a guest also needs seeking, as for a region (review, 2.42).
+            if (intent == null) throw new InvalidDataException(!disk.Permissions.RemotePlayback ? "Remote playback is disabled." : !disk.Permissions.GuestSeeking ? "Guest seeking is disabled, so palette words play only here." : "Guest playback permission or session authorization changed.");
             var source = await pcm.Get(r.Path);
             if (!IsNewest(intent)) return Superseded(c, "newer");
             long from = SliceRenderer.FrameOf(start, source.SampleRate), to = Math.Min(SliceRenderer.FrameOf(end, source.SampleRate), source.FrameCount);
-            var wav = await Task.Run(() => SliceRenderer.Render(source, from, to, new SliceOptions { FadeInMs = 3, FadeOutMs = 5 }));
-            return await PlayInGame(c, wav, "palette:" + recordingId, actor, participant, intent, new { text = label });
+            var wav = await RenderForGame(intent, cancel => Heavy("palette render", () => SliceRenderer.Render(source, from, to, new SliceOptions { FadeInMs = 3, FadeOutMs = 5 }, cancel), cancel));
+            if (wav == null) return Superseded(c, "newer");
+            return await PlayInGame(c, wav, "palette:" + recordingId, actor, participant, requester, audience, intent, true, new { text = label });
         }
         if (!host && !previewing.TryAdd(key, 0)) throw new InvalidDataException("Your last preview is still being made.");
         try
         {
             if (!host && !paletteRate.TryTake(key)) throw new InvalidDataException("Too many palette previews. Wait a moment and try again.");
-            var (mono, rate) = await Task.Run(() => AudioFile.ReadMono(r.Path, start, end));
-            if (mono.Length == 0) throw new InvalidDataException("Nothing to hear there.");
-            if (!host && rate > GuestPreviewRate) { mono = MimicTranscriber.Resample(mono, rate, GuestPreviewRate); rate = GuestPreviewRate; }
-            return Ok(c, new { wav = Convert.ToBase64String(MimicRing.Wav(mono, rate)), text = label });
+            var wav = await Heavy("palette preview", () =>
+            {
+                var (mono, rate) = AudioFile.ReadMono(r.Path, start, end);
+                if (mono.Length == 0) throw new InvalidDataException("Nothing to hear there.");
+                if (!host && rate > GuestPreviewRate) { mono = MimicTranscriber.Resample(mono, rate, GuestPreviewRate); rate = GuestPreviewRate; }
+                return MimicRing.Wav(mono, rate);
+            });
+            return Ok(c, new { wav = Convert.ToBase64String(wav), text = label });
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Runtime.InteropServices.COMException or ArgumentException) { throw new InvalidDataException("That sound file could not be read."); }
         finally { if (!host) previewing.TryRemove(key, out _); }
@@ -788,7 +922,7 @@ public sealed partial class Bridge
                 var n = f.Named.FirstOrDefault(x => x.Id == id) ?? throw new InvalidDataException("That named piece is no longer there.");
                 if (n.By != key && key != "host") throw new InvalidDataException("Only who named it or the host can remove it.");
                 f.Named.Remove(n); return 0;
-            });
+            }, key != "host");
             SentencesChanged();
             return new { removed = true };
         }
@@ -798,7 +932,9 @@ public sealed partial class Bridge
         long start = input.StartMs ?? -1, end = input.EndMs ?? -1;
         if (start < 0 || end <= start + 20 || end - start > 30000 || r.DurationMs > 0 && end > r.DurationMs + 50) throw new InvalidDataException("Mark a part of the recording (up to 30 s).");
         var piece = new NamedPiece { Id = SentenceStore.NewId(), Name = name, RecordingId = r.Id, StartMs = start, EndMs = end, By = key, ByName = person.Name, Created = utcNow() };
-        SentenceData.Change(f => { if (f.Named.Count >= SentenceStore.MaxNamed) throw new InvalidDataException("There are as many named pieces as the library can hold."); f.Named.Add(piece); return 0; });
+        // Guests leave room for the host's own named pieces (review, 2.42).
+        bool host = key == "host";
+        SentenceData.Change(f => { if (f.Named.Count >= SentenceStore.MaxNamed - (host ? 0 : HostReserveNamed)) throw new InvalidDataException("There are as many named pieces as the library can hold."); f.Named.Add(piece); return 0; }, !host);
         Log($"{person.Name} named a piece [{name}]");
         SentencesChanged();
         return new { namedId = piece.Id, name };
@@ -820,38 +956,49 @@ public sealed partial class Bridge
                 lock (performances) return performances.TryGetValue(key, out var p) ? new { recording = true, taps = p.Taps.Count, sinceMs = utcNow() - p.Started } : (object)new { recording = false, taps = 0, sinceMs = 0L };
             case "stop":
                 {
-                    Performance? perf;
-                    lock (performances) { performances.Remove(key, out perf); }
+                    Performance? perf; List<(long At, PaletteRef Item)> taps;
+                    lock (performances) { performances.TryGetValue(key, out perf); taps = perf == null ? [] : [.. perf.Taps]; }
                     if (perf == null) throw new InvalidDataException("No performance is being recorded.");
-                    if (perf.Taps.Count == 0) throw new InvalidDataException("Nothing was tapped while recording.");
-                    if (!canBuild) throw new InvalidDataException("The host has not allowed guests to build sentences.");
-                    var project = TakeFromPerformance(perf, key, person);
+                    void End() { lock (performances) if (performances.TryGetValue(key, out var now) && ReferenceEquals(now, perf)) performances.Remove(key); }
+                    if (taps.Count == 0) { End(); throw new InvalidDataException("Nothing was tapped while recording."); }
+                    if (!canBuild) { End(); throw new InvalidDataException("The host has not allowed guests to build sentences."); }
+                    var project = TakeFromPerformance(taps, key, person);
+                    // The recording ends only once its take is saved (review, 2.42): a take that cannot be saved (the list is
+                    // full) leaves the performance recording, so Stop can be pressed again after making room.
+                    bool host = key == "host";
                     SentenceData.Change(f =>
                     {
-                        if (f.Sentences.Count(s => s.Owner == key && !s.Kept) >= MaxSentencesPerPerson) throw new InvalidDataException($"You have {MaxSentencesPerPerson} unkept sentences. Keep or discard some first.");
+                        SweepGuestDrafts(f);
+                        RequireRoom(f, key, host);
                         f.Sentences.Add(project); return 0;
-                    });
+                    }, !host);
+                    End();
                     SentencesChanged();
-                    return new { sentenceId = project.Id, taps = perf.Taps.Count };
+                    return new { sentenceId = project.Id, taps = taps.Count };
                 }
             default: throw new InvalidDataException("Start, stop or cancel recording a performance.");
         }
     }
 
-    /// <summary>A performance as an editable take: each tap a hand-placed piece at its time, the text its labels in order.</summary>
-    private SentenceProject TakeFromPerformance(Performance perf, string key, Participant person)
+    /// <summary>
+    /// A performance as an editable take: each tap a hand-placed piece at its time, the text its labels in order. Taps
+    /// whose labels no longer fit the text (<see cref="SentenceStore.MaxText"/> characters, <see cref="SentenceStore.MaxTokens"/>
+    /// words) stay in the take as pieces without words of their own (review, 2.42: a long take used to fail to save).
+    /// </summary>
+    private SentenceProject TakeFromPerformance(List<(long At, PaletteRef Item)> taps, string key, Participant person)
     {
-        var pieces = new List<SentencePiece>(); var words = new List<string>(); int token = 0;
-        long first = perf.Taps[0].At;
-        foreach (var (at, item) in perf.Taps)
+        var pieces = new List<SentencePiece>(); var words = new List<string>(); int token = 0, length = 0;
+        long first = taps[0].At;
+        foreach (var (at, item) in taps)
         {
             SentencePiece piece;
             try
             {
                 var label = Resolve(item).Label;
                 int count = SentenceComposer.Tokens(label).Count;
-                piece = PieceFromItem(item, at - first, count > 0 ? token : null, count > 0 ? token + count : null);
-                token += count; words.Add(label);
+                bool fits = token + count <= SentenceStore.MaxTokens && length + label.Length + (words.Count > 0 ? 1 : 0) <= SentenceStore.MaxText;
+                piece = PieceFromItem(item, at - first, fits && count > 0 ? token : null, fits && count > 0 ? token + count : null);
+                if (fits) { token += count; length += label.Length + (words.Count > 0 ? 1 : 0); words.Add(label); }
             }
             catch (InvalidDataException) { continue; } // that item left the library since the tap
             pieces.Add(piece);
@@ -880,7 +1027,8 @@ public sealed partial class Bridge
                 var mine = f.People.FirstOrDefault(p => p.Owner == key);
                 if (mine == null)
                 {
-                    if (f.People.Count >= SentenceStore.MaxPeople) throw new InvalidDataException("Too many people have performance sets.");
+                    // The last entry stays the host's (review, 2.42).
+                    if (f.People.Count >= SentenceStore.MaxPeople - (key == "host" ? 0 : 1)) throw new InvalidDataException("Too many people have performance sets.");
                     f.People.Add(mine = new PersonSets { Owner = key, Sets = [new PerformanceSet()] });
                 }
                 PerformanceSet Find() => mine.Sets.FirstOrDefault(s => s.Id == input.Id) ?? throw new InvalidDataException("That performance set is no longer there.");
@@ -904,7 +1052,7 @@ public sealed partial class Bridge
                     case "activate": mine.Active = Find().Id; break;
                 }
                 return 0;
-            });
+            }, key != "host");
             SentencesChanged();
         }
         var sets = PersonSetsOf(key);

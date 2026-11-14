@@ -440,6 +440,7 @@ function App() {
     // One window at a time: the other closes (what it showed is remembered).
     setMimicOpen(request.kind === 'history');
     setVoicesOpen(request.kind === 'recording');
+    setSentencesOpen(false);
   });
   // After the host's Panic (2.35): guests cannot start audio until the host resumes; the host can.
   const suspended = mode !== 'landing' && state.playbackSuspended === true;

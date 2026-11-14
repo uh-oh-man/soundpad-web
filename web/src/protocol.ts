@@ -653,8 +653,12 @@ export function isGuestAllowed(c: Command, s: Snapshot) {
     (c.op === 'paletteTap' && c.action !== 'game')
   )
     return true;
-  if (c.op === 'sentencePlay' || (c.op === 'paletteTap' && c.action === 'game'))
+  // A palette word into the game, and a sentence rendered from words (not a kept version), are parts
+  // of recordings: like a region, they also need seeking (2.42 review).
+  if (c.op === 'sentencePlay' && c.sentence?.version !== undefined)
     return s.permissions.remotePlayback;
+  if (c.op === 'sentencePlay' || (c.op === 'paletteTap' && c.action === 'game'))
+    return s.permissions.remotePlayback && s.permissions.guestSeeking !== false;
   if (c.op === 'sentenceKeep')
     return s.permissions.guestKeep === true && s.permissions.guestLibraryEdit !== false;
   if (

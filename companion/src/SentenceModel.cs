@@ -217,6 +217,10 @@ public sealed class SentenceStore
     public string AudioFolder => Path.Combine(Folder, "sentences");
     public bool Blocked { get; private set; }
     public string? Problem { get; private set; }
+    /// <summary>The largest file a save writes (tests lower it): Load refuses anything over <see cref="MaxFileBytes"/>.</summary>
+    internal long SaveLimit { get; set; } = MaxFileBytes;
+    /// <summary>A guest's change may grow the file only to this share of <see cref="SaveLimit"/>: the rest stays the host's.</summary>
+    public const double GuestShare = 0.75;
     public long Revision => Interlocked.Read(ref revision);
 
     public SentenceStore(string dataDirectory, Func<long>? clock = null)
@@ -357,17 +361,22 @@ public sealed class SentenceStore
 
     private void RequireWritable() { if (Blocked) throw new InvalidDataException(Problem ?? "The sentences file could not be read. It was left untouched."); }
 
-    private void SaveLocked()
+    private void SaveLocked(bool guest, long before)
     {
         RequireWritable();
         Validate(file);
+        // Never a file Load would refuse (review, 2.42): the change is refused instead, and Change puts it back. A
+        // guest's change that grows the file stops earlier, so guests cannot fill the room the host's own sentences need.
+        var bytes = JsonSerializer.SerializeToUtf8Bytes(file, Json.Options);
+        if (bytes.Length > SaveLimit) throw new InvalidDataException($"The sentences would take more than {SaveLimit / (1024 * 1024)} MiB. Discard some sentences or make shorter ones first.");
+        if (guest && bytes.Length > before && bytes.Length > SaveLimit * GuestShare) throw new InvalidDataException("The sentences file is nearly full. The host can make room by removing sentences.");
         Directory.CreateDirectory(Folder);
         var temporary = MainPath + ".tmp";
         try
         {
             using (var stream = new FileStream(temporary, FileMode.Create, FileAccess.Write, FileShare.None))
             {
-                JsonSerializer.Serialize(stream, file, Json.Options);
+                stream.Write(bytes);
                 stream.Flush(true);
             }
             if (File.Exists(MainPath)) File.Replace(temporary, MainPath, BackupPath, true);
@@ -386,16 +395,17 @@ public sealed class SentenceStore
     public T Read<T>(Func<SentenceFile, T> read) { lock (gate) return read(file); }
 
     /// <summary>
-    /// Changes the file and saves it; if the change is refused (validation) or cannot be saved, the file in memory
-    /// goes back to what it was, so a failed change leaves nothing half done.
+    /// Changes the file and saves it; if the change is refused (validation, size) or cannot be saved, the file in memory
+    /// goes back to what it was, so a failed change leaves nothing half done. <paramref name="guest"/>: a guest's change,
+    /// which may use only <see cref="GuestShare"/> of the file's room.
     /// </summary>
-    public T Change<T>(Func<SentenceFile, T> change)
+    public T Change<T>(Func<SentenceFile, T> change, bool guest = false)
     {
         lock (gate)
         {
             RequireWritable();
             var before = JsonSerializer.Serialize(file, Json.Options);
-            try { var result = change(file); SaveLocked(); return result; }
+            try { var result = change(file); SaveLocked(guest, System.Text.Encoding.UTF8.GetByteCount(before)); return result; }
             catch { file = JsonSerializer.Deserialize<SentenceFile>(before, Json.Options)!; throw; }
         }
     }
@@ -403,8 +413,11 @@ public sealed class SentenceStore
     /// <summary>A deep copy (versions, plays and previews work on copies, never on the live project).</summary>
     public static T Copy<T>(T value) => JsonSerializer.Deserialize<T>(JsonSerializer.Serialize(value, Json.Options), Json.Options)!;
 
-    /// <summary>Writes a kept version's audio once (temporary file, flush, rename; never over an existing file).</summary>
-    public (string File, string Hash) WriteAudio(string sentenceId, int n, byte[] wav)
+    /// <summary>
+    /// Writes a kept version's audio once (temporary file, flush, rename; never over an existing file). Created: this
+    /// call wrote it (so it may remove it again if the version cannot be recorded).
+    /// </summary>
+    public (string File, string Hash, bool Created) WriteAudio(string sentenceId, int n, byte[] wav)
     {
         RequireWritable();
         if (!ValidId(sentenceId)) throw new InvalidDataException("Unknown sentence.");
@@ -415,13 +428,20 @@ public sealed class SentenceStore
         try
         {
             Directory.CreateDirectory(folder);
-            if (File.Exists(path)) return (name, hash);
+            if (File.Exists(path)) return (name, hash, false);
             var temporary = path + ".tmp";
             using (var stream = new FileStream(temporary, FileMode.Create, FileAccess.Write, FileShare.None)) { stream.Write(wav); stream.Flush(true); }
             File.Move(temporary, path, false);
-            return (name, hash);
+            return (name, hash, true);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { throw new InvalidDataException("The kept sentence could not be saved: " + ex.Message); }
+    }
+
+    /// <summary>Removes a version's audio file that no version records (its Keep failed after writing it).</summary>
+    public void RemoveAudio(string sentenceId, string fileName)
+    {
+        try { File.Delete(AudioPath(sentenceId, fileName)); }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { /* an unreferenced file; nothing plays it */ }
     }
 
     public string AudioPath(string sentenceId, string fileName)

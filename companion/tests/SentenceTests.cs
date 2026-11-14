@@ -533,4 +533,294 @@ public sealed class SentenceTests : IDisposable
         var stored = rig.Bridge.SentenceStoreForTests.Read(f => Json.Write(f.People));
         Assert.DoesNotContain("wav", stored, StringComparison.OrdinalIgnoreCase);
     }
+    // ---- Review fixes (2.42) ----------------------------------------------------------------------------------------
+
+    [Fact]
+    public async Task SentenceRendersRunOnTheAudioWorkerOneAtATimeAndANewerPlayGivesTheOlderUp()
+    {
+        await using var rig = new Rig(folder); await rig.Start();
+        var first = await Create(rig, "hello fixture tone");
+        var second = await Create(rig, "fixture tone one");
+        // The first render is held on the audio worker; the second Play arrives meanwhile.
+        int running = 0, most = 0, renders = 0;
+        var entered = new ManualResetEventSlim(); var release = new ManualResetEventSlim();
+        rig.Bridge.UseHeavyWorkHook(what =>
+        {
+            if (what != "sentence render") return;
+            int now = Interlocked.Increment(ref running); most = Math.Max(most, now); Interlocked.Increment(ref renders);
+            if (!entered.IsSet) { entered.Set(); release.Wait(TimeSpan.FromSeconds(10)); }
+            Interlocked.Decrement(ref running);
+        });
+        var older = rig.Host(Cmd("sentencePlay") with { SentenceId = first });
+        Assert.True(entered.Wait(TimeSpan.FromSeconds(10)), "the render did not reach the audio worker");
+        var newer = rig.Host(Cmd("sentencePlay") with { SentenceId = second });
+        await Task.Delay(100);
+        release.Set();
+        var a = await Ok(older); var b = await Ok(newer);
+        Assert.Equal("newer", Body(a).GetProperty("reason").GetString());
+        Assert.True(Body(b).GetProperty("played").GetBoolean());
+        Assert.Equal(1, most);
+        Assert.Single(rig.SlotPlays());
+        Assert.Equal("sentence:" + second, rig.Bridge.Snapshot.Playback.SoundId);
+    }
+
+    [Fact]
+    public async Task ASentenceLaidOutPastTheLimitIsRefusedBeforeAnythingIsRendered()
+    {
+        await using var rig = new Rig(folder); await rig.Start();
+        var id = await Create(rig, "hello fixture tone");
+        var piece = rig.Stored(id).Pieces[0];
+        await Ok(rig.Host(Edit(id, new SentenceInput(Do: "move", Pieces: [piece.Id], OffsetMs: 590000))));
+        await Ok(rig.Host(Edit(id, new SentenceInput(Do: "effects", Effect: new PieceEffect { Speed = 0.25, KeepPitch = true }))));
+        var renders = 0;
+        rig.Bridge.UseHeavyWorkHook(what => { if (what == "sentence render") Interlocked.Increment(ref renders); });
+        foreach (var op in new[] { "sentencePlay", "sentencePreview", "sentenceKeep" })
+        {
+            var reply = await rig.Host(Cmd(op) with { SentenceId = id });
+            Assert.False(reply.Ok); Assert.Contains("at most 120 seconds", reply.Error);
+        }
+        Assert.Equal(0, renders);
+        Assert.Empty(rig.SlotPlays());
+    }
+
+    [Fact]
+    public async Task SentenceCommandsLeaveTheReceiveLoopWhileTheSentencesFileIsBusy()
+    {
+        await using var rig = new Rig(folder); await rig.Start();
+        var id = await Create(rig, "hello fixture tone");
+        await Ok(rig.Host(Cmd("sentenceKeep") with { SentenceId = id }));
+        // Someone holds the sentences file (a long save); Execute must hand every sentence command back at once.
+        var holding = new ManualResetEventSlim(); var release = new ManualResetEventSlim();
+        var holder = Task.Run(() => rig.Bridge.SentenceStoreForTests.Read(f => { holding.Set(); release.Wait(TimeSpan.FromSeconds(3)); return 0; }));
+        Assert.True(holding.Wait(TimeSpan.FromSeconds(5)));
+        var clock = System.Diagnostics.Stopwatch.StartNew();
+        var pending = new[]
+        {
+            rig.As(Alice, Cmd("sentenceList")),
+            rig.As(Alice, Cmd("paletteMark") with { RecordingId = rig.Recordings[0], Name = "laugh", Sentence = new SentenceInput(StartMs: 0, EndMs: 300) }),
+            rig.As(Alice, Cmd("performanceSets") with { Action = "create", Set = new PerformanceSetInput(Name: "Quick") }),
+            rig.As(Alice, Cmd("sentencePlay") with { SentenceId = id, Sentence = new SentenceInput(Version: 1) }),
+            rig.As(Alice, Cmd("sentencePreview") with { SentenceId = id, Sentence = new SentenceInput(Version: 1) }),
+        };
+        Assert.True(clock.ElapsedMilliseconds < 1000, $"Execute held the caller for {clock.ElapsedMilliseconds} ms");
+        release.Set(); await holder;
+        foreach (var reply in pending) await Ok(reply);
+    }
+
+    [Fact]
+    public async Task AGuestSentenceDoesNotPlayWhenTheirPermissionChangedWhileItRendered()
+    {
+        await using var rig = new Rig(folder); await rig.Start();
+        var id = await Create(rig, "hello fixture tone", Alice);
+        async Task<Reply> PlayWhile(Command change)
+        {
+            var hold = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously); var held = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            rig.Bridge.SentenceRenderHold = async () => { held.TrySetResult(); await hold.Task; };
+            var playing = rig.As(Alice, Cmd("sentencePlay") with { SentenceId = id });
+            await held.Task;
+            rig.Bridge.SentenceRenderHold = null;
+            await Ok(rig.Host(change));
+            hold.SetResult();
+            return await playing;
+        }
+        static void NotPlayed(Reply r) => Assert.True(!r.Ok || Body(r).GetProperty("reason").GetString() == "suspended", r.Error);
+        // Remote playback turned off meanwhile: nothing plays.
+        var off = await PlayWhile(Cmd("permissions") with { Permissions = new(RemotePlayback: false) });
+        NotPlayed(off);
+        await Ok(rig.Host(Cmd("permissions") with { Permissions = new() }));
+        // Seeking turned off meanwhile: a sentence rendered from words is parts of recordings.
+        var seeking = await PlayWhile(Cmd("permissions") with { Permissions = new(GuestSeeking: false) });
+        NotPlayed(seeking);
+        await Ok(rig.Host(Cmd("permissions") with { Permissions = new() }));
+        // Revoked meanwhile.
+        var revoked = await PlayWhile(Cmd("revokePeer") with { OwnerId = "peer-Alice" });
+        NotPlayed(revoked);
+        Assert.Empty(rig.SlotPlays());
+        lock (rig.Mock.Commands) Assert.DoesNotContain(rig.Mock.Commands, x => x.StartsWith("DoPlaySound"));
+    }
+
+    [Fact]
+    public async Task WithGuestSeekingOffGuestsPlayOnlyKeptSentencesIntoTheGame()
+    {
+        await using var rig = new Rig(folder); await rig.Start();
+        var hosts = await Create(rig, "hello fixture tone");
+        await Ok(rig.Host(Cmd("sentenceKeep") with { SentenceId = hosts }));
+        var mine = await Create(rig, "fixture tone one", Alice);
+        await Ok(rig.Host(Cmd("permissions") with { Permissions = new(GuestSeeking: false) }));
+        var word = new SentenceInput(Item: new PaletteRef { RecordingId = rig.Recordings[0], StartMs = 0, EndMs = 300, Text = "fixture" });
+        var tap = await rig.As(Alice, Cmd("paletteTap") with { Action = "game", Sentence = word });
+        Assert.False(tap.Ok); Assert.Contains("seeking", tap.Error);
+        var own = await rig.As(Alice, Cmd("sentencePlay") with { SentenceId = mine });
+        Assert.False(own.Ok); Assert.Contains("seeking", own.Error);
+        Assert.Empty(rig.SlotPlays());
+        // A private preview and a kept version still work.
+        await Ok(rig.As(Alice, Cmd("paletteTap") with { Action = "preview", Sentence = word }));
+        Assert.True(Body(await Ok(rig.As(Alice, Cmd("sentencePlay") with { SentenceId = hosts, Sentence = new SentenceInput(Version: 1) }))).GetProperty("played").GetBoolean());
+        // The host is not limited by it.
+        await Ok(rig.Host(Cmd("paletteTap") with { Action = "game", Sentence = word }));
+    }
+
+    [Fact]
+    public async Task ARegistrationFailureIsNotRetriedOnEveryPlay()
+    {
+        // The managed-audio journal is damaged: the slot files cannot be registered, and that is not a matter of quiet.
+        Directory.CreateDirectory(Path.Combine(folder, "managed-audio"));
+        File.WriteAllText(Path.Combine(folder, "managed-audio", "journal.json"), "{broken");
+        await using var rig = new Rig(folder); await rig.Start();
+        var id = await Create(rig, "hello fixture tone");
+        await Task.Delay(400); // past the quiet moment after the last audio
+        var first = await rig.Host(Cmd("sentencePlay") with { SentenceId = id });
+        Assert.False(first.Ok);
+        var clock = System.Diagnostics.Stopwatch.StartNew();
+        var again = await rig.Host(Cmd("sentencePlay") with { SentenceId = id });
+        Assert.False(again.Ok); Assert.Contains("getting ready", again.Error);
+        Assert.True(clock.ElapsedMilliseconds < 1000, $"the second Play waited {clock.ElapsedMilliseconds} ms");
+    }
+
+    [Fact]
+    public void KeepAllowancesAreHeldWhenChecked()
+    {
+        var budgets = new GuestBudgets();
+        var settings = new KeepSettings(KeptMb: 1);
+        Assert.Null(budgets.ReserveKeep("g", "G", 600 * 1024, settings));
+        // A second Keep at the same moment sees the first one.
+        Assert.NotNull(budgets.ReserveKeep("g", "G", 600 * 1024, settings));
+        Assert.NotNull(budgets.CheckKeep("g", "G", 600 * 1024, settings));
+        budgets.ReleaseKeep("g", 600 * 1024);
+        Assert.Null(budgets.CheckKeep("g", "G", 600 * 1024, settings));
+    }
+
+    [Fact]
+    public async Task AGuestsKeepsAtTheSameMomentStayWithinTheirAllowance()
+    {
+        await using var rig = new Rig(folder); await rig.Start();
+        await Ok(rig.Host(Cmd("keepSettings") with { KeptMb = 1 }));
+        var ids = new List<string>();
+        for (int i = 0; i < 2; i++)
+        {
+            var id = await Create(rig, "hello fixture tone", Alice);
+            // About 0.6 MB each: one fits in 1 MB, two do not.
+            await Ok(rig.As(Alice, Edit(id, new SentenceInput(Do: "insertPause", OffsetMs: 1500, DurationMs: 5000))));
+            ids.Add(id);
+        }
+        var hold = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        rig.Bridge.SentenceRenderHold = () => hold.Task;
+        var first = rig.As(Alice, Cmd("sentenceKeep") with { SentenceId = ids[0] });
+        var second = rig.As(Alice, Cmd("sentenceKeep") with { SentenceId = ids[1] });
+        await Task.WhenAny(second, Task.Delay(2000));
+        hold.SetResult();
+        var replies = new[] { await first, await second };
+        Assert.Single(replies, r => r.Ok);
+        Assert.Equal(1, ids.Sum(id => rig.Stored(id).Versions.Count));
+    }
+
+    [Fact]
+    public async Task AKeepThatCannotBeRecordedLeavesNoAudioBehind()
+    {
+        await using var rig = new Rig(folder); await rig.Start();
+        var id = await Create(rig, "hello fixture tone");
+        var hold = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously); var held = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        rig.Bridge.SentenceRenderHold = async () => { held.TrySetResult(); await hold.Task; };
+        var keeping = rig.Host(Cmd("sentenceKeep") with { SentenceId = id });
+        await held.Task;
+        rig.Bridge.SentenceRenderHold = null;
+        await Ok(rig.Host(Cmd("sentenceDiscard") with { SentenceId = id }));
+        hold.SetResult();
+        Assert.False((await keeping).Ok);
+        var audio = Path.Combine(folder, "library", "sentences", id);
+        Assert.True(!Directory.Exists(audio) || Directory.GetFiles(audio).Length == 0);
+    }
+
+    [Fact]
+    public async Task GuestsChangeSentencesAtALimitedPaceAndLeaveRoomForTheHost()
+    {
+        await using var rig = new Rig(folder); await rig.Start();
+        rig.Bridge.UseSentenceWriteLimit(new RateWindow(2, TimeSpan.FromMinutes(1)));
+        var id = await Create(rig, "hello", Alice);
+        await Ok(rig.As(Alice, Cmd("sentenceText") with { SentenceId = id, Sentence = new SentenceInput(Text: "hello fixture") }));
+        var third = await rig.As(Alice, Cmd("sentenceText") with { SentenceId = id, Sentence = new SentenceInput(Text: "hello tone") });
+        Assert.False(third.Ok); Assert.Contains("Too many changes", third.Error);
+        await Ok(rig.As(Alice, Cmd("sentenceList"))); // reading is not limited
+        await Create(rig, "hello"); await Create(rig, "hello"); await Create(rig, "hello"); // nor is the host
+        rig.Bridge.UseSentenceWriteLimit(new RateWindow(1000, TimeSpan.FromMinutes(1)));
+        // An old guest sentence nobody kept goes; a full list still has room for the host.
+        string alice = rig.Stored(id).Owner;
+        long old = DateTimeOffset.UtcNow.AddDays(-15).ToUnixTimeMilliseconds();
+        rig.Bridge.SentenceStoreForTests.Change(f =>
+        {
+            f.Sentences.Single(s => s.Id == id).Updated = old;
+            while (f.Sentences.Count < SentenceStore.MaxSentences - Bridge.HostReserveSentences + 1)
+                f.Sentences.Add(new SentenceProject { Id = SentenceStore.NewId(), Owner = "host", Text = "x", Versions = [new SentenceVersion { N = 1, File = "v1-00000000.wav", Hash = new string('0', 64), Bytes = 1 }] });
+            return 0;
+        });
+        var full = await rig.As(Bob, Cmd("sentenceCreate") with { Sentence = new SentenceInput(Text: "hello") });
+        Assert.False(full.Ok); Assert.Contains("full", full.Error);
+        await Create(rig, "hello");
+        Assert.DoesNotContain(rig.Bridge.SentenceStoreForTests.Read(f => f.Sentences.Select(s => s.Id).ToList()), x => x == id);
+        Assert.NotEqual("host", alice);
+    }
+
+    [Fact]
+    public void TheSentencesFileIsNeverSavedLargerThanLoadAccepts()
+    {
+        var store = new SentenceStore(folder) { SaveLimit = 64 * 1024 };
+        store.Change(f => { f.Sentences.Add(new SentenceProject { Id = new string('a', 32), Text = "hello" }); return 0; });
+        var big = string.Join(' ', Enumerable.Repeat("word", 700));
+        // Each change below would pass the limit: refused, and nothing changes in memory or on disk.
+        Assert.Throws<InvalidDataException>(() => store.Change(f => { for (int i = 0; i < 40; i++) f.Sentences.Add(new SentenceProject { Id = SentenceStore.NewId(), Text = big }); return 0; }));
+        Assert.Single(store.Read(f => f.Sentences));
+        Assert.False(new SentenceStore(folder).Blocked);
+        // A guest's change may grow the file to three quarters of the room only; shrinking it is always allowed.
+        store.Change(f => { for (int i = 0; i < 13; i++) f.Sentences.Add(new SentenceProject { Id = SentenceStore.NewId(), Text = big }); return 0; });
+        Assert.Throws<InvalidDataException>(() => store.Change(f => { f.Sentences.Add(new SentenceProject { Id = SentenceStore.NewId(), Text = big }); return 0; }, guest: true));
+        store.Change(f => { f.Sentences.RemoveAt(1); return 0; }, guest: true);
+        store.Change(f => { f.Sentences.Add(new SentenceProject { Id = SentenceStore.NewId(), Text = big }); return 0; });
+        Assert.Equal(14, new SentenceStore(folder).Read(f => f.Sentences.Count));
+    }
+
+    [Fact]
+    public async Task EditsNotKeptYetStayWithTheirMaker()
+    {
+        await using var rig = new Rig(folder); await rig.Start();
+        var id = await Create(rig, "hello fixture tone", Alice);
+        await Ok(rig.As(Alice, Cmd("sentenceKeep") with { SentenceId = id }));
+        await Ok(rig.As(Alice, Cmd("sentenceText") with { SentenceId = id, Sentence = new SentenceInput(Text: "fixture tone two") }));
+        string Listed(Reply r) => Body(r).GetProperty("sentences").EnumerateArray().Single(s => s.GetProperty("id").GetString() == id).GetProperty("text").GetString()!;
+        Assert.Equal("hello fixture tone", Listed(await Ok(rig.As(Bob, Cmd("sentenceList")))));
+        Assert.Equal("hello fixture tone", Body(await Ok(rig.As(Bob, Cmd("sentenceGet") with { SentenceId = id }))).GetProperty("text").GetString());
+        Assert.Equal("fixture tone two", Listed(await Ok(rig.As(Alice, Cmd("sentenceList")))));
+        Assert.Equal("fixture tone two", Body(await Ok(rig.As(Alice, Cmd("sentenceGet") with { SentenceId = id }))).GetProperty("text").GetString());
+        // Bob's preview is of the kept version's pieces, not the draft.
+        var kept = rig.Stored(id).Versions[^1];
+        var heard = Convert.FromBase64String(Body(await Ok(rig.As(Bob, Cmd("sentencePreview") with { SentenceId = id }))).GetProperty("wav").GetString()!);
+        var expected = SentenceRender.PreviewWav(SentenceRender.Render(kept.Pieces, kept.Settings, rig.Source).Audio, Bridge.GuestPreviewRate, Bridge.PreviewMaxMs);
+        Assert.Equal(SliceWav.Pcm16(expected), SliceWav.Pcm16(heard));
+    }
+
+    [Fact]
+    public async Task AGuestCanListSentencesBeforeTheVoiceLibraryHasLoaded()
+    {
+        await using var rig = new Rig(folder);
+        var list = await rig.As(Alice, Cmd("sentenceList"));
+        Assert.True(list.Ok, list.Error);
+        Assert.True(Body(list).GetProperty("canBuild").GetBoolean());
+    }
+
+    [Fact]
+    public async Task ALongPerformanceIsSavedAsATakeWithinTheTextLimits()
+    {
+        await using var rig = new Rig(folder); await rig.Start();
+        var label = string.Join(' ', Enumerable.Repeat("fixture", 12)); // 95 characters, 12 words
+        await Ok(rig.Host(Cmd("performance") with { Action = "start" }));
+        for (int i = 0; i < 45; i++)
+            await Ok(rig.Host(Cmd("paletteTap") with { Action = "preview", Sentence = new SentenceInput(Item: new PaletteRef { RecordingId = rig.Recordings[0], StartMs = 0, EndMs = 300, Text = label }) }));
+        var take = Body(await Ok(rig.Host(Cmd("performance") with { Action = "stop" })));
+        Assert.Equal(45, take.GetProperty("taps").GetInt32());
+        var project = rig.Stored(take.GetProperty("sentenceId").GetString()!);
+        Assert.Equal(45, project.Pieces.Count);
+        Assert.True(project.Text.Length <= SentenceStore.MaxText);
+        Assert.All(project.Pieces, p => Assert.True(p.TokenEnd is null or <= SentenceStore.MaxTokens));
+        // The recording ended with the saved take.
+        Assert.False(Body(await Ok(rig.Host(Cmd("performance") with { Action = "status" }))).GetProperty("recording").GetBoolean());
+    }
 }

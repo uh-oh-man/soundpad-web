@@ -20,13 +20,24 @@ public static class SentenceRender
         public string PieceId { get; } = pieceId;
     }
 
-    public static Result Render(IReadOnlyList<SentencePiece> pieces, SentenceSettings settings, Func<string, ISliceSource> library, bool? cleanup = null)
+    /// <summary>How long the pieces last as laid out on the timeline, the whole-sentence speed included (before any render).</summary>
+    public static double LaidOutMs(IReadOnlyList<SentencePiece> pieces, SentenceSettings settings) =>
+        pieces.Count == 0 ? 0 : pieces.Max(p => p.OffsetMs + SentenceComposer.Duration(p)) / SentenceComposer.SpeedOf(settings.Effect);
+
+    /// <summary>
+    /// Renders the pieces. A sentence laid out longer than <see cref="MaxSentenceMs"/> is refused before anything is
+    /// decoded or mixed (review, 2.42: a piece at 590 s with a quarter-speed whole-sentence effect used to allocate
+    /// over 1 GB first); <paramref name="cancel"/> stops a render nobody waits for any more between pieces.
+    /// </summary>
+    public static Result Render(IReadOnlyList<SentencePiece> pieces, SentenceSettings settings, Func<string, ISliceSource> library, bool? cleanup = null, CancellationToken cancel = default)
     {
         ArgumentNullException.ThrowIfNull(pieces); ArgumentNullException.ThrowIfNull(library);
+        if (LaidOutMs(pieces, settings) > MaxSentenceMs) throw TooLong();
         bool clean = cleanup ?? settings.Cleanup;
         var items = new List<SliceItem>(); var parts = new List<ReadPart>(); var owners = new List<string>();
         foreach (var p in pieces.OrderBy(p => p.OffsetMs).ThenBy(p => p.TokenStart ?? int.MaxValue))
         {
+            cancel.ThrowIfCancellationRequested();
             switch (p.Kind)
             {
                 case "pause": items.Add(new SlicePause(p.OffsetMs, p.DurationMs)); owners.Add(p.Id); break;
@@ -53,12 +64,15 @@ public static class SentenceRender
             }
         }
         if (items.Count == 0) throw new InvalidDataException("There is nothing in this sentence yet.");
+        cancel.ThrowIfCancellationRequested();
         var output = SliceAssembly.RenderSamples(items, new SliceAssemblyOptions { Balance = settings.Balance });
         var audio = output.Audio;
+        cancel.ThrowIfCancellationRequested();
         if (settings.Effect is { IsNone: false } whole) audio = Apply(audio, whole);
-        if (audio.DurationMs > MaxSentenceMs) throw new InvalidDataException($"A sentence can be at most {MaxSentenceMs / 1000:0} seconds long.");
+        if (audio.DurationMs > MaxSentenceMs) throw TooLong();
         return new(audio, parts, items, owners);
     }
+    private static InvalidDataException TooLong() => new($"A sentence can be at most {MaxSentenceMs / 1000:0} seconds long.");
 
     private static SlicePiece Piece(SentencePiece p, SentenceSource s, double offset, double fadeIn, double fadeOut, bool clean, Func<string, ISliceSource> library, List<ReadPart> parts)
     {

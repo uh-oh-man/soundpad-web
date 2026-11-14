@@ -70,8 +70,11 @@ public sealed partial class Bridge
         if (c.V is not (1 or 2) || !Guid.TryParseExact(c.Id, "D", out _)) return default;
         bool host = actor == "host";
         if ((panic || c.Op == "endSession") && !host) return default;
-        // A guest who may not play (or seek) reserves nothing: the refusal must not cancel anyone's pending start.
-        if (!host && (!GuestStillAllowed(actor, requester, audience) || (c.Op is "seek" or "pause" or "startAt" or "region") && !disk.Permissions.GuestSeeking)) return default;
+        // A guest who may not play (or seek) reserves nothing: the refusal must not cancel anyone's pending start. A
+        // palette word into the game, and a sentence rendered from words (not a kept version), are parts of recordings:
+        // they need seeking too, like a region (review, 2.42).
+        bool parts = c.Op is "seek" or "pause" or "startAt" or "region" or "paletteTap" || c.Op == "sentencePlay" && c.Sentence?.Version is null;
+        if (!host && (!GuestStillAllowed(actor, requester, audience) || parts && !disk.Permissions.GuestSeeking)) return default;
         if (playbackIntents.TryGetValue(c.Id, out var known)) return new(known, true, null);
         long now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
         if (c.Op != "endSession")

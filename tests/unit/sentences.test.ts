@@ -15,6 +15,7 @@ import {
   prune,
   sameRef,
   select,
+  sentenceRights,
   sentenceSchema,
   sourceProblem,
   templateSlots,
@@ -27,7 +28,11 @@ import { commandSchema, EMPTY, isGuestAllowed, parseSnapshot } from '../../web/s
 import { missingFeatures, siteRelaysSentences, supports } from '../../web/src/version';
 import { controller } from '../../web/src/controller';
 import { combineResults, type ResultType } from '../../web/src/library/voices';
-import { refreshSentences, resetSentenceStore } from '../../web/src/library/sentence-store';
+import {
+  refreshSentences,
+  resetSentenceStore,
+  sentenceStoreSnapshot,
+} from '../../web/src/library/sentence-store';
 
 const hex = (n: number, length = 32) => n.toString(16).padStart(length, '0');
 const piece = (n: number, extra: Partial<Piece> = {}): Piece => ({
@@ -190,7 +195,9 @@ describe('timeline keyboard and moves (2.42)', () => {
     expect(timelineKey({ key: 'Delete' })).toEqual({ kind: 'delete' });
     expect(timelineKey({ key: 'Backspace' })).toEqual({ kind: 'delete' });
     expect(timelineKey({ key: 'Enter' })).toEqual({ kind: 'preview' });
-    expect(timelineKey({ key: ' ' })).toEqual({ kind: 'preview' });
+    // Space selects like a click, so a piece with no neighbour can be selected too (2.42 review).
+    expect(timelineKey({ key: ' ' })).toEqual({ kind: 'select', add: false });
+    expect(timelineKey({ key: ' ', shiftKey: true })).toEqual({ kind: 'select', add: true });
     expect(timelineKey({ key: 'Escape' })).toEqual({ kind: 'clear' });
     expect(timelineKey({ key: 'a' })).toBeNull();
     expect(timelineKey({ key: 'Delete', ctrlKey: true })).toBeNull(); // browser shortcuts stay theirs
@@ -287,6 +294,49 @@ describe('sentence permissions, snapshot and gates (2.42)', () => {
     );
   });
 
+  it('treats a word or a sentence rendered from words into the game as a region: guests need seeking (2.42 review)', () => {
+    const noSeek = { ...base, permissions: { ...base.permissions, guestSeeking: false } };
+    expect(isGuestAllowed(c('paletteTap', { action: 'game', sentence: { item } }), noSeek)).toBe(
+      false,
+    );
+    expect(isGuestAllowed(c('sentencePlay', { sentenceId: hex(1) }), noSeek)).toBe(false);
+    // A kept version is a finished sentence, like a sound on the board.
+    expect(
+      isGuestAllowed(c('sentencePlay', { sentenceId: hex(1), sentence: { version: 2 } }), noSeek),
+    ).toBe(true);
+    expect(isGuestAllowed(c('paletteTap', { action: 'preview', sentence: { item } }), noSeek)).toBe(
+      true,
+    );
+    const noPlay = { ...base, permissions: { ...base.permissions, remotePlayback: false } };
+    expect(
+      isGuestAllowed(c('sentencePlay', { sentenceId: hex(1), sentence: { version: 2 } }), noPlay),
+    ).toBe(false);
+  });
+
+  it('narrows the list’s session-wide rights by the host’s setting for this guest (2.42 review)', () => {
+    const list = { canBuild: true, canKeep: true };
+    const all = sentenceRights(list, { guestKeep: true }, false);
+    expect([all.canBuild, all.canKeep, all.canPlayParts, all.canEdit(true)]).toEqual([
+      true,
+      true,
+      true,
+      true,
+    ]);
+    const off = sentenceRights(list, { guestLibraryEdit: false, guestKeep: true }, false);
+    expect([off.canBuild, off.canKeep, off.canEdit(true)]).toEqual([false, false, false]);
+    expect(sentenceRights(list, { guestKeep: false }, false).canKeep).toBe(false);
+    expect(sentenceRights(list, { guestSeeking: false }, false).canPlayParts).toBe(false);
+    // The host's own settings for guests never limit the host.
+    const host = sentenceRights(list, { guestLibraryEdit: false, guestSeeking: false }, true);
+    expect([host.canBuild, host.canKeep, host.canPlayParts, host.canEdit(true)]).toEqual([
+      true,
+      true,
+      true,
+      true,
+    ]);
+    expect(sentenceRights(null, {}, false).canBuild).toBe(false);
+  });
+
   it('reads the snapshot field and gates the feature on the 2.42 companion and host page', () => {
     expect(parseSnapshot({ ...EMPTY, sentences: 4 }).sentences).toBe(4);
     expect(supports('2.41.0', 'sentences')).toBe(false);
@@ -333,5 +383,29 @@ describe('the sentence store (2.42)', () => {
     const run = vi.spyOn(controller, 'run').mockRejectedValueOnce(new Error('no'));
     await refreshSentences();
     expect(run).toHaveBeenCalledWith('sentenceList', {}, { quiet: true });
+  });
+
+  it('keeps the last list when a refresh fails, and tries again (2.42 review)', async () => {
+    vi.useFakeTimers();
+    try {
+      const good = { revision: 1, canBuild: true, canKeep: true, sentences: [], named: [] };
+      const run = vi
+        .spyOn(controller, 'run')
+        .mockResolvedValueOnce(good)
+        .mockRejectedValueOnce(new Error('Too many requests'))
+        .mockResolvedValueOnce({ ...good, revision: 2 });
+      const read = sentenceStoreSnapshot;
+      await refreshSentences();
+      expect(read().list?.revision).toBe(1);
+      await refreshSentences();
+      expect(read().list?.revision).toBe(1);
+      expect(read().failed).toBe(true);
+      await vi.advanceTimersByTimeAsync(1100);
+      expect(run).toHaveBeenCalledTimes(3);
+      expect(read().list?.revision).toBe(2);
+      expect(read().failed).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

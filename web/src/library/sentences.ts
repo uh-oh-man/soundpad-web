@@ -124,6 +124,26 @@ export const listSchema = z.object({
   named: z.array(namedSchema).max(5000),
 });
 export type SentenceList = z.infer<typeof listSchema>;
+/**
+ * What this person may do with sentences (2.42 review). The list's flags are the session's settings;
+ * the host's setting for this guest (library editing or Keep turned Off for them) is in the guest's
+ * own permissions, as in Voices (canEditLibrary). A palette word or a sentence rendered from words
+ * into the game is a part of a recording, so a guest also needs seeking for it (like a region).
+ */
+export function sentenceRights(
+  list: Pick<SentenceList, 'canBuild' | 'canKeep'> | null | undefined,
+  permissions: { guestLibraryEdit?: boolean; guestKeep?: boolean; guestSeeking?: boolean },
+  host: boolean,
+) {
+  const build = host || permissions.guestLibraryEdit !== false;
+  return {
+    canBuild: (list?.canBuild ?? host) && build,
+    canKeep: (list?.canKeep ?? host) && (host || (build && permissions.guestKeep === true)),
+    canPlayParts: host || permissions.guestSeeking !== false,
+    /** A sentence's own canEdit, with the host's setting for this guest. */
+    canEdit: (canEdit: boolean) => canEdit && build,
+  };
+}
 export const alternativesSchema = z.object({
   pieceId,
   current: z.number().int(),
@@ -262,12 +282,15 @@ export type TimelineAction =
   | { kind: 'focus'; step: -1 | 1 }
   | { kind: 'delete' }
   | { kind: 'preview' }
+  | { kind: 'select'; add: boolean }
   | { kind: 'clear' }
   | null;
 /**
  * The timeline's keyboard (every pointer action has one): Alt+←/→ moves the selected piece by 10 ms
  * (Shift: 100 ms), ←/→ moves focus between pieces, Delete or Backspace deletes (leaving a pause),
- * Enter or Space previews the piece privately, Escape clears the selection.
+ * Space selects the piece like a click (Shift+Space adds it to the selection, like Ctrl+click; 2.42
+ * review: a piece with no neighbour could not be selected), Enter previews it privately, Escape
+ * clears the selection.
  */
 export function timelineKey(e: {
   key: string;
@@ -289,8 +312,9 @@ export function timelineKey(e: {
     case 'Backspace':
       return { kind: 'delete' };
     case 'Enter':
-    case ' ':
       return { kind: 'preview' };
+    case ' ':
+      return { kind: 'select', add: !!e.shiftKey };
     case 'Escape':
       return { kind: 'clear' };
     default:

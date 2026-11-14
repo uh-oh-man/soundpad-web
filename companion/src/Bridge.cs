@@ -23,15 +23,17 @@ public sealed partial class Bridge(ISoundpad pipe, StateStore store) : IDisposab
     private Action<string>? heavyWorkHook;
     /// <summary>Tests: runs at the start of every job on the audio worker, with its name.</summary>
     internal void UseHeavyWorkHook(Action<string> hook) => heavyWorkHook = hook;
-    private Task<T> Heavy<T>(string what, Func<T> work) => audioWork.Run(() => { heavyWorkHook?.Invoke(what); return work(); });
+    private Task<T> Heavy<T>(string what, Func<T> work, CancellationToken cancel = default) => audioWork.Run(() => { heavyWorkHook?.Invoke(what); cancel.ThrowIfCancellationRequested(); return work(); }, cancel);
     /// <summary>
     /// Commands whose work may decode, encode, read recorded audio or list devices before its first real wait (2.41).
     /// They leave the caller's thread at once, after their playback intent (if any) was reserved in arrival order, so
     /// the socket's receive loop is free for the next Play, Stop or Panic. Everything else keeps running inline up to
     /// its first wait, as before: its arrival order matters (revocations, session changes) and it is cheap.
+    /// Sentences and the palette (review, 2.42) read and save the sentences file under its lock, read the library and
+    /// kept audio, and render: all of them leave at once too (Play and a Game tap reserved their intent already).
     /// </summary>
     private static bool Offloaded(string op) => op is "trimAudio" or "trimPreview" or "mimicClip" or "mimicPreview" or "mimicSources" or "mimicLibrary" or "mimicLibraryImport"
-        or "draftKeep" or "draftPlay" or "mimicPeek" or "historyLevels" or "historyTimeline" or "historyTranscript";
+        or "draftKeep" or "draftPlay" or "mimicPeek" or "historyLevels" or "historyTimeline" or "historyTranscript" || IsSentenceOp(op);
     private int waiting;
     private DiskState disk = store.Load();
     private ParsedLibrary parsed = new(new("empty", [], []), [], []);

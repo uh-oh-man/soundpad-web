@@ -4,6 +4,7 @@ import {
   useRef,
   useState,
   type CSSProperties,
+  type MutableRefObject,
   type KeyboardEvent as ReactKeyboardEvent,
   type PointerEvent as ReactPointerEvent,
 } from 'react';
@@ -45,6 +46,7 @@ import {
   pxOf,
   sameRef,
   select,
+  sentenceRights,
   sentenceSchema,
   setsSchema,
   sourceProblem,
@@ -80,6 +82,8 @@ type Tab = 'sentences' | 'palette' | 'sets';
  */
 export function SentencesPanel({ state, host, connected, canPlay, openId = null }: Props) {
   const { list } = useSentenceStore();
+  // The list's flags are the session's; the host's setting for this guest narrows them (2.42 review).
+  const rights = sentenceRights(list, state.permissions, host);
   const [tab, setTab] = useState<Tab>('sentences');
   const [open, setOpen] = useState<string | null>(openId);
   useEffect(() => {
@@ -122,16 +126,19 @@ export function SentencesPanel({ state, host, connected, canPlay, openId = null 
           <Builder
             id={open}
             canPlay={canPlay && connected}
-            canKeep={list?.canKeep ?? host}
+            canKeep={rights.canKeep}
+            canPlayParts={rights.canPlayParts}
+            canEdit={rights.canEdit}
             back={() => setOpen(null)}
           />
         ) : (
-          <SentenceList open={setOpen} canBuild={list?.canBuild ?? host} />
+          <SentenceList open={setOpen} canBuild={rights.canBuild} />
         ))}
       {tab === 'palette' && (
         <PalettePanel
           canPlay={canPlay && connected}
-          canBuild={list?.canBuild ?? host}
+          canGame={canPlay && connected && rights.canPlayParts}
+          canBuild={rights.canBuild}
           openTake={(id) => {
             setOpen(id);
             setTab('sentences');
@@ -140,7 +147,7 @@ export function SentencesPanel({ state, host, connected, canPlay, openId = null 
       )}
       {tab === 'sets' && (
         <SetsPanel
-          canBuild={list?.canBuild ?? host}
+          canBuild={rights.canBuild}
           openSentence={(id) => {
             setOpen(id);
             setTab('sentences');
@@ -167,11 +174,40 @@ async function create(text: string, origin?: 'typed' | 'template') {
   return reply;
 }
 
+/**
+ * A list setting changed by quick clicks (2.42 review): each change builds on the last one asked for,
+ * not on the last reply, and the changes are sent one after another, so none undoes another.
+ */
+function useListSetting<T>(current: T[], send: (next: T[]) => Promise<unknown>) {
+  const [pending, setPending] = useState<T[] | null>(null);
+  const latest = useRef<T[] | null>(null);
+  const chain = useRef<Promise<unknown>>(Promise.resolve());
+  const change = (update: (list: T[]) => T[]) => {
+    const next = update(latest.current ?? current);
+    latest.current = next;
+    setPending(next);
+    chain.current = chain.current
+      .then(() => send(next))
+      .catch(() => {})
+      .finally(() => {
+        if (latest.current !== next) return;
+        latest.current = null;
+        setPending(null);
+      });
+  };
+  return [pending ?? current, change] as const;
+}
+
 function SentenceList({ open, canBuild }: { open: (id: string) => void; canBuild: boolean }) {
-  const { list } = useSentenceStore();
+  const { list, failed } = useSentenceStore();
   const [text, setText] = useState('');
   const [busy, setBusy] = useState(false);
-  if (!list) return <p className="muted">Loading sentences…</p>;
+  if (!list)
+    return (
+      <p className="muted" role="status">
+        {failed ? 'The sentences could not be loaded. Trying again…' : 'Loading sentences…'}
+      </p>
+    );
   const kept = list.sentences.filter((s) => s.kept);
   const projects = list.sentences.filter((s) => !s.kept);
   const row = (s: (typeof list.sentences)[number]) => (
@@ -191,6 +227,11 @@ function SentenceList({ open, canBuild }: { open: (id: string) => void; canBuild
   );
   return (
     <div className="sentences-list">
+      {failed && (
+        <p className="warning" role="status">
+          The list could not be refreshed. Trying again…
+        </p>
+      )}
       {canBuild && (
         <form
           className="voices-inline"
@@ -247,39 +288,62 @@ function Builder({
   id,
   canPlay,
   canKeep,
+  canPlayParts,
+  canEdit,
   back,
 }: {
   id: string;
   canPlay: boolean;
   canKeep: boolean;
+  canPlayParts: boolean;
+  canEdit: (canEdit: boolean) => boolean;
   back: () => void;
 }) {
   const { list } = useSentenceStore();
   const voices = useVoices();
   const preview = usePreviewAudio();
   const [sentence, setSentence] = useState<Sentence | null>(null);
+  const [loadFailed, setLoadFailed] = useState(false);
   const [draft, setDraft] = useState('');
   const [selection, setSelection] = useState<Selection>([]);
   const [busy, setBusy] = useState(false);
   const typing = useRef(0);
   const typedAt = useRef(0);
+  // Typed text not sent yet (it goes 350 ms after the last key), and the last one on its way.
+  const pendingText = useRef<{ timer: number; value: string } | null>(null);
+  const sendingText = useRef<Promise<void> | null>(null);
+  const refocus = useRef<string[] | null>(null);
+  const retry = useRef({ timer: 0, delay: 1000 });
   const reduced = useMemo(prefersReducedMotion, []);
 
   const load = async () => {
+    window.clearTimeout(retry.current.timer);
     try {
       const s = sentenceSchema.parse(
         await controller.run('sentenceGet', { sentenceId: id }, { quiet: true }),
       );
       setSentence(s);
+      setLoadFailed(false);
+      retry.current.delay = 1000;
       // Someone else's change (or a reply that came later) never replaces what is being typed.
       if (Date.now() - typedAt.current > 1500) setDraft(s.text);
     } catch {
-      setSentence(null);
+      // A refusal or a short reconnect keeps what is shown (2.42 review) and tries again shortly.
+      setLoadFailed(true);
+      retry.current.timer = window.setTimeout(() => void load(), retry.current.delay);
+      retry.current.delay = Math.min(30000, retry.current.delay * 2);
     }
   };
   useEffect(() => {
     void load();
   }, [id, list?.revision]);
+  useEffect(
+    () => () => {
+      window.clearTimeout(retry.current.timer);
+      retry.current.delay = 0;
+    },
+    [],
+  );
   useEffect(() => {
     if (sentence) setSelection((current) => prune(current, sentence.pieces));
   }, [sentence]);
@@ -296,36 +360,82 @@ function Builder({
     }
   };
   // Typing matches live: the text goes to the companion a moment after the last key; nothing plays.
+  const sendText = (value: string, mine: number) => {
+    const sending = controller
+      .run('sentenceText', { sentenceId: id, sentence: { text: value } }, { quiet: true })
+      .then((reply) => {
+        if (mine === typing.current) setSentence(changedSchema.parse(reply).sentence);
+      })
+      .catch(() => {})
+      .finally(() => {
+        if (sendingText.current === sending) sendingText.current = null;
+      });
+    sendingText.current = sending;
+    return sending;
+  };
   const type = (value: string) => {
     setDraft(value);
     typedAt.current = Date.now();
     const mine = ++typing.current;
-    window.setTimeout(() => {
-      if (mine !== typing.current) return;
-      void controller
-        .run('sentenceText', { sentenceId: id, sentence: { text: value } }, { quiet: true })
-        .then((reply) => {
-          if (mine === typing.current) setSentence(changedSchema.parse(reply).sentence);
-        })
-        .catch(() => {});
-    }, 350);
+    if (pendingText.current) window.clearTimeout(pendingText.current.timer);
+    pendingText.current = {
+      value,
+      timer: window.setTimeout(() => {
+        pendingText.current = null;
+        void sendText(value, mine);
+      }, 350),
+    };
   };
+  /**
+   * Sends text typed in the last 350 ms now and waits until the companion has it (2.42 review): Keep,
+   * Play into game and Preview act on the companion's revision, which must be what the box shows.
+   */
+  const flush = async () => {
+    const waiting = pendingText.current;
+    if (waiting) {
+      window.clearTimeout(waiting.timer);
+      pendingText.current = null;
+      await sendText(waiting.value, typing.current);
+    } else if (sendingText.current) await sendingText.current;
+  };
+  const textPending = () => !!pendingText.current || !!sendingText.current;
+  // Closing the window or the builder still saves what was typed.
+  useEffect(
+    () => () => {
+      const waiting = pendingText.current;
+      if (!waiting) return;
+      window.clearTimeout(waiting.timer);
+      pendingText.current = null;
+      void controller
+        .run('sentenceText', { sentenceId: id, sentence: { text: waiting.value } }, { quiet: true })
+        .catch(() => {});
+    },
+    [id],
+  );
+  const leave = () => void flush().then(back);
   if (!sentence)
     return (
       <div>
         <button type="button" onClick={back}>
           Back
         </button>
-        <p className="muted">Loading the sentence…</p>
+        <p className="muted" role="status">
+          {loadFailed ? 'The sentence could not be loaded. Trying again…' : 'Loading the sentence…'}
+        </p>
       </div>
     );
-  const editable = sentence.canEdit;
+  const editable = canEdit(sentence.canEdit);
+  // Someone else's kept sentence plays as kept; the builder's own work is rendered from its words.
+  const latestKept = !editable && sentence.kept ? sentence.versions[0]?.n : undefined;
+  const rendersWords = latestKept === undefined;
+  const canPlayHere = canPlay && (canPlayParts || !rendersWords);
   const selected = sentence.pieces.filter((p) => selection.includes(p.id));
   const one = selected.length === 1 ? selected[0] : null;
   const playIntoGame = async (version?: number) => {
     if (busy) return;
     setBusy(true);
     try {
+      await flush();
       await controller.run('sentencePlay', {
         sentenceId: id,
         ...(version !== undefined && { sentence: { version } }),
@@ -336,20 +446,42 @@ function Builder({
       setBusy(false);
     }
   };
-  const previewSentence = (fields: SentenceInput = {}) =>
-    void preview.play('sentencePreview', { sentenceId: id, sentence: fields });
+  const previewSentence = (fields: SentenceInput = {}) => {
+    const play = () => void preview.play('sentencePreview', { sentenceId: id, sentence: fields });
+    if (textPending()) void flush().then(play);
+    else play();
+  };
+  // Removing a pause takes away the focused button: focus goes to a neighbour (2.42 review).
+  const remove = (ids: string[]) => {
+    const order = sentence.pieces.map((p) => p.id);
+    const gone = new Set(
+      ids.filter((x) => sentence.pieces.find((p) => p.id === x)?.kind === 'pause'),
+    );
+    if (gone.size) {
+      const first = Math.min(...[...gone].map((x) => order.indexOf(x)));
+      refocus.current = [...order.slice(first + 1), ...order.slice(0, first).reverse()].filter(
+        (x) => !gone.has(x),
+      );
+    }
+    return apply({ do: 'delete', pieces: ids });
+  };
   return (
     <section
       className="sentence-builder"
       aria-label={`Sentence ${sentence.title || sentence.text}`}
     >
       <div className="voices-inline">
-        <button type="button" onClick={back}>
+        <button type="button" onClick={leave}>
           Back to sentences
         </button>
         {sentence.kept && <span className="badge">Kept · version {sentence.versions[0]?.n}</span>}
         {!sentence.mine && <span className="muted">by {sentence.ownerName}</span>}
       </div>
+      {loadFailed && (
+        <p className="warning" role="status">
+          The sentence could not be refreshed. Trying again…
+        </p>
+      )}
       <label className="sentence-text">
         <span>Sentence text</span>
         <textarea
@@ -415,9 +547,15 @@ function Builder({
         <button
           type="button"
           className="primary"
-          aria-disabled={!canPlay || busy || sentence.pieces.length === 0 || undefined}
-          title={canPlay ? undefined : 'Playback is not available'}
-          onClick={() => canPlay && sentence.pieces.length > 0 && void playIntoGame()}
+          aria-disabled={!canPlayHere || busy || sentence.pieces.length === 0 || undefined}
+          title={
+            !canPlay
+              ? 'Playback is not available'
+              : canPlayHere
+                ? undefined
+                : 'The host has turned guest seeking off: only kept sentences play into the game'
+          }
+          onClick={() => canPlayHere && sentence.pieces.length > 0 && void playIntoGame(latestKept)}
         >
           <Play size={14} /> Play into game
         </button>
@@ -428,8 +566,8 @@ function Builder({
             onClick={() => {
               if (busy || sentence.pieces.length === 0) return;
               setBusy(true);
-              void controller
-                .run('sentenceKeep', { sentenceId: id })
+              void flush()
+                .then(() => controller.run('sentenceKeep', { sentenceId: id }))
                 .then((r) => {
                   const version = (r as { version?: number } | undefined)?.version;
                   controller.notify(
@@ -465,13 +603,16 @@ function Builder({
         {editable && !sentence.kept && sentence.mine && (
           <button
             type="button"
-            onClick={() =>
+            onClick={() => {
+              // Text not sent yet would only be refused once the sentence is gone.
+              if (pendingText.current) window.clearTimeout(pendingText.current.timer);
+              pendingText.current = null;
               void controller
                 .run('sentenceDiscard', { sentenceId: id })
                 .then(() => refreshSentences())
                 .then(back)
-                .catch(() => {})
-            }
+                .catch(() => {});
+            }}
           >
             <Trash2 size={14} /> Discard
           </button>
@@ -488,6 +629,8 @@ function Builder({
         editable={editable}
         reduced={reduced}
         apply={apply}
+        remove={remove}
+        refocus={refocus}
         previewPiece={(p) => previewSentence({ pieces: [p.id] })}
       />
       {one && (
@@ -498,6 +641,7 @@ function Builder({
           voices={voices}
           editable={editable}
           apply={apply}
+          remove={remove}
           previewAlternative={(i) => previewSentence({ pieces: [one.id], alternative: i })}
         />
       )}
@@ -535,6 +679,9 @@ function MixSettings({
   const [chaos, setChaos] = useState(sentence.settings.chaos);
   useEffect(() => setChaos(sentence.settings.chaos), [sentence.settings.chaos]);
   const s = sentence.settings;
+  const [voiceIds, changeVoices] = useListSetting(s.voiceIds, (next) =>
+    apply({ do: 'settings', voiceIds: next }),
+  );
   const other = s.timing === 'fluent' ? 'original' : 'fluent';
   return (
     <details className="sentence-mix">
@@ -556,20 +703,18 @@ function MixSettings({
         </label>
       </div>
       <fieldset className="sentence-voices">
-        <legend>Voices in the mix {s.voiceIds.length === 0 && '(all)'}</legend>
+        <legend>Voices in the mix {voiceIds.length === 0 && '(all)'}</legend>
         {voices.map((v) => (
           <label key={v.id} className="voices-check">
             <input
               type="checkbox"
-              checked={s.voiceIds.includes(v.id)}
-              onChange={(e) =>
-                void apply({
-                  do: 'settings',
-                  voiceIds: e.target.checked
-                    ? [...s.voiceIds, v.id]
-                    : s.voiceIds.filter((x) => x !== v.id),
-                })
-              }
+              checked={voiceIds.includes(v.id)}
+              onChange={(e) => {
+                const on = e.target.checked;
+                changeVoices((list) =>
+                  on ? [...list.filter((x) => x !== v.id), v.id] : list.filter((x) => x !== v.id),
+                );
+              }}
             />
             <VoiceAvatar voice={v} size={18} /> {v.name}
           </label>
@@ -646,6 +791,8 @@ function Timeline({
   editable,
   reduced,
   apply,
+  remove,
+  refocus,
   previewPiece,
 }: {
   sentence: Sentence;
@@ -655,6 +802,8 @@ function Timeline({
   editable: boolean;
   reduced: boolean;
   apply: (edit: SentenceInput, quiet?: boolean) => Promise<unknown>;
+  remove: (ids: string[]) => Promise<unknown>;
+  refocus: MutableRefObject<string[] | null>;
   previewPiece: (p: Piece) => void;
 }) {
   const [drag, setDrag] = useState<{
@@ -665,8 +814,33 @@ function Timeline({
     moved: boolean;
   } | null>(null);
   const refs = useRef(new Map<string, HTMLButtonElement>());
+  const group = useRef<HTMLDivElement>(null);
+  // Alt+arrow nudges (2.42 review): each builds on the last one, shown at once and sent as one move
+  // once the keys rest, so quick presses all count and key repeat does not flood the host.
+  const [nudged, setNudged] = useState<{ id: string; at: number } | null>(null);
+  const nudge = useRef<{ id: string; at: number; timer: number } | null>(null);
   const overlaps = overlapping(sentence);
   const pieces = sentence.pieces;
+  // A removed pause took the focus with it: a neighbour (or the timeline) gets it back.
+  useEffect(() => {
+    const want = refocus.current;
+    if (!want) return;
+    const active = document.activeElement;
+    if (active && active !== document.body && active.isConnected) return;
+    refocus.current = null;
+    const next = want.find((x) => refs.current.has(x));
+    (next ? refs.current.get(next) : group.current)?.focus();
+  }, [pieces]);
+  const sendNudge = () => {
+    const n = nudge.current;
+    if (!n) return;
+    window.clearTimeout(n.timer);
+    nudge.current = null;
+    void apply({ do: 'move', pieces: [n.id], offsetMs: n.at }, true).finally(() =>
+      setNudged((shown) => (shown && shown.id === n.id && shown.at === n.at ? null : shown)),
+    );
+  };
+  useEffect(() => () => sendNudge(), []);
   const width = pxOf(Math.max(sentence.durationMs, 2000) + 1000);
   const others = (except: string) =>
     pieces
@@ -700,6 +874,8 @@ function Timeline({
   const key = (e: ReactKeyboardEvent<HTMLButtonElement>, p: Piece, index: number) => {
     const action = timelineKey(e);
     if (!action) return;
+    // Escape with nothing to clear closes the window, as everywhere else (2.42 review).
+    if (action.kind === 'clear' && selection.length === 0) return;
     e.preventDefault();
     switch (action.kind) {
       case 'focus': {
@@ -710,19 +886,24 @@ function Timeline({
         }
         break;
       }
-      case 'move':
-        if (editable)
-          void apply(
-            { do: 'move', pieces: [p.id], offsetMs: Math.max(0, p.offsetMs + action.deltaMs) },
-            true,
-          );
+      case 'move': {
+        if (!editable) break;
+        if (nudge.current && nudge.current.id !== p.id) sendNudge();
+        const base = nudge.current?.at ?? (nudged?.id === p.id ? nudged.at : p.offsetMs);
+        const at = Math.max(0, base + action.deltaMs);
+        if (nudge.current) window.clearTimeout(nudge.current.timer);
+        nudge.current = { id: p.id, at, timer: window.setTimeout(sendNudge, 200) };
+        setNudged({ id: p.id, at });
         break;
+      }
       case 'delete':
-        if (editable)
-          void apply({ do: 'delete', pieces: selection.includes(p.id) ? [...selection] : [p.id] });
+        if (editable) void remove(selection.includes(p.id) ? [...selection] : [p.id]);
         break;
       case 'preview':
         previewPiece(p);
+        break;
+      case 'select':
+        setSelection(select(selection, p.id, action.add));
         break;
       case 'clear':
         setSelection([]);
@@ -734,8 +915,8 @@ function Timeline({
       <div className="voices-inline">
         <strong>Timeline</strong>
         <span className="muted">
-          {formatMs(sentence.durationMs)} · drag freely, Shift snaps · Alt+←/→ nudges · Delete
-          leaves a pause
+          {formatMs(sentence.durationMs)} · drag freely, Shift snaps · Space selects · Alt+←/→
+          nudges · Delete leaves a pause
         </span>
         {editable && (
           <button
@@ -748,7 +929,13 @@ function Timeline({
           </button>
         )}
       </div>
-      <div className="sentence-timeline" role="group" aria-label="Timeline">
+      <div
+        className="sentence-timeline"
+        role="group"
+        aria-label="Timeline"
+        ref={group}
+        tabIndex={-1}
+      >
         <div className="sentence-track" style={{ width }}>
           {Array.from({ length: Math.ceil(width / pxOf(1000)) }, (_, i) => (
             <span
@@ -763,7 +950,8 @@ function Timeline({
           {pieces.map((p, index) => {
             const voice = voiceById(voices, p.voiceId);
             const marker = p.kind === 'missing' ? missingMarker(p, reduced) : null;
-            const offset = drag?.id === p.id ? drag.at : p.offsetMs;
+            const offset =
+              drag?.id === p.id ? drag.at : nudged?.id === p.id ? nudged.at : p.offsetMs;
             const problem = sourceProblem(p);
             return (
               <button
@@ -823,6 +1011,7 @@ function PieceInspector({
   voices,
   editable,
   apply,
+  remove,
   previewAlternative,
 }: {
   sentence: Sentence;
@@ -830,6 +1019,7 @@ function PieceInspector({
   voices: Voice[];
   editable: boolean;
   apply: (edit: SentenceInput, quiet?: boolean) => Promise<unknown>;
+  remove: (ids: string[]) => Promise<unknown>;
   previewAlternative: (index: number) => void;
 }) {
   const [alternatives, setAlternatives] = useState<Alternatives | null>(null);
@@ -855,6 +1045,11 @@ function PieceInspector({
   const voice = voiceById(voices, piece.voiceId);
   const ids = [piece.id];
   const problem = sourceProblem(piece);
+  // The volume slider from the pointer or the keyboard (2.42 review): sent when it changed.
+  const setGain = (gain: number) => {
+    if (Number.isFinite(gain) && gain !== piece.gain)
+      void apply({ do: 'gain', pieces: ids, gain }, true);
+  };
   return (
     <section className="sentence-inspector" aria-label={`Piece ${pieceLabel(piece)}`}>
       <div className="voices-inline">
@@ -1101,16 +1296,15 @@ function PieceInspector({
                 step={0.05}
                 defaultValue={piece.gain}
                 aria-label="Piece volume"
-                onPointerUp={(e) =>
-                  void apply({ do: 'gain', pieces: ids, gain: Number(e.currentTarget.value) }, true)
-                }
+                onPointerUp={(e) => setGain(Number(e.currentTarget.value))}
+                onKeyUp={(e) => setGain(Number(e.currentTarget.value))}
               />
             </label>
           )}
         </div>
       )}
       {editable && (
-        <button type="button" onClick={() => void apply({ do: 'delete', pieces: ids })}>
+        <button type="button" onClick={() => void remove(ids)}>
           <Trash2 size={13} /> {piece.kind === 'pause' ? 'Remove pause' : 'Delete (leaves a pause)'}
         </button>
       )}
@@ -1266,10 +1460,13 @@ function usePaletteMode() {
 
 function PalettePanel({
   canPlay,
+  canGame,
   canBuild,
   openTake,
 }: {
   canPlay: boolean;
+  /** A word into the game: playback, and (guests) seeking, as for a region (2.42 review). */
+  canGame: boolean;
   canBuild: boolean;
   openTake: (id: string) => void;
 }) {
@@ -1308,10 +1505,22 @@ function PalettePanel({
       .catch(() => {});
   }, []);
   const active = sets?.sets.find((s) => s.id === sets.active) ?? null;
+  const [favorites, changeFavorites] = useListSetting(active?.favorites ?? [], (next) =>
+    active
+      ? controller
+          .run('performanceSets', { action: 'update', set: { id: active.id, favorites: next } })
+          .then((r) => {
+            setSets(setsSchema.parse(r));
+            search(query);
+          })
+      : Promise.resolve(),
+  );
+  const starred = (item: PaletteItem) =>
+    active ? favorites.some((f) => sameRef(f, itemRef(item))) : item.favorite;
   const tap = (item: PaletteItem) => {
     const ref = itemRef(item);
     if (recording) setRecording({ taps: recording.taps + 1 });
-    if (mode === 'game' && canPlay)
+    if (mode === 'game' && canGame)
       void controller
         .run('paletteTap', { action: 'game', sentence: { item: ref } })
         .catch(() => {});
@@ -1320,16 +1529,9 @@ function PalettePanel({
   const toggleFavorite = (item: PaletteItem) => {
     if (!active) return;
     const ref = itemRef(item);
-    const favorites = active.favorites.some((f) => sameRef(f, ref))
-      ? active.favorites.filter((f) => !sameRef(f, ref))
-      : [...active.favorites, ref];
-    void controller
-      .run('performanceSets', { action: 'update', set: { id: active.id, favorites } })
-      .then((r) => {
-        setSets(setsSchema.parse(r));
-        search(query);
-      })
-      .catch(() => {});
+    changeFavorites((list) =>
+      list.some((f) => sameRef(f, ref)) ? list.filter((f) => !sameRef(f, ref)) : [...list, ref],
+    );
   };
   return (
     <div className="sentence-palette">
@@ -1350,17 +1552,25 @@ function PalettePanel({
           <input
             type="radio"
             name="palette-mode"
-            checked={mode === 'preview'}
+            checked={mode === 'preview' || !canGame}
             onChange={() => setMode('preview')}
           />
           <Headphones size={13} aria-hidden="true" /> Preview here
         </label>
-        <label title={canPlay ? undefined : 'Playback is not available'}>
+        <label
+          title={
+            canGame
+              ? undefined
+              : canPlay
+                ? 'The host has turned guest seeking off: palette words play only here'
+                : 'Playback is not available'
+          }
+        >
           <input
             type="radio"
             name="palette-mode"
-            checked={mode === 'game'}
-            disabled={!canPlay}
+            checked={mode === 'game' && canGame}
+            disabled={!canGame}
             onChange={() => setMode('game')}
           />
           <Play size={13} aria-hidden="true" /> Play into game
@@ -1454,8 +1664,8 @@ function PalettePanel({
               <button
                 type="button"
                 className="icon-button"
-                aria-pressed={item.favorite}
-                aria-label={`${item.favorite ? 'Remove' : 'Add'} favourite “${item.text}”`}
+                aria-pressed={starred(item)}
+                aria-label={`${starred(item) ? 'Remove' : 'Add'} favourite “${item.text}”`}
                 onClick={() => toggleFavorite(item)}
               >
                 <Star size={13} />
@@ -1547,8 +1757,20 @@ function SetsPanel({
       .then((r) => setSets(setsSchema.parse(r)))
       .catch(() => {});
   }, []);
-  if (!sets) return <p className="muted">Loading your performance sets…</p>;
-  const active = sets.sets.find((s) => s.id === sets.active) ?? sets.sets[0];
+  const active = sets ? (sets.sets.find((s) => s.id === sets.active) ?? sets.sets[0]) : null;
+  const update = (fields: Record<string, unknown>) =>
+    active
+      ? controller
+          .run('performanceSets', { action: 'update', set: { id: active.id, ...fields } })
+          .then((r) => setSets(setsSchema.parse(r)))
+      : Promise.resolve();
+  const [setVoices, changeSetVoices] = useListSetting(active?.voiceIds ?? [], (voiceIds) =>
+    update({ voiceIds }),
+  );
+  const [templates, changeTemplates] = useListSetting(active?.templates ?? [], (next) =>
+    update({ templates: next }),
+  );
+  if (!sets || !active) return <p className="muted">Loading your performance sets…</p>;
   return (
     <div className="sentence-sets">
       <p className="muted">
@@ -1598,24 +1820,19 @@ function SetsPanel({
       </form>
       <fieldset className="sentence-voices">
         <legend>
-          Voices in “{active.name}” {active.voiceIds.length === 0 && '(all)'}
+          Voices in “{active.name}” {setVoices.length === 0 && '(all)'}
         </legend>
         {voices.map((v) => (
           <label key={v.id} className="voices-check">
             <input
               type="checkbox"
-              checked={active.voiceIds.includes(v.id)}
-              onChange={(e) =>
-                runSets({
-                  action: 'update',
-                  set: {
-                    id: active.id,
-                    voiceIds: e.target.checked
-                      ? [...active.voiceIds, v.id]
-                      : active.voiceIds.filter((x) => x !== v.id),
-                  },
-                })
-              }
+              checked={setVoices.includes(v.id)}
+              onChange={(e) => {
+                const on = e.target.checked;
+                changeSetVoices((list) =>
+                  on ? [...list.filter((x) => x !== v.id), v.id] : list.filter((x) => x !== v.id),
+                );
+              }}
             />
             <VoiceAvatar voice={v} size={18} /> {v.name}
           </label>
@@ -1627,10 +1844,10 @@ function SetsPanel({
       </p>
       <h3>Templates</h3>
       <ul className="sentence-takes" aria-label="Templates">
-        {active.templates.map((t) => {
+        {templates.map((t, index) => {
           const names = templateSlots(t.text);
           return (
-            <li key={t.id}>
+            <li key={t.id || `new-${index}`}>
               <strong>{t.name}</strong>
               <span className="muted">{t.text}</span>
               {names.map((n) => (
@@ -1663,15 +1880,7 @@ function SetsPanel({
               <button
                 type="button"
                 aria-label={`Remove template ${t.name}`}
-                onClick={() =>
-                  runSets({
-                    action: 'update',
-                    set: {
-                      id: active.id,
-                      templates: active.templates.filter((x) => x.id !== t.id),
-                    },
-                  })
-                }
+                onClick={() => changeTemplates((list) => list.filter((x) => x !== t))}
               >
                 <Trash2 size={13} />
               </button>
@@ -1684,20 +1893,12 @@ function SetsPanel({
         onSubmit={(e) => {
           e.preventDefault();
           if (!template.name.trim() || !template.text.trim()) return;
-          runSets({
-            action: 'update',
-            set: {
-              id: active.id,
-              templates: [
-                ...active.templates,
-                {
-                  id: '',
-                  name: template.name.trim().slice(0, 40),
-                  text: template.text.trim().slice(0, 400),
-                },
-              ],
-            },
-          });
+          const added = {
+            id: '',
+            name: template.name.trim().slice(0, 40),
+            text: template.text.trim().slice(0, 400),
+          };
+          changeTemplates((list) => [...list, added]);
           setTemplate({ name: '', text: '' });
         }}
       >

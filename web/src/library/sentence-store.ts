@@ -8,8 +8,8 @@ import { listSchema, type SentenceList } from './sentences';
  * palette pieces, fetched once per change the companion announces (the snapshot's `sentences`
  * revision) and shared by the Sentences window and the board's pinned tiles.
  */
-type Store = { list: SentenceList | null };
-let store: Store = { list: null };
+type Store = { list: SentenceList | null; failed: boolean };
+let store: Store = { list: null, failed: false };
 const listeners = new Set<() => void>();
 const set = (next: Partial<Store>) => {
   store = { ...store, ...next };
@@ -23,6 +23,10 @@ export const useSentenceStore = () => useSyncExternalStore(subscribe, () => stor
 
 let fetching: Promise<void> | null = null;
 let again = false;
+// A failed refresh keeps the last list (2.42 review: a refusal or a short reconnect used to empty the
+// window and the board's pinned tiles) and tries again a few times, waiting longer each time.
+const RETRIES = 5;
+let retry = { timer: undefined as ReturnType<typeof setTimeout> | undefined, count: 0 };
 export function refreshSentences(): Promise<void> {
   if (fetching) {
     again = true;
@@ -32,12 +36,17 @@ export function refreshSentences(): Promise<void> {
     try {
       do {
         again = false;
+        clearTimeout(retry.timer);
         try {
           set({
             list: listSchema.parse(await controller.run('sentenceList', {}, { quiet: true })),
+            failed: false,
           });
+          retry.count = 0;
         } catch {
-          set({ list: null });
+          set({ failed: true });
+          if (retry.count < RETRIES)
+            retry.timer = setTimeout(() => void refreshSentences(), 1000 * 2 ** retry.count++);
         }
       } while (again);
     } finally {
@@ -52,18 +61,26 @@ export function useSentenceSync(state: Snapshot, enabled: boolean) {
   const revision = state.sentences ?? 0;
   useEffect(() => {
     if (!enabled) {
-      set({ list: null });
+      clearTimeout(retry.timer);
+      retry.count = RETRIES;
+      set({ list: null, failed: false });
       return;
     }
+    retry.count = 0;
     // Like the library's first look, a moment after joining (the join sends a burst already).
     const timer = setTimeout(() => void refreshSentences(), store.list ? 150 : 2200);
     return () => clearTimeout(timer);
   }, [enabled, revision]);
 }
 
+/** Test seam: the store as the hook sees it. */
+export const sentenceStoreSnapshot = () => store;
+
 /** Test seam. */
 export function resetSentenceStore() {
-  store = { list: null };
+  store = { list: null, failed: false };
   fetching = null;
   again = false;
+  clearTimeout(retry.timer);
+  retry = { timer: undefined, count: 0 };
 }

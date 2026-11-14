@@ -53,10 +53,24 @@ The host can also press a hotkey **in any app** to save the last few seconds mid
 
 Guests can look, search and listen by default; changing the library needs the **Edit the voice library** permission (on by default, can be turned off per guest). Removing a recording from the library never deletes its file. **Group speakers (experimental)**, off by default, groups Mimic's phrases by who seems to speak so a person can name them.
 
+## Sentences
+
+**Sentences** (beside **Voices**, companion 2.42+) puts sentences together from words that were really said in your voice library's recordings. **Every word comes from a real recording**: nothing is synthesised, imitated or cloned. A word no recording has is never made up: it stays a **missing word**, marked in the text and on the timeline, and plays as a gap or a bleep, whichever you choose. Similar recorded words or a splice of two recorded words are offered for it, but used only when you pick one.
+
+- **Type a sentence** and the recorded words appear on a timeline under the text; typing plays nothing. **Smooth to Chaotic** decides between long phrases in one voice and quick switches between voices, and the same settings always give the same result. **Swap take**, **Shuffle voices** and **Try contrasting deliveries** choose other recordings.
+- **Shape it on the timeline**: drag pieces, set their edges, fades and volume, add pauses, apply effects, choose **Fluent joins** or **Original timing**, and try **Gentle cleanup**. Everything works from the keyboard too.
+- **Preview here** plays it in your own browser; **Play into game** plays it through Soundpad like any sound, and Stop and Panic stop it.
+- **Keep** saves it as a version that always sounds exactly as kept, even if its recordings change later. Kept sentences can be **pinned to the board** as tiles that play them into the game, and show up in Voices' search.
+- **Palette**: tap recorded words and phrases, and named sounds like a laugh or a breath, to preview them or play them into the game. **Record performance** keeps a run of your own taps with their timing as a sentence you can edit.
+- **Performance sets**: your own choice of voices, palette favourites and templates, kept for you by the companion.
+
+Guests can read, search and preview sentences and play kept ones into the game. Building sentences follows **Edit the voice library**, keeping them follows **Keep clips** and the guest's Keep budget, and playing words or unkept sentences into the game also needs **Seeking & pause**. Unkept sentences are private to whoever made them. Full guide: [docs/SENTENCES.md](docs/SENTENCES.md).
+
 ## Features
 
 - **Mimic**, described above, merged from the Voice Replay Studio desktop app.
 - **Voice library**, described above: kept clips with their words, voices and tags, and word search that plays a single word.
+- **Sentences and the speaking palette**, described above: sentences and performances made only from real recordings, kept as versions and pinned to the board.
 - Real named-pipe Soundpad integration, including Steam and standalone distributions using the same RC API.
 - Ordered, nested categories, native category icons, cross-category search, duplicate titles and empty categories.
 - Play, prominent Stop, accurate vendor playback status and progress where available. When two people click at once, the newest click wins: older ones never play late and show no error.
@@ -79,7 +93,7 @@ More screenshots: [Phone](docs/screenshots/v23-phone.png) · [Original Purple](d
 
 Treat an invitation as a password. Anyone with it can join and use the permissions you enable. **Session & access → Replace invite** revokes the previous invitation and disconnects existing guests. Disconnecting one peer alone does not invalidate a bearer invitation; that person could return with a new browser identity.
 
-Guests receive sound titles, category names/order/membership/icons, custom icons, playback status, counter and permissions, and (since 2.41) the voice library's titles, tags, voices and words. Host library audio is not sent to guests, except private previews of up to 30 seconds of voice-library recordings and of sounds in the categories the host indexes for word search; they play in the guest's own browser and are never offered as a download. Guests never receive the host's file paths. Each guest's browser keeps its own private key, which never leaves it; the host's page checks it on every connection so permissions follow the right person. Guest uploads travel directly to the host; local paths, native access tokens and host signing keys stay local. Shared organization and enabled Spotify metadata/artwork are visible to session participants. There are no analytics, third-party fonts, arbitrary file endpoints, shell commands or arbitrary Soundpad API access. Managed imports are the only production library mutations; native entry removal is deliberately deferred when atomic ownership cannot be established. WebRTC exposes network connection information to peers; signaling relays see network metadata and encrypted session descriptions.
+Guests receive sound titles, category names/order/membership/icons, custom icons, playback status, counter and permissions, and (since 2.41) the voice library's titles, tags, voices and words, and (since 2.42) kept sentences, their versions and the palette. Host library audio is not sent to guests, except private previews of up to 30 seconds of voice-library recordings and of sounds in the categories the host indexes for word search, and private previews of sentences and palette words; they play in the guest's own browser and are never offered as a download. Guests never receive the host's file paths. Each guest's browser keeps its own private key, which never leaves it; the host's page checks it on every connection so permissions follow the right person. Guest uploads travel directly to the host; local paths, native access tokens and host signing keys stay local. Shared organization and enabled Spotify metadata/artwork are visible to session participants. There are no analytics, third-party fonts, arbitrary file endpoints, shell commands or arbitrary Soundpad API access. Managed imports are the only production library mutations; native entry removal is deliberately deferred when atomic ownership cannot be established. WebRTC exposes network connection information to peers; signaling relays see network metadata and encrypted session descriptions.
 
 **Mimic** is off until the host starts it and never records a microphone. Everyone is told when it starts and stops, and a **Mimic on** badge shows while it listens. Its audio stays on the host PC: guests allowed to use Mimic receive waveform levels and, if the host turns transcripts on, the transcript text. Speech recognition runs locally. Guest Mimic is off by default. See [Mimic privacy](docs/MIMIC.md#privacy-and-safety).
 
@@ -108,9 +122,9 @@ Every release stays on GitHub. Download any older `SoundpadWeb.exe` from [Releas
 | Part | Where | What it does |
 | --- | --- | --- |
 | Website | `web/` | The static React site on GitHub Pages: soundboard, Temp, Mimic window, host settings. Guests only ever need this. |
-| Windows companion | `companion/` | One portable `SoundpadWeb.exe` on the host PC. It talks to Soundpad, manages Temp audio, runs Mimic (capture, local Whisper transcript, the F6–F10 hotkey, preview, trim and effects) and keeps the voice library and its word index. |
+| Windows companion | `companion/` | One portable `SoundpadWeb.exe` on the host PC. It talks to Soundpad, manages Temp audio, runs Mimic (capture, local Whisper transcript, the F6–F10 hotkey, preview, trim and effects) keeps the voice library and its word index, and puts sentences together from its recordings. |
 | Voice Replay Studio | `mimic/` | The original Mimic desktop app (V1.1), kept intact with its own [README](mimic/README.md), tests and licenses. |
-| Docs | `docs/` | [Mimic](docs/MIMIC.md), [rolling back](docs/ROLLBACK.md), [developers](docs/DEVELOPERS.md), API research, protocol and verification notes. Version histories: [2.3](docs/V2.3.md), [V2](docs/V2.md). |
+| Docs | `docs/` | [Mimic](docs/MIMIC.md), [sentences](docs/SENTENCES.md), [rolling back](docs/ROLLBACK.md), [developers](docs/DEVELOPERS.md), API research, protocol and verification notes. Version histories: [2.3](docs/V2.3.md), [V2](docs/V2.md). |
 
 Building, testing, publishing your own fork, companion options and technical limitations: **[docs/DEVELOPERS.md](docs/DEVELOPERS.md)**. Maintainer notes: [CLAUDE.md](CLAUDE.md).
 

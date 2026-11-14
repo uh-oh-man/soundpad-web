@@ -254,19 +254,28 @@ public sealed partial class Bridge
         {
             Interlocked.Exchange(ref slotsRetryAt, Environment.TickCount64 + 5000);
             var audio = Audio;
-            if (audio.Public.Blocked) { Note("blocked", "Exact cue starts are off while the managed-audio journal is blocked; sounds start the usual way."); Interlocked.Exchange(ref slotsRetryAt, Environment.TickCount64 + 60000); return; }
+            if (audio.Public.Blocked) { Note("blocked", "Exact cue starts are off while the managed-audio journal is blocked; sounds start the usual way."); SlotsFailed(60000); return; }
             await Slots.Pool.EnsureFiles();
             bool done = await audio.RegisterSlots(Slots.Paths);
             if (done) Slots.Record(audio.Public.TempCategoryName);
             await gate.EnterAsync(PriorityGate.Lane.Background); try { await RefreshInner(); Publish(); } finally { gate.Release(); }
-            if (SlotsReady) { slotsWanted = false; Log("Exact cue starts and regions are ready (three slot files in the Temp category)."); }
+            if (SlotsReady) { slotsWanted = false; Interlocked.Exchange(ref slotsFailedUntil, 0); Log("Exact cue starts and regions are ready (three slot files in the Temp category)."); }
+            // Registered, yet not usable (a slot listed twice, or outside the app's Temp category): not a matter of quiet.
+            else if (done) { Note("listed", "Exact cue starts are not available yet (a slot file is listed in Soundpad more than once or outside the app's Temp category); it is retried."); SlotsFailed(30000); }
         }
         catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             Note("register", "Exact cue starts are not available yet (" + (ex is InvalidDataException ? ex.Message : "Soundpad or the slot files could not be prepared") + "); sounds start the usual way and it is retried.");
-            Interlocked.Exchange(ref slotsRetryAt, Environment.TickCount64 + 30000);
+            SlotsFailed(30000);
         }
         finally { audioGate.Release(); }
+    }
+
+    /// <summary>Registration failed for a reason other than a missing quiet moment: no new try for a while, and sentence plays do not wait for one.</summary>
+    private void SlotsFailed(long ms)
+    {
+        long until = Environment.TickCount64 + ms;
+        Interlocked.Exchange(ref slotsRetryAt, until); Interlocked.Exchange(ref slotsFailedUntil, until);
     }
 
     /// <summary>

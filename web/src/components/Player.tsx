@@ -66,8 +66,12 @@ export function Player({
   // A sentence or a palette word (2.42) plays from a slot: it is not one of the board's sounds.
   const { list: sentences } = useSentenceStore();
   const sentenceId = current.soundId?.startsWith('sentence:') ? current.soundId.slice(9) : null;
+  const playedSentence = sentenceId ? sentences?.sentences.find((s) => s.id === sentenceId) : null;
+  const sentenceName = playedSentence ? playedSentence.title || playedSentence.text : '';
   const composed = sentenceId
-    ? `Sentence: ${sentences?.sentences.find((s) => s.id === sentenceId)?.title || 'kept sentence'}`
+    ? sentenceName
+      ? `Sentence: ${sentenceName.length > 80 ? sentenceName.slice(0, 79) + '…' : sentenceName}`
+      : 'Sentence'
     : current.soundId?.startsWith('palette:')
       ? 'Palette word'
       : null;
