@@ -22,11 +22,20 @@ public static class SliceWav
     public static short ToPcm16(float sample) => float.IsFinite(sample) ? (short)Math.Clamp(MathF.Round(sample * 32768f), -32768f, 32767f) : (short)0;
 
     /// <summary>Interleaved float samples as a 16-bit PCM WAV file.</summary>
-    public static byte[] Encode(ReadOnlySpan<float> interleaved, int rate, int channels)
+    public static byte[] Encode(ReadOnlySpan<float> interleaved, int rate, int channels) => Encode(interleaved, rate, channels, default);
+
+    /// <summary><see cref="Encode(ReadOnlySpan{float}, int, int)"/> that stops when cancelled (a slice nobody waits for any more, 2.37).</summary>
+    public static byte[] Encode(ReadOnlySpan<float> interleaved, int rate, int channels, CancellationToken cancel)
     {
         Check(interleaved.Length, rate, channels);
+        cancel.ThrowIfCancellationRequested();
         var pcm = new byte[interleaved.Length * 2];
-        for (int i = 0; i < interleaved.Length; i++) BinaryPrimitives.WriteInt16LittleEndian(pcm.AsSpan(i * 2), ToPcm16(interleaved[i]));
+        for (int i = 0; i < interleaved.Length; i++)
+        {
+            if ((i & 0xFFFF) == 0) cancel.ThrowIfCancellationRequested();
+            BinaryPrimitives.WriteInt16LittleEndian(pcm.AsSpan(i * 2), ToPcm16(interleaved[i]));
+        }
+        cancel.ThrowIfCancellationRequested();
         return Wrap(pcm, rate, channels);
     }
 

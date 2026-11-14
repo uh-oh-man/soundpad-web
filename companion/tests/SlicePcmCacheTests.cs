@@ -183,6 +183,50 @@ public sealed class SlicePcmCacheTests : IDisposable
     }
 
     [Fact]
+    public async Task AudioThatCanNeverBePreparedIsNotDecodedAgainUntilTheFileChanges()
+    {
+        // Review, 2.37: every cue start on a sound too long for the cache decoded it again, 256 MiB each time.
+        var path = Wave("long.wav");
+        int calls = 0;
+        using var cache = new PcmCache(1 << 20, (file, max, cancel) => { Interlocked.Increment(ref calls); throw new InvalidDataException("This sound is too long to prepare for exact playback."); });
+        await Assert.ThrowsAsync<InvalidDataException>(() => cache.Get(path));
+        var again = await Assert.ThrowsAsync<InvalidDataException>(() => cache.Get(path));
+        Assert.Equal(1, calls); Assert.Contains("too long", again.Message);
+        // A changed file is another file: tried again.
+        Wave("long.wav", frames: 4801);
+        await Assert.ThrowsAsync<InvalidDataException>(() => cache.Get(path));
+        Assert.Equal(2, calls);
+        // A file that could not be opened (in use, say) is not remembered.
+        int locked = 0;
+        using var busy = new PcmCache(1 << 20, (file, max, cancel) => ++locked == 1 ? throw new IOException("in use") : PcmCache.Decode(file, max, cancel));
+        await Assert.ThrowsAsync<InvalidDataException>(() => busy.Get(path));
+        Assert.Equal(4801, (await busy.Get(path)).FrameCount);
+    }
+
+    [Fact]
+    public void AFileLongerThanTheBudgetIsRefusedBeforeItsAudioIsAllocatedOrRead()
+    {
+        // 12 s of 48 kHz stereo is 4.6 MB of floats; the budget is 2 MB.
+        var path = Path.Combine(folder, "twelve.wav");
+        using (var writer = new WaveFileWriter(path, new WaveFormat(48000, 16, 2))) writer.Write(new byte[48000 * 4 * 12], 0, 48000 * 4 * 12);
+        long before = GC.GetAllocatedBytesForCurrentThread();
+        var error = Assert.Throws<InvalidDataException>(() => PcmCache.Decode(path, 2 * 1024 * 1024));
+        long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+        Assert.Contains("too long", error.Message);
+        Assert.True(allocated < 1024 * 1024, $"allocated {allocated} bytes to refuse it");
+    }
+
+    [Fact]
+    public void ACancelledRenderStops()
+    {
+        var source = new PcmSliceSource(new float[48000 * 2 * 4], 48000, 2);
+        using var stop = new CancellationTokenSource(); stop.Cancel();
+        Assert.ThrowsAny<OperationCanceledException>(() => SliceRenderer.Render(source, 0, 48000 * 4, null, stop.Token));
+        Assert.ThrowsAny<OperationCanceledException>(() => SliceWav.Encode(new float[1000], 48000, 2, stop.Token));
+        Assert.Equal(SliceRenderer.Render(source, 0, 4800), SliceRenderer.Render(source, 0, 4800, null, CancellationToken.None));
+    }
+
+    [Fact]
     public async Task FailuresAreReportedOneWayAndNotRemembered()
     {
         using var cache = new PcmCache();

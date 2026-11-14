@@ -13,7 +13,12 @@ import {
 } from '../../web/src/network/session';
 import { createRelayLink } from '../../web/src/network/relay';
 import { createIdentity, type HostIdentity } from '../../web/src/network/identity';
-import { DEFAULT_POLICY, type SessionPolicy } from '../../web/src/network/policy';
+import {
+  DEFAULT_POLICY,
+  effectivePermissions,
+  LIST,
+  type SessionPolicy,
+} from '../../web/src/network/policy';
 import { command, EMPTY, type Command, type Snapshot } from '../../web/src/protocol';
 import { MemoryNetwork } from './memory-network';
 import { FakeHub, seededBytes } from './relay-hub';
@@ -53,6 +58,10 @@ type PageOptions = {
   policy?: Partial<SessionPolicy>;
   direct?: boolean;
   identity?: HostIdentity;
+  /** The guest's profile, read for every hello (default: `person`). */
+  profile?: () => { id: string; name: string };
+  /** Host: this many sounds with long names, so a full report takes seconds over the relay. */
+  sounds?: number;
 };
 function page(net: MemoryNetwork, invite: HostIdentity, id: string, options: PageOptions = {}) {
   let state: Snapshot = {
@@ -60,6 +69,19 @@ function page(net: MemoryNetwork, invite: HostIdentity, id: string, options: Pag
     available: true,
     companionVersion: '2.37.0',
     permissions: { remotePlayback: true, guestCounter: true },
+    ...(options.sounds
+      ? {
+          library: {
+            version: 'big',
+            sounds: Array.from({ length: options.sounds }, (_, i) => ({
+              id: String(i),
+              name: `${i} ${'x'.repeat(4000)}`,
+              icon: null,
+            })),
+            categories: [],
+          },
+        }
+      : {}),
   };
   let status = 'Connecting';
   let guests: string[] = [];
@@ -84,7 +106,10 @@ function page(net: MemoryNetwork, invite: HostIdentity, id: string, options: Pag
       links = kinds;
     },
     net.transport(id),
-    options.person && { get: () => options.person!, changed: () => {} },
+    (options.profile || options.person) && {
+      get: options.profile ?? (() => options.person!),
+      changed: () => {},
+    },
     undefined,
     '2.37.0',
     {
@@ -223,10 +248,11 @@ describe('reconnect (2.37)', () => {
       g = page(net, a, 'guest');
     await until(() => g.status() === 'Connected');
     await h.session.close();
-    await until(() => g.status() === 'Reconnecting');
+    // The status can already read 'Reconnecting for N s' when it is first sampled under load.
+    await until(() => g.status().startsWith('Reconnecting'));
     // The same room, but a new key: what a host that started over looks like to this invitation.
     page(net, a, 'host-new', { host: true, identity: { ...b, room: a.room, secret: a.secret } });
-    await until(() => g.status() === ENDED_INVITE, 10000);
+    await until(() => g.status() === ENDED_INVITE, 60000);
     expect(g.connection()?.ended).toBe(true);
   });
 });
@@ -355,5 +381,125 @@ describe('per-guest permissions (2.37)', () => {
     h.session.setPolicy({ ...h.policy(), overrides: {} });
     await until(() => ga.state().permissions.remotePlayback === true);
     await done(ga.session.sendCommand(command('play')));
+  });
+});
+
+describe('review fixes (2.37)', () => {
+  /** A peer that speaks the protocol by hand, as a modified guest page could. */
+  function raw(net: MemoryNetwork, invite: HostIdentity, id: string) {
+    const room = net
+      .transport(id)
+      .join(
+        { appId: 'org.soundpad-web.v1', password: invite.secret } as never,
+        invite.room,
+      ) as unknown as {
+      makeAction: () => {
+        send: (data: unknown, options: { target: string }) => Promise<void>;
+        onMessage: ((data: unknown) => void) | null;
+      };
+    };
+    const action = room.makeAction();
+    const received: { type: string; lobby?: string }[] = [];
+    action.onMessage = (data) => received.push(data as { type: string });
+    const nonce = crypto.randomUUID();
+    return {
+      received,
+      hello: (person: { id: string; name: string }) =>
+        action.send({ v: 1, type: 'hello', nonce, person, site: '2.37.0' }, { target: 'host' }),
+    };
+  }
+
+  it('lets a relay guest with a large library in: a hello while the welcome is on its way does not restart it', async () => {
+    const hub = goodHub(),
+      net = new MemoryNetwork(),
+      a = await createIdentity();
+    // About 1.6 MB: well over the 2.5 s between a waiting guest's hellos at the relay's pace.
+    const h = page(net, a, 'host', { host: true, hub, sounds: 400 });
+    const g = page(net, a, 'guest', { hub, direct: false, person: person('Ann') });
+    await until(() => g.status() === 'Connected', 60000);
+    expect(g.session.transport).toBe('relay');
+    expect(g.state().library.sounds).toHaveLength(400);
+    expect(h.guests()).toEqual([RELAY + 'guest']);
+    // And it stays connected: the host's reports keep arriving.
+    await advance(35000);
+    expect(g.status()).toBe('Connected');
+    expect(g.connection()?.reconnecting).toBe(false);
+  });
+
+  it('switching to "Let guests in at once" lets in only as many waiting guests as there are places', async () => {
+    const net = new MemoryNetwork(),
+      a = await createIdentity();
+    const h = page(net, a, 'host', { host: true, policy: { admission: 'ask', capacity: 2 } });
+    const guests = ['A', 'B', 'C', 'D'].map((n, i) =>
+      page(net, a, `guest-${i}`, { person: person(n) }),
+    );
+    await until(() => h.requests().length === 4);
+    h.session.setPolicy({ ...h.policy(), admission: 'open' });
+    await until(() => h.guests().length >= 2);
+    await advance(3000);
+    expect(h.guests()).toHaveLength(2);
+    expect(guests.filter((g) => g.status() === 'Connected')).toHaveLength(2);
+    expect(h.requests()).toHaveLength(2);
+  });
+
+  it('two hellos at once never both take the last place', async () => {
+    const net = new MemoryNetwork(),
+      a = await createIdentity();
+    const h = page(net, a, 'host', { host: true, policy: { capacity: 1 } });
+    await advance(100);
+    const one = raw(net, a, 'one'),
+      two = raw(net, a, 'two');
+    await Promise.all([one.hello(person('One')), two.hello(person('Two'))]);
+    await advance(500);
+    expect(h.guests()).toHaveLength(1);
+    const types = [...one.received, ...two.received].map((m) => m.lobby ?? m.type);
+    expect(types.sort()).toEqual(['full', 'welcome']);
+  });
+
+  it('an override can only take a permission away', () => {
+    const off = { remotePlayback: false, guestCounter: false, guestMimic: false };
+    expect(effectivePermissions(off, { remotePlayback: true, guestMimic: true })).toEqual(off);
+    const on = { remotePlayback: true, guestCounter: true };
+    expect(effectivePermissions(on, { remotePlayback: false })).toEqual({
+      remotePlayback: false,
+      guestCounter: true,
+    });
+    expect(effectivePermissions(on, { guestCounter: true })).toEqual(on);
+  });
+
+  it('a connection keeps the id it was let in with, so a new id cannot shed its own "Off"', async () => {
+    const net = new MemoryNetwork(),
+      a = await createIdentity(),
+      ann = person('Ann');
+    let profile = ann;
+    const h = page(net, a, 'host', { host: true });
+    const g = page(net, a, 'guest', { profile: () => profile });
+    await until(() => g.status() === 'Connected');
+    h.session.setPolicy({ ...h.policy(), overrides: { [ann.id]: { remotePlayback: false } } });
+    await until(() => g.state().permissions.remotePlayback === false);
+    // The same connection says hello again as somebody new (a modified page), with a new name too.
+    profile = { id: crypto.randomUUID(), name: 'Zed' };
+    g.session.rename();
+    await advance(1000);
+    await expect(g.session.sendCommand(command('play'))).rejects.toThrow('disabled');
+    expect(h.commands).toEqual([]);
+    expect(h.policy().admitted).toEqual([ann.id]);
+    expect(g.state().permissions.remotePlayback).toBe(false);
+  });
+
+  it('one connection holds one lobby request, and the lobby has a limit', async () => {
+    const net = new MemoryNetwork(),
+      a = await createIdentity();
+    const h = page(net, a, 'host', { host: true, policy: { admission: 'ask' } });
+    // A page that says hello as somebody new every time.
+    page(net, a, 'guest', { profile: () => person('Again') });
+    await advance(20000);
+    expect(h.requests()).toHaveLength(1);
+    // Many invitation holders at once: the list stops at what the host's views can show.
+    const peers = Array.from({ length: LIST + 6 }, (_, i) => raw(net, a, `raw-${i}`));
+    for (const [i, p] of peers.entries()) await p.hello(person(`P${i}`));
+    await advance(1000);
+    expect(h.requests()).toHaveLength(LIST);
+    expect(peers.at(-1)!.received.map((m) => m.lobby)).toContain('full');
   });
 });

@@ -573,10 +573,24 @@ test('V2: nested personal categories, multiple membership, export, end and resum
   await page.getByLabel('New personal category name').fill('Child');
   await page.getByRole('button', { name: 'Create category', exact: true }).click();
   await expect(page.getByLabel('Parent of Child')).not.toHaveValue('');
+  // The exported text is read from the file the page hands the browser, not from the saved download:
+  // on the owner's PC Windows' download check cancels or locks Chromium's saved downloads (EPERM,
+  // also for a plain test page; WebKit is not affected), which says nothing about this app (2.37).
+  await page.evaluate(() => {
+    const page = window as unknown as { exported?: Promise<string> };
+    const make = URL.createObjectURL.bind(URL);
+    URL.createObjectURL = (blob: Blob | MediaSource) => {
+      if (blob instanceof Blob) page.exported = blob.text();
+      return make(blob);
+    };
+  });
   const downloadPromise = page.waitForEvent('download');
   await page.getByRole('button', { name: 'Export layout', exact: true }).click();
   const download = await downloadPromise;
-  const exported = JSON.parse(await readFile((await download.path())!, 'utf8'));
+  expect(download.suggestedFilename()).toBe('soundpad-personal-layout.json');
+  const exported = JSON.parse(
+    await page.evaluate(() => (window as unknown as { exported?: Promise<string> }).exported ?? ''),
+  );
   expect(exported.folders.map((f: { name: string }) => f.name)).toEqual(['Parent', 'Child']);
   expect(JSON.stringify(exported)).not.toMatch(/token|invite|secret/i);
   await page.getByRole('button', { name: 'Close dialog' }).click();

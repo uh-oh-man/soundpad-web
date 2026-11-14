@@ -49,15 +49,24 @@ public sealed partial class Bridge
             {
                 // Soundpad reports the slot file (2.37): the sound's position is the slot's plus where the slice
                 // starts, and the slot's own length stands for the sound's while it is the slice's length.
+                long? raw = position; long now = Environment.TickCount64;
                 if (position.HasValue) position += cut.OffsetMs;
-                bool atEnd = Environment.TickCount64 - cut.StartedTick >= cut.SliceMs - 60;
-                if (duration is long slotMs && Math.Abs(slotMs - cut.SliceMs) <= 150) duration = cut.SourceMs;
+                // The end clock stands still while the slice is paused, from the website or in Soundpad (review, 2.37).
+                if (status == "PAUSED") cut.Pause(now); else if (status == "PLAYING") cut.Resume(now);
+                bool atEnd = cut.PausedTick == null && now - cut.StartedTick >= cut.SliceMs - 60;
+                if (duration is long slotMs && Math.Abs(slotMs - cut.SliceMs) <= 150)
+                {
+                    duration = cut.SourceMs;
+                    if (status == "PLAYING") { cut.SeenPlaying = true; if (raw is long r && r >= cut.SliceMs - cut.NearMs) cut.NearEnd = true; }
+                }
                 // The slot ended while it was being read (its length is gone with it): it is at its end, and the next
-                // look sees it stopped. Not a sign that another sound took over.
-                else if (atEnd && status != "STOPPED") { position = cut.OffsetMs + cut.SliceMs; duration = cut.SourceMs; }
-                // Stopped after the slice's own length: the slot played to its end, which is exactly the end of the
-                // region (or of the sound). A repeating region plays the slot again; no seek is involved.
-                sliceEnded = status == "STOPPED" && atEnd;
+                // look sees it stopped. Not a sign that another sound took over. Only when the length is missing: a
+                // different length is another sound, which ends the record's identity like any other (review, 2.37).
+                else if (atEnd && status != "STOPPED" && duration == null) { position = cut.OffsetMs + cut.SliceMs; duration = cut.SourceMs; cut.NearEnd = true; }
+                // Stopped after the slice's own length, and a reading saw it close to its end: the slot played to its
+                // end, which is exactly the end of the region (or of the sound). A repeating region plays the slot
+                // again; no seek is involved. A stop without that reading was the person stopping it in Soundpad.
+                sliceEnded = status == "STOPPED" && atEnd && cut.NearEnd;
                 if (sliceEnded && cut.Region && playback.Repeat) replay = cut;
             }
             if (replay == null)
@@ -66,7 +75,9 @@ public sealed partial class Bridge
                 // Trust only our short, epoch-bound transition window; a changed duration still invalidates identity.
                 bool sameDuration = playback.DurationMs is not > 0 || duration is not > 0 || Math.Abs(playback.DurationMs.Value - duration.Value) <= 150;
                 bool positionJump = known && position.HasValue && playback.PositionMs.HasValue && Math.Abs(position.Value - (playback.PositionMs.Value + elapsed)) > 1200;
-                if (known && !sliceEnded && Environment.TickCount64 < seekSettlesUntil && sameDuration &&
+                // A slice involves no seek: once its slot was seen playing, a stop is real (review, 2.37).
+                bool sliceStopped = cut != null && cut.SeenPlaying && status == "STOPPED";
+                if (known && !sliceEnded && !sliceStopped && Environment.TickCount64 < seekSettlesUntil && sameDuration &&
                     (status is "STOPPED" or "SEEKING" || status.StartsWith("R-") || positionJump || !position.HasValue))
                 {
                     status = playback.Status == "PAUSED" ? "PAUSED" : "SEEKING";
@@ -210,7 +221,22 @@ public sealed partial class Bridge
         if (c.Op == "pause")
         {
             await Success("DoTogglePause()");
-            lock (playbackSync) { if (playback.Epoch == c.Epoch) { playback = playback with { Status = playback.Status == "PAUSED" ? "PLAYING" : "PAUSED", SampledAt = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() }; sampledTick = Environment.TickCount64; } }
+            ExactSlice? resumed = null; long played = 0;
+            lock (playbackSync)
+            {
+                if (playback.Epoch == c.Epoch)
+                {
+                    bool pausing = playback.Status != "PAUSED"; long now = Environment.TickCount64;
+                    playback = playback with { Status = pausing ? "PAUSED" : "PLAYING", SampledAt = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() }; sampledTick = now;
+                    // A slice's end clock stands still while it is paused (review, 2.37).
+                    if (slice is { } cut)
+                    {
+                        if (pausing) cut.Pause(now);
+                        else { cut.Resume(now); resumed = cut; played = now - cut.StartedTick; }
+                    }
+                }
+            }
+            if (resumed != null) WakeAfter(resumed.SliceMs, played);
         }
         else
         {

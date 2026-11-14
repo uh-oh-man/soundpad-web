@@ -2,6 +2,38 @@
 
 Notable changes to Soundpad Web. Versions follow the website's `package.json`; the Windows companion is versioned separately and only needs updating when a release says so.
 
+## 2.37.0 — Sturdier connections, exact starts
+
+**Update the companion** for exact starts and for keeping the host's session choices across a reload of its window. The rest works with any companion.
+
+### Added
+
+- **A backup route for guests.** When a guest's browser cannot reach the host directly within about 12 seconds (some home routers, school or work networks, a browser with WebRTC off), it carries on through the same free public relays the invitation already uses to find the host, encrypted end to end with keys from the invitation. Everything works that way except uploading audio files, which need a direct connection. The status reads "Connected (relayed, slower)", and it keeps trying to connect directly. No paid service, account or server is involved.
+- **Connection problems say what is wrong.** Instead of a general "Host unavailable", a guest sees the likely cause: WebRTC blocked, no relay reachable, host not found (offline, or the invitation was replaced), direct connections blocked, or a strict network. **Settings → Connection details** shows the full picture, with **Check network**. The host sees for each guest whether they are connected directly or relayed.
+- **Guests reconnect by themselves** after a dropped connection, and the banner says how long it has been trying. If the host started a new session, the guest is told the invitation has ended instead of waiting forever.
+- **Ask me first.** In **Settings → Session & access**, the host can choose **Admission: Let guests in at once / Ask me first** and **Guest places** (1–12). Waiting guests appear in a list with **Let in** and **Turn away**. When the session is full, a new guest can **Ask for an extra place**. A guest who reloads keeps their place.
+- **Permissions per guest.** Each guest in the list has a **Permissions** control: each permission can be turned off for that guest alone, or left "Same as everyone". (A permission that is off for everyone cannot be turned on for one guest: the companion checks the session-wide setting.)
+- **Exact starts and ends.** Clicking a sound's waveform, or playing a region or cue, now starts at exactly that point and a region stops exactly at its end. The companion copies just that part of the sound into one of three small "slot" files in its Temp category and plays that. Before, Soundpad started the sound from the beginning and then jumped, and measured on the owner's Soundpad the jump was sometimes ignored, so the whole beginning played.
+
+### Changed
+
+- Removing the companion's Temp category (Clear Temp, End hosting, quitting) waits until nothing has played for a second: Soundpad once closed itself when its category was removed right after one of its sounds played.
+
+### Measured
+
+With the test Soundpad: 100 of 100 cue starts and regions played the wanted audio from their first sample, 31 ms (median) after the click. With 2.36, 86 of 99 played from the top of the sound until replaced. Exact starts were proven on the owner's real Soundpad 4.0.35 before they were built (a rewritten slot file is read again on every play, its first and last 20 ms are played exactly); the finished feature has not yet been run on the real Soundpad. The relay route was tested with simulated relays and the public relays were probed from this PC; it has not yet been tried between two real networks.
+
+### Reviewed
+
+A review of the change found eight problems, all fixed before release: a repeating region started again after it was stopped in Soundpad itself, and another sound started from Soundpad near a region's end was shown as that region; a seek inside an exact start could play the wrong Soundpad entry after the list changed; quick clicks on a long sound rendered several large slices at once, none of which played, and a sound too long for exact starts was decoded again on every click; over the relay, a guest with a large library never got in, because each of its hellos restarted the host's welcome; switching to "Let guests in at once" let in every waiting guest whatever the number of places; a per-guest "On" showed controls the companion then refused; a connected guest could take on another id to leave their own "Off" behind; and one invitation holder could fill the waiting list without limit until the views lost the session.
+
+### Tests
+
+- 15 new companion tests for exact playback and slots, 1 for the session settings the companion keeps, and 6 for the review's fixes.
+- 7 website unit tests for the review's fixes.
+- 27 new website unit tests (relay route, diagnosis, reconnect, lobby, places, per-guest permissions).
+- 3 new browser tests: Ask me first, a full session with an extra place, per-guest permissions.
+
 ## 2.36.0 — Hosting without a browser tab
 
 **Update the companion** for this one. The website still works with older companions, which host from a browser tab as before.

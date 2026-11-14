@@ -25,6 +25,12 @@ public sealed class PcmCache : IDisposable
     }
 
     private readonly Dictionary<string, Entry> entries = [];
+    /// <summary>
+    /// Files (by path, length and last-write time) that can never be prepared: too long, empty or not decodable
+    /// audio. Remembered so every later click does not decode them again (review, 2.37); a changed file is a new key.
+    /// </summary>
+    private readonly Dictionary<string, string> failed = [];
+    private const int MaxFailed = 256;
     private readonly object sync = new();
     private readonly Func<string, long, CancellationToken, PcmSliceSource> decode;
     private long bytes, clock, decodes;
@@ -65,6 +71,7 @@ public sealed class PcmCache : IDisposable
         lock (sync)
         {
             ObjectDisposedException.ThrowIf(disposed, this);
+            if (failed.TryGetValue(key, out var reason)) throw new InvalidDataException(reason);
             // The file changed: its earlier audio can never be asked for again, so it would only use up budget.
             foreach (var stale in entries.Values.Where(e => e.Key != key && e.Path.Equals(full, StringComparison.OrdinalIgnoreCase)).ToArray()) Drop(stale);
             if (!entries.TryGetValue(key, out entry))
@@ -108,11 +115,15 @@ public sealed class PcmCache : IDisposable
     public void Invalidate(string path)
     {
         var full = Path.GetFullPath(path);
-        lock (sync) foreach (var entry in entries.Values.Where(e => e.Path.Equals(full, StringComparison.OrdinalIgnoreCase)).ToArray()) Drop(entry);
+        lock (sync)
+        {
+            foreach (var entry in entries.Values.Where(e => e.Path.Equals(full, StringComparison.OrdinalIgnoreCase)).ToArray()) Drop(entry);
+            foreach (var key in failed.Keys.Where(k => k.StartsWith(full.ToUpperInvariant() + "|", StringComparison.Ordinal)).ToArray()) failed.Remove(key);
+        }
     }
 
     /// <summary>Forgets everything. Sources already handed out stay usable.</summary>
-    public void Clear() { lock (sync) foreach (var entry in entries.Values.ToArray()) Drop(entry); }
+    public void Clear() { lock (sync) { foreach (var entry in entries.Values.ToArray()) Drop(entry); failed.Clear(); } }
 
     public void Dispose()
     {
@@ -135,22 +146,28 @@ public sealed class PcmCache : IDisposable
         long limit = Math.Min(maxBytes / sizeof(float), Array.MaxLength);
         // The stated duration sizes the buffer once for most files; it may be missing or slightly off, so it still grows.
         long expected = (long)Math.Ceiling(Math.Max(0, audio.Duration.TotalSeconds) * rate) * channels + chunk;
+        // Clearly too long by its stated duration: refused before anything is allocated or read (review, 2.37).
+        if (Math.Max(0, audio.Duration.TotalSeconds) * rate * channels > limit * 1.02) throw new InvalidDataException(TooLong);
         var samples = new float[Math.Clamp(expected, chunk, Math.Max(chunk, limit))];
         var buffer = new float[chunk];
         int total = 0, count;
         while ((count = audio.Read(buffer)) > 0)
         {
             cancel.ThrowIfCancellationRequested();
-            if ((long)total + count > limit) throw new InvalidDataException("This sound is too long to prepare for exact playback.");
+            if ((long)total + count > limit) throw new InvalidDataException(TooLong);
             if (total + count > samples.Length) Array.Resize(ref samples, (int)Math.Min(Math.Max(samples.Length * 3L / 2, (long)total + count), Math.Max(chunk, limit)));
             buffer.AsSpan(0, count).CopyTo(samples.AsSpan(total)); total += count;
         }
         total -= total % channels;
-        if (total == 0) throw new InvalidDataException("Empty audio.");
+        if (total == 0) throw new InvalidDataException(Empty);
         if (total != samples.Length) Array.Resize(ref samples, total);
         for (int i = 0; i < samples.Length; i++) if (!float.IsFinite(samples[i])) samples[i] = 0;
         return new(samples, rate, channels);
     }
+
+    private const string TooLong = "This sound is too long to prepare for exact playback.";
+    private const string Changed = "Audio changed while it was being read. Try again.";
+    private const string Empty = "Empty audio.";
 
     private static string KeyOf(string fullPath, long length, long writtenTicks) => $"{fullPath.ToUpperInvariant()}|{length}|{writtenTicks}";
 
@@ -164,7 +181,7 @@ public sealed class PcmCache : IDisposable
             // Decoders fail in their own ways (COM errors from Media Foundation, format exceptions); callers get one kind.
             catch (Exception ex) when (ex is not (InvalidDataException or OperationCanceledException or OutOfMemoryException)) { throw new InvalidDataException("This file could not be decoded.", ex); }
             var after = new FileInfo(entry.Path);
-            if (!after.Exists || after.Length != length || after.LastWriteTimeUtc.Ticks != written) throw new InvalidDataException("Audio changed while it was being read. Try again.");
+            if (!after.Exists || after.Length != length || after.LastWriteTimeUtc.Ticks != written) throw new InvalidDataException(Changed);
             lock (sync)
             {
                 // Still the entry for this file (not invalidated, replaced or abandoned meanwhile): keep it.
@@ -176,10 +193,20 @@ public sealed class PcmCache : IDisposable
             }
             return pcm;
         }
-        catch
+        catch (Exception ex)
         {
-            // A failure is not remembered, so the next request tries again.
-            lock (sync) if (entries.TryGetValue(entry.Key, out var current) && current == entry) entries.Remove(entry.Key);
+            lock (sync)
+            {
+                if (entries.TryGetValue(entry.Key, out var current) && current == entry) entries.Remove(entry.Key);
+                // Audio that can never be prepared (too long, or empty) is remembered for this version of the file.
+                // Anything else (a decoder error, a file in use or changed meanwhile, a cancelled decode) is tried
+                // again by the next request.
+                if (!disposed && ex is InvalidDataException { Message: TooLong or Empty, InnerException: null })
+                {
+                    if (failed.Count >= MaxFailed) failed.Clear();
+                    failed[entry.Key] = ex.Message;
+                }
+            }
             throw;
         }
     }

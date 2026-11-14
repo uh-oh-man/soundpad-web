@@ -380,6 +380,112 @@ public sealed class ExactPlaybackTests : IDisposable
         Assert.Equal(new[] { "DoPlaySound(1)" }, Sent(mock).Where(c => c.StartsWith("DoPlaySound(") || c.StartsWith("DoSeekMs(")).ToArray());
     }
 
+    /// <summary>Soundpad's list with one sound added at its top: every index (the slots' too) moves down one.</summary>
+    private static void InsertAtTop(MockSoundpad mock, string path)
+    {
+        XDocument Shift(string xml) { var doc = XDocument.Parse(xml); foreach (var e in doc.Descendants("Sound")) e.SetAttributeValue("index", (int)e.Attribute("index")! + 1); return doc; }
+        var all = Shift(mock.AllXml); var cats = Shift(mock.CategoryXml);
+        all.Root!.AddFirst(new XElement("Sound", new XAttribute("index", 1), new XAttribute("url", path), new XAttribute("title", "Added")));
+        mock.AllXml = all.ToString(); mock.CategoryXml = cats.ToString();
+    }
+
+    [Fact]
+    public async Task AStopInSoundpadEndsARepeatingSliceAndAnotherSoundIsNeverReportedAsIt()
+    {
+        // Review, 2.37: a repeat was played again whenever the slot was found stopped after the slice's length,
+        // also when the person had stopped it in Soundpad, and another sound started near the slice's end was
+        // reported as the sliced sound.
+        var tone = Make("tone.wav", 16000, 1, 1000); var other = Make("other.wav", 48000, 2, 700);
+        await using var mock = Mock(tone.Path, other.Path); using var pipe = new SoundpadPipe(mock.Name); using var bridge = new Bridge(pipe, new StateStore(folder)); await bridge.Poll(true);
+        var sounds = bridge.Snapshot.Library.Sounds; await Ready(bridge, mock, sounds[1]);
+        async Task Polls(int count) { for (int i = 0; i < count; i++) { await Task.Delay(50); await bridge.Poll(false); } }
+
+        // Stopped in Soundpad 60 ms into a 300 ms repeating region: it stays stopped.
+        var region = await bridge.Execute(Cmd("region", sounds[0].Id) with { PositionMs = 100, EndMs = 400, Repeat = true }, "host");
+        Assert.True(Played(region), region.Error); int plays = SlotPlays(mock).Length;
+        await Task.Delay(60); mock.StopFromSoundpad();
+        await Polls(12);
+        Assert.Equal(plays, SlotPlays(mock).Length);
+        Assert.Equal(("STOPPED", (string?)null), (bridge.Snapshot.Playback.Status, bridge.Snapshot.Playback.SoundId));
+
+        // Paused from the website for longer than the slice, then stopped in Soundpad: it stays stopped.
+        region = await bridge.Execute(Cmd("region", sounds[0].Id) with { PositionMs = 100, EndMs = 400, Repeat = true }, "host");
+        Assert.True(Played(region), region.Error); plays = SlotPlays(mock).Length;
+        Assert.True((await bridge.Execute(Cmd("pause", sounds[0].Id) with { Epoch = Text(region, "epoch") }, "guest")).Ok);
+        await Polls(8);
+        Assert.Equal("PAUSED", bridge.Snapshot.Playback.Status);
+        mock.StopFromSoundpad();
+        await Polls(10);
+        Assert.Equal(plays, SlotPlays(mock).Length);
+        Assert.Equal(("STOPPED", (string?)null), (bridge.Snapshot.Playback.Status, bridge.Snapshot.Playback.SoundId));
+
+        // Another sound started from Soundpad just before the slice's end: never reported as the sliced sound,
+        // and when it ends, the region does not start again by itself.
+        region = await bridge.Execute(Cmd("region", sounds[0].Id) with { PositionMs = 100, EndMs = 400, Repeat = true }, "host");
+        Assert.True(Played(region), region.Error); plays = SlotPlays(mock).Length;
+        await Task.Delay(265); mock.PlayFromSoundpad(2);
+        await bridge.Poll(false);
+        Assert.NotEqual(sounds[0].Id, bridge.Snapshot.Playback.SoundId);
+        await Polls(20);
+        Assert.Equal(plays, SlotPlays(mock).Length);
+        Assert.Null(bridge.Snapshot.Playback.SoundId);
+    }
+
+    [Fact]
+    public async Task ASeekInsideASliceReadsSoundpadsListAgainBeforeItPlaysASlot()
+    {
+        // Review, 2.37: the seek played the slot's cached index; a sound added at the top of Soundpad's list since the
+        // last library read made that index another entry.
+        var a = Make("a.wav", 48000, 2, 2000); var b = Make("b.wav", 16000, 1, 1000); var added = Make("added.wav", 16000, 1, 500);
+        await using var mock = Mock(a.Path, b.Path); using var pipe = new SoundpadPipe(mock.Name); using var bridge = new Bridge(pipe, new StateStore(folder)); await bridge.Poll(true);
+        var sounds = bridge.Snapshot.Library.Sounds; await Ready(bridge, mock, sounds[1]);
+        var cue = await bridge.Execute(Cmd("startAt", sounds[0].Id) with { PositionMs = 200 }, "host");
+        Assert.True(Played(cue), cue.Error); var epoch = Text(cue, "epoch");
+        InsertAtTop(mock, added.Path);
+        int slots = SlotPlays(mock).Length;
+        var seek = await bridge.Execute(Cmd("seek", sounds[0].Id) with { Epoch = epoch, PositionMs = 1500 }, "host");
+        Assert.True(seek.Ok, seek.Error); Assert.False(Flag(seek, "superseded"));
+        Assert.Equal(slots + 1, SlotPlays(mock).Length);
+        Assert.Equal(a.Range(1500, null), SliceWav.Pcm16(SlotPlays(mock)[^1].Bytes));
+        Assert.Equal(mock.PlayingIndex, SlotPlays(mock)[^1].Index);
+    }
+
+    [Fact]
+    public async Task OnlyOneSliceRendersAtATimeAndARenderNobodyWaitsForIsStopped()
+    {
+        // Review, 2.37: every cue start rendered its slice to the end, all at once, also when none of them was played.
+        var a = Make("a.wav", 48000, 2, 1500); var b = Make("b.wav", 16000, 1, 1000);
+        await using var mock = Mock(a.Path, b.Path); using var pipe = new SoundpadPipe(mock.Name); using var bridge = new Bridge(pipe, new StateStore(folder)); await bridge.Poll(true);
+        var sounds = bridge.Snapshot.Library.Sounds; await Ready(bridge, mock, sounds[1]);
+        Assert.True(Played(await bridge.Execute(Cmd("startAt", sounds[0].Id) with { PositionMs = 50 }, "host"))); // decoded and cached now
+        int running = 0, most = 0, started = 0, cancelled = 0;
+        var gate = new object();
+        bridge.UseRenderer((source, start, end, cancel) =>
+        {
+            Interlocked.Increment(ref started); int now = Interlocked.Increment(ref running);
+            lock (gate) most = Math.Max(most, now);
+            try
+            {
+                // A render far slower than the budget: it ends only when it is told to stop.
+                if (cancel.WaitHandle.WaitOne(10000)) { Interlocked.Increment(ref cancelled); cancel.ThrowIfCancellationRequested(); }
+                return SliceRenderer.Render(source, start, end);
+            }
+            finally { Interlocked.Decrement(ref running); }
+        });
+        var clicks = await Task.WhenAll(Enumerable.Range(0, 4).Select(i => bridge.Execute(Cmd("startAt", sounds[0].Id) with { PositionMs = 100 + i * 50 }, "host")));
+        Assert.All(clicks, reply => Assert.True(reply.Ok, reply.Error));
+        for (int i = 0; i < 100 && Volatile.Read(ref running) > 0; i++) await Task.Delay(20);
+        Assert.Equal(0, Volatile.Read(ref running)); // every render was stopped, none ran on for 10 s
+        Assert.True(started >= 1); Assert.Equal(1, most); Assert.Equal(started, cancelled);
+        // The slot is free again: with the usual renderer the next click is exact.
+        bridge.UseRenderer((source, start, end, cancel) => SliceRenderer.Render(source, start, end, null, cancel));
+        await Task.Delay(50);
+        int slots = SlotPlays(mock).Length;
+        Assert.True(Played(await bridge.Execute(Cmd("startAt", sounds[0].Id) with { PositionMs = 700 }, "host")));
+        Assert.Equal(slots + 1, SlotPlays(mock).Length);
+        Assert.Equal(a.Range(700, null), SliceWav.Pcm16(SlotPlays(mock)[^1].Bytes));
+    }
+
     [Fact]
     public void OnlyTheAppsOwnSlotPathsCountAsRemovableEvenIfSlotsJsonIsTampered()
     {

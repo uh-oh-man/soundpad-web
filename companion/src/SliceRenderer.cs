@@ -45,8 +45,11 @@ public static class SliceRenderer
     /// source[startFrame], the last is source[endFrame - 1], and nothing outside the range is read into the file.
     /// Throws <see cref="SliceRangeException"/> when the range is empty or outside the source.
     /// </summary>
-    public static byte[] Render(ISliceSource source, long startFrame, long endFrame, SliceOptions? options = null) =>
-        RenderSamples(source, startFrame, endFrame, options).ToWav();
+    public static byte[] Render(ISliceSource source, long startFrame, long endFrame, SliceOptions? options = null, CancellationToken cancel = default)
+    {
+        var audio = RenderSamples(source, startFrame, endFrame, options, cancel);
+        return SliceWav.Encode(audio.Samples, audio.Rate, audio.Channels, cancel);
+    }
 
     /// <summary><see cref="Render"/> with the boundaries given in milliseconds (converted with <see cref="FrameOf"/>).</summary>
     public static byte[] RenderMs(ISliceSource source, double startMs, double endMs, SliceOptions? options = null)
@@ -59,14 +62,14 @@ public static class SliceRenderer
     /// The same slice as float samples, for mixing or a browser preview. Order: take the frames, reverse,
     /// resample, convert channels, then gain and fades (so fade lengths are in output time).
     /// </summary>
-    public static SliceAudio RenderSamples(ISliceSource source, long startFrame, long endFrame, SliceOptions? options = null)
+    public static SliceAudio RenderSamples(ISliceSource source, long startFrame, long endFrame, SliceOptions? options = null, CancellationToken cancel = default)
     {
         ArgumentNullException.ThrowIfNull(source); options ??= SliceOptions.Exact;
         if (!double.IsFinite(options.Gain) || !double.IsFinite(options.FadeInMs) || !double.IsFinite(options.FadeOutMs) || options.FadeInMs < 0 || options.FadeOutMs < 0)
             throw new InvalidDataException("Invalid gain or fade.");
         int channels = source.Channels, rate = source.SampleRate;
         (startFrame, endFrame) = CheckRange(source, startFrame, endFrame, options.ClampToSource);
-        var samples = Extract(source, startFrame, endFrame);
+        var samples = Extract(source, startFrame, endFrame, cancel);
         if (options.Reverse) ReverseFrames(samples, channels);
         if (options.TargetRate is int targetRate && targetRate != rate) { samples = SliceResampler.Resample(samples, channels, rate, targetRate); rate = targetRate; }
         if (options.TargetChannels is int targetChannels && targetChannels != channels) { samples = Remix(samples, channels, targetChannels); channels = targetChannels; }
@@ -114,18 +117,22 @@ public static class SliceRenderer
         return output;
     }
 
-    /// <summary>Reads exactly the frames [startFrame, endFrame); anything unreadable is a range error.</summary>
-    internal static float[] Extract(ISliceSource source, long startFrame, long endFrame)
+    /// <summary>Reads exactly the frames [startFrame, endFrame); anything unreadable is a range error. Stops when cancelled (2.37).</summary>
+    internal static float[] Extract(ISliceSource source, long startFrame, long endFrame, CancellationToken cancel = default)
     {
         int channels = source.Channels;
+        cancel.ThrowIfCancellationRequested();
         var samples = new float[(endFrame - startFrame) * channels];
         int done = 0;
         while (done < samples.Length)
         {
-            int frames = source.Read(startFrame + done / channels, samples.AsSpan(done));
+            cancel.ThrowIfCancellationRequested();
+            // In pieces of about 64K samples, so a cancelled render of a long range stops within a few ms.
+            int frames = source.Read(startFrame + done / channels, samples.AsSpan(done, Math.Min(samples.Length - done, Math.Max(channels, 65536 / channels * channels))));
             if (frames <= 0) throw new SliceRangeException("That audio is no longer available.", startFrame, endFrame, source.FrameCount);
             done += frames * channels;
         }
+        cancel.ThrowIfCancellationRequested();
         for (int i = 0; i < samples.Length; i++) if (!float.IsFinite(samples[i])) samples[i] = 0;
         return samples;
     }

@@ -131,6 +131,10 @@ public sealed class MockSoundpad : IAsyncDisposable
     private string ReportStatus() => remainingStops-- > 0 ? "STOPPED" : Status;
     private long Position => position + (Status == "PLAYING" ? Environment.TickCount64 - startedTick : 0);
     public void BeginFixturePlayback() { position = 0; startedTick = Environment.TickCount64; Status = "PLAYING"; }
+    /// <summary>The person presses Soundpad's own stop (a hotkey or its window): no pipe command is involved (2.37).</summary>
+    public void StopFromSoundpad() { Status = "STOPPED"; position = 0; PlayingIndex = null; EndAudio(); }
+    /// <summary>The person starts the entry at <paramref name="index"/> from Soundpad itself (a hotkey) (2.37).</summary>
+    public void PlayFromSoundpad(int index) { BeginFixturePlayback(); PlayingIndex = index; StartAudio(index); }
     private long CurrentDuration => playingFileMs ?? DurationMs;
     /// <summary>The sound stopped, ended, or another took its place: its file is free and the "just played" clock starts.</summary>
     private void EndAudio()

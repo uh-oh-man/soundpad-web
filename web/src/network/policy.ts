@@ -39,7 +39,7 @@ export type SessionPolicy = {
   capacity: number;
   /** Places added by "Let in" on an extra-place request; for this session only. */
   extra: number;
-  /** Per-guest permissions; a key that is absent means "Same as everyone". */
+  /** Per-guest permissions; a key that is absent means "Same as everyone". Only "Off" changes anything. */
   overrides: Record<string, Override>;
   /** Guests the host turned away, with the name they used, so the host can let them in after all. */
   turnedAway: Participant[];
@@ -91,13 +91,16 @@ export const forNewInvite = (policy: SessionPolicy): SessionPolicy => ({
 export const places = (policy: SessionPolicy) =>
   Math.min(MAX_PLACES + MAX_EXTRA, policy.capacity + policy.extra);
 
-/** A guest's permissions: their override where the host set one, the session-wide value otherwise. */
+/**
+ * A guest's permissions: the session-wide value, turned off where the host set an override "Off" for
+ * them. An override can only take a permission away (2.37 review): the companion checks the
+ * session-wide permissions and cannot tell guests apart, so a guest set to "On" while it is off for
+ * everyone would see a control that every press of fails.
+ */
 export function effectivePermissions(base: Permissions, override?: Override): Permissions {
   if (!override) return base;
   const result = { ...base };
-  for (const key of PERMISSION_KEYS) {
-    const value = override[key];
-    if (value !== undefined) result[key] = value;
-  }
+  // "On" keeps the session-wide value as it is (some are unset on older companions, which means allowed).
+  for (const key of PERMISSION_KEYS) if (override[key] === false) result[key] = false;
   return result;
 }

@@ -27,5 +27,14 @@ export default defineConfig({
     url: 'http://127.0.0.1:5173',
     reuseExistingServer: !process.env.CI,
   },
-  projects: [{ name: browser, use: { ...devices[device] } }],
+  // Chromium is muted: the owner often plays games on this PC while tests run (2.37).
+  projects: [
+    {
+      name: browser,
+      use: {
+        ...devices[device],
+        ...(browser === 'chromium' ? { launchOptions: { args: ['--mute-audio'] } } : {}),
+      },
+    },
+  ],
 });

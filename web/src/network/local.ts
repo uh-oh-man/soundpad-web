@@ -70,6 +70,8 @@ const roleSchema = z.object({
 });
 const peerId = z.string().min(1).max(100);
 const soundIds = z.array(z.string().regex(/^[a-f0-9]{64}$/)).max(50000);
+/** Most waiting guests a session message may list; a view refuses a message with more (2.37). */
+export const LOBBY_VIEW_MAX = 64;
 const sessionInfoSchema = z.object({
   type: z.literal('session'),
   invite: z.string().max(4000),
@@ -111,7 +113,7 @@ const sessionInfoSchema = z.object({
             expiresAt: z.number(),
           }),
         )
-        .max(64),
+        .max(LOBBY_VIEW_MAX),
       policy: z.unknown(),
       links: z.record(peerId, z.enum(['direct', 'relay'])),
     })

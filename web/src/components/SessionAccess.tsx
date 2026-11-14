@@ -83,7 +83,9 @@ export function SessionAccess({ view }: { view: View }) {
           const person = view.people[id];
           const name = person?.name ?? `Guest ${i + 1}`;
           const own = (person && policy.overrides[person.id]) || {};
-          const custom = Object.keys(own).length;
+          // An override can only turn a permission off (2.37 review); an "On" kept from before counts as
+          // "Same as everyone", which is also what it does.
+          const custom = Object.values(own).filter((value) => value === false).length;
           return (
             <div className="guest-row" key={id}>
               <span>
@@ -101,17 +103,16 @@ export function SessionAccess({ view }: { view: View }) {
                     {label}
                     <select
                       aria-label={`${label} for ${name}`}
-                      value={own[key] === undefined ? 'same' : own[key] ? 'on' : 'off'}
+                      value={own[key] === false ? 'off' : 'same'}
                       onChange={(e) =>
                         controller.setGuestPermission(
                           id,
                           key,
-                          e.target.value === 'same' ? undefined : e.target.value === 'on',
+                          e.target.value === 'off' ? false : undefined,
                         )
                       }
                     >
                       <option value="same">Same as everyone</option>
-                      <option value="on">On</option>
                       <option value="off">Off</option>
                     </select>
                   </label>

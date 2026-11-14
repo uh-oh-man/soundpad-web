@@ -12,6 +12,7 @@ import { acceptWaveform } from './waveform-cache';
 import { waveformSchema } from './protocol';
 import {
   LocalBridge,
+  LOBBY_VIEW_MAX,
   type BridgeAddress,
   type HostRole,
   type OwnerAction,
@@ -254,7 +255,8 @@ export class Controller {
         layouts,
         ownerWindow: !!this.ownerKey,
         // What views show about the lobby and each guest (2.37); older views ignore it.
-        control: { requests, policy, links },
+        // At most what the views accept (local.ts), so a crowded lobby never costs them the session info.
+        control: { requests: requests.slice(0, LOBBY_VIEW_MAX), policy, links },
       };
       // The companion ends a socket over any message above 200,000 bytes, which would cost this page
       // its ownership (and the views a promotion loop). Many large shared layouts can pass that, so
@@ -620,7 +622,10 @@ export class Controller {
       if (this.relayed?.room !== this.identity!.room) this.sendIdentity();
       // A room this page has left (a Replace invite, or the window taking over in 2.36) can still
       // report peers leaving; only the current one may change the guest list a view is shown.
-      const current = () => this.session === session;
+      // The relay link reports its state while the room is still being constructed (2.37), so a call
+      // before `session` is assigned comes from this new room and counts as current.
+      let constructing = true;
+      const current = () => constructing || this.session === session;
       // A new invitation starts with nobody admitted or turned away; the host's choices stay (2.37).
       if (rotate) this.policy = forNewInvite(this.policy);
       const session: Session = new Session(
@@ -650,6 +655,7 @@ export class Controller {
         },
       );
       this.session = session;
+      constructing = false;
       this.update({
         invite: inviteUrl(this.identity!),
         guests: [],

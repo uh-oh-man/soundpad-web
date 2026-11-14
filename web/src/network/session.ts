@@ -18,7 +18,7 @@ import { parseOrganization, type SharedLayout, type Organization } from '../shar
 import { cleanName } from '../protocol';
 import { APP_VERSION, siteRelaysIntents, supports } from '../version';
 import { sign, verify, type HostIdentity, type Invite } from './identity';
-import type { RelayLink, RelayLinkState, SendOptions } from './relay';
+import type { RelayLink, RelayLinkState, SendOptions, SendResult } from './relay';
 import {
   diagnose,
   judgeIce,
@@ -33,6 +33,7 @@ import {
   DEFAULT_POLICY,
   effectivePermissions,
   HOLD_MS,
+  LIST,
   MAX_EXTRA,
   MAX_PLACES,
   places,
@@ -211,6 +212,14 @@ export class Session {
   /** Host: lobby and capacity (2.37). */
   private policy: SessionPolicy;
   private requests = new Map<string, Request>();
+  /**
+   * Host: participants whose welcome is being signed (2.37 review). They count as seated, so two quick
+   * decisions (two hellos at once, or "Let guests in at once" letting the waiting list in) never give
+   * away the same place twice.
+   */
+  private joining = new Set<string>();
+  /** Host: relay peers with a welcome still on its way, by the hello nonce it answers (2.37 review). */
+  private welcoming = new Map<string, string>();
   private lapsed = new Map<string, number>();
   /** When each participant's last connection left, so a reload keeps their place for a while. */
   private left = new Map<string, number>();
@@ -464,6 +473,7 @@ export class Session {
     this.sentVersion.delete(peer);
     this.rates.delete(peer);
     this.heavy.delete(peer);
+    this.welcoming.delete(peer);
     this.waveSubscriptions.delete(peer);
     for (const request of this.requests.values()) request.peers.delete(peer);
     if (this.host && wasAccepted && person && !this.peersOf(person.id).length)
@@ -624,29 +634,35 @@ export class Session {
     this.reported = text;
     this.options.connection(info);
   }
-  private send(data: Message, peer: string, options?: SendOptions) {
-    if (this.stopped) return;
+  /** Sends a message; over the relay, the promise says how its sending ended (direct: undefined). */
+  private send(
+    data: Message,
+    peer: string,
+    options?: SendOptions,
+  ): Promise<SendResult | undefined> {
+    if (this.stopped) return Promise.resolve(undefined);
     if (!isRelay(peer)) {
       void this.action?.send(data, { target: peer }).catch(() => {});
-      return;
+      return Promise.resolve(undefined);
     }
     const link = this.link;
-    if (!link) return;
+    if (!link) return Promise.resolve(undefined);
     // A full report or welcome can take seconds to cross the relay; ticks wait for it (see broadcast).
     const heavy = data.type === 'welcome' || data.type === 'state';
     if (heavy) this.heavy.set(peer, (this.heavy.get(peer) ?? 0) + 1);
-    void link
+    return link
       .send(peer.slice(RELAY.length), data as unknown as JsonValue, options)
       .then((result) => {
-        if (!heavy) return;
+        if (!heavy) return result;
         const left = (this.heavy.get(peer) ?? 1) - 1;
         if (left > 0) this.heavy.set(peer, left);
         else this.heavy.delete(peer);
         // A lost library makes the next report a full one again.
         if (result === 'failed') this.sentVersion.delete(peer);
         if (!left) this.broadcast();
+        return result;
       })
-      .catch(() => {});
+      .catch(() => undefined);
   }
   private sendHello(peer: string) {
     this.send(
@@ -708,6 +724,7 @@ export class Session {
     this.people.delete(peer);
     this.profiles?.changed(Object.fromEntries(this.people));
     this.rates.delete(peer);
+    this.welcoming.delete(peer);
     if (!isRelay(peer)) this.room?.getPeers()[peer]?.close();
     if (person && !this.peersOf(person.id).length) this.left.delete(person.id);
     if (this.host) this.notifyGuests();
@@ -740,6 +757,7 @@ export class Session {
   private seats(except?: string) {
     const ids = new Set(this.members().keys());
     for (const id of this.left.keys()) ids.add(id);
+    for (const id of this.joining) ids.add(id);
     ids.delete(except ?? '');
     return ids.size;
   }
@@ -801,6 +819,14 @@ export class Session {
     }
     const full = this.seats(id) >= places(policy);
     const ask = (kind: Request['kind']) => {
+      // One connection holds one request (2.37 review): a hello with another id replaces its earlier
+      // request instead of adding to the list, and the list never grows past what views can show.
+      for (const [other, r] of this.requests)
+        if (r.peers.delete(peer) && !r.peers.size) this.requests.delete(other);
+      if (this.requests.size >= LIST) {
+        this.lobbyChanged();
+        return 'full' as const;
+      }
       this.requests.set(id, { participant, kind, at: Date.now(), peers: new Map([[peer, nonce]]) });
       this.lobbyChanged();
       return 'waiting' as const;
@@ -815,7 +841,14 @@ export class Session {
   private async welcome(peer: string, nonce: string, participant: Participant) {
     const host = this.host!;
     const { host: hostId, guest } = this.proof(peer);
-    const signature = await sign(host, nonce, hostId, guest);
+    // The place is taken in the same step as the decision; see `joining`.
+    this.joining.add(participant.id);
+    let signature: string;
+    try {
+      signature = await sign(host, nonce, hostId, guest);
+    } finally {
+      this.joining.delete(participant.id);
+    }
     if (this.denied.has(peer) || this.stopped) return;
     this.accepted.add(peer);
     this.people.set(peer, participant);
@@ -828,8 +861,13 @@ export class Session {
       );
     this.profiles?.changed(Object.fromEntries(this.people));
     this.notifyGuests();
+    // A relay guest says hello every 2.5 s until a welcome has arrived, and a large one takes longer
+    // than that to cross the relay. Sending it again would cancel the one on its way, every time, so
+    // the guest never got in (2.37 review). When it has arrived, broadcast() brings the guest up to date.
+    if (isRelay(peer) && this.welcoming.get(peer) === nonce) return;
+    if (isRelay(peer)) this.welcoming.set(peer, nonce);
     const state = this.current();
-    this.send(
+    void this.send(
       {
         v: 1,
         type: 'welcome',
@@ -843,7 +881,10 @@ export class Session {
       },
       peer,
       { supersedeKey: 'welcome' },
-    );
+    ).then(() => {
+      // Whatever the outcome (sent, superseded by a reload's hello, failed), the next hello may ask again.
+      if (this.welcoming.get(peer) === nonce) this.welcoming.delete(peer);
+    });
     this.sentVersion.set(peer, state.library.version);
   }
   /**
@@ -927,11 +968,18 @@ export class Session {
       policy = { ...policy, extra: policy.extra + 1 };
     }
     this.requests.delete(id);
-    this.setPolicy(policy, false);
-    this.lobbyChanged();
-    // A guest turned away earlier stopped asking; the next time they open the invitation they are in.
-    for (const [peer, nonce] of request?.peers ?? [])
-      await this.welcome(peer, nonce, request!.participant);
+    // Their place is taken now, before the settings change below lets anyone else in (2.37 review).
+    if (request) this.joining.add(id);
+    try {
+      this.setPolicy(policy, false);
+      this.lobbyChanged();
+      // A guest turned away earlier stopped asking; the next time they open the invitation they are in.
+      for (const [peer, nonce] of request?.peers ?? [])
+        await this.welcome(peer, nonce, request!.participant);
+    } finally {
+      // Seated by now (the welcome took the place over), or nobody was left to welcome.
+      this.joining.delete(id);
+    }
   }
   /** Host: turns a waiting guest away; they are told calmly and are not asked about again. */
   turnAway(id: string) {
@@ -997,7 +1045,11 @@ export class Session {
         // Two connections per guest at most (direct and relay), for the largest session there can be.
         if (!this.accepted.has(peer) && this.accepted.size >= 2 * (MAX_PLACES + MAX_EXTRA))
           throw Error('Session full');
-        const participant = this.participantOf(peer, m.person);
+        let participant = this.participantOf(peer, m.person);
+        // A connection keeps the id it was let in with; only the name can change (2.37 review). A new id
+        // on the same connection would leave its own permissions, the lobby and the places behind.
+        const known = this.accepted.has(peer) ? this.people.get(peer) : undefined;
+        if (known && participant.id !== known.id) participant = { ...participant, id: known.id };
         if (!this.accepted.has(peer)) {
           const verdict = this.admit(peer, m.nonce, participant, m);
           if (verdict !== 'in') {

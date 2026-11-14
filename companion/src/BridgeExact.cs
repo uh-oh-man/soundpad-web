@@ -27,6 +27,11 @@ public sealed partial class Bridge
     private PcmCache pcm = new();
     /// <summary>For tests: a cache with a stand-in decoder (a slow or failing decode).</summary>
     internal void UsePcmCache(PcmCache cache) { var old = pcm; pcm = cache; old.Dispose(); }
+    /// <summary>One slice is rendered at a time (review, 2.37): a long one holds hundreds of MB while it is made.</summary>
+    private readonly SemaphoreSlim renderSlot = new(1, 1);
+    private Func<ISliceSource, long, long, CancellationToken, byte[]> renderSlice = (source, start, end, cancel) => SliceRenderer.Render(source, start, end, null, cancel);
+    /// <summary>For tests: a stand-in renderer (a slow one, or one that counts how many run at once).</summary>
+    internal void UseRenderer(Func<ISliceSource, long, long, CancellationToken, byte[]> render) => renderSlice = render;
     private SlotFiles? slotFiles;
     private SlotFiles Slots
     {
@@ -73,9 +78,24 @@ public sealed partial class Bridge
         public readonly bool Region = region;
         /// <summary>The intent that started it, so a repeat never outlives a newer one.</summary>
         public readonly Intent Owner = owner;
-        /// <summary>When its slot was last told to play (TickCount64).</summary>
+        /// <summary>When its slot was last told to play (TickCount64); moved on by the time it spent paused.</summary>
         public long StartedTick = Environment.TickCount64;
+        /// <summary>Since it was last told to play, a reading saw the slot playing close to its own end (review, 2.37).</summary>
+        public bool NearEnd;
+        /// <summary>A reading saw the slot playing since it was last told to play.</summary>
+        public bool SeenPlaying;
+        /// <summary>When it was paused (TickCount64), while it is paused: the end clock stands still meanwhile.</summary>
+        public long? PausedTick;
+        /// <summary>
+        /// How close to its end a reading must see the slot for a later stop to count as its natural end. A stop
+        /// seen without such a reading was someone stopping it in Soundpad, and a repeat never plays it again.
+        /// </summary>
+        public long NearMs => NearWindow(SliceMs);
+        public void Pause(long now) { PausedTick ??= now; }
+        public void Resume(long now) { if (PausedTick is long paused) { StartedTick += now - paused; PausedTick = null; } }
     }
+    /// <summary>See <see cref="ExactSlice.NearMs"/>: two thirds of the slice, at least 60 ms and at most 250 ms.</summary>
+    private static long NearWindow(long sliceMs) => Math.Clamp(sliceMs * 2 / 3, 60, 250);
     private ExactSlice? slice;
 
     /// <summary>The companion just played, stopped or saw audio playing: the Temp category waits a second after this (2.37).</summary>
@@ -123,7 +143,7 @@ public sealed partial class Bridge
 
     /// <summary>A cue start or region of this command, prepared for its intent; see <see cref="PrepareExact"/>.</summary>
     private Task<(ExactPlan? Plan, bool Withdrawn)> PrepareFor(Command c, string? path, Intent intent) =>
-        c.Op is "startAt" or "region" ? PrepareExact(c.Op, c.PositionMs, c.EndMs, path, () => IsNewest(intent)) : Task.FromResult<(ExactPlan?, bool)>((null, false));
+        c.Op is "startAt" or "region" ? PrepareExact(c.Op, c.PositionMs, c.EndMs, path, () => IsNewest(intent), c.SoundId) : Task.FromResult<(ExactPlan?, bool)>((null, false));
 
     /// <summary>
     /// Renders [start, end) of the source into a free slot, before the gate is taken, so nothing waits for it.
@@ -131,9 +151,13 @@ public sealed partial class Bridge
     /// long, a slot locked beyond its retries). Withdrawn: <paramref name="wanted"/> turned false meanwhile (a newer
     /// intent, Stop or Panic): nothing may play. The decode is never cancelled, so the next click finds it cached.
     /// </summary>
-    private async Task<(ExactPlan? Plan, bool Withdrawn)> PrepareExact(string op, long? positionMs, long? endMs, string? path, Func<bool> wanted)
+    private async Task<(ExactPlan? Plan, bool Withdrawn)> PrepareExact(string op, long? positionMs, long? endMs, string? path, Func<bool> wanted, string? soundId = null)
     {
         if (!exactEnabled || path == null || positionMs is not >= 0 || op == "region" && (endMs is null || endMs <= positionMs)) return (null, false);
+        // Too long to be a slice by what is already known (the region, or the rest of the sound by the length
+        // Soundpad lists): nothing is decoded for it (review, 2.37).
+        long? listedMs = soundId == null ? null : parsed.Public.Sounds.FirstOrDefault(s => s.Id == soundId)?.DurationMs;
+        if ((op == "region" ? endMs!.Value : listedMs ?? 0) - positionMs.Value > ExactMaxMs) return (null, false);
         var clock = Stopwatch.StartNew();
         Task<ISliceSource> loading;
         try { if (!File.Exists(path)) return (null, false); loading = pcm.Get(path); }
@@ -159,8 +183,17 @@ public sealed partial class Bridge
         long end = op == "region" ? Math.Min(SliceRenderer.FrameOf(endMs!.Value, rate), frames) : frames;
         // An empty or reversed range keeps the old handling (it clamps, or refuses as before); so does a very long one.
         if (start >= end || SliceRenderer.MsOf(end - start, rate) > ExactMaxMs || source.Channels > 8) return (null, false);
-        var rendering = Task.Run(() => SliceRenderer.Render(source, start, end));
+        // One render at a time, and a render nobody waits for any more is stopped (review, 2.37): five quick clicks on
+        // a long sound used to make five full renders at once, none of which was played.
+        if (!renderSlot.Wait(0)) { Note("render-busy", "Exact cue starts: another slice was still being made, so a sound started the usual way this once."); return (null, false); }
+        var stop = new CancellationTokenSource();
+        var render = renderSlice;
+        Task<byte[]> rendering;
+        try { rendering = Task.Run(() => render(source, start, end, stop.Token)); }
+        catch { renderSlot.Release(); stop.Dispose(); throw; }
+        _ = rendering.ContinueWith(task => { _ = task.Exception; renderSlot.Release(); stop.Dispose(); }, CancellationToken.None, TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
         var rendered = await Within(rendering, clock, wanted);
+        if (rendered != true) { try { stop.Cancel(); } catch (ObjectDisposedException) { } }
         if (rendered == null) return (null, true);
         if (rendered == false || !rendering.IsCompletedSuccessfully) { Note("render", "Exact cue starts: a slice was not ready in time, so it started the usual way this once."); return (null, false); }
         var wav = rendering.Result;
@@ -251,11 +284,17 @@ public sealed partial class Bridge
     internal Task WarmExact(string path) => pcm.Get(path);
     internal string? SoundIdOf(string path) => parsed.Paths.FirstOrDefault(p => string.Equals(p.Value, path, StringComparison.OrdinalIgnoreCase)).Key;
 
-    /// <summary>Wakes the poll loop when a short slice should have ended, so a repeat follows at once rather than at the next poll.</summary>
-    private void WakeAfter(long sliceMs)
+    /// <summary>
+    /// Wakes the poll loop shortly before a short slice ends (so a reading sees it near its end, see
+    /// <see cref="ExactSlice.NearMs"/>) and just after, so a repeat follows at once rather than at the next poll.
+    /// <paramref name="playedMs"/> is how much of it has already played (a resume).
+    /// </summary>
+    private void WakeAfter(long sliceMs, long playedMs = 0)
     {
         if (sliceMs > 60000) return;
-        _ = Task.Delay((int)sliceMs + 20).ContinueWith(_ => CommandAccepted?.Invoke(), TaskScheduler.Default);
+        long near = sliceMs - NearWindow(sliceMs) / 3 - playedMs, end = sliceMs + 20 - playedMs;
+        if (near > 0) _ = Task.Delay((int)near).ContinueWith(_ => CommandAccepted?.Invoke(), TaskScheduler.Default);
+        if (end > 0) _ = Task.Delay((int)end).ContinueWith(_ => CommandAccepted?.Invoke(), TaskScheduler.Default);
     }
 
     /// <summary>
@@ -285,7 +324,7 @@ public sealed partial class Bridge
         {
             if (seen == playbackVersion && ReferenceEquals(slice, cut))
             {
-                cut.StartedTick = Environment.TickCount64; seekSettlesUntil = Environment.TickCount64 + 1500; sampledTick = Environment.TickCount64;
+                cut.StartedTick = Environment.TickCount64; cut.NearEnd = false; cut.SeenPlaying = false; cut.PausedTick = null; seekSettlesUntil = Environment.TickCount64 + 1500; sampledTick = Environment.TickCount64;
                 playback = playback with { Status = "PLAYING", PositionMs = cut.OffsetMs, PositionRevision = playback.PositionRevision + 1, SampledAt = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() };
             }
         }
@@ -303,22 +342,23 @@ public sealed partial class Bridge
         var epoch = c.Epoch;
         bool Current() { lock (playbackSync) return ReferenceEquals(slice, cut) && playback.Epoch == epoch; }
         var path = c.SoundId != null ? parsed.Paths.GetValueOrDefault(c.SoundId) : null;
-        var prepared = await PrepareExact("startAt", target, null, path, () => !AboutToChange() && Current());
+        var prepared = await PrepareExact("startAt", target, null, path, () => !AboutToChange() && Current(), c.SoundId);
         if (prepared.Withdrawn) return false;
         var plan = prepared.Plan;
         try
         {
             var latest = newest;
             if (AboutToChange() || !Current()) return false;
+            // Soundpad's indexes are list positions: a sound added, removed or moved since the last library
+            // read shifts them. Never trust a cached index here either (review, 2.37), whether it is the slot's
+            // or the sound's own.
+            var list = await Pipe.Request("GetSoundlist()");
+            if (list != lastSoundlist) await RefreshInner();
+            if (AboutToChange() || !Current()) return false;
             int? slotIndex = plan == null ? null : SlotIndexOf(plan.Lease, plan.Generation);
             int index;
             if (slotIndex is int found) index = found;
-            else
-            {
-                var list = await Pipe.Request("GetSoundlist()");
-                if (list != lastSoundlist) await RefreshInner();
-                if (c.SoundId == null || !parsed.Indexes.TryGetValue(c.SoundId, out index)) return false;
-            }
+            else if (c.SoundId == null || !parsed.Indexes.TryGetValue(c.SoundId, out index)) return false;
             string answer;
             try { answer = await Pipe.Request($"DoPlaySound({index})", latest.Withdrawn.Token); }
             catch (OperationCanceledException) when (latest.Withdrawn.IsCancellationRequested) { return false; }
@@ -333,7 +373,7 @@ public sealed partial class Bridge
                 if (playback.Epoch == epoch)
                 {
                     free = DropSliceLocked();
-                    if (slotIndex != null) { slice = new ExactSlice(plan!, false, cut.Owner); plan!.Taken = true; }
+                    if (slotIndex != null) { slice = new ExactSlice(plan!, false, cut.Owner); plan!.Taken = true; if (paused) slice.Pause(Environment.TickCount64); }
                     seekSettlesUntil = Environment.TickCount64 + 1500; sampledTick = Environment.TickCount64; regionStart = null;
                     playback = playback with { Status = paused ? "PAUSED" : "PLAYING", PositionMs = target, PositionRevision = playback.PositionRevision + 1, RegionEndMs = null, Repeat = false, SampledAt = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() };
                 }

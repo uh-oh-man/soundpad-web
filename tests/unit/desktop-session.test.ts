@@ -3,6 +3,7 @@ import type { HostIdentity } from '../../web/src/network/identity';
 
 // The guest room is a stand-in: these tests check which room a host page runs, never Trystero itself.
 const rooms = vi.hoisted(() => [] as FakeRoom[]);
+const startReport = vi.hoisted(() => ({ info: undefined as unknown }));
 type FakeRoom = {
   invite: { room: string };
   host: { room: string } | undefined;
@@ -31,6 +32,9 @@ vi.mock('../../web/src/network/session', () => ({
     constructor(...args: unknown[]) {
       [this.invite, this.host, , , , , this.guests, , this.profiles, this.extras, , this.options] =
         args;
+      // The real room's relay link reports its state before the constructor returns (2.37).
+      if (startReport.info)
+        (this.options as { connection?: (info: unknown) => void }).connection?.(startReport.info);
       rooms.push(this as unknown as FakeRoom);
     }
     broadcast() {}
@@ -245,6 +249,25 @@ describe('session owner (2.36)', () => {
     await vi.advanceTimersByTimeAsync(250);
     expect(JSON.stringify(layout(2000)).length).toBeGreaterThan(SESSION_INFO_BYTES);
     expect(sent().layouts).toEqual([]);
+  });
+  it('never lists more waiting guests than a view accepts', async () => {
+    // Review, 2.37: a view refuses a session message with more than 64 requests, and then showed no
+    // session at all.
+    const { socket } = await hostPage(`#host=1234.${token}&owner=${ownerKey}`);
+    socket.receive({ type: 'role', role: 'owner', identity: identity(7) });
+    socket.receive({ type: 'state', state: state('2.37.0') });
+    await flush();
+    const requests = Array.from({ length: 70 }, (_, i) => ({
+      id: crypto.randomUUID(),
+      name: `Guest ${i}`,
+      kind: 'admit',
+      at: i,
+      expiresAt: i + 120000,
+    }));
+    rooms[0].options.lobby(requests);
+    await vi.advanceTimersByTimeAsync(250);
+    const sent = socket.posted('session').at(-1) as { control: { requests: unknown[] } };
+    expect(sent.control.requests).toEqual(requests.slice(0, 64));
   });
   it('carries out Disconnect and Replace invite pressed in a view', async () => {
     const { socket } = await hostPage(`#host=1234.${token}&owner=${ownerKey}`);
@@ -485,6 +508,23 @@ describe('session settings (2.37)', () => {
     expect(page.getSnapshot().requests).toEqual([request]);
     expect(page.getSnapshot().policy).toEqual(kept);
     expect(page.getSnapshot().links).toEqual({ 'peer-a': 'relay' });
+  });
+  it('shows the connection a room reports while it is still being made', async () => {
+    // Integration, 2.37: this report hit the room variable before it was assigned and hosting
+    // failed with "Cannot access 'session' before initialization".
+    const info = { transport: 'relay', since: 1 };
+    startReport.info = info;
+    try {
+      const { page, socket } = await hostPage(`#host=1234.${token}&owner=${ownerKey}`);
+      socket.receive({ type: 'role', role: 'owner', identity: identity(7) });
+      socket.receive({ type: 'state', state: state('2.37.0') });
+      await flush();
+      expect(rooms).toHaveLength(1);
+      expect(page.getSnapshot().connection).toEqual(info);
+      expect(page.getSnapshot().invite).toMatch(/#join=/);
+    } finally {
+      startReport.info = undefined;
+    }
   });
 });
 

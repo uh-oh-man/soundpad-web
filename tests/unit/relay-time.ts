@@ -36,7 +36,9 @@ export function useFakeClock() {
 
 /** Lets every started piece of real work (and what it starts in turn) finish. */
 async function idle() {
-  for (let quiet = 0; quiet < 2;) {
+  // Several quiet turns in a row, not two: on a loaded machine a piece of work can start a turn or two after the
+  // previous one ended, and a test then saw simulated time move past it (2.37 integration).
+  for (let quiet = 0; quiet < 6;) {
     await turn();
     quiet = inFlight ? 0 : quiet + 1;
   }
