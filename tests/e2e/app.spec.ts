@@ -83,7 +83,26 @@ async function startHarness(origin = ORIGIN, count = 4, options: string[] = []) 
     },
   };
 }
-const test = base.extend<{ harness: Harness; diagnostics: void; harnessOptions: string[] }>({
+const test = base.extend<{
+  harness: Harness;
+  diagnostics: void;
+  harnessOptions: string[];
+  noPublicRelays: void;
+}>({
+  // A host page reaches out to the public Nostr relays once its session starts (2.37). Tests never
+  // depend on them (the opt-in LIVE_RELAY and DEPLOYED_URL tests excepted), and in Playwright's
+  // Windows WebKit, setting up those internet connections holds up the page's local companion socket
+  // meanwhile: Play was answered after 2.5 s on the owner's PC (the companion took 50 ms) and after
+  // more than the 12 s command timeout on a GitHub runner (2.41.0 CI). So every page of the test's
+  // context has them refused at once.
+  noPublicRelays: [
+    async ({ context }, use) => {
+      if (process.env.LIVE_RELAY !== '1' && !process.env.DEPLOYED_URL)
+        await context.routeWebSocket(/^wss:\/\//, (socket) => socket.close());
+      await use();
+    },
+    { auto: true },
+  ],
   // Extra harness arguments for a group of tests (test.use), e.g. ['--latency-ms', '40'] for a
   // Soundpad that takes 40 ms per request; see the end of companion/harness/Program.cs.
   harnessOptions: [[], { option: true }],
@@ -749,7 +768,14 @@ test('V2: 10000-sound library keeps rendering bounded and search responsive', as
     const loadMs = performance.now() - start;
     await expect(page.locator('.sound-entry')).toHaveCount(120);
     const search = performance.now();
-    await page.getByLabel('Search sounds').fill('Benchmark fixture 10000');
+    // Playwright's WebKit sometimes drops the text it types here while the page is still busy with the
+    // 10,000-sound board: the box keeps focus, but no input event ever reaches the page (1 run in 5 on the
+    // owner's PC with a second suite running, 2.41.0). Typed again, it holds.
+    const searchBox = page.getByLabel('Search sounds');
+    await expect(async () => {
+      await searchBox.fill('Benchmark fixture 10000');
+      await expect(searchBox).toHaveValue('Benchmark fixture 10000', { timeout: 1000 });
+    }).toPass({ timeout: 10000 });
     await expect(
       page.getByRole('button', { name: 'Play from start: Benchmark fixture 10000', exact: true }),
     ).toBeVisible();
@@ -3398,6 +3424,15 @@ test("on a phone, focus in the player's waveform tools stays clear of the notice
     .evaluate((el) => (el as HTMLElement).focus({ preventScroll: true }));
   for (let step = 0; step < 8; step++) {
     await page.keyboard.press('Tab');
+    // The page checks focus again a frame later, after the browser's own focus scrolling (watchFocusClearance).
+    // WebKit's scrolling inside the tools lands only then: read right after the key, a control could still
+    // be on its way out from under the notices (7 of 8 runs failed so on the owner's PC, 2.41.0).
+    await page.evaluate(
+      () =>
+        new Promise<void>((resolve) =>
+          requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
+        ),
+    );
     const shown = await page.evaluate(() => {
       const el = document.activeElement as HTMLElement;
       const r = el.getBoundingClientRect();
