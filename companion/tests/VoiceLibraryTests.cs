@@ -741,12 +741,15 @@ public sealed class VoiceLibraryTests : IDisposable
         // A scanner reads the file just written, sharing it for reading and writing but not for replacing (as state.json
         // met on GitHub's runners in 2.35.0): the guest's tag used to be refused with "The voice library could not be saved".
         var scanner = new FileStream(main, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
-        var done = Task.Run(async () => { await Task.Delay(300); scanner.Dispose(); });
+        // Its own thread lets go after 300 ms: a thread-pool task could start late on a busy runner and hold the file past
+        // the save's one-second retry window, which is not what this test is about (2.42 CI).
+        var releaser = new Thread(() => { Thread.Sleep(300); scanner.Dispose(); }) { IsBackground = true };
+        releaser.Start();
         try
         {
             await Ok(rig.As(Alice, Cmd("libraryEdit") with { RecordingId = r.Id, AddTags = ["funny"] }));
         }
-        finally { await done; }
+        finally { releaser.Join(); }
         Assert.Contains("funny", Assert.IsType<LibraryRecording>(library.Get(r.Id)).Tags);
         Assert.Null(library.Problem);
         Assert.Empty(Directory.EnumerateFiles(Path.GetDirectoryName(main)!, "*.tmp"));
