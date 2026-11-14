@@ -1,5 +1,20 @@
 import { supports } from './version';
 
+/**
+ * Why the example cannot do something that needs the host's PC (Stage G): the example's model refuses
+ * with these, and the page shows the same words next to the control (HostOnlyTag) without loading the
+ * example's code.
+ */
+export const HOST_ONLY = {
+  keep: 'Not available in the example: Keep permanently writes a file and a Soundpad entry on the host’s PC.',
+  spotify:
+    'Not available in the example: Spotify controls work with the Spotify app on the host’s PC.',
+  hotkey:
+    'Not available in the example: the hotkey works only on the host’s PC, where it listens for a key in every app. A web page cannot do that.',
+  library:
+    'Not available in the example: Voice Replay Studio’s library is read from the host’s PC.',
+} as const;
+
 /** Where a host page's guest room runs (2.36); see the controller's `hosting`. */
 export type Hosting = 'tab' | 'window' | 'view';
 

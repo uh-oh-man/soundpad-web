@@ -61,6 +61,7 @@ export function SoundEditor({
           workspace={workspace}
           update={update}
           choose={(at) => playback.position(sound.id, at)}
+          nameSuffix=" in the editor"
         />
       </section>
       {mayTrim && (

@@ -67,6 +67,7 @@ import {
 } from './shell';
 import { recall, remember } from './sections';
 import { usePref } from './prefs';
+import { useHostStyleSync } from './ui-sync';
 import { currentOpener, returnFocus } from './focus-return';
 import { useUnreadNotices } from './notifications';
 import { useNoticeSounds } from './notice-sound';
@@ -322,6 +323,12 @@ function App() {
     supports(state.companionVersion, 'sentences') &&
     (host || controller.relaysSentences());
   useSentenceSync(state, sentencesReady);
+  // Host style sync (2.43): the host's browser and the companion window share style and Mimic's open
+  // draft through the companion's ui.json. Never on a guest's page or in the example.
+  useHostStyleSync(
+    state,
+    host && connected && !view.demo && supports(state.companionVersion, 'uiSync'),
+  );
   // A notice's Jump opens Mimic at that moment and Open shows the recording in Voices: the library
   // store asks the shell (showView / requestEditor), and the view or panel takes the request.
   // After the host's Panic (2.35): guests cannot start audio until the host resumes; the host can.
@@ -678,7 +685,14 @@ function App() {
               </SectionView>
             ) : shown === 'sentences' ? (
               <SectionView view="sentences" ribbon={ribbon}>
-                <SentencesPanel state={state} host={host} connected={connected} canPlay={canPlay} />
+                <SentencesPanel
+                  state={state}
+                  host={host}
+                  connected={connected}
+                  canPlay={canPlay}
+                  // Section memory: the sentence that was open when Sentences was last left.
+                  openId={recall('sentences').sentenceId ?? null}
+                />
               </SectionView>
             ) : (
               <>
@@ -755,7 +769,6 @@ function App() {
                             .map((id, i) => view.people[id]?.name ?? `Guest ${i + 1}`)
                             .join(', ')}
                           {view.guests.length > 4 && ` +${view.guests.length - 4} more`}
-                          {view.demo && ' (simulated)'}
                         </span>
                       )}
                     </p>

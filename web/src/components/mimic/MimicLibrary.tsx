@@ -5,6 +5,7 @@ import { controller } from '../../controller';
 import { removeNewTempAudio } from '../../remove-temp';
 import { playback } from '../../playback';
 import { formatTime } from '../Waveform';
+import { HostOnlyTag } from '../SimulatedBadge';
 
 const librarySchema = z.object({
   available: z.boolean(),
@@ -90,6 +91,7 @@ export function MimicLibrary({ connected, canPlay }: { connected: boolean; canPl
     <details className="mimic-library" onToggle={(e) => setOpen(e.currentTarget.open)}>
       <summary>
         <Library size={15} aria-hidden="true" /> From Voice Replay Studio
+        {controller.getSnapshot().demo && <HostOnlyTag />}
       </summary>
       {failed ? (
         <p className="muted">

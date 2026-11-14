@@ -40,6 +40,7 @@ import {
 import { DemoHistory, loopMs, type Range } from './history';
 import { ALEX_BAND_MS, DemoDrafts } from './drafts';
 import { DemoVoices, LIBRARY_UNAVAILABLE } from './voices';
+import { HOST_ONLY } from '../hosting';
 import { DemoSentences } from './sentences';
 
 /**
@@ -126,13 +127,7 @@ export const DEMO_COMPANION = '2.42.0';
 export const DEMO_HOST_ID = 'de30'.padEnd(64, '0');
 /** Features that need the host's PC: the example says so instead of pretending. */
 export const UNAVAILABLE = {
-  keep: 'Not available in the example: Keep permanently writes a file and a Soundpad entry on the host’s PC.',
-  spotify:
-    'Not available in the example: Spotify controls work with the Spotify app on the host’s PC.',
-  hotkey:
-    'Not available in the example: the hotkey works only on the host’s PC, where it listens for a key in every app. A web page cannot do that.',
-  library:
-    'Not available in the example: Voice Replay Studio’s library is read from the host’s PC.',
+  ...HOST_ONLY,
   share:
     'Not available in the example: its guests are simulated and never see Mimic, so there is nobody to share the history with.',
   other: 'Not available in the example.',

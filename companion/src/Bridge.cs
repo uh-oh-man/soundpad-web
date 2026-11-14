@@ -58,7 +58,7 @@ public sealed partial class Bridge(ISoundpad pipe, StateStore store) : IDisposab
     }
     public Snapshot Snapshot => new(1, revision, available, error, parsed.Public, playback, disk.Counter, disk.Permissions, 2,
         Convert.ToHexString(System.Security.Cryptography.HMACSHA256.HashData(Convert.FromBase64String(disk.IdentityKey), System.Text.Encoding.UTF8.GetBytes("workspace-host-v2"))).ToLowerInvariant(), disk.StatisticsVersion, typeof(Bridge).Assembly.GetName().Version?.ToString(3), managed?.Public.Revision ?? 0, MimicSnapshot, playbackSuspended,
-        Interlocked.Read(ref draftsRevision), budgets.Revision, tempRecovery > 0 ? tempRecovery : null, Interlocked.Read(ref voicesRevision), Interlocked.Read(ref sentencesRevision), counterSession) { Permissions = PublicPermissions };
+        Interlocked.Read(ref draftsRevision), budgets.Revision, tempRecovery > 0 ? tempRecovery : null, Interlocked.Read(ref voicesRevision), Interlocked.Read(ref sentencesRevision), counterSession, Interlocked.Read(ref uiRevision)) { Permissions = PublicPermissions };
     /// <summary>
     /// Kick presses since this companion started (2.43, gate kickSession): it moves with the lifetime counter (never
     /// below 0) and Reset clears both. In memory only, so a restart begins a new session and state.json is unchanged.
@@ -163,6 +163,7 @@ public sealed partial class Bridge(ISoundpad pipe, StateStore store) : IDisposab
         // The host disconnected or turned this guest away: letting them back in records a new join time. Done here, in
         // arrival order, before anything that may wait, so a command they sent later never sees the old one.
         if (c.Op == "revokePeer" && actor == "host" && c.GuestId is { Length: > 0 and <= 128 } guestId) ForgetGuest(guestId);
+        if (ExecuteUiPrefs(c, actor) is { } ui) return ui;
         if (await ExecuteKeep(c, actor, participant, requester, audience) is { } keep) return keep;
         if (await ExecuteVoices(c, actor, participant, requester, audience) is { } voices) return voices;
         var query = await Query(c, actor); if (query != null) return query;

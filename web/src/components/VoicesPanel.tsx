@@ -341,6 +341,7 @@ function LibraryView({
         <Search size={16} aria-hidden="true" />
         <input
           aria-label="Search the voice library"
+          data-view-search
           placeholder="Search sounds, voice clips and sentences by name or exact words…"
           value={typed}
           maxLength={200}

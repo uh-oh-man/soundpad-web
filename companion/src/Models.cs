@@ -24,7 +24,9 @@ public record Snapshot(int V, long Revision, bool Available, string? Error, Libr
     // 2.42: rises when sentences, named palette pieces or performance sets change (pages fetch sentenceList).
     long Sentences = 0,
     // 2.43: Kick presses since this companion started (gate kickSession). In memory only: never written to state.json.
-    int CounterSession = 0);
+    int CounterSession = 0,
+    // 2.43: rises when the host's shared style (ui.json, gate uiSync) changes, so host pages fetch uiPrefsGet. In memory only.
+    long UiRevision = 0);
 public record Participant(string Id, string Name);
 public record ParticipantPlays(string Name, long Count);
 public sealed class SoundStatistics
@@ -70,7 +72,9 @@ public record Command(int V, string Id, long At, string Op, string? SoundId = nu
     string? Color = null, string[]? Categories = null, int? GroupId = null, string? Kind = null, bool? Unassigned = null, string? Tag = null, bool? GroupSpeakers = null, bool? GuestLibraryEdit = null,
     // Sentences and the speaking palette (2.42): the sentence a command is about, and what it asks (SentenceInput);
     // a performance set to create or change.
-    string? SentenceId = null, SentenceInput? Sentence = null, PerformanceSetInput? Set = null);
+    string? SentenceId = null, SentenceInput? Sentence = null, PerformanceSetInput? Set = null,
+    // uiPrefsSet (2.43): the style fields to change, checked field by field by UiPrefsStore.
+    JsonElement? UiPrefs = null);
 /// <summary>The details of a sentence or palette command (2.42); null fields are not part of the request.</summary>
 public sealed record SentenceInput(string? Do = null, string? Text = null, string[]? Pieces = null, double? OffsetMs = null, long? StartMs = null, long? EndMs = null,
     double? FadeInMs = null, double? FadeOutMs = null, double? Gain = null, bool? Balanced = null, double? DurationMs = null, string? Mode = null, PieceEffect? Effect = null,

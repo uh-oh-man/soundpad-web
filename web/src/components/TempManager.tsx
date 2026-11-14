@@ -10,6 +10,7 @@ import { useDraftStore } from '../mimic/draft-store';
 import { formatMb } from '../mimic/drafts';
 import { refreshTempAssets, useTempAssets, type TempAsset, type TempVariant } from '../temp-assets';
 import { requestEditor } from '../shell';
+import { HostOnlyTag } from './SimulatedBadge';
 type Asset = TempAsset;
 type Variant = TempVariant;
 
@@ -67,6 +68,7 @@ export function TempManager({
     }
   }
   const me = controller.getSnapshot().profile.name;
+  const demo = controller.getSnapshot().demo;
   const keepBlocked = !connected
     ? 'Reconnecting: Keep waits until you are connected again.'
     : own?.waiting === 'kept'
@@ -322,17 +324,21 @@ export function TempManager({
                       </button>
                     )}
                     {host && !v.permanent && v.state === 'ready' && v.nativeLabel && (
-                      <button
-                        aria-disabled={!!pending || undefined}
-                        onClick={() => {
-                          if (pending) return;
-                          setSaving({ asset: a, variant: v });
-                          setCategory('');
-                          setDirectory('');
-                        }}
-                      >
-                        Keep {v.orientation} permanently
-                      </button>
+                      <>
+                        <button
+                          aria-disabled={!!pending || undefined}
+                          aria-describedby={demo ? `keep-host-only-${v.id}` : undefined}
+                          onClick={() => {
+                            if (pending) return;
+                            setSaving({ asset: a, variant: v });
+                            setCategory('');
+                            setDirectory('');
+                          }}
+                        >
+                          Keep {v.orientation} permanently
+                        </button>
+                        {demo && <HostOnlyTag id={`keep-host-only-${v.id}`} />}
+                      </>
                     )}
                     {/* 2.41: clips kept before the voice library existed are added by hand (no automatic migration). */}
                     {libraryAdds && v.permanent && v.soundId && (

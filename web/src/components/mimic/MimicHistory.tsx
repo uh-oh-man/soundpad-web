@@ -68,6 +68,7 @@ import {
   type Draft,
 } from '../../mimic/drafts';
 import { refreshDrafts, useDraftStore } from '../../mimic/draft-store';
+import { shareActiveDraft, useSharedDraft } from '../../ui-sync';
 import { recall, remember } from '../../sections';
 import { z } from 'zod';
 import { requestOpen, takeOpen, useOpenRequests, useVoiceStore } from '../../library/voice-store';
@@ -411,19 +412,25 @@ export function MimicHistory({
   }
   const onWaveSelect = (s: Selection | null) => select(s ? selectionFrames(s, start, rate) : null);
 
-  function openDraft(draft: Draft | null) {
+  /**
+   * `share` (2.43, host style sync): tell the host's other page (the companion window, or the browser)
+   * which draft is open here; false when this page is following that page.
+   */
+  function openDraft(draft: Draft | null, share = true) {
     clearTimeout(saveTimer.current);
     if (!draft) {
-      closeDraft();
+      closeDraft(share);
       return;
     }
+    if (host && share) shareActiveDraft({ sessionId: draft.sessionId, draftId: draft.id });
     setOpenId(draft.id);
     setSelection({ startFrame: draft.startFrame, endFrame: draft.endFrame });
     setName(draft.name ?? '');
     reveal({ startFrame: draft.startFrame, endFrame: draft.endFrame });
   }
-  function closeDraft() {
+  function closeDraft(share = true) {
     clearTimeout(saveTimer.current);
+    if (host && share && openId) shareActiveDraft(null);
     setOpenId(null);
     setSelection(null);
     setName('');
@@ -432,6 +439,31 @@ export function MimicHistory({
       setFollow(true);
     }
   }
+
+  // Host style sync (2.43): the draft the host opened on their other page opens here too, and closing it
+  // there closes it here. Only changes are followed, so a page opening Mimic keeps a draft it remembers
+  // when the other page has none open.
+  const shared = useSharedDraft();
+  const sharedKey = shared ? `${shared.sessionId}:${shared.draftId}` : '';
+  const followed = useRef<string | null>(null);
+  useEffect(() => {
+    if (!host || sharedKey === followed.current) return;
+    if (!shared) {
+      const was = followed.current;
+      followed.current = '';
+      if (was && openId) closeDraft(false);
+      return;
+    }
+    if (shared.draftId === openId) {
+      followed.current = sharedKey;
+      return;
+    }
+    // The other page's new draft may not be in this page's list yet: wait for it.
+    const draft = mine.find((d) => d.id === shared.draftId && d.sessionId === shared.sessionId);
+    if (!draft) return;
+    followed.current = sharedKey;
+    openDraft(draft, false);
+  });
 
   const selectedMs = selection ? selectionMs(selection, start, rate) : null;
   const suggestion = wordsText(words, selection);

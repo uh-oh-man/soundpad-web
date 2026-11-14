@@ -393,6 +393,8 @@ if (args.FirstOrDefault() == "--make-rollback-fixture" && args.Length == 3)
     var asset = System.Text.Json.JsonSerializer.Deserialize<AudioJournal>(File.ReadAllText(journalPath), Json.Options)!.Assets.Single();
     await Must(b.Execute(C("trimAudio") with { AssetId = asset.Id, PositionMs = 500, EndMs = 4000 }, "host"), "trim");
     await Must(b.Execute(C("trimAudio") with { AssetId = asset.Id, PositionMs = 0, EndMs = 8000, Action = "echo" }, "host"), "effect");
+    // 2.43: the host's shared style (ui.json), which older companions must ignore.
+    await Must(b.Execute(C("uiPrefsSet") with { UiPrefs = System.Text.Json.JsonDocument.Parse("{\"navStyle\":\"tabs\",\"theme\":\"ocean\",\"motion\":\"reduce\",\"contrast\":\"high\",\"headerAnimation\":\"still\",\"activeDraft\":null}").RootElement.Clone() }, "host"), "ui prefs");
     if (args[2] == "ended") await Must(b.Execute(C("endSession"), "host"), "end");
     else b.Dispose();
     Console.WriteLine($"FIXTURE_READY {dir} pipe={soundpad.Name}");

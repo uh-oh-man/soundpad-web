@@ -6,7 +6,16 @@
  */
 import AxeBuilder from '@axe-core/playwright';
 import type { Locator, Page } from '@playwright/test';
-import { test, expect, host, playButton, TEMP_READY } from './helpers/harness';
+import {
+  test,
+  expect,
+  host,
+  joinGuest,
+  playButton,
+  sendCommand,
+  TEMP_READY,
+  useLocalGuests,
+} from './helpers/harness';
 import { closeEditor, editorPanel, section, sectionNav } from './helpers/shell';
 
 const nav = (page: Page, name: string) =>
@@ -382,6 +391,7 @@ test('notices never cover the panel, Stop, Panic, the nav or Settings at four si
       ['Mimic', nav(page, 'Mimic')],
       ['Access settings', page.getByRole('button', { name: /^Access settings/ })],
       ['Increase Kick counter', page.getByRole('button', { name: 'Increase Kick counter' })],
+      ['Kick counter details', page.getByRole('button', { name: 'Kick counter details' })],
       ['Undo', undo],
     ];
     if (narrow) controls.push(['Show board', panel.getByRole('button', { name: 'Show board' })]);
@@ -390,6 +400,13 @@ test('notices never cover the panel, Stop, Panic, the nav or Settings at four si
       await control.scrollIntoViewIfNeeded();
       expect(await onTop(control), `${name} at ${size.width}`).toBe(true);
     }
+    // Kick's details open above the player, and above the notices on a phone (Stage G integration).
+    await page.getByRole('button', { name: 'Kick counter details' }).click();
+    const decrease = page.getByRole('button', { name: 'Decrease Kick counter' });
+    await expect(decrease).toBeVisible();
+    expect(await onTop(decrease), `Decrease Kick counter at ${size.width}`).toBe(true);
+    await page.keyboard.press('Escape');
+    await expect(decrease).toHaveCount(0);
     // Keyboard: no focus trap; Shift+Tab from the panel's close button reaches a notice's Undo (the dock
     // comes just before the splitter and the panel).
     await panel.getByRole('button', { name: 'Close dialog' }).focus();
@@ -504,7 +521,8 @@ test('keyboard order: skip links, topbar, nav, search, tiles, then the player; S
   await page.locator('body').focus();
   await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
   const order: string[] = [];
-  for (let i = 0; i < 60; i++) {
+  // Each tile has several stops (play, art, quick actions, Favorite, Organize, …): room for all of them.
+  for (let i = 0; i < 200; i++) {
     await page.keyboard.press('Tab');
     order.push(
       await page.evaluate(() => {
@@ -573,4 +591,277 @@ test('accessibility: axe finds nothing serious in either nav style, the docked p
   // check does not apply there.
   await scan('forced colours', ['color-contrast']);
   expect(problems).toEqual([]);
+});
+
+// ---- Phase 3 (Stage G integration): what crosses the packages (spec 12.4, Phase 3 list) ----
+
+/** Rewrites every snapshot the companion sends, e.g. to stand in for an older companion. */
+async function rewriteSnapshots(page: Page, change: (state: Record<string, unknown>) => void) {
+  await page.routeWebSocket(/ws:\/\/127\.0\.0\.1:\d+\/bridge/, (socket) => {
+    const server = socket.connectToServer();
+    socket.onMessage((message) => server.send(message));
+    server.onMessage((message) => {
+      const frame = JSON.parse(String(message));
+      if (frame.state) change(frame.state);
+      socket.send(JSON.stringify(frame));
+    });
+  });
+}
+/**
+ * Starts the example. Playwright's Windows WebKit has no Web Audio (real Safari has it): there the example
+ * says it cannot start and the test ends early, as in example.spec.ts (new tests add no skips).
+ */
+async function startExample(page: Page) {
+  await page.goto('/');
+  const audio = await page.evaluate(
+    () => 'AudioContext' in window || 'webkitAudioContext' in window,
+  );
+  await page.getByRole('button', { name: 'Try the example' }).click();
+  if (!audio) {
+    await expect(page.getByText(/The example could not start/)).toBeVisible();
+    return false;
+  }
+  await expect(page.getByRole('complementary', { name: 'Example session' })).toBeVisible();
+  return true;
+}
+const boardRibbon = (page: Page) => page.locator('.board-heading .header-ribbon');
+
+test('Open editor for X: the sound editor with its own waveform and effects (2.43)', async ({
+  page,
+  harness,
+}) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await host(page, harness);
+  await page.getByRole('button', { name: 'Open editor for Airhorn' }).click();
+  const panel = page.getByRole('dialog', { name: 'Edit Airhorn' });
+  await expect(panel).toBeVisible();
+  await expect(editorPanel(page)).toHaveAttribute('data-panel-kind', 'sound-edit');
+  await expect(page.locator('#editor-title')).toBeFocused();
+  // Its waveform's controls have names of their own, so the player's and the tiles' stay unique.
+  await expect(panel.getByRole('slider', { name: 'Seek Airhorn in the editor' })).toBeVisible();
+  // A Soundpad sound on a 2.43 companion (soundEdit): the copy form.
+  const form = panel.getByRole('form', { name: 'Edit a copy of Airhorn' });
+  await expect(form).toBeVisible();
+  await expect(form.getByRole('button', { name: 'Save copy' })).toBeVisible();
+  await expect(panel).not.toContainText('need companion 2.43');
+  // The board stays playable while it is open.
+  await playButton(page, 'Laugh').click();
+  await expect.poll(() => harness.plays.some((p) => p.startsWith('DoPlaySound'))).toBe(true);
+  await expect(panel).toBeVisible();
+});
+
+test('Open editor for X on an older companion: cues, icon and statistics, and one line instead of a disabled form', async ({
+  page,
+  harness,
+}) => {
+  await rewriteSnapshots(page, (state) => {
+    if (state.companionVersion) state.companionVersion = '2.42.0';
+  });
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await host(page, harness);
+  await page.getByRole('button', { name: 'Open editor for Airhorn' }).click();
+  const panel = page.getByRole('dialog', { name: 'Edit Airhorn' });
+  await expect(panel).toContainText(
+    'Effects on Soundpad sounds need companion 2.43 or later. Cues, regions, icon and statistics work here.',
+  );
+  await expect(panel.getByRole('form', { name: 'Edit a copy of Airhorn' })).toHaveCount(0);
+  await expect(panel.getByRole('slider', { name: 'Seek Airhorn in the editor' })).toBeVisible();
+  await expect(panel.locator('details.sound-editor-stats')).not.toHaveAttribute('open', '');
+});
+
+test('Details for X in the player opens the sound editor with Statistics expanded', async ({
+  page,
+  harness,
+}) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await host(page, harness);
+  await playButton(page, 'Airhorn').click();
+  await page.getByRole('button', { name: 'Details for Airhorn' }).click();
+  const panel = page.getByRole('dialog', { name: 'Edit Airhorn' });
+  await expect(panel).toBeVisible();
+  await expect(panel.locator('details.sound-editor-stats')).toHaveAttribute('open', '');
+  // Pressing it again keeps the same editor (no second panel, no stale title).
+  await page.getByRole('button', { name: 'Details for Airhorn' }).click();
+  await expect(page.getByRole('dialog')).toHaveCount(1);
+  await expect(page.locator('#editor-title')).toHaveText('Edit Airhorn');
+});
+
+test('example: the ribbon follows a draft played into the game, with a new key for each play', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  if (!(await startExample(page))) return;
+  await expect(boardRibbon(page)).toHaveAttribute('data-ribbon-state', 'idle');
+  await nav(page, 'Mimic').click();
+  const mimic = mimicPanel(page);
+  await mimic.getByRole('button', { name: 'Start listening' }).click();
+  // Latest phrase takes a finished phrase: wait until the first one has been heard (as example.spec.ts).
+  await expect(
+    mimic.getByRole('list', { name: 'Transcript' }).getByRole('button', { name: 'man,' }).first(),
+  ).toBeVisible({ timeout: 15000 });
+  await mimic.getByRole('button', { name: 'Latest phrase' }).click();
+  const draft = mimic.getByRole('region', { name: 'Draft' });
+  await expect(draft).toBeVisible();
+  await draft.getByRole('button', { name: 'Play into game' }).click();
+  await expect(boardRibbon(page)).toHaveAttribute('data-ribbon-state', /live|waiting/);
+  await expect(boardRibbon(page)).toHaveAttribute('data-ribbon-key', /\S/);
+  const first = await boardRibbon(page).getAttribute('data-ribbon-key');
+  // The key is host:sound:epoch, and a second play of the same draft is a new epoch.
+  expect(first!.split(':')).toHaveLength(3);
+  await draft.getByRole('button', { name: 'Play into game' }).click();
+  await expect.poll(() => boardRibbon(page).getAttribute('data-ribbon-key')).not.toBe(first);
+  await expect(boardRibbon(page)).toHaveAttribute('data-ribbon-key', /\S/);
+  await page.getByRole('button', { name: 'Stop', exact: true }).click();
+  await expect(boardRibbon(page)).toHaveAttribute('data-ribbon-key', '');
+});
+
+test('example: notices never cover Leave example, the panel, Stop, Panic, the nav or Kick at four sizes', async ({
+  page,
+}) => {
+  test.slow();
+  let started = false;
+  for (const size of [
+    { width: 1280, height: 720 },
+    { width: 1440, height: 900 },
+    { width: 1100, height: 800 },
+    { width: 412, height: 860 },
+  ]) {
+    await page.setViewportSize(size);
+    if (!started) {
+      if (!(await startExample(page))) return;
+      started = true;
+    }
+    await nav(page, 'Mimic').click();
+    const panel = mimicPanel(page);
+    await expect(panel).toBeVisible();
+    await page.evaluate(async (width) => {
+      const { controller } = await import(/* @vite-ignore */ '/src/' + 'controller.ts');
+      for (let i = 1; i <= 4; i++)
+        controller.notify(`Example notice ${i} at ${width}`, 'success', {
+          label: 'Undo',
+          run: () => {},
+        });
+    }, size.width);
+    const narrow = size.width <= 1000;
+    await expect(page.locator('.notification-stack .toast')).toHaveCount(narrow ? 2 : 3);
+    const controls: [string, Locator][] = [
+      ['Close dialog', panel.getByRole('button', { name: 'Close dialog' })],
+      ['Stop', page.getByRole('button', { name: 'Stop', exact: true })],
+      ['Panic', page.getByRole('button', { name: 'Panic: stop audio and pause guest playback' })],
+      ['Mimic', nav(page, 'Mimic')],
+      ['Increase Kick counter', page.getByRole('button', { name: 'Increase Kick counter' })],
+      ['Kick counter details', page.getByRole('button', { name: 'Kick counter details' })],
+      ['Undo', page.locator('.notification-stack').getByRole('button', { name: 'Undo' }).first()],
+    ];
+    if (narrow) controls.push(['Show board', panel.getByRole('button', { name: 'Show board' })]);
+    else {
+      controls.push(['Resize editor', page.getByRole('separator', { name: 'Resize editor' })]);
+      controls.push(['Leave example', page.getByRole('button', { name: 'Leave example' })]);
+    }
+    for (const [name, control] of controls) {
+      await control.scrollIntoViewIfNeeded();
+      expect(await onTop(control), `${name} at ${size.width}`).toBe(true);
+    }
+    if (narrow) {
+      // The phone sheet covers the banner; Show board folds it, and Leave example is reachable then.
+      await panel.getByRole('button', { name: 'Show board' }).click();
+      const leave = page.getByRole('button', { name: 'Leave example' });
+      await leave.scrollIntoViewIfNeeded();
+      expect(await onTop(leave), `Leave example at ${size.width}`).toBe(true);
+      await page.getByRole('button', { name: 'Show editor' }).click();
+    }
+    await closeEditor(page);
+    await expect(panel).toHaveCount(0);
+  }
+  await page.getByRole('button', { name: 'Leave example' }).click();
+  await expect(page.getByRole('button', { name: 'Try the example' })).toBeVisible();
+});
+
+test('phone widths: no view, the Mimic sheet, Settings or Kick details scroll sideways', async ({
+  page,
+  harness,
+}) => {
+  for (const width of [412, 390, 375]) {
+    await page.setViewportSize({ width, height: 860 });
+    await host(page, harness);
+    expect(await noSideScroll(page), `board at ${width}`).toBe(true);
+    await nav(page, 'Mimic').click();
+    await expect(editorPanel(page)).toHaveAttribute('data-panel-mode', 'sheet');
+    expect(await noSideScroll(page), `Mimic sheet at ${width}`).toBe(true);
+    await closeEditor(page);
+    for (const name of ['Voices', 'Sentences'] as const) {
+      await nav(page, name).click();
+      await expect(section(page, name)).toBeVisible();
+      expect(await noSideScroll(page), `${name} at ${width}`).toBe(true);
+    }
+    await nav(page, 'Soundboard').click();
+    await page.getByRole('button', { name: 'Access settings' }).click();
+    await expect(page.getByRole('dialog', { name: 'Session & access' })).toBeVisible();
+    expect(await noSideScroll(page), `Settings at ${width}`).toBe(true);
+    await page.getByRole('button', { name: 'Close dialog' }).click();
+    await page.getByRole('button', { name: 'Kick counter details' }).click();
+    const details = page.locator('#kick-details');
+    await expect(details).toBeVisible();
+    expect(await noSideScroll(page), `Kick details at ${width}`).toBe(true);
+    const box = (await details.boundingBox())!;
+    expect(box.x).toBeGreaterThanOrEqual(0);
+    expect(box.x + box.width).toBeLessThanOrEqual(width + 1);
+    await page.keyboard.press('Escape');
+  }
+});
+
+test('host style sync: the host’s two pages (separate browsers) share navigation, theme, motion and the open draft; guests never send it', async ({
+  page,
+  browser,
+  harness,
+}) => {
+  test.slow();
+  await useLocalGuests(page);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await host(page, harness);
+  // The companion window is another browser with its own storage: a second context stands in for it.
+  const windowContext = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+  try {
+    const other = await windowContext.newPage();
+    await other.goto(harness.launch);
+    await expect(playButton(other, 'Airhorn')).toBeEnabled();
+    // Navigation chosen on this page moves the other page's nav into its topbar.
+    await chooseNav(page, 'Top tabs');
+    await expect(other.locator('header.topbar nav[aria-label="Sections"]')).toBeVisible();
+    // Theme and motion chosen on the other page show here.
+    await other.getByRole('button', { name: 'Access settings' }).click();
+    await other.getByLabel('Theme').selectOption('purple');
+    await other
+      .getByRole('radiogroup', { name: 'Motion' })
+      .getByRole('radio', { name: 'Reduce' })
+      .check();
+    await other.getByRole('button', { name: 'Close dialog' }).click();
+    await expect(page.locator('html')).toHaveAttribute('data-theme', 'purple');
+    await expect(page.locator('html')).toHaveAttribute('data-motion', 'reduce');
+    // A reload keeps it, and the companion has it for the next page.
+    await page.reload();
+    await expect(playButton(page, 'Airhorn')).toBeEnabled();
+    await expect(page.locator('html')).toHaveAttribute('data-theme', 'purple');
+    await expect(page.locator('header.topbar nav[aria-label="Sections"]')).toBeVisible();
+    // The open draft: made on this page, it opens on the other one.
+    const panel = await startMimic(page);
+    await page.waitForTimeout(2600);
+    await panel.getByLabel('F6 hotkey').focus();
+    await page.keyboard.press('5');
+    await panel.getByLabel('Clip name').fill('Shared draft');
+    await page.keyboard.press('Enter');
+    await expect(panel.getByRole('region', { name: 'Draft' })).toBeVisible();
+    await nav(other, 'Mimic').click();
+    const otherPanel = mimicPanel(other);
+    await expect(otherPanel.getByRole('region', { name: 'Draft' })).toBeVisible();
+    await expect(otherPanel.getByLabel('Clip name')).toHaveValue('Shared draft');
+    // A guest never sends the host's style: the companion refuses it, and nothing changes.
+    const guest = await joinGuest(page, 'Style Guest');
+    const refused = await sendCommand(guest, 'uiPrefsSet', { uiPrefs: { theme: 'ocean' } });
+    expect(refused.error).toBeTruthy();
+    await expect(page.locator('html')).toHaveAttribute('data-theme', 'purple');
+    await expect(other.locator('html')).toHaveAttribute('data-theme', 'purple');
+  } finally {
+    await windowContext.close();
+  }
 });

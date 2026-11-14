@@ -171,9 +171,12 @@ test('example voices and sentences: search finds a word; "hello [laugh]" with a 
   await builder.getByRole('button', { name: 'Keep', exact: true }).click();
   await expect(builder.getByText('Kept · version 1')).toBeVisible();
   expect(await axe(page)).toEqual([]);
-  // Reopened from the list, it is the kept sentence with its version.
+  // Section memory (Stage G): showing Sentences again brings back the sentence that was open.
   await closeSection(page, 'Sentences');
   await page.getByRole('button', { name: 'Sentences', exact: true }).click();
+  await expect(builder.getByText('Kept · version 1')).toBeVisible();
+  // Reopened from the list, it is the kept sentence with its version.
+  await sentences.getByRole('button', { name: 'Back to sentences' }).click();
   await sentences
     .getByRole('list', { name: 'Kept sentences' })
     .getByRole('button', { name: /hello \[laugh\]/ })

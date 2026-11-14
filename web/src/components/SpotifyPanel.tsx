@@ -3,6 +3,7 @@ import { Music2, SkipBack, SkipForward, Play, Pause, ChevronDown } from 'lucide-
 import { z } from 'zod';
 import { controller } from '../controller';
 import { usePref } from '../prefs';
+import { HostOnlyTag } from './SimulatedBadge';
 const schema = z.object({
   enabled: z.boolean().optional(),
   available: z.boolean(),
@@ -106,6 +107,7 @@ export function SpotifyPanel({ host = true }: { host?: boolean }) {
               <strong title={data?.available ? (data.title ?? undefined) : undefined}>
                 {data?.available ? data.title || 'Track name unavailable' : 'Spotify unavailable'}
               </strong>
+              {controller.getSnapshot().demo && <HostOnlyTag />}
               <span title={data?.available ? (data.artist ?? undefined) : undefined}>
                 {data?.available
                   ? data.artist || 'Artist unavailable'

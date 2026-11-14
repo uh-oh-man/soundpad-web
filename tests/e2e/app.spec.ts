@@ -4142,7 +4142,7 @@ test('example session: plays example sounds in this browser, edits a copy, and l
   await expect(page.getByRole('button', { name: /Play / })).toHaveCount(0);
   await expect(page.locator('#try-example-note')).toHaveText(
     // What can actually be tried (2.41), not "every feature".
-    'Try the soundboard, edited copies, Mimic and simulated guests with example sounds. Nothing is sent to Soundpad; sounds play in this browser.',
+    'Try the example: sounds, Mimic history and drafts, voices, sentences and simulated guests. Nothing is sent to Soundpad; sounds play in this browser.',
   );
   await page.getByRole('button', { name: 'Try the example' }).click();
   // Playwright's Windows WebKit has no Web Audio at all (real Safari has it): the example must say it cannot
@@ -4167,17 +4167,18 @@ test('example session: plays example sounds in this browser, edits a copy, and l
   );
   // Leaving clears the example's audio; favourites and view settings stay (2.41).
   await expect(page.getByRole('complementary', { name: 'Example session' })).toContainText(
-    'Leaving clears the example’s audio, copies and Mimic clips; your favourites and view settings stay.',
+    'leaving clears the example’s recordings, drafts and clips. Favourites and view settings stay on this browser.',
   );
   await expect(page.locator('header .status')).toHaveText('Example session');
-  // Mimic in the example is labelled as the older flow, and its hotkey promises nothing outside this page.
+  // Mimic in the example (Stage G: the 2.40 history and drafts) says what it listens to, and its hotkey
+  // promises nothing outside this page.
   await page.getByRole('button', { name: 'Mimic', exact: true }).click();
   const mimic = page.getByRole('dialog', { name: 'Mimic' });
-  await expect(mimic.locator('.mimic-intro')).toContainText('The example shows the older Mimic');
+  await expect(mimic.locator('.mimic-intro')).toContainText('loop of Apollo 11 clips');
   await expect(mimic).toContainText("Host's PC only: there, pressing F6 in any app saves the last");
   await expect(mimic).not.toContainText('Press F6 in any app on this PC');
   await closeEditor(page);
-  // There is no companion to update (the example stands in for one without the 2.39 recording history).
+  // There is no companion to update (the example stands in for one, and never says it is out of date).
   await page.getByRole('button', { name: 'Access settings' }).click();
   await expect(page.getByRole('dialog').first()).toBeVisible();
   await expect(page.getByText('A newer one adds', { exact: false })).toHaveCount(0);
@@ -4277,7 +4278,8 @@ test('notices never cover Mimic’s close button, Leave example, Stop, Panic or 
     await page.waitForTimeout(3200);
     for (let i = 0; i < 2; i++) {
       await dialog.getByRole('button', { name: 'Last 3 s' }).click();
-      await dialog.getByRole('button', { name: 'Mimic it' }).click();
+      // Stage G: the example has the 2.40 history, where "Mimic it" became Capture; Mimic & play still makes the clip.
+      await dialog.getByRole('button', { name: 'Mimic & play' }).click();
     }
     const undo = page.locator('.notification-stack').getByRole('button', { name: 'Undo' }).first();
     await expect(undo).toBeVisible();
@@ -4658,8 +4660,11 @@ test('sentences: typed from recorded words without playing, a take swapped, a mi
   const tilePlays = harness.plays.length;
   await tile.click();
   await expect.poll(() => harness.plays.slice(tilePlays).join(' ')).toMatch(/DoPlaySound\(\d+\)/);
-  // Edit the kept sentence and keep it again: a new version, the first one still there.
+  // Edit the kept sentence and keep it again: a new version, the first one still there. Section memory
+  // (Stage G) shows the sentence that was open; it is opened from the list here.
   await page.getByRole('button', { name: 'Sentences', exact: true }).click();
+  await expect(builder.getByText('Kept · version 1')).toBeVisible();
+  await sentences.getByRole('button', { name: 'Back to sentences' }).click();
   await sentences
     .getByRole('list', { name: 'Kept sentences' })
     .getByRole('button', { name: /fixture tone zebra/ })
@@ -4755,6 +4760,8 @@ test('sentences (2.42 review): Space selects a lone piece, Escape clears it, nud
   await closeSection(page, 'Sentences');
   await expect(sentences).toBeHidden();
   await page.getByRole('button', { name: 'Sentences', exact: true }).click();
+  // Section memory (Stage G) brings back the open sentence; this test reopens it from the list.
+  await sentences.getByRole('button', { name: 'Back to sentences' }).click();
   await sentences
     .getByRole('list', { name: 'Sentences in progress' })
     .getByRole('button', { name: /fixture/ })

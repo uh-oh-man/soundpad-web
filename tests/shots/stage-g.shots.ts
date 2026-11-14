@@ -78,7 +78,8 @@ for (const s of MATRIX)
       await page.waitForTimeout(3200);
       for (let i = 0; i < 2; i++) {
         await mimic.getByRole('button', { name: 'Last 3 s' }).click();
-        await mimic.getByRole('button', { name: 'Mimic it' }).click();
+        // "Mimic it" before Stage G; the example's 2.40 history (after) makes the clip with Mimic & play.
+        await mimic.getByRole('button', { name: /^(Mimic it|Mimic & play)$/ }).click();
       }
       await expect(page.getByRole('button', { name: 'Undo' }).first()).toBeVisible();
       await shot(page, 'example-mimic-notices', s);

@@ -231,6 +231,8 @@ html[data-motion='reduce'] :is(.sound-entry .spinning, .player.intent-pending .p
 /* ---------- Speed menu (a popover, not a dialog) ---------- */
 .speed-menu {
   position: fixed;
+  /* Above the phone notice dock (Stage G integration); dialogs (--z-scrim) still cover it. */
+  z-index: calc(var(--z-notices) + 1);
   display: flex;
   flex-direction: column;
   gap: 2px;
@@ -523,6 +525,11 @@ html[data-motion='reduce'] .player.intent-pending .playback-icon {
 }
 .player-v2 .kick > .kick-more[aria-expanded='true'] svg {
   transform: rotate(180deg);
+}
+/* While Kick's details are open the player (their stacking context) sits above the phone notice dock,
+   which never overlaps the player itself, so the popover is never under a notice (Stage G integration). */
+.player:has(.kick-details) {
+  z-index: calc(var(--z-notices) + 1);
 }
 /* Above the player, at its right edge: never over Stop or Panic, and inside the viewport. */
 .kick-details {

@@ -1551,6 +1551,7 @@ function PalettePanel({
       <div className="voices-search">
         <input
           aria-label="Search the palette"
+          data-view-search
           placeholder="Search words, phrases and [named] pieces"
           value={query}
           onChange={(e) => {

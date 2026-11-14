@@ -80,6 +80,11 @@ type Props = {
   compact?: boolean;
   /** The host's Panic holds guest playback (2.35): looks unavailable, keeps focus, ignores presses. */
   held?: boolean;
+  /**
+   * Added to every control's name (Stage G): the editor panel's waveform says " in the editor", so its
+   * "Seek X" never repeats the player's or a tile's while both are on screen.
+   */
+  nameSuffix?: string;
 };
 export function Waveform({
   sound,
@@ -90,7 +95,9 @@ export function Waveform({
   choose,
   compact = false,
   held = false,
+  nameSuffix = '',
 }: Props) {
+  const named = (label: string) => label + nameSuffix;
   const root = useRef<HTMLDivElement>(null);
   const [visible, setVisible] = useState(compact),
     [tools, setTools] = useState(false),
@@ -171,7 +178,7 @@ export function Waveform({
             className="wave-surface"
             role="slider"
             tabIndex={disabled ? -1 : 0}
-            aria-label={`Seek ${sound.name}`}
+            aria-label={named(`Seek ${sound.name}`)}
             aria-valuemin={0}
             aria-valuemax={duration}
             aria-valuenow={Math.round(preview ?? (active ? position : selected))}
@@ -217,7 +224,7 @@ export function Waveform({
                   key={c.id}
                   className="cue-marker"
                   title={`${c.name} · ${formatTime(c.at)}`}
-                  aria-label={`Cue ${c.name}`}
+                  aria-label={named(`Cue ${c.name}`)}
                   style={{ left: `${percentage(c.at)}%` }}
                   onPointerDown={(e) => {
                     e.stopPropagation();
@@ -277,7 +284,7 @@ export function Waveform({
             {zoom > 1 && (
               <button
                 className="wave-fit"
-                aria-label={`Fit waveform ${sound.name}`}
+                aria-label={named(`Fit waveform ${sound.name}`)}
                 onClick={timeline.fit}
               >
                 <RotateCcw size={12} /> Fit <small>{zoom.toFixed(1)}×</small>
@@ -307,7 +314,7 @@ export function Waveform({
               </div>
               <div className="cue-create">
                 <input
-                  aria-label="New cue name"
+                  aria-label={named('New cue name')}
                   value={cueName}
                   maxLength={80}
                   onChange={(e) => setCueName(e.target.value)}
@@ -316,7 +323,7 @@ export function Waveform({
                   Time (s)
                   <input
                     type="number"
-                    aria-label="Cue time seconds"
+                    aria-label={named('Cue time seconds')}
                     min={0}
                     max={duration / 1000}
                     step="0.001"
@@ -327,7 +334,7 @@ export function Waveform({
                 <button
                   disabled={disabled}
                   aria-disabled={held || undefined}
-                  aria-label={`Seek here: selected position ${sound.name}`}
+                  aria-label={named(`Seek here: selected position ${sound.name}`)}
                   onClick={() => !held && void pick(selected)}
                 >
                   Seek here
@@ -360,12 +367,12 @@ export function Waveform({
                     disabled={disabled}
                     aria-disabled={held || undefined}
                     onClick={() => !held && void pick(c.at)}
-                    aria-label={`Play cue ${c.name}`}
+                    aria-label={named(`Play cue ${c.name}`)}
                   >
                     <Play size={13} />
                   </button>
                   <input
-                    aria-label={`Rename cue ${c.name}`}
+                    aria-label={named(`Rename cue ${c.name}`)}
                     defaultValue={c.name}
                     maxLength={80}
                     onBlur={(e) =>
@@ -382,7 +389,7 @@ export function Waveform({
                   />
                   <input
                     type="number"
-                    aria-label={`Move cue ${c.name} seconds`}
+                    aria-label={named(`Move cue ${c.name} seconds`)}
                     min={0}
                     max={duration / 1000}
                     step="0.1"
@@ -403,7 +410,7 @@ export function Waveform({
                     }}
                   />
                   <button
-                    aria-label={`Delete cue ${c.name}`}
+                    aria-label={named(`Delete cue ${c.name}`)}
                     onClick={() =>
                       update((w) => ({
                         ...w,
@@ -420,7 +427,7 @@ export function Waveform({
               ))}
               <div className="region-create">
                 <input
-                  aria-label="Region name"
+                  aria-label={named('Region name')}
                   value={regionName}
                   maxLength={80}
                   onChange={(e) => setRegionName(e.target.value)}
@@ -429,7 +436,7 @@ export function Waveform({
                   Start (s)
                   <input
                     type="number"
-                    aria-label="Region start seconds"
+                    aria-label={named('Region start seconds')}
                     min={0}
                     max={duration / 1000}
                     step="0.1"
@@ -442,7 +449,7 @@ export function Waveform({
                   End (s)
                   <input
                     type="number"
-                    aria-label="Region end seconds"
+                    aria-label={named('Region end seconds')}
                     min={0}
                     max={duration / 1000}
                     step="0.1"
@@ -488,7 +495,7 @@ export function Waveform({
                   <button
                     disabled={disabled}
                     aria-disabled={held || undefined}
-                    aria-label={`Play region ${r.name}`}
+                    aria-label={named(`Play region ${r.name}`)}
                     onClick={() => {
                       if (held) return;
                       update((w) => ({
@@ -501,7 +508,7 @@ export function Waveform({
                     <Play size={13} />
                   </button>
                   <input
-                    aria-label={`Rename region ${r.name}`}
+                    aria-label={named(`Rename region ${r.name}`)}
                     defaultValue={r.name}
                     maxLength={80}
                     onBlur={(e) =>
@@ -518,7 +525,7 @@ export function Waveform({
                   />
                   <input
                     type="number"
-                    aria-label={`Region ${r.name} start seconds`}
+                    aria-label={named(`Region ${r.name} start seconds`)}
                     min={0}
                     max={r.end / 1000}
                     step="0.1"
@@ -541,7 +548,7 @@ export function Waveform({
                   />
                   <input
                     type="number"
-                    aria-label={`Region ${r.name} end seconds`}
+                    aria-label={named(`Region ${r.name} end seconds`)}
                     min={r.start / 1000}
                     max={duration / 1000}
                     step="0.1"
@@ -565,7 +572,7 @@ export function Waveform({
                   <label>
                     <input
                       type="checkbox"
-                      aria-label={`Repeat region ${r.name}`}
+                      aria-label={named(`Repeat region ${r.name}`)}
                       checked={r.repeat}
                       onChange={(e) => {
                         const repeat = e.target.checked;
@@ -583,7 +590,7 @@ export function Waveform({
                     Repeat
                   </label>
                   <button
-                    aria-label={`Delete region ${r.name}`}
+                    aria-label={named(`Delete region ${r.name}`)}
                     onClick={() =>
                       update((w) => ({
                         ...w,

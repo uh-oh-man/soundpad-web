@@ -14,6 +14,9 @@ import type { Snapshot } from '../../protocol';
 import { supports } from '../../version';
 import { preferredSource, sourceKey } from '../../mimic/selection';
 import { formatSpan } from '../../mimic/history';
+import { HOST_ONLY } from '../../hosting';
+import { notify } from '../../notifications';
+import { HostOnlyTag } from '../SimulatedBadge';
 
 const SOURCE_KEY = 'soundpad-mimic-source';
 const sourcesSchema = z.object({
@@ -92,6 +95,8 @@ export function MimicHostControls({ state, connected }: { state: Snapshot; conne
   const hotkeyKey = mimic?.hotkeyKey ?? 'F6';
   /** The example session (2.41): its hotkey copy says it needs the host's PC. */
   const demo = useSyncExternalStore(controller.subscribe, () => controller.getSnapshot().demo);
+  /** In the example the hotkey controls explain themselves instead of changing (Stage G, spec 11.5). */
+  const hostOnly = () => notify(HOST_ONLY.hotkey, 'info');
 
   /**
    * Once the hotkey is on, put back the key and length this browser last chose. Moving a hotkey that is
@@ -272,8 +277,9 @@ export function MimicHostControls({ state, connected }: { state: Snapshot; conne
             </select>
           </label>
           <small>
-            Kept on this PC until the companion closes. Gaming recognises speech with the least CPU,
-            at low priority.
+            {demo
+              ? 'In the example the history repeats its loop and is cleared when you leave.'
+              : 'Kept on this PC until the companion closes. Gaming recognises speech with the least CPU, at low priority.'}
           </small>
         </div>
       )}
@@ -326,8 +332,10 @@ export function MimicHostControls({ state, connected }: { state: Snapshot; conne
               type="checkbox"
               aria-label={`${hotkeyKey} hotkey`}
               checked={hotkey}
-              aria-disabled={busy || undefined}
+              aria-disabled={busy || demo || undefined}
+              aria-describedby={demo ? 'mimic-hotkey-host-only mimic-hotkey-note' : undefined}
               onChange={(e) => {
+                if (demo) return hostOnly();
                 if (running.current) return;
                 const on = e.target.checked;
                 setWantHotkey(on);
@@ -348,8 +356,10 @@ export function MimicHostControls({ state, connected }: { state: Snapshot; conne
             <select
               aria-label="Hotkey key"
               value={hotkeyKey}
-              aria-disabled={busy || undefined}
+              aria-disabled={busy || demo || undefined}
+              aria-describedby={demo ? 'mimic-hotkey-host-only mimic-hotkey-note' : undefined}
               onChange={(e) => {
+                if (demo) return hostOnly();
                 if (running.current) return;
                 const key = e.target.value;
                 void command(async () => {
@@ -369,8 +379,10 @@ export function MimicHostControls({ state, connected }: { state: Snapshot; conne
               <select
                 aria-label={`${hotkeyKey} saves the last`}
                 value={mimic?.hotkeySeconds ?? 10}
-                aria-disabled={busy || undefined}
+                aria-disabled={busy || demo || undefined}
+                aria-describedby={demo ? 'mimic-hotkey-host-only mimic-hotkey-note' : undefined}
                 onChange={(e) => {
+                  if (demo) return hostOnly();
                   if (running.current) return;
                   const seconds = Number(e.target.value);
                   void controller
@@ -387,7 +399,8 @@ export function MimicHostControls({ state, connected }: { state: Snapshot; conne
               </select>
             </label>
           )}
-          <small>
+          {demo && <HostOnlyTag id="mimic-hotkey-host-only" />}
+          <small id="mimic-hotkey-note">
             {demo
               ? // 2.41: a web page cannot listen for keys in other apps; the example must not promise it.
                 `Host's PC only: there, pressing ${hotkeyKey} in any app saves the last ${mimic?.hotkeySeconds ?? 10} seconds. It does nothing in the example.`

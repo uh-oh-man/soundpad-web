@@ -193,19 +193,20 @@ export function MimicPanel({
 
   return (
     <div className="mimic-panel">
-      {historyMode ? (
+      {historyMode && demo ? (
+        // Stage G (2.43): the example has the recording history too; say what it listens to.
+        <p className="mimic-intro">
+          The example&apos;s Mimic listens to a 20-second loop of Apollo 11 clips and keeps the last{' '}
+          {Math.round((mimic?.history?.seconds ?? 600) / 60)} minutes of it, as the companion keeps
+          one app or output device on the host&apos;s PC. Subtitles are placed by hand. It never
+          records a microphone.
+        </p>
+      ) : historyMode ? (
         <p className="mimic-intro">
           Mimic records one app or output device on the host's PC and keeps the last{' '}
           {Math.round((mimic?.history?.seconds ?? 600) / 60)} minutes there until the companion
           closes. Go back to anything said in that time and turn it into a sound. It never records a
           microphone, and everyone in the session can see when it is listening.
-        </p>
-      ) : demo ? (
-        // 2.41: the example still shows the older 30-second Mimic; say so instead of passing it off as current.
-        <p className="mimic-intro">
-          The example shows the older Mimic: the last 30 seconds of a loop of example clips, with
-          subtitles placed by hand. With the companion on the host's PC, Mimic keeps minutes of
-          history with words to click, drafts and private preview. It never records a microphone.
         </p>
       ) : (
         <p className="mimic-intro">

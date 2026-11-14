@@ -301,6 +301,8 @@ export const uiPrefsSchema = z.looseObject({ version: z.literal(1), ...uiPrefsFi
 export type UiPrefs = z.infer<typeof uiPrefsSchema>;
 /** What uiPrefsSet may carry: any of the fields, nothing else. */
 export const uiPrefsInputSchema = z.object(uiPrefsFields).partial().strict();
+/** The answer to uiPrefsGet and uiPrefsSet: ui.json with every field filled in, and whether it exists yet. */
+export const uiPrefsReplySchema = z.object({ prefs: uiPrefsSchema, saved: z.boolean() });
 const recordingIdSchema = z.string().regex(/^[a-f0-9]{32}$/);
 const pieceIdSchema = z.string().regex(/^[a-f0-9]{12}$/);
 const msSchema = z
