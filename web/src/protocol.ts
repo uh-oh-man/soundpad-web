@@ -94,7 +94,32 @@ export const commandSchema = z
       'speakerGroups',
       'speakerName',
       'speakerLink',
+      // Sentences and the speaking palette (2.42): built from library recordings only. Guests read and
+      // preview with the library; building needs guestLibraryEdit, Keep needs guestKeep, and Play into
+      // game (sentencePlay, a Game-mode paletteTap) needs remote playback like any play.
+      'sentenceList',
+      'sentenceCreate',
+      'sentenceGet',
+      'sentenceText',
+      'sentenceEdit',
+      'sentenceAlternatives',
+      'sentenceDiscard',
+      'sentencePreview',
+      'sentenceKeep',
+      'sentencePlay',
+      'paletteSearch',
+      'paletteTap',
+      'paletteMark',
+      'performance',
+      'performanceSets',
     ]),
+    // Sentences (2.42): which sentence, and what is asked of it (see sentenceInputSchema).
+    sentenceId: z
+      .string()
+      .regex(/^[a-f0-9]{32}$/)
+      .optional(),
+    sentence: z.lazy(() => sentenceInputSchema).optional(),
+    set: z.lazy(() => setInputSchema).optional(),
     // Voice library (2.41): which recording(s), metadata, an audit group to undo, search text and paging.
     recordingId: z
       .string()
@@ -214,6 +239,13 @@ export const commandSchema = z
         'remove',
         'pause',
         'resume',
+        // 2.42: paletteTap (into the game or privately), performance recording, performance sets.
+        'game',
+        'preview',
+        'start',
+        'stop',
+        'cancel',
+        'activate',
       ])
       .optional(),
     permissions: z
@@ -233,6 +265,102 @@ export const commandSchema = z
   })
   .strict();
 export type Command = z.infer<typeof commandSchema>;
+const recordingIdSchema = z.string().regex(/^[a-f0-9]{32}$/);
+const pieceIdSchema = z.string().regex(/^[a-f0-9]{12}$/);
+const msSchema = z
+  .number()
+  .int()
+  .min(0)
+  .max(4 * 3600 * 1000);
+export const effectSchema = z
+  .object({
+    reverse: z.boolean(),
+    speed: z.number().min(0.25).max(4),
+    keepPitch: z.boolean(),
+    echo: z.boolean(),
+  })
+  .strict();
+export const paletteRefSchema = z
+  .object({
+    recordingId: recordingIdSchema.nullish(),
+    startMs: msSchema,
+    endMs: msSchema,
+    text: z.string().max(100),
+    namedId: recordingIdSchema.nullish(),
+  })
+  .strict();
+export type PaletteRef = z.infer<typeof paletteRefSchema>;
+/** What a sentence or palette command asks (2.42). */
+export const sentenceInputSchema = z
+  .object({
+    do: z
+      .enum([
+        'move',
+        'edges',
+        'fade',
+        'gain',
+        'delete',
+        'pause',
+        'insertPause',
+        'missing',
+        'effects',
+        'settings',
+        'swap',
+        'resolve',
+        'shuffle',
+        'contrast',
+        'rematch',
+        'restore',
+        'pin',
+        'insert',
+        'title',
+      ])
+      .optional(),
+    text: z.string().max(4000).optional(),
+    pieces: z.array(pieceIdSchema).max(400).optional(),
+    offsetMs: z.number().min(0).max(600000).optional(),
+    startMs: msSchema.optional(),
+    endMs: msSchema.optional(),
+    fadeInMs: z.number().min(0).max(2000).optional(),
+    fadeOutMs: z.number().min(0).max(2000).optional(),
+    gain: z.number().min(0).max(8).optional(),
+    balanced: z.boolean().optional(),
+    durationMs: z.number().min(10).max(60000).optional(),
+    mode: z.enum(['gap', 'bleep']).optional(),
+    effect: effectSchema.optional(),
+    chaos: z.number().int().min(0).max(100).optional(),
+    timing: z.enum(['fluent', 'original']).optional(),
+    balance: z.boolean().optional(),
+    cleanup: z.boolean().optional(),
+    altered: z.boolean().optional(),
+    voiceIds: z.array(recordingIdSchema).max(256).optional(),
+    alternative: z.number().int().min(0).max(1000).optional(),
+    splice: z.number().int().min(0).max(16).optional(),
+    word: z.string().max(100).optional(),
+    version: z.number().int().min(1).max(1000).optional(),
+    pinned: z.boolean().optional(),
+    variant: z.enum(['original', 'cleaned']).optional(),
+    item: paletteRefSchema.optional(),
+    origin: z.enum(['typed', 'template']).optional(),
+  })
+  .strict();
+export type SentenceInput = z.infer<typeof sentenceInputSchema>;
+export const templateSchema = z
+  .object({ id: z.string().max(32), name: z.string().max(40), text: z.string().max(400) })
+  .strict();
+/** A performance set to create or change (2.42): references to library items only. */
+export const setInputSchema = z
+  .object({
+    id: z
+      .string()
+      .regex(/^(default|[a-f0-9]{32})$/)
+      .optional(),
+    name: z.string().max(40).optional(),
+    voiceIds: z.array(recordingIdSchema).max(256).optional(),
+    favorites: z.array(paletteRefSchema).max(200).optional(),
+    templates: z.array(templateSchema).max(100).optional(),
+  })
+  .strict();
 export type Sound = {
   id: string;
   name: string;
@@ -337,6 +465,8 @@ export const snapshotSchema = z.object({
   }),
   // 2.41: rises when the voice library, its word index, notices or speaker groups change (fetch libraryStatus).
   voiceLibrary: z.number().int().nonnegative().optional(),
+  // 2.42: rises when sentences, named palette pieces or performance sets change (fetch sentenceList).
+  sentences: z.number().int().nonnegative().optional(),
   // 2.40: these rise when drafts or guest budgets change, so pages fetch draftList or budgetStatus;
   // tempRecovery counts the clips a crashed companion left in Temp until the host decides.
   drafts: z.number().int().nonnegative().optional(),
@@ -436,6 +566,9 @@ export const slowOps: readonly Command['op'][] = [
   'tempRecover',
   'libraryPreview',
   'libraryAdd',
+  'sentencePreview',
+  'sentenceKeep',
+  'sentencePlay',
 ];
 /**
  * Playback and transport commands (2.35). They are answered quickly and a burst of them is normal use
@@ -452,6 +585,8 @@ export const controlOps: readonly Command['op'][] = [
   'audioPlay',
   'reverse',
   'panic',
+  'sentencePlay',
+  'paletteTap',
 ];
 export function isGuestAllowed(c: Command, s: Snapshot) {
   // "Make it and play it" (2.35) needs the same permission as playing it afterwards did.
@@ -505,6 +640,32 @@ export function isGuestAllowed(c: Command, s: Snapshot) {
     return s.permissions.guestMimic === true;
   if (c.op === 'speakerName' || c.op === 'speakerLink')
     return s.permissions.guestMimic === true && s.permissions.guestLibraryEdit !== false;
+  // Sentences and the palette (2.42): built only from the library, which guests may read. Building
+  // and naming pieces follow the library's edit permission; Keep follows guest Keep; anything that
+  // plays into the game follows remote playback (and Panic, which the companion applies).
+  if (
+    c.op === 'sentenceList' ||
+    c.op === 'sentenceGet' ||
+    c.op === 'sentenceAlternatives' ||
+    c.op === 'sentencePreview' ||
+    c.op === 'paletteSearch' ||
+    c.op === 'performanceSets' ||
+    (c.op === 'paletteTap' && c.action !== 'game')
+  )
+    return true;
+  if (c.op === 'sentencePlay' || (c.op === 'paletteTap' && c.action === 'game'))
+    return s.permissions.remotePlayback;
+  if (c.op === 'sentenceKeep')
+    return s.permissions.guestKeep === true && s.permissions.guestLibraryEdit !== false;
+  if (
+    c.op === 'sentenceCreate' ||
+    c.op === 'sentenceText' ||
+    c.op === 'sentenceEdit' ||
+    c.op === 'sentenceDiscard' ||
+    c.op === 'paletteMark' ||
+    c.op === 'performance'
+  )
+    return s.permissions.guestLibraryEdit !== false;
   if (c.op === 'trimAudio') return s.permissions.guestUploads !== false;
   // Undo of a guest's own clip or copy (2.32): the companion checks the guest added it.
   if (c.op === 'removeAudio') return s.permissions.guestUploads !== false;

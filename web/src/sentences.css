@@ -1,0 +1,337 @@
+/* Sentences (2.42): the builder's text and timeline, the speaking palette, performance sets and the
+   board's pinned sentence tiles. Same tokens and controls as the Voices window (voices.css). */
+.dialog:has(.sentences-panel) {
+  max-width: 980px;
+}
+.sentence-rows {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 6px;
+}
+.sentence-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.sentence-open {
+  flex: 1 1 auto;
+  display: grid;
+  gap: 2px;
+  text-align: left;
+  min-width: 0;
+}
+.sentence-open > * {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.warning-badge {
+  border-color: var(--amber, #e2a03f);
+  color: var(--amber, #e2a03f);
+}
+.sentence-builder {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+}
+.sentence-text {
+  display: grid;
+  gap: 4px;
+}
+.sentence-words {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin: 0;
+}
+.sentence-word {
+  position: relative;
+  padding: 2px 7px;
+  border-radius: 6px;
+  border: 1px solid color-mix(in srgb, var(--voice, var(--line)) 70%, transparent);
+  background: color-mix(in srgb, var(--voice, transparent) 18%, transparent);
+  font-size: 13px;
+}
+.sentence-word.selected {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+/* Missing words: pulsing, or (reduced motion) a static dashed marker with a "!" badge. */
+.sentence-word.missing,
+.timeline-piece.kind-missing {
+  border: 1px dashed var(--amber, #e2a03f);
+  background: color-mix(in srgb, var(--amber, #e2a03f) 12%, transparent);
+  color: var(--text-primary);
+}
+.missing-pulse {
+  animation: missing-pulse 1.4s ease-in-out infinite;
+}
+@keyframes missing-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--amber, #e2a03f) 0%, transparent);
+  }
+  50% {
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--amber, #e2a03f) 45%, transparent);
+  }
+}
+.missing-static {
+  border-width: 2px;
+}
+.missing-badge {
+  position: absolute;
+  top: -7px;
+  right: -6px;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--amber, #e2a03f);
+  color: #111;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 14px;
+  text-align: center;
+}
+@media (prefers-reduced-motion: reduce) {
+  .missing-pulse {
+    animation: none;
+  }
+}
+.sentence-note {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  font-size: 13px;
+}
+.sentence-actions {
+  flex-wrap: wrap;
+}
+.sentence-mix,
+.sentence-effects {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 6px 10px;
+}
+.sentence-mix summary,
+.sentence-effects summary {
+  cursor: pointer;
+  font-size: 13px;
+}
+.sentence-mix > * + *,
+.sentence-effects > * + * {
+  margin-top: 8px;
+}
+.sentence-slider {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+}
+.sentence-slider input {
+  width: min(320px, 50vw);
+}
+.sentence-voices {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 12px;
+  border: 0;
+  padding: 0;
+  margin: 0;
+}
+.sentence-voices legend {
+  font-size: 13px;
+  margin-bottom: 4px;
+}
+.sentence-timeline {
+  overflow-x: auto;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface-2);
+  padding: 22px 8px 10px;
+}
+.sentence-track {
+  position: relative;
+  height: 46px;
+  min-width: 100%;
+}
+.sentence-tick {
+  position: absolute;
+  top: -18px;
+  font-size: 10px;
+  color: var(--text-secondary, #9aa);
+  border-left: 1px solid var(--line);
+  padding-left: 3px;
+  height: 64px;
+  pointer-events: none;
+}
+.timeline-piece {
+  position: absolute;
+  top: 0;
+  height: 40px;
+  min-width: 14px;
+  padding: 0 6px;
+  border-radius: 6px;
+  border: 1px solid color-mix(in srgb, var(--voice, var(--line)) 80%, transparent);
+  background: color-mix(in srgb, var(--voice, var(--surface-2)) 30%, var(--surface-1, #1b2230));
+  color: var(--text-primary);
+  font-size: 12px;
+  overflow: hidden;
+  white-space: nowrap;
+  touch-action: none;
+  cursor: grab;
+  transition:
+    left 120ms ease,
+    box-shadow 120ms ease;
+}
+.timeline-piece.dragging {
+  cursor: grabbing;
+  transition: none;
+  z-index: 3;
+}
+.timeline-piece.selected {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+  z-index: 2;
+}
+.timeline-piece.kind-pause {
+  background: repeating-linear-gradient(
+    90deg,
+    transparent 0 6px,
+    color-mix(in srgb, var(--line) 60%, transparent) 6px 7px
+  );
+  border-style: dotted;
+}
+.timeline-piece.kind-splice {
+  border-style: dashed;
+  border-color: var(--accent);
+}
+.timeline-piece.overlap {
+  background-image: repeating-linear-gradient(
+    135deg,
+    transparent 0 5px,
+    color-mix(in srgb, #d9634c 35%, transparent) 5px 8px
+  );
+}
+.timeline-piece.source-missing,
+.timeline-piece.source-changed {
+  border-color: #d9634c;
+}
+.timeline-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: block;
+  line-height: 38px;
+}
+@media (prefers-reduced-motion: reduce) {
+  .timeline-piece {
+    transition: none;
+  }
+}
+.sentence-overlap-note {
+  margin: 4px 0 0;
+  font-size: 12px;
+}
+.sentence-inspector {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 8px 10px;
+  display: grid;
+  gap: 8px;
+}
+.sentence-takes {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 4px;
+}
+.sentence-takes li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+}
+.sentence-takes li.current {
+  font-weight: 600;
+}
+.palette-items {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+  gap: 6px;
+}
+.palette-item {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+.palette-tap {
+  flex: 1 1 auto;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  border-color: color-mix(in srgb, var(--voice, var(--line)) 70%, transparent);
+}
+.palette-tap > span:first-of-type {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.palette-tap:active {
+  transform: scale(0.97);
+}
+.palette-item.kind-named .palette-tap {
+  font-style: italic;
+}
+.sentence-record {
+  align-items: center;
+  flex-wrap: wrap;
+}
+.recording-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #d9634c;
+}
+.sentence-sets {
+  display: grid;
+  gap: 10px;
+}
+.pinned-sentences {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0 0 10px;
+}
+.pinned-sentence {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  min-width: 0;
+}
+.pinned-sentence > span:first-of-type {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 260px;
+}
+.sentences-panel .badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 7px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  font-size: 11px;
+  white-space: nowrap;
+}

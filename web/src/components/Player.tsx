@@ -15,6 +15,7 @@ import type { Workspace } from '../workspace';
 import { Waveform, formatTime, usePlayhead } from './Waveform';
 import { guestHeld, HELD_BY_HOST, intentKey, playback, usePendingIntent } from '../playback';
 import { supports } from '../version';
+import { useSentenceStore } from '../library/sentence-store';
 /** Panic's accessible name; its title adds the shortcut. */
 export const PANIC_LABEL = 'Panic: stop audio and pause guest playback';
 export function Player({
@@ -62,6 +63,14 @@ export function Player({
     known = !!current.soundId,
     sound = state.library.sounds.find((s) => s.id === (current.soundId ?? lastId)),
     position = usePlayhead(current);
+  // A sentence or a palette word (2.42) plays from a slot: it is not one of the board's sounds.
+  const { list: sentences } = useSentenceStore();
+  const sentenceId = current.soundId?.startsWith('sentence:') ? current.soundId.slice(9) : null;
+  const composed = sentenceId
+    ? `Sentence: ${sentences?.sentences.find((s) => s.id === sentenceId)?.title || 'kept sentence'}`
+    : current.soundId?.startsWith('palette:')
+      ? 'Palette word'
+      : null;
   // A click this page sent and the companion has not answered yet (2.35). "Playing" is the report.
   const pending = usePendingIntent();
   const held = guestHeld(state, host);
@@ -91,14 +100,16 @@ export function Player({
               ? known
                 ? sound.name
                 : `Last selection: ${sound.name}`
-              : current.status === 'PLAYING' || current.status === 'PAUSED'
-                ? 'Soundpad playback · sound unknown'
-                : current.status === 'STOPPED'
-                  ? 'Ready to make some noise'
-                  : 'Playback status unavailable'}
+              : composed && (current.status === 'PLAYING' || current.status === 'PAUSED')
+                ? composed
+                : current.status === 'PLAYING' || current.status === 'PAUSED'
+                  ? 'Soundpad playback · sound unknown'
+                  : current.status === 'STOPPED'
+                    ? 'Ready to make some noise'
+                    : 'Playback status unavailable'}
           </strong>
           <small>
-            {sound && known
+            {(sound || composed) && known
               ? `Requested by ${current.requester ?? 'Host'} · ${current.status.toLowerCase()}`
               : 'Direct Soundpad playback remains independent.'}
           </small>

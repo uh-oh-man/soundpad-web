@@ -119,6 +119,9 @@ describe('validation and access', () => {
         'seek',
         'startAt',
         'stop',
+        // 2.42: a sentence or a palette tap into the game is a play like any other.
+        'sentencePlay',
+        'paletteTap',
       ].sort(),
     );
   });

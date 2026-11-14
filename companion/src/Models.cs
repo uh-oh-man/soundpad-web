@@ -20,7 +20,9 @@ public record Snapshot(int V, long Revision, bool Available, string? Error, Libr
     // (budgetStatus), and the number of Temp clips a crashed launch left, waiting for the host's Recover or Discard.
     long Drafts = 0, long Budgets = 0, int? TempRecovery = null,
     // 2.41: rises when the voice library, its word index, wanted-word notices or speaker groups change (pages fetch libraryStatus).
-    long VoiceLibrary = 0);
+    long VoiceLibrary = 0,
+    // 2.42: rises when sentences, named palette pieces or performance sets change (pages fetch sentenceList).
+    long Sentences = 0);
 public record Participant(string Id, string Name);
 public record ParticipantPlays(string Name, long Count);
 public sealed class SoundStatistics
@@ -63,7 +65,17 @@ public record Command(int V, string Id, long At, string Op, string? SoundId = nu
     // colour, the Soundpad categories to index, a speaker group, and filters (kind of result, unassigned, tag).
     string? RecordingId = null, string[]? RecordingIds = null, string? VoiceId = null, string[]? Tags = null, string[]? AddTags = null, string[]? RemoveTags = null,
     bool? Favorite = null, string? Title = null, string? CorrectedText = null, bool? Reviewed = null, long? AuditId = null, string? Query = null, int? Offset = null, int? Limit = null,
-    string? Color = null, string[]? Categories = null, int? GroupId = null, string? Kind = null, bool? Unassigned = null, string? Tag = null, bool? GroupSpeakers = null, bool? GuestLibraryEdit = null);
+    string? Color = null, string[]? Categories = null, int? GroupId = null, string? Kind = null, bool? Unassigned = null, string? Tag = null, bool? GroupSpeakers = null, bool? GuestLibraryEdit = null,
+    // Sentences and the speaking palette (2.42): the sentence a command is about, and what it asks (SentenceInput);
+    // a performance set to create or change.
+    string? SentenceId = null, SentenceInput? Sentence = null, PerformanceSetInput? Set = null);
+/// <summary>The details of a sentence or palette command (2.42); null fields are not part of the request.</summary>
+public sealed record SentenceInput(string? Do = null, string? Text = null, string[]? Pieces = null, double? OffsetMs = null, long? StartMs = null, long? EndMs = null,
+    double? FadeInMs = null, double? FadeOutMs = null, double? Gain = null, bool? Balanced = null, double? DurationMs = null, string? Mode = null, PieceEffect? Effect = null,
+    int? Chaos = null, string? Timing = null, bool? Balance = null, bool? Cleanup = null, bool? Altered = null, string[]? VoiceIds = null, int? Alternative = null, int? Splice = null,
+    string? Word = null, int? Version = null, bool? Pinned = null, string? Variant = null, PaletteRef? Item = null, string? Origin = null);
+/// <summary>A performance set to create or change (2.42).</summary>
+public sealed record PerformanceSetInput(string? Id = null, string? Name = null, string[]? VoiceIds = null, PaletteRef[]? Favorites = null, SentenceTemplate[]? Templates = null);
 public record Reply(string Type, string Id, bool Ok, string? Error = null, object? Data = null);
 public static class Json
 {

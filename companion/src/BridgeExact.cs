@@ -247,7 +247,7 @@ public sealed partial class Bridge
     /// </summary>
     private async Task RegisterSlotsIfDue()
     {
-        if (!exactEnabled || !slotsWanted || SlotsReady || !available || Environment.TickCount64 < Interlocked.Read(ref slotsRetryAt)) return;
+        if (!(exactEnabled || slotsForSentences) || !slotsWanted || SlotsReady || !available || Environment.TickCount64 < Interlocked.Read(ref slotsRetryAt)) return;
         if (playback.Status != "STOPPED" || Environment.TickCount64 - Interlocked.Read(ref lastAudio) < 300) return;
         if (!audioGate.TryEnter()) return;
         try

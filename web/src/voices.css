@@ -183,6 +183,10 @@
   border-color: var(--success);
   color: var(--success);
 }
+.type-badge.sentence {
+  border-color: var(--amber, #e2a03f);
+  color: var(--amber, #e2a03f);
+}
 .voices-context,
 .voices-words {
   display: flex;

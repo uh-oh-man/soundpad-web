@@ -191,7 +191,7 @@ public sealed class LocalServer(Bridge bridge, string origin, string? ownerKey =
                         var actor = root.GetProperty("actor").GetString() == "host" ? "host" : "guest";
                         var command = root.GetProperty("command").Deserialize<Command>(Json.Options) ?? throw new InvalidDataException();
                         running.RemoveAll(t => t.IsCompleted);
-                        bool control = command.Op is "play" or "startAt" or "region" or "stop" or "seek" or "pause" or "panic" or "audioPlay" or "reverse";
+                        bool control = command.Op is "play" or "startAt" or "region" or "stop" or "seek" or "pause" or "panic" or "audioPlay" or "reverse" or "sentencePlay" or "paletteTap";
                         // The host's own Stop and Panic never compete with relayed guest traffic for this budget (2.35).
                         var budget = control ? (actor == "host" ? hostControlBucket : controlBucket) : bucket;
                         while (budget.Count > 0 && budget.Peek() < now - 1000) budget.Dequeue();
@@ -211,7 +211,9 @@ public sealed class LocalServer(Bridge bridge, string origin, string? ownerKey =
                             // 2.40: previews, clips made from drafts, and Temp recovery are expensive too.
                             or "mimicPreview" or "draftKeep" or "draftPlay" or "tempRecover"
                             // 2.41: previews from the voice library read files; adding and indexing do too.
-                            or "libraryPreview" or "libraryAdd" or "libraryIndex")
+                            or "libraryPreview" or "libraryAdd" or "libraryIndex"
+                            // 2.42: sentence previews and Keep render audio.
+                            or "sentencePreview" or "sentenceKeep")
                         {
                             if (!await queries.WaitAsync(0)) { running.Add(Answer(command.Id, Task.FromResult(new Reply("ack", command.Id, false, "Too many background requests.")), null)); continue; }
                             slot = queries;

@@ -46,7 +46,9 @@ public sealed partial class Bridge
     private long playbackOwner, playbackVersion;
     private int stateDirty, disposed;
 
-    private static bool StartOperation(string op) => op is "play" or "startAt" or "region" or "audioPlay" or "reverse";
+    private static bool StartOperation(string op) => op is "play" or "startAt" or "region" or "audioPlay" or "reverse" or "sentencePlay";
+    /// <summary>Starts audio in the game: the operations above, and a palette tap in Game mode (2.42).</summary>
+    private static bool StartsAudio(Command c) => StartOperation(c.Op) || c.Op == "paletteTap" && c.Action == "game";
     // draftPlay (2.40) is always "make it (or reuse it) and play it".
     private static bool AutoplayOperation(Command c) => c.Autoplay && c.Op is "trimAudio" or "mimicClip" or "mimicLibraryImport" || c.Op == "draftPlay";
     /// <summary>The quiet answer to playback input that no longer applies: never an error, nothing was played.</summary>
@@ -64,7 +66,7 @@ public sealed partial class Bridge
     {
         bool autoplay = AutoplayOperation(c), control = c.Op is "seek" or "pause", panic = c.Op == "panic";
         bool halts = c.Op == "stop" || panic && c.Action == "enable";
-        if (!StartOperation(c.Op) && !autoplay && !control && !halts && !panic && c.Op != "endSession") return default;
+        if (!StartsAudio(c) && !autoplay && !control && !halts && !panic && c.Op != "endSession") return default;
         if (c.V is not (1 or 2) || !Guid.TryParseExact(c.Id, "D", out _)) return default;
         bool host = actor == "host";
         if ((panic || c.Op == "endSession") && !host) return default;

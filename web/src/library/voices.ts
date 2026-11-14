@@ -254,7 +254,15 @@ export const TYPE_LABELS: Record<ResultType, string> = {
 export type Combined =
   | { type: 'sound'; key: string; soundId: string; title: string; words: SearchResult | null }
   | { type: 'clip'; key: string; result: SearchResult }
-  | { type: 'sentence'; key: string; title: string };
+  | { type: 'sentence'; key: string; id: string; title: string; text: string; versions: number };
+/** A kept sentence as the combined search sees it (2.42: from the sentence list). */
+export type SentenceRef = {
+  id: string;
+  title: string;
+  text: string;
+  versions: number;
+  kept: boolean;
+};
 
 /**
  * One list across the types (2.41): Soundpad sounds whose name contains the text, the indexed sounds
@@ -268,6 +276,7 @@ export function combineResults(
   results: SearchResult[],
   types: ReadonlySet<ResultType>,
   limit = 60,
+  sentences: readonly SentenceRef[] = [],
 ): Combined[] {
   const text = query.trim().toLocaleLowerCase();
   const out: Combined[] = [];
@@ -294,6 +303,18 @@ export function combineResults(
   if (types.has('clip'))
     for (const r of results)
       if (r.type === 'clip') out.push({ type: 'clip', key: 'clip:' + r.id, result: r });
+  // Kept sentences (2.42) whose title or text contains what was typed.
+  if (types.has('sentence') && text)
+    for (const s of sentences)
+      if (s.kept && `${s.title}\n${s.text}`.toLocaleLowerCase().includes(text))
+        out.push({
+          type: 'sentence',
+          key: 'sentence:' + s.id,
+          id: s.id,
+          title: s.title || s.text,
+          text: s.text,
+          versions: s.versions,
+        });
   return out.slice(0, limit);
 }
 

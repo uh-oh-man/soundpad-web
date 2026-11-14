@@ -852,6 +852,10 @@ export class Controller {
   relaysLibrary() {
     return this.view.mode === 'host' || (this.session?.hostRelaysLibrary ?? false);
   }
+  /** Whether the page that relays this page's commands knows the 2.42 sentence and palette ones. */
+  relaysSentences() {
+    return this.view.mode === 'host' || (this.session?.hostRelaysSentences ?? false);
+  }
   private dispatch(c: Command) {
     if (this.demo)
       return this.demo.send(c, {
