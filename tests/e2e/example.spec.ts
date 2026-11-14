@@ -141,6 +141,13 @@ test('example voices and sentences: search finds a word; "hello [laugh]" with a 
   await closeSection(page, 'Voices');
   await page.getByRole('button', { name: 'Voices', exact: true }).click();
   await expect(voices.getByRole('tab', { name: 'Words' })).toHaveAttribute('aria-selected', 'true');
+  // What needs the host's PC says so, and a press says why.
+  await voices.getByRole('tab', { name: 'Word index' }).click();
+  await expect(voices.getByText('Host’s PC only')).toBeVisible();
+  // aria-disabled (focusable, explained): Playwright will not click it, so press it from the keyboard.
+  await voices.getByLabel('Group speakers (experimental)').focus();
+  await page.keyboard.press('Space');
+  await expect(page.locator('.notification-stack')).toContainText('need the host’s PC');
   await voices.getByRole('tab', { name: 'Library' }).click();
   await closeSection(page, 'Voices');
   // Sentences (2.42): a missing word and the named laugh.
