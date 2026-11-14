@@ -2,19 +2,36 @@
 
 Notable changes to Soundpad Web. Versions follow the website's `package.json`; the Windows companion is versioned separately and only needs updating when a release says so.
 
-## 2.43.0 (unreleased) — Blue studio
+## 2.43.0 — Blue studio
 
-Work in progress (Stage G). This entry grows as the stage lands and is finished at release.
+A new look and layout. **Update the companion** for three parts of it: the Kick session count, edited and speed copies of any Soundpad sound, and sharing your style between your browser and the companion window. With an older companion those three are hidden or say what they need, and everything else works.
 
 ### Added
 
-- **Appearance choices** in Settings → Appearance, stored for this browser only: **Navigation** (Sidebar or Top tabs), **Motion** (System or Reduce), **Contrast** (Standard or High), **Header animation** (On, Still or Off) and **Notice sounds** (Off or Subtle). Motion: Reduce and Contrast: High take effect at once; the others prepare the new navigation, header ribbon and notice sounds that follow in this release. Without browser storage a choice still applies to the open tab.
+- **Sections.** **Soundboard**, **Mimic**, **Voices** and **Sentences** are listed in the sidebar, or as tabs along the top (Settings → Appearance → **Navigation**). Voices and Sentences are now full views instead of windows, and each remembers its tab, the recording or sentence you had open and where you had scrolled.
+- **The editor panel.** Mimic, the copy editor, a sound's editor and **Activity** open in a panel on the right, beside a board that stays playable. Drag its edge, or use the arrow keys on it, to change its width; the width is remembered. Under 1280 px the sidebar folds to icons while the panel is open. On a phone the panel is a sheet over the board, with **Show board** to fold it to a bar and **Show editor** to bring it back.
+- **A sound's editor.** Every tile has **Open editor for …**, and the player has **Details for …**. The editor shows the sound's waveform with its cues and regions, makes effect and speed copies, and has its icon and statistics. Copies can start from any Soundpad sound, not only from Temp audio (companion 2.43; an older companion shows a one-line note instead).
+- **Quick Reverse and Speed** on a tile, shown on hover or keyboard focus: a Temp copy at 0.5× to 2× (or reversed) that plays as soon as it is ready.
+- **Kick session count.** Kick shows "+N this session" beside its lifetime count (companion 2.43; the session count is kept in memory only, so a restart starts a new session). **Decrease** and **Reset** moved behind **Kick counter details**, and `+` and `-` work on the focused Kick.
+- **The header ribbon.** An animated ribbon in the header follows the sound that is playing. It stands still under reduced motion and has its own setting (**Header animation**: On, Still or Off).
+- **Activity** keeps each notice, with its **Undo** or **Jump**, for a minute after it leaves the screen.
+- **Appearance settings**: **Motion** (System or Reduce), **Contrast** (Standard or High), **Header animation** and optional subtle **Notice sounds**.
+- **Your style follows you** (companion 2.43): as host, your browser and the companion window share navigation, theme, motion, contrast, header animation and the Mimic draft you have open. The companion keeps them in a new file, `ui.json`. Guests keep their own choices. Notice sounds, the panel width and Spotify's expanded row stay per browser.
+- **Skip links** at the top of the page (to the sounds, the player and the sections), and a **capture chip** in the header while Mimic records.
+- **The example** now has Mimic's recording history with drafts, **Preview** and **Play into game**, a simulated guest's selection, and simulated voices and sentences. It says plainly what is simulated and what leaving clears. Controls that only work on the host's PC are marked **Host's PC only** and explain why when pressed. Guest names read "(simulated)" once.
 
 ### Changed
 
-- **Blue studio.** New colour tokens for the whole app: midnight navy surfaces, electric-blue focus, selection and playback, red Stop and amber Panic. The default theme is now called **Blue studio** (it keeps the id browsers already stored), **Original Purple** is retuned to the original design, and **Ocean** follows the same roles. Focus is a 2 px ring with a gap, scrollbars are thin and visible instead of hidden, and no text is smaller than 11 px. The system's More contrast, Reduce transparency and forced colours are honoured.
-
-- **One legacy stylesheet.** `styles.css`, `v2.css` and `polish.css` are now one `studio.css`, and `main.tsx` imports every stylesheet itself, in cascade order: `tokens.css`, `studio.css`, `controls.css`, `mimic.css`, `voices.css`, `sentences.css`, then `shell.css`, `playback.css` and `surfaces.css` for the new look. Inside `studio.css`, rules repeated for the same selector were merged into the last one wherever no rule in between with the same specificity sets the same property; the old centred notice positioning (unused since 2.41) is gone; the four `!important` overrides outside the reduced-motion rules became rules of enough specificity; and layers use `--z-*` tokens. Nothing looked different: a temporary spec compared exact screenshots (`maxDiffPixels: 0`) and a dump of about 45 computed style properties of every element, at rest, under keyboard focus on each control and on hover, across the start page, the example board at five widths in all five views, a paused sound, and the host's board, Mimic, Voices, Sentences, Settings, Temp, Edit copy and the expanded player, after each step. As in 2.9.2, the spec and its images were not kept.
+- **Blue studio** is the new default look: midnight navy, soft glass, electric-blue focus and playback, red Stop and amber Panic. **Original Purple** and **Ocean** remain. Focus is a clear 2 px ring, scrollbars are thin and visible, and no text is smaller than 11 px. The system's More contrast, Reduce transparency and forced colours are honoured.
+- **DM Sans** is the app's typeface. It is part of the website itself (nothing is loaded from a font service), under the SIL Open Font License; see `THIRD-PARTY-NOTICES.md`.
+- **Tiles** show **Queued**, **Playing** and **Held** with text as well as colour. The board's toolbar fits on one row, so at 1440×900 the first tiles start about 170 px higher.
+- **The player** is one compact bar with filled **Stop** and **Panic**, which stay visible at every width.
+- **Spotify** is one compact row in the sidebar; **More Spotify controls** shows Previous and the progress, and the choice is remembered.
+- **Notices** sit in a strip under the board (above the player on a phone) and never cover a control. Screen readers hear each notice once.
+- **Dialogs** make the page behind them unreachable by mouse, keyboard and screen readers.
+- **Record performance keeps every tap.** In the palette, a tap made while the previous tap's preview was still being made could be lost, either for a newer tap or because **Stop recording** was pressed quickly. Each tap now waits its turn, and Stop waits until the companion has every tap the page counted.
+- **Sentences** shows the sentence that was open when you come back to it.
+- The three old stylesheets are now one, and the rules the new look overrides are gone. Two temporary comparisons of exact screenshots and computed styles (at many widths, in every view, theme, contrast and motion setting, under keyboard focus and hover) found no difference from either step; as in 2.9.2 they were not kept.
 
 ### Reviewed
 
@@ -29,6 +46,14 @@ A review of the redesign before release found 24 problems, all fixed:
 - **Leaving the example or a session** drops its Temp list, so the next session never shows or sends the old sources. The sound editor asks for **Statistics** only once they are opened, and not on an older companion. A Soundpad file that cannot be read as a copy source now says "That sound file could not be read." instead of a general failure, and a `ui.json` with a key written twice reads as the defaults instead of stopping style sync.
 - **Look.** The header ribbon's strands move as one layered wave instead of crossing in a mesh. The capture chip ends in an ellipsis. The Voices search is one field, like the board's, with space under it; the **New sentence** field takes the row's room. The example's compact Spotify row shows its name, **Host's PC only** and the reason in full, without transport buttons that did nothing.
 - **The example reports companion 2.43**: Speed and effects work on any example sound, and Kick shows the session count, as on a host.
+
+### Tests
+
+- 57 new browser tests: the sections and the editor panel at desktop, companion-window and phone widths (with the phone sheet, its bar and Tab order), notices never covering a control at four widths, skip links and dialogs, tiles, quick actions, Kick, Spotify and the ribbon, the sound's editor on companion 2.43 and on 2.42, host style sync between two pages, the example's history, voices and sentences, and the review's fixes. The palette's performance test now taps twice in quick succession and stops at once (it failed 1 run in 3 before the fix).
+- About 55 new website unit tests (the ribbon, the playhead, notices, the panel's width, host style sync, the colour tokens' contrast, and the example's history, drafts, voices and sentences, with a check that the example answers every command the website sends) and 20 new companion tests (`ui.json`: saving, reading, refusing bad input and guests, keeping unknown keys, damaged files; the Kick session count; copies from a Soundpad sound, including one that cannot be read).
+- The 2.41 and 2.42 test fixes (no public relays in browser tests, failure notes from every page, the phone focus tests) carry over to the new layout; the phone test for focus behind the notices now uses a 667 px screen, where the copy editor's sheet is short enough for **Save copy** to start under the notices.
+- `ui.json` was checked against the 2.3.1 companion (see `docs/ROLLBACK.md`): it starts normally and leaves the file alone.
+- Not checked yet: by ear or with a screen reader. NVDA hearing each notice once, and the look of the phone ribbon and of Spotify's **Host's PC only** row, are still to be checked by hand.
 
 ## 2.42.0 — Sentences from recorded words
 

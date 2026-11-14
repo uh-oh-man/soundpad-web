@@ -20,13 +20,25 @@ You can still open the website in Chrome or Edge on the same PC as an extra view
 
 ## Try it first
 
-Press **Try the example** on the [website](https://uh-oh-man.github.io/soundpad-web/) to try the soundboard, edited copies, Mimic and simulated guests with example sounds, in your browser only. Nothing is sent to Soundpad and you need no companion for it. The example still shows the older 30-second Mimic.
+Press **Try the example** on the [website](https://uh-oh-man.github.io/soundpad-web/) to try the soundboard, edited copies, Mimic's recording history with drafts, simulated voices and sentences, and a simulated guest, with example sounds, in your browser only. Nothing is sent to Soundpad and you need no companion for it. Controls that only work on the host's PC are marked **Host's PC only** and say why; leaving the example says what it clears.
 
 ## Join a session
 
 Open the invite link in a modern browser (Chrome, Edge, Firefox or Safari, on a computer or phone) and pick a name. Tapping a sound plays it on the **host's** PC, not on your device.
 
 Your browser keeps a private key for Soundpad Web, so the host knows it is you after a reload or a reconnect, and nobody can take your place by using your name. **Settings → Connection details → This browser** says whether that works in your browser (a private window may not keep it). The host sees **Unverified** next to a guest whose page is older than 2.41; reloading fixes it.
+
+## Finding your way around
+
+- **Sections.** **Soundboard**, **Mimic**, **Voices** and **Sentences** are listed in the sidebar, or as tabs along the top if you choose **Top tabs** in **Settings → Appearance → Navigation**. Voices and Sentences remember their tab, what you had open and where you had scrolled.
+- **The editor panel.** Mimic, the copy editor, a sound's editor and **Activity** open on the right, beside the board, which stays playable. Drag the panel's edge, or focus it and use the arrow keys, to change its width. On a phone the panel is a sheet: **Show board** folds it to a bar above the player, **Show editor** brings it back.
+- **A sound's editor.** Every tile has **Open editor for …**, and the player has **Details for …**: the sound's waveform with cues and regions, effect and speed copies, its icon and its statistics. With companion 2.43 or newer, copies can start from any Soundpad sound; older companions make them from Temp audio only.
+- **Tiles** say **Queued**, **Playing** or **Held**. Hover or focus a tile for quick **Reverse** and **Speed** (0.5× to 2×; the copy goes to Temp and plays when it is ready).
+- **The player** sits at the bottom with **Stop** and **Panic** always in reach. **Kick** shows the lifetime count and, with companion 2.43, "+N this session"; **Kick counter details** has Decrease and Reset, and `+` and `-` work while Kick has the keyboard. **Spotify** is one row in the sidebar; **More Spotify controls** adds Previous and the progress.
+- **Notices** appear in a strip under the board (above the player on a phone) and never cover a control. **Activity** keeps each one, with its **Undo** or **Jump**, for a minute after it goes.
+- **The header ribbon** moves with the sound that is playing.
+- **Settings → Appearance**: theme (**Blue studio**, **Original Purple** or **Ocean**), **Navigation**, **Motion** (System or Reduce), **Contrast** (Standard or High), **Header animation** (On, Still or Off) and **Notice sounds** (Off or Subtle). With companion 2.43, the host's browser and the companion window share the navigation, theme, motion, contrast, header animation and the open Mimic draft; guests keep their own choices.
+- **Keyboard**: **Skip to sounds**, **Skip to player** and the section links appear on the first Tab.
 
 ## Mimic
 
@@ -84,8 +96,8 @@ Guests can read, search and preview sentences and play kept ones into the game. 
 - Named guests, durable web statistics and guarded read-only native Soundpad statistics.
 - Large-photo PNG/JPEG cropping, dedicated 96-pixel icon storage, and safe V1 metadata migration.
 - Optional shared Spotify desktop integration and End/Resume Hosting.
-- Desktop sidebar, mobile category selector, responsive sound grid and incremental rendering for large libraries.
-- Three themes, keyboard focus and shortcuts, and screen-reader labels checked by an automated accessibility test.
+- Sidebar or top-tab sections, a resizable editor panel (a sheet on phones), mobile category selector, responsive sound grid and incremental rendering for large libraries.
+- Three themes, high contrast and reduced motion settings, keyboard focus, skip links and shortcuts, and screen-reader labels checked by an automated accessibility test.
 
 More screenshots: [Phone](docs/screenshots/v23-phone.png) · [Original Purple](docs/screenshots/v23-purple.png) · [Temp manager](docs/screenshots/v23-temp.png). They show the real interface with **fixture sounds**, not a real library.
 
@@ -93,7 +105,7 @@ More screenshots: [Phone](docs/screenshots/v23-phone.png) · [Original Purple](d
 
 Treat an invitation as a password. Anyone with it can join and use the permissions you enable. **Session & access → Replace invite** revokes the previous invitation and disconnects existing guests. Disconnecting one peer alone does not invalidate a bearer invitation; that person could return with a new browser identity.
 
-Guests receive sound titles, category names/order/membership/icons, custom icons, playback status, counter and permissions, and (since 2.41) the voice library's titles, tags, voices and words, and (since 2.42) kept sentences, their versions and the palette. Host library audio is not sent to guests, except private previews of up to 30 seconds of voice-library recordings and of sounds in the categories the host indexes for word search, and private previews of sentences and palette words; they play in the guest's own browser and are never offered as a download. Guests never receive the host's file paths. Each guest's browser keeps its own private key, which never leaves it; the host's page checks it on every connection so permissions follow the right person. Guest uploads travel directly to the host; local paths, native access tokens and host signing keys stay local. Shared organization and enabled Spotify metadata/artwork are visible to session participants. There are no analytics, third-party fonts, arbitrary file endpoints, shell commands or arbitrary Soundpad API access. Managed imports are the only production library mutations; native entry removal is deliberately deferred when atomic ownership cannot be established. WebRTC exposes network connection information to peers; signaling relays see network metadata and encrypted session descriptions.
+Guests receive sound titles, category names/order/membership/icons, custom icons, playback status, counter and permissions, and (since 2.41) the voice library's titles, tags, voices and words, and (since 2.42) kept sentences, their versions and the palette. Host library audio is not sent to guests, except private previews of up to 30 seconds of voice-library recordings and of sounds in the categories the host indexes for word search, and private previews of sentences and palette words; they play in the guest's own browser and are never offered as a download. Guests never receive the host's file paths. Each guest's browser keeps its own private key, which never leaves it; the host's page checks it on every connection so permissions follow the right person. Guest uploads travel directly to the host; local paths, native access tokens and host signing keys stay local. Shared organization and enabled Spotify metadata/artwork are visible to session participants. There are no analytics, fonts or scripts loaded from other sites (the DM Sans typeface is part of the website), arbitrary file endpoints, shell commands or arbitrary Soundpad API access. Managed imports are the only production library mutations; native entry removal is deliberately deferred when atomic ownership cannot be established. WebRTC exposes network connection information to peers; signaling relays see network metadata and encrypted session descriptions.
 
 **Mimic** is off until the host starts it and never records a microphone. Everyone is told when it starts and stops, and a **Mimic on** badge shows while it listens. Its audio stays on the host PC: guests allowed to use Mimic receive waveform levels and, if the host turns transcripts on, the transcript text. Speech recognition runs locally. Guest Mimic is off by default. See [Mimic privacy](docs/MIMIC.md#privacy-and-safety).
 

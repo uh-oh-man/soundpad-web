@@ -15,15 +15,17 @@ Mimic came from a separate desktop project, **Voice Replay Studio**: a rolling "
 | F6 hotkey | `companion/src/MimicHotkey.cs` |
 | Commands, permissions, clips, recent list | `companion/src/BridgeMimic.cs` |
 | Edit copy (trim and voice effects) | `companion/src/BridgeTrim.cs` |
-| The Mimic window | `web/src/components/MimicPanel.tsx`, with `components/mimic/` (`MimicHostControls`, `MimicWave`, `MimicRecent`) |
+| The Mimic window (the editor panel since 2.43) | `web/src/components/MimicPanel.tsx`, with `components/mimic/` (`MimicHostControls`, `MimicWave`, `MimicRecent`); the panel is `components/shell/EditorPanel.tsx` |
 | Pure selection, transcript and source helpers | `web/src/mimic/selection.ts` |
-| Edit copy form | `web/src/components/TempManager.tsx` |
+| Edit copy form (in the editor panel since 2.43) | `web/src/components/EditCopyForm.tsx`, opened from `TempManager.tsx` |
 | Test stand-ins (tone source, speech, hotkey) | `companion/harness/MimicFixture.cs`, `TranscriptFixture.cs`, `HotkeyFixture.cs` |
 | Voice Replay Studio V1.1 desktop app | `mimic/`, imported unchanged apart from a pointer at the top of its README |
 
 The companion's capture is a port of Voice Replay Studio's `CaptureService` onto NAudio 3.3 (`WasapiRecorder`, with built-in process loopback). The transcript uses the same Whisper `base.en` model and filters. The desktop app keeps its own code on NAudio 2.2.1 and Whisper.net.
 
 ## Using it
+
+**Where it opens (2.43).** Mimic opens in the editor panel on the right, beside the board, which stays playable; drag the panel's edge to make it wider (the width is remembered). On a phone it is a sheet over the board: **Show board** folds it to a bar above the player and **Show editor** brings it back as it was. Escape closes the panel when nothing inside it uses the key, as the window did. While Mimic records, a capture chip in the header says so and names the source. The host's browser and the companion window (companion 2.43) open the same draft: a draft opened or closed in one is opened or closed in the other.
 
 ### Host
 
@@ -132,6 +134,7 @@ The website always serves the newest version and hides anything the host's compa
 | Discard keeps what was recorded since a crash | 2.41 |
 | Voice library, history search, speaker groups | 2.41 |
 | Sentences, speaking palette, performances and sets ([guide](SENTENCES.md)) | 2.42 |
+| Edited and speed copies of any Soundpad sound; the open draft shared between the host's pages | 2.43 |
 
 ## Protocol
 
@@ -144,7 +147,7 @@ The website always serves the newest version and hides anything the host's compa
   - `mimicPreview` with the same selection fields as `mimicClip`; returns the selection as base64 WAV to the host's own tab.
 - **Host only, 2.15+:** `mimicLibrary` lists Voice Replay Studio clips (`available`, and `clips` with `id`, `title`, `transcript`, `capturedAt`, `durationMs`); `mimicLibraryImport` with `sourceId` set to a clip id copies it into Temp.
 - **Host, or guests with `guestMimic`:** `mimicPeek` and `mimicClip`. A clip sends `mimicEnd`, `positionMs`/`endMs`, an optional `name`, and the capture's `sourceId`.
-- **Host, or guests with uploads:** `trimAudio`, with `assetId`, `positionMs`/`endMs`, `action` (`none`, `chipmunk`, `slowmo` or `echo`) and an optional `name`.
+- **Host, or guests with uploads:** `trimAudio`, with `assetId`, `positionMs`/`endMs`, `action` (`none`, `chipmunk`, `slowmo` or `echo`) and an optional `name`. Since 2.43 `trimAudio` and `trimPreview` take `soundId` (any Soundpad sound) instead of `assetId`; see `TrimSource` in the [protocol notes](../shared/protocol/README.md#studio-layout-243).
 - **New permission:** `guestMimic`, default `false`.
 - **The `mimic` snapshot object:**
   - `active`, `source`, `status`, `windowMs`;
