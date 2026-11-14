@@ -82,6 +82,19 @@ export function Modal({
     };
   }, []);
   useEffect(() => {
+    // The title row sticks with its top padding above the dialog's edge (studio.css). What it covers
+    // then is its height less that padding: the dialog keeps that much room at the top for keyboard focus.
+    const element = dialog.current;
+    const title = element?.querySelector<HTMLElement>(':scope > .dialog-title');
+    if (!element || !title) return;
+    const resize = new ResizeObserver(() => {
+      const covers = title.offsetHeight - parseFloat(getComputedStyle(title).paddingTop || '0');
+      element.style.setProperty('--dialog-title-height', `${Math.max(0, covers)}px`);
+    });
+    resize.observe(title, { box: 'border-box' });
+    return () => resize.disconnect();
+  }, []);
+  useEffect(() => {
     // Return focus to whatever opened the dialog once it closes.
     const opener = currentOpener();
     const me = dialog;

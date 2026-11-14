@@ -1,6 +1,7 @@
 /**
  * Keyboard focus is never hidden behind the notices, the player bar or the phone sheet's minimized bar
- * (2.41, notice dock 2.43).
+ * (2.41, notice dock 2.43), nor under the phone's sticky header or a dialog's sticky title row (2.43,
+ * their scroll-padding-top: --topbar-bottom, --dialog-title-height).
  *
  * CSS does most of the work. On a narrow screen the notice dock floats above the player and publishes
  * its height as --notice-height (Notifications.tsx); the page's scroll-padding and bottom padding, the
@@ -43,6 +44,24 @@ export function clearShift(
   return Math.max(0, Math.min(shift, target.top - visibleTop));
 }
 
+/**
+ * How far to scroll down (px, negative) so a control that `visibleTop` covers comes out from under
+ * the bar at the top of its scroll area: the phone's sticky header, or a dialog's sticky title row
+ * (2.43). 0 when it is clear. It keeps `margin` below the bar unless that would push the control under
+ * a bottom overlay; then it settles for just clear of the top.
+ */
+export function revealShift(
+  target: Box,
+  overlays: Box[],
+  visibleTop: number,
+  margin = FOCUS_MARGIN,
+) {
+  if (target.top >= visibleTop) return 0;
+  const shift = target.top - visibleTop - margin;
+  const moved = { ...target, top: target.top - shift, bottom: target.bottom - shift };
+  return clearShift(moved, overlays, -Infinity, 0) > 0 ? target.top - visibleTop : shift;
+}
+
 const box = (e: Element): Box => {
   const r = e.getBoundingClientRect();
   return { top: r.top, bottom: r.bottom, left: r.left, right: r.right };
@@ -66,12 +85,33 @@ function overlaysFor(el: HTMLElement) {
   return [...candidates].filter((o) => !o.contains(el)).map(box);
 }
 
+/**
+ * Where the visible part of a scroll area starts. The page: below the phone's sticky header
+ * (shell.css, 1000 px and below). A dialog: below its sticky title row (studio.css). Not for a control
+ * inside that bar itself.
+ */
+function visibleTopOf(scroller: HTMLElement, isRoot: boolean, el: HTMLElement) {
+  if (isRoot) {
+    const bar = document.querySelector('.app-shell > .topbar');
+    if (!bar || bar.contains(el) || getComputedStyle(bar).position !== 'sticky') return 0;
+    return Math.max(0, bar.getBoundingClientRect().bottom);
+  }
+  const top = box(scroller).top + scroller.clientTop;
+  const title = [...scroller.children].find((child) => child.classList.contains('dialog-title'));
+  if (!title || title.contains(el) || getComputedStyle(title).position !== 'sticky') return top;
+  return Math.max(top, title.getBoundingClientRect().bottom);
+}
+
 function scrollsVertically(e: Element) {
   const overflow = getComputedStyle(e).overflowY;
   return (overflow === 'auto' || overflow === 'scroll') && e.scrollHeight > e.clientHeight;
 }
 
-/** Scrolls the focused control clear of what covers it: its nearest scroll area first, then outer ones. */
+/**
+ * Scrolls the focused control clear of what covers it, at the bottom (notices, player, minimized bar)
+ * or at the top (the phone's header, a dialog's title row): its nearest scroll area first, then outer
+ * ones.
+ */
 export function keepClear(el: Element | null) {
   if (!(el instanceof HTMLElement) || !el.isConnected) return;
   // Keyboard focus only: a click already landed where the pointer is, and scrolling then (for example
@@ -83,8 +123,10 @@ export function keepClear(el: Element | null) {
     const isRoot = scroller === root;
     if (isRoot || scrollsVertically(scroller)) {
       const overlays = overlaysFor(el);
-      if (!overlays.length) return;
-      const shift = clearShift(box(el), overlays, isRoot ? 0 : box(scroller).top);
+      const visibleTop = visibleTopOf(scroller, isRoot, el);
+      const target = box(el);
+      const shift =
+        clearShift(target, overlays, visibleTop) || revealShift(target, overlays, visibleTop);
       if (!shift) return;
       // Instant, like the browser's own focus scrolling, so it adds no motion.
       if (isRoot) window.scrollBy({ top: shift, behavior: 'instant' });

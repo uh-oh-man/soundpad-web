@@ -213,7 +213,12 @@ export function SettingsDialog({
             ['subtle', 'Subtle'],
           ]}
         />
-        <p>Only your browser's appearance changes.</p>
+        {/* The host's page shares them through the companion's ui.json (ui-sync.ts, same gate as main.tsx). */}
+        <p>
+          {host && connected && !view.demo && supports(state.companionVersion, 'uiSync')
+            ? 'This browser and the companion window share these, except Notice sounds.'
+            : "Only your browser's appearance changes."}
+        </p>
         {appearance.error && <p className="inline-error">{appearance.error}</p>}
       </section>
       <div className="settings-status">

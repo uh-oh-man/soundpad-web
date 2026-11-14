@@ -598,6 +598,11 @@ html[data-motion='reduce'] .notice-dock .notification-stack .toast {
     row-gap: 6px;
     padding: 8px 17px;
   }
+  /* ...and keyboard focus is never under it (2.43): Shift+Tab up the board hid Search and the tiles'
+     buttons there. TopBar.tsx publishes its height as --topbar-bottom; focus-clear.ts counts it too. */
+  html:has(.app-shell.is-connected) {
+    scroll-padding-top: calc(var(--topbar-bottom, 0px) + 8px);
+  }
   .app-shell.is-connected > .topbar .nav-topbar {
     order: 10;
     flex: 1 1 100%;

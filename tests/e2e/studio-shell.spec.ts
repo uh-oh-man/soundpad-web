@@ -11,12 +11,14 @@ import {
   expect,
   host,
   joinGuest,
+  ORIGIN,
   playButton,
   sendCommand,
+  startHarness,
   TEMP_READY,
   useLocalGuests,
 } from './helpers/harness';
-import { closeEditor, editorPanel, section, sectionNav } from './helpers/shell';
+import { closeEditor, editCopyForm, editorPanel, section, sectionNav } from './helpers/shell';
 
 const nav = (page: Page, name: string) =>
   sectionNav(page).getByRole('button', { name, exact: true });
@@ -1178,4 +1180,121 @@ test('Voices and Sentences: one search field like the board’s, and a New sente
   await nav(page, 'Sentences').click();
   const field = section(page, 'Sentences').getByLabel('New sentence', { exact: true });
   expect((await field.boundingBox())!.width).toBeGreaterThanOrEqual(280);
+});
+
+/** Where the focused control is against the bar at the top of its scroll area (null when it is in it). */
+const underTopBar = (page: Page, bar: string) =>
+  page.evaluate((selector) => {
+    const el = document.activeElement as HTMLElement | null;
+    const top = document.querySelector(selector);
+    if (!el || !top || top.contains(el)) return null;
+    const r = el.getBoundingClientRect();
+    if (!r.height) return null;
+    const edge = top.getBoundingClientRect().bottom;
+    const name = el.getAttribute('aria-label') ?? el.textContent?.trim().slice(0, 30) ?? el.tagName;
+    return r.top < edge - 0.5
+      ? `${name}: top ${Math.round(r.top)} under ${Math.round(edge)}`
+      : null;
+  }, bar);
+
+test('2.43 review: on a phone, keyboard focus never hides under the sticky header, going up or down with notices', async ({
+  page,
+}) => {
+  // Enough sounds for the page to scroll well past the header.
+  const harness = await startHarness(ORIGIN, 40);
+  try {
+    await page.setViewportSize({ width: 412, height: 860 });
+    await host(page, harness);
+    await headerWalk(page);
+  } finally {
+    await harness.stop();
+  }
+});
+
+async function headerWalk(page: Page) {
+  const header = '.app-shell > .topbar';
+  await expect(page.locator(header)).toHaveCSS('position', 'sticky');
+  // From a tile well down the board, Shift+Tab back up to the search.
+  await page.locator('#board .tile-play-strip').nth(20).focus();
+  expect(await page.evaluate(() => scrollY)).toBeGreaterThan(200);
+  const search = page.getByRole('textbox', { name: 'Search sounds' });
+  let steps = 0;
+  for (; steps < 200; steps++) {
+    await page.keyboard.press('Shift+Tab');
+    await expect.poll(() => underTopBar(page, header), `Shift+Tab ${steps}`).toBeNull();
+    if (await search.evaluate((el) => el === document.activeElement)) break;
+  }
+  expect(steps).toBeGreaterThan(5);
+  await expect(search).toBeFocused();
+  // Notices showing: clearing them on the way down never puts a control under the header instead.
+  await page.evaluate(async () => {
+    const { controller } = await import(/* @vite-ignore */ '/src/' + 'controller.ts');
+    controller.notify('A fixture notice, long enough to need a second line on a phone.', 'info', {
+      label: 'Undo',
+      run: () => {},
+    });
+    controller.notify('A second fixture notice.', 'info', { label: 'Undo', run: () => {} });
+  });
+  await expect(page.locator('.notification-stack .toast')).toHaveCount(2);
+  let checked = 0;
+  for (let i = 0; i < 40; i++) {
+    await page.keyboard.press('Tab');
+    await expect.poll(() => underTopBar(page, header), `Tab ${i}`).toBeNull();
+    const box = await focusedBox(page);
+    if (!box.inBoard || !box.height) continue;
+    checked++;
+    expect(box.bottom, `Tab ${i} under the notices`).toBeLessThanOrEqual(box.dockTop + 1);
+  }
+  expect(checked).toBeGreaterThan(5);
+}
+
+test('2.43 review: Shift+Tab up Session & access never leaves a control under the dialog’s title; Appearance says what the host shares', async ({
+  page,
+  harness,
+}) => {
+  await page.setViewportSize({ width: 1280, height: 720 });
+  await host(page, harness);
+  await page.getByRole('button', { name: 'Access settings' }).click();
+  const dialog = page.getByRole('dialog', { name: 'Session & access' });
+  await expect(dialog).toBeVisible();
+  // A host on companion 2.43 shares the style with the companion window (ui.json).
+  await expect(dialog.getByRole('region', { name: 'Appearance' })).toContainText(
+    'This browser and the companion window share these, except Notice sounds.',
+  );
+  const close = dialog.getByRole('button', { name: 'Close dialog' });
+  await expect(close).toBeFocused();
+  // From the close button Shift+Tab wraps to the last control, then walks all the way back up.
+  let steps = 0;
+  for (; steps < 120; steps++) {
+    await page.keyboard.press('Shift+Tab');
+    if (await close.evaluate((el) => el === document.activeElement)) break;
+    await expect
+      .poll(
+        () => underTopBar(page, '[aria-label="Session & access"] > .dialog-title'),
+        `Shift+Tab ${steps}`,
+      )
+      .toBeNull();
+  }
+  expect(steps).toBeGreaterThan(10);
+  // The dialog did scroll, so the title row was stuck over its content for most of the walk.
+  await page.keyboard.press('Shift+Tab');
+  await expect.poll(() => dialog.evaluate((el) => el.scrollTop)).toBeGreaterThan(50);
+});
+
+test('2.43 review: Escape in a field of the sound editor leaves the field and keeps what was typed; a second Escape closes it', async ({
+  page,
+  harness,
+}) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await host(page, harness);
+  await page.getByRole('button', { name: 'Open editor for Airhorn' }).click();
+  const panel = page.getByRole('dialog', { name: 'Edit Airhorn' });
+  const name = editCopyForm(page, 'Airhorn').getByRole('textbox', { name: 'Name', exact: true });
+  await name.fill('My edited copy name');
+  await name.press('Escape');
+  await expect(panel).toBeVisible();
+  await expect(page.locator('#editor-title')).toBeFocused();
+  await expect(name).toHaveValue('My edited copy name');
+  await page.keyboard.press('Escape');
+  await expect(panel).toHaveCount(0);
 });

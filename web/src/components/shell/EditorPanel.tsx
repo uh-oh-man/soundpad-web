@@ -3,6 +3,24 @@ import { Maximize2, Minimize2, X } from 'lucide-react';
 import type { EditorKind, PanelMode } from '../../shell';
 import { dialogOpen } from '../Modal';
 
+/** Text a person types or a choice they make: Escape there backs out of the field, not the editor. */
+const NOT_TEXT = new Set([
+  'button',
+  'checkbox',
+  'radio',
+  'range',
+  'submit',
+  'reset',
+  'file',
+  'color',
+  'image',
+]);
+function isField(el: HTMLElement) {
+  if (el.isContentEditable || el instanceof HTMLTextAreaElement || el instanceof HTMLSelectElement)
+    return true;
+  return el instanceof HTMLInputElement && !NOT_TEXT.has(el.type);
+}
+
 /**
  * The right editor panel (2.43): Mimic, the copy editor, a sound's editor or Activity, one at a time.
  * It is a non-modal dialog, so the board beside it stays playable: no focus trap, and Tab goes on to
@@ -44,8 +62,8 @@ export function EditorPanel({
   }, [focusKey]);
   useEffect(() => {
     // Escape closes the panel when it is meant for it: no dialog is open over it, nothing inside used
-    // the key first (Mimic clears a selection or puts a draft away before), and focus is in the panel or
-    // nowhere. Escape in the board's search or on a tile keeps its own meaning. Bubble phase, so the
+    // the key first (Mimic clears a selection or puts a draft away before), and focus is in the panel
+    // (outside a field) or nowhere. Escape in the board's search or on a tile keeps its own meaning. Bubble phase, so the
     // capture-phase handlers inside the panel always see the key first.
     function escape(e: KeyboardEvent) {
       if (e.key !== 'Escape' || e.defaultPrevented || e.shiftKey || dialogOpen()) return;
@@ -56,6 +74,12 @@ export function EditorPanel({
         (target instanceof Node && !!document.getElementById('editor-panel')?.contains(target));
       if (!inside) return;
       e.preventDefault();
+      // In a field, the first Escape only leaves the field (2.43): closing there threw away what was
+      // typed in the copy form. Focus goes to the heading, so a second Escape closes.
+      if (target instanceof HTMLElement && isField(target)) {
+        heading.current?.focus();
+        return;
+      }
       close.current();
     }
     document.addEventListener('keydown', escape);

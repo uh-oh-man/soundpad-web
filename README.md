@@ -38,7 +38,7 @@ Your browser keeps a private key for Soundpad Web, so the host knows it is you a
 - **Notices** appear in a strip under the board (above the player on a phone) and never cover a control. **Activity** keeps each one, with its **Undo** or **Jump**, for a minute after it goes.
 - **The header ribbon** moves with the sound that is playing.
 - **Settings → Appearance**: theme (**Blue studio**, **Original Purple** or **Ocean**), **Navigation**, **Motion** (System or Reduce), **Contrast** (Standard or High), **Header animation** (On, Still or Off) and **Notice sounds** (Off or Subtle). With companion 2.43, the host's browser and the companion window share the navigation, theme, motion, contrast, header animation and the open Mimic draft; guests keep their own choices.
-- **Keyboard**: **Skip to sounds**, **Skip to player** and the section links appear on the first Tab.
+- **Keyboard**: **Skip to sounds**, **Skip to player** and, with the editor open, **Skip to editor** appear on the first Tab.
 
 ## Mimic
 

@@ -111,6 +111,11 @@
 .dialog-title {
   background: var(--surface-1);
 }
+/* Keyboard focus is never under the sticky title row (2.43): Shift+Tab up Session & access hid the invite
+   and Theme controls under it. Modal.tsx publishes the row's height while stuck as --dialog-title-height. */
+.dialog {
+  scroll-padding-top: calc(var(--dialog-title-height, 0px) + 8px);
+}
 .dialog-title h2 {
   font-size: 20px;
   letter-spacing: -0.2px;
