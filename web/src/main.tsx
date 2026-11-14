@@ -73,8 +73,11 @@ import { useUnreadNotices } from './notifications';
 import { useNoticeSounds } from './notice-sound';
 import { useTempAssetsSync } from './temp-assets';
 // Stylesheets in their cascade order (Stage G spec 3.1). Each later file overrides earlier ones at equal
-// specificity; see the ownership note at the top of each file. The DM Sans font goes after tokens.css.
+// specificity; see the ownership note at the top of each file. DM Sans (self-hosted, SIL OFL 1.1, see
+// THIRD-PARTY-NOTICES.md) comes right after the tokens: its variable-weight faces, latin and latin-ext by
+// unicode-range, so a page in English loads only the latin file. --font-ui names it first.
 import './tokens.css';
+import '@fontsource-variable/dm-sans/wght.css';
 import './studio.css';
 import './controls.css';
 import './mimic.css';

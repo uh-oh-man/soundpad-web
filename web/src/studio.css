@@ -6,7 +6,7 @@
  */
 /* ==== Base (was styles.css) ==== */
 :root {
-  font-family: 'DM Sans', system-ui, sans-serif;
+  font-family: var(--font-ui);
   color: var(--text-primary);
   background: var(--surface-0);
   font-synthesis: none;
