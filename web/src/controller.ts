@@ -16,6 +16,7 @@ import {
   type BridgeAddress,
   type HostRole,
   type OwnerAction,
+  type QuitPrompt,
   type SessionInfo,
 } from './network/local';
 import {
@@ -78,6 +79,8 @@ type View = {
   links: Record<string, Transport>;
   /** The example session: a host page that runs entirely in this browser; nothing reaches Soundpad. */
   demo: boolean;
+  /** The companion window is closing while Temp holds clips (2.40); this page answers. */
+  quitPrompt: QuitPrompt | null;
 };
 /** What Settings shows as the example's invitation; it is not a link and nothing can join with it. */
 export const DEMO_INVITE = 'Example session: there is no invitation to share.';
@@ -133,6 +136,7 @@ export class Controller {
     policy: { ...DEFAULT_POLICY },
     links: {},
     demo: false,
+    quitPrompt: null,
   };
   private listeners = new Set<() => void>();
   private bridge?: LocalBridge;
@@ -206,6 +210,7 @@ export class Controller {
         'guestUploads',
         'guestTransforms',
         'guestMimic',
+        'guestKeep',
       ] as const;
       if (keys.every((key) => (state.permissions[key] ?? true) === (desired[key] ?? true)))
         this.pendingPermissions = undefined;
@@ -519,6 +524,7 @@ export class Controller {
           void this.takeRole(role).catch((e) => this.notify(errorMessage(e), 'error')),
         session: (info) => this.showSession(info),
         ownerAction: (action) => this.ownerAction(action),
+        quitPrompt: (prompt) => this.update({ quitPrompt: prompt }),
       },
       this.hostClientId(),
     );
@@ -808,6 +814,10 @@ export class Controller {
   hostSite() {
     return this.view.mode === 'host' ? APP_VERSION : (this.session?.hostSite ?? '');
   }
+  /** Whether the page that relays this page's commands knows the 2.40 ones (always, for the host). */
+  relaysDrafts() {
+    return this.view.mode === 'host' || (this.session?.hostRelaysDrafts ?? false);
+  }
   private dispatch(c: Command) {
     if (this.demo)
       return this.demo.send(c, {
@@ -823,6 +833,16 @@ export class Controller {
     } else if (this.view.mode === 'guest' && this.view.status === 'Connected')
       return this.session!.sendCommand(c);
     return Promise.reject(new Disconnected('Connect to the host first.'));
+  }
+  /**
+   * The answer to the window's quit prompt (2.40): keep the chosen clips first, quit anyway, or stay. The
+   * companion quits by itself after "keep" or "quit"; nothing is sent when it is unreachable.
+   */
+  answerQuit(action: 'keep' | 'quit' | 'cancel', assetIds: string[] = []) {
+    const prompt = this.view.quitPrompt;
+    this.update({ quitPrompt: null });
+    if (!prompt) return false;
+    return this.bridge?.post({ type: 'quitAnswer', id: prompt.id, action, assetIds }) ?? false;
   }
   /** Mimic's live view polls; failures are retried by the caller, so they are not notified. */
   peekMimic() {

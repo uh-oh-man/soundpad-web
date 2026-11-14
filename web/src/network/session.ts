@@ -16,7 +16,7 @@ import {
 } from '../protocol';
 import { parseOrganization, type SharedLayout, type Organization } from '../shared-layout';
 import { cleanName } from '../protocol';
-import { APP_VERSION, siteRelaysIntents, supports } from '../version';
+import { APP_VERSION, siteRelaysDrafts, siteRelaysIntents, supports } from '../version';
 import { sign, verify, type HostIdentity, type Invite } from './identity';
 import type { RelayLink, RelayLinkState, SendOptions, SendResult } from './relay';
 import {
@@ -66,6 +66,8 @@ type Message = {
   extra?: boolean;
   /** Hello (2.37): the guest asks again after a request lapsed. */
   again?: boolean;
+  /** Welcome (2.40): commands the host's page relays beyond what its version says, e.g. ['drafts']. */
+  relays?: string[];
 };
 /** Most guests one host session admits at once, unless the host grants extra places (2.37). */
 export const MAX_GUESTS = MAX_PLACES;
@@ -257,6 +259,8 @@ export class Session {
   private hostOffset = 0;
   private offsets: number[] = [];
   private welcomedSite = '';
+  /** The host page said it relays the 2.40 commands (drafts, guest preview and Keep, budgets). */
+  private welcomedDrafts = false;
   private olderHostRate = new RateLimit(OLDER_HOST_RATE);
   // Guest connection state (2.37).
   private since = Date.now();
@@ -276,6 +280,14 @@ export class Session {
   /** Website version the host's tab reported in its welcome ('' from a tab older than 2.35). */
   get hostSite() {
     return this.hostPeer ? this.welcomedSite : '';
+  }
+  /**
+   * Guest: whether the host's page relays the 2.40 commands. An older page refuses them, so they are
+   * offered only when its welcome says so: by its version, or by naming them (a page whose version
+   * was not bumped yet, such as a development build, still knows its own commands).
+   */
+  get hostRelaysDrafts() {
+    return !!this.hostPeer && this.welcomedDrafts;
   }
   /** Guest: how this page reaches the host now (2.37). */
   get transport(): Transport | undefined {
@@ -899,6 +911,8 @@ export class Session {
         state: this.stateFor(peer, state),
         hostNow: Date.now(),
         site: this.site,
+        // 2.40: what this page relays beyond what its version says (see hostRelaysDrafts).
+        relays: ['drafts'],
         data: [...this.layouts.values()] as unknown as JsonValue,
       },
       peer,
@@ -1250,6 +1264,9 @@ export class Session {
     if (take) {
       this.hostPeer = peer;
       this.welcomedSite = typeof m.site === 'string' && m.site.length <= 40 ? m.site : '';
+      this.welcomedDrafts =
+        siteRelaysDrafts(this.welcomedSite) ||
+        (Array.isArray(m.relays) && m.relays.length <= 16 && m.relays.includes('drafts'));
       this.syncClock(m.hostNow, true);
     }
     const reconnected = first && this.everConnected;

@@ -358,4 +358,62 @@ public sealed class HostSessionTests : IDisposable
         var result = await socket.ReceiveAsync(new byte[1000], CancellationToken.None);
         Assert.Equal(WebSocketMessageType.Close, result.MessageType); Assert.Equal(WebSocketCloseStatus.PolicyViolation, result.CloseStatus);
     }
+
+    [Fact]
+    public async Task OnlyTheWindowsOwnPageAnswersTheQuitPrompt()
+    {
+        // 2.40: closing the window while Temp holds clips asks the window's page; with no such page it closes as before.
+        await using var companion = await new Companion(folder, Key).Start();
+        var server = companion.Server;
+        Assert.False(server.AskQuit(2, _ => { }));
+        await using var tab = await Page.Open(server, new { token = server.Token, protocol = 3, clientId = "tab", quitPrompt = true });
+        Assert.Equal("owner", Role(await tab.Next("role")));
+        Assert.False(server.AskQuit(2, _ => { })); // a browser tab is not the window
+        // The window running an older website (no quitPrompt in its hello) would drop the connection over the message.
+        var old = await Page.Host(server, "window-old", Key);
+        Assert.Equal("owner", Role(await old.Next("role")));
+        Assert.False(server.AskQuit(2, _ => { }));
+        Assert.Null(await old.Maybe("quitPrompt", 200));
+        await old.DisposeAsync();
+        await using var window = await Page.Open(server, new { token = server.Token, protocol = 3, clientId = "window", ownerKey = Key, quitPrompt = true });
+        Assert.Equal("owner", Role(await window.Next("role")));
+        var answers = new List<QuitAnswer>();
+        Assert.True(server.AskQuit(3, answer => { lock (answers) answers.Add(answer); }));
+        var prompt = await window.Next("quitPrompt");
+        Assert.Equal(3, prompt.GetProperty("clips").GetInt32());
+        string id = prompt.GetProperty("id").GetString()!;
+        Assert.Null(await tab.Maybe("quitPrompt", 200)); // only the window is asked
+        // Someone else cannot answer for the window, and an unknown prompt id is ignored.
+        await tab.Send(new { type = "quitAnswer", id, action = "quit" });
+        await window.Send(new { type = "quitAnswer", id = "not-the-prompt", action = "quit" });
+        await Task.Delay(200);
+        lock (answers) Assert.Empty(answers);
+        string kept = Guid.NewGuid().ToString();
+        await window.Send(new { type = "quitAnswer", id, action = "keep", assetIds = new[] { kept, "not-an-id" } });
+        for (int i = 0; i < 50; i++) { lock (answers) if (answers.Count > 0) break; await Task.Delay(20); }
+        lock (answers) { var answer = Assert.Single(answers); Assert.Equal("keep", answer.Action); Assert.Equal([kept], answer.AssetIds); }
+        // Answered once: the same answer again does nothing; a new close asks again.
+        await window.Send(new { type = "quitAnswer", id, action = "quit" });
+        await Task.Delay(200);
+        lock (answers) Assert.Single(answers);
+        Assert.True(server.AskQuit(1, answer => { lock (answers) answers.Add(answer); }));
+        var second = await window.Next("quitPrompt");
+        await window.Send(new { type = "quitAnswer", id = second.GetProperty("id").GetString(), action = "cancel" });
+        for (int i = 0; i < 50; i++) { lock (answers) if (answers.Count > 1) break; await Task.Delay(20); }
+        lock (answers) Assert.Equal("cancel", answers[^1].Action);
+    }
+
+    [Fact]
+    public async Task AQuitPromptLeftUnansweredNoLongerHoldsTheWindow()
+    {
+        await using var mock = new MockSoundpad(); using var pipe = new SoundpadPipe(mock.Name); using var bridge = new Bridge(pipe, new StateStore(folder));
+        await using var server = new LocalServer(bridge, Site, Key) { QuitPromptPatience = TimeSpan.FromMilliseconds(300) };
+        await server.Start();
+        await using var window = await Page.Open(server, new { token = server.Token, protocol = 3, clientId = "window", ownerKey = Key, quitPrompt = true });
+        Assert.Equal("owner", Role(await window.Next("role")));
+        Assert.True(server.AskQuit(1, _ => { }));
+        Assert.True(server.AskQuit(1, _ => { })); // pressed X again while it is showing: asked again
+        await Task.Delay(400);
+        Assert.False(server.AskQuit(1, _ => { })); // the page never answered: the window closes
+    }
 }

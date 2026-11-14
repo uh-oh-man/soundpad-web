@@ -132,7 +132,8 @@ internal static class Program
             // A terminal the window was started from keeps its keyboard (Ctrl+C still works there).
             void WatchEnter() => _ = Task.Run(() => { if (Console.ReadLine() != null) shutdown.Cancel(); });
             if (ConsoleLink.ReadsEnter) WatchEnter();
-            try { await bridge.CleanupSession(); } catch (Exception) { Console.WriteLine("Temporary audio cleanup will retry when Soundpad is available."); }
+            // After a crash the last session's Temp waits for the host's Recover or Discard (2.40); otherwise it is cleaned up as before.
+            try { await bridge.StartupCleanup(); } catch (Exception) { Console.WriteLine("Temporary audio cleanup will retry when Soundpad is available."); }
             var url = clean + "#host=" + server.Port + "." + server.Token;
             bool closedWindow = false;
             var cleaned = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -163,7 +164,21 @@ internal static class Program
                         // give the cleanup the same few seconds the console window's X had.
                         if (sessionEnding) cleaned.Task.Wait(TimeSpan.FromSeconds(4.5));
                     },
-                    hidden: args.Contains("--hidden-window"));
+                    hidden: args.Contains("--hidden-window"),
+                    asking: () =>
+                    {
+                        // Clips in Temp would be removed by quitting (2.40): the window's page asks Keep selected / Quit anyway / Cancel.
+                        int clips = bridge.TemporaryClipCount;
+                        return clips > 0 && server.AskQuit(clips, answer =>
+                        {
+                            if (answer.Action == "cancel") return;
+                            _ = Task.Run(async () =>
+                            {
+                                if (answer.Action == "keep") { try { await bridge.KeepForQuit(answer.AssetIds); } catch (Exception) { /* quits anyway, as asked */ } }
+                                closedWindow = true; shutdown.Cancel();
+                            });
+                        });
+                    });
             }
             long nextLibrary = 0; int pollFailures = 0;
             using var wake = new SemaphoreSlim(0, 1);

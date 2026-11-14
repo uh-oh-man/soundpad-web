@@ -14,7 +14,10 @@ type Harness = {
 // How long to wait for an upload, reverse or edited copy to be ready in Temp. On a slow CI runner one
 // took over 25 s (v2.29.0's tag run), and a failed tag run publishes no EXE, so CI gets more room.
 const TEMP_READY = process.env.CI ? 45000 : 25000;
-async function startHarness(origin = 'http://127.0.0.1:5173', count = 4, options: string[] = []) {
+// The dev server's port: 5173 unless E2E_PORT says otherwise (a second checkout running the suite at the same time).
+const PORT = process.env.E2E_PORT ?? '5173';
+const ORIGIN = `http://127.0.0.1:${PORT}`;
+async function startHarness(origin = ORIGIN, count = 4, options: string[] = []) {
   const proc = spawn(
     resolve(
       'companion/harness/bin/Release/net10.0-windows10.0.19041.0/win-x64/SoundpadWeb.Harness.exe',
@@ -134,6 +137,16 @@ async function invite(page: Page) {
   const url = await page.locator('#invite').inputValue();
   await page.getByRole('button', { name: 'Close dialog' }).click();
   return url;
+}
+/**
+ * Capture (2.40) opens the selection as a draft; Keep in Temp makes the clip (what "Mimic it" did at once
+ * until 2.39). Returns the draft region, which stays open.
+ */
+async function captureAndKeep(dialog: Locator) {
+  await dialog.getByRole('button', { name: 'Capture', exact: true }).click();
+  const draft = dialog.getByRole('region', { name: 'Draft' });
+  await draft.getByRole('button', { name: 'Keep in Temp', exact: true }).click();
+  return draft;
 }
 async function finishGuestName(page: Page, name = 'Fixture Guest') {
   const dialog = page.getByRole('dialog', { name: /gamer name/i });
@@ -692,7 +705,7 @@ test('V2: large-photo crop, cancel, failed save retention and remove', async ({
 test('V2: 10000-sound library keeps rendering bounded and search responsive', async ({
   page,
 }, testInfo) => {
-  const large = await startHarness('http://127.0.0.1:5173', 10000);
+  const large = await startHarness(ORIGIN, 10000);
   try {
     const start = performance.now();
     await host(page, large);
@@ -994,7 +1007,7 @@ function sessionWave(seconds = 1) {
   return wave;
 }
 
-test('session uploads use temp, reverse immediately, and only approved files survive End Hosting', async ({
+test('session uploads use temp, reverse immediately, and End hosting keeps Temp until the companion quits', async ({
   page,
   harness,
 }) => {
@@ -1025,9 +1038,16 @@ test('session uploads use temp, reverse immediately, and only approved files sur
   await expect(
     page.getByRole('button', { name: 'Play from start: Session tone', exact: true }),
   ).toBeEnabled();
+  // 2.40: End hosting no longer clears Temp (until 2.39 the reversed copy and the Temp category went
+  // here); it stays while the companion runs, and only quitting the companion removes it.
   await expect(
-    page.getByRole('button', { name: 'Play from start: Session tone (reversed)', exact: true }),
-  ).toHaveCount(0);
+    page
+      .getByRole('navigation', { name: 'Sound categories' })
+      .getByRole('button', { name: /^Temp - Soundpad Web/ }),
+  ).toBeVisible();
+  // Temp opens as it was left (2.40: each section remembers its open item).
+  await expect(page.locator('#temp-manager')).toHaveAttribute('open', '');
+  await expect(page.locator('#temp-manager')).toContainText('reversed · ready');
   await expect(
     page.getByRole('button', { name: 'Play from start: Airhorn', exact: true }),
   ).toBeEnabled();
@@ -1246,7 +1266,7 @@ test('themes persist locally, notifications deduplicate and expire, upload error
 test('desktop panels scroll independently and layouts remain usable at narrow widths', async ({
   page,
 }) => {
-  const harness = await startHarness('http://127.0.0.1:5173', 300);
+  const harness = await startHarness(ORIGIN, 300);
   try {
     await page.setViewportSize({ width: 1440, height: 900 });
     await host(page, harness);
@@ -1555,7 +1575,7 @@ test('Mimic transcript: words appear, a click and a Shift-click select them, and
   for (const button of await buttons.all())
     await expect(button).toHaveAttribute('aria-pressed', 'true');
   await expect(dialog.getByLabel('Clip name')).toHaveAttribute('placeholder', words);
-  await dialog.getByRole('button', { name: 'Mimic it' }).click();
+  await captureAndKeep(dialog);
   await expect(
     page.getByRole('button', { name: `Play from start: ${words}`, exact: true }),
   ).toBeEnabled();
@@ -1566,7 +1586,7 @@ test('Mimic transcript: words appear, a click and a Shift-click select them, and
   ).toBeVisible();
 });
 
-test('Mimic keyboard: number keys grab recent audio, Enter mimics, Escape clears before closing', async ({
+test('Mimic keyboard: number keys grab recent audio, Enter captures and keeps, Escape clears before closing', async ({
   page,
   harness,
 }) => {
@@ -1585,11 +1605,19 @@ test('Mimic keyboard: number keys grab recent audio, Enter mimics, Escape clears
   const name = dialog.getByLabel('Clip name');
   await expect(name).toBeFocused();
   await name.fill('Key mimic');
+  // 2.40: Enter captures a draft (the name field keeps focus), Enter again keeps it in Temp.
+  await page.keyboard.press('Enter');
+  await expect(dialog.getByRole('region', { name: 'Draft' })).toBeVisible();
+  await expect(name).toBeFocused();
   await page.keyboard.press('Enter');
   await expect(
     page.getByRole('button', { name: 'Play from start: Key mimic', exact: true }),
   ).toBeEnabled();
+  // Escape puts the draft away (it stays in the draft history).
+  await name.blur();
+  await page.keyboard.press('Escape');
   await expect(dialog.locator('.mimic-range')).toHaveCount(0);
+  await expect(dialog.getByLabel('Draft history')).toBeVisible();
   await page.keyboard.press('3');
   await expect(dialog.locator('.mimic-range')).toContainText('3.0 s');
   await page.keyboard.press('Escape');
@@ -1655,10 +1683,12 @@ test('Mimic history: go back, select words in older audio, clip them, and see ga
   // Hovering a word marks it (and the waveform under it).
   await buttons.nth(1).hover();
   await expect(buttons.nth(1)).toHaveClass(/hover/);
-  await dialog.getByRole('button', { name: 'Mimic it' }).click();
+  await captureAndKeep(dialog);
   await expect(
     page.getByRole('button', { name: `Play from start: ${words}`, exact: true }),
   ).toBeEnabled();
+  // The draft goes; the clip stays in Temp (an open draft keeps its audio in view).
+  await dialog.getByRole('button', { name: 'Discard' }).click();
   // Go live returns to the newest audio.
   await dialog.getByRole('button', { name: 'Go live' }).click();
   await expect(dialog.getByRole('button', { name: 'Live', exact: true })).toBeVisible();
@@ -1717,7 +1747,7 @@ test('Mimic history: a guest sees only what was recorded since they joined, unle
   await guest.waitForTimeout(6000); // "Last 3 s" must lie wholly after the join
   await guestDialog.getByRole('button', { name: 'Last 3 s' }).click();
   await guestDialog.getByLabel('Clip name').fill('Since I joined');
-  await guestDialog.getByRole('button', { name: 'Mimic it' }).click();
+  await captureAndKeep(guestDialog);
   await expect(playButton(page, 'Since I joined')).toBeEnabled({ timeout: TEMP_READY });
   // The host shares the start of the history: exactly that part opens to guests.
   expect(
@@ -1741,6 +1771,198 @@ test('Mimic history: a guest sees only what was recorded since they joined, unle
     sourceId,
   });
   expect(outside.error).toMatch(/before you joined/);
+});
+
+/** A draft as draftList answers it (2.40), as far as these tests read it. */
+type DraftReply = {
+  drafts: { id: string; startFrame: number; endFrame: number; name: string | null }[];
+  others: { id: string; ownerName: string; startFrame: number; endFrame: number }[];
+};
+
+test('Mimic drafts: Capture opens a draft, an edge drags into the audio around it, preview, keep, and it survives closing Mimic', async ({
+  page,
+  harness,
+  browserName,
+}) => {
+  await host(page, harness);
+  await page.getByRole('button', { name: 'Mimic', exact: true }).click();
+  const dialog = page.getByRole('dialog', { name: 'Mimic' });
+  await dialog.getByRole('button', { name: 'Start listening' }).click();
+  await page.waitForTimeout(2600);
+  await dialog.getByRole('button', { name: 'Last 3 s', exact: true }).click();
+  await dialog.getByLabel('Clip name').fill('Draft one');
+  const playsBefore = harness.plays.length;
+  await dialog.getByRole('button', { name: 'Capture', exact: true }).click();
+  const draft = dialog.getByRole('region', { name: 'Draft' });
+  await expect(draft.locator('.mimic-range')).toContainText('3.0 s');
+  // Capture never imports or plays anything: it is a draft until someone keeps or plays it.
+  await expect(playButton(page, 'Draft one')).toHaveCount(0);
+  expect(harness.plays.length).toBe(playsBefore);
+  // Drag its start edge 2 s to the left, into the audio before it (the view shows 10 s; the draft is its last 3 s).
+  const wave = dialog.getByRole('slider', { name: /^Mimic buffer, showing/ });
+  const box = (await wave.boundingBox())!;
+  const y = box.y + box.height / 2;
+  await page.mouse.move(box.x + box.width * 0.7, y);
+  await page.mouse.down();
+  await page.mouse.move(box.x + box.width * 0.6, y, { steps: 4 });
+  await page.mouse.move(box.x + box.width * 0.5, y, { steps: 4 });
+  await page.mouse.up();
+  await expect(draft.locator('.mimic-range')).toContainText(/(4\.9|5\.0|5\.1) s/);
+  // The companion has the new edges (and pinned the audio they cover).
+  await expect
+    .poll(async () => {
+      const list = (await sendCommand(page, 'draftList')).data as DraftReply;
+      const [only] = list.drafts;
+      return list.drafts.length === 1
+        ? Math.round(((only.endFrame - only.startFrame) / 16000) * 10)
+        : -1;
+    })
+    .toBeGreaterThanOrEqual(49);
+  // Private preview: heard in this tab only; Soundpad plays nothing.
+  if (browserName !== 'webkit') {
+    await draft.getByRole('button', { name: 'Preview' }).click();
+    await expect(draft.getByRole('button', { name: 'Stop preview' })).toBeVisible();
+    await expect(draft.getByRole('button', { name: 'Preview' })).toBeVisible({ timeout: 10000 });
+    expect(harness.plays.length).toBe(playsBefore);
+  }
+  await draft.getByRole('button', { name: 'Keep in Temp', exact: true }).click();
+  await expect(playButton(page, 'Draft one')).toBeEnabled({ timeout: TEMP_READY });
+  // Closing Mimic and playing a Soundboard tile keep the draft: Mimic opens on it again.
+  await dialog.getByRole('button', { name: 'Close dialog' }).click();
+  await playButton(page, 'Airhorn').click();
+  await expect.poll(() => harness.plays.length).toBeGreaterThan(playsBefore);
+  await page.getByRole('button', { name: 'Mimic', exact: true }).click();
+  await expect(draft).toBeVisible();
+  await expect(draft.getByLabel('Clip name')).toHaveValue('Draft one');
+  await expect(draft.locator('.mimic-range')).toContainText(/(4\.9|5\.0|5\.1) s/);
+  // Kept again with the same edges: the same clip, not a second one. Closing it ends the draft.
+  await draft.getByRole('button', { name: 'Keep in Temp and close draft' }).click();
+  await expect(draft).toHaveCount(0);
+  await expect(dialog.getByLabel('Draft history')).toHaveCount(0);
+  await expect(playButton(page, 'Draft one')).toHaveCount(1);
+  expect(((await sendCommand(page, 'draftList')).data as DraftReply).drafts).toHaveLength(0);
+});
+
+test('Mimic drafts: a guest previews privately only what was recorded since joining, and the host sees and copies their selection', async ({
+  page,
+  harness,
+  browserName,
+}) => {
+  await useLocalGuests(page);
+  await host(page, harness);
+  await page.getByRole('button', { name: 'Access settings' }).click();
+  await page.getByLabel('Allow guest Mimic').check();
+  await page.keyboard.press('Escape');
+  await page.getByRole('button', { name: 'Mimic', exact: true }).click();
+  const dialog = page.getByRole('dialog', { name: 'Mimic' });
+  await dialog.getByRole('button', { name: 'Start listening' }).click();
+  await expect(dialog.getByRole('status').first()).toContainText('Listening to Fixture');
+  await page.waitForTimeout(5000); // five seconds the guest was not there for
+  await page.keyboard.press('Escape');
+  const guest = await joinGuest(page);
+  const view = (await sendCommand(guest, 'historyTimeline')).data as HistoryView;
+  const sourceId = view.sessionId;
+  // Before the join: refused, whatever the page sends. After it: a small WAV for this browser only.
+  const early = await sendCommand(guest, 'mimicPreview', {
+    startFrame: 0,
+    endFrame: view.rate,
+    sourceId,
+  });
+  expect(early.error).toMatch(/before you joined/);
+  await guest.waitForTimeout(3500);
+  const from = view.fromFrame!;
+  const mine = await sendCommand(guest, 'mimicPreview', {
+    startFrame: from + view.rate / 2,
+    endFrame: from + view.rate * 2.5,
+    sourceId,
+  });
+  expect(mine.error).toBeUndefined();
+  const wav = Buffer.from((mine.data as { wav: string }).wav, 'base64');
+  expect(wav.readUInt32LE(24)).toBeLessThanOrEqual(16000); // the guest's copy is at most 16 kHz
+  expect(wav.length).toBeLessThan(2 * 16000 * 2 + 100);
+  // In the window: Preview is there for a guest, and plays nothing in the game.
+  await guest.getByRole('button', { name: 'Mimic', exact: true }).click();
+  const guestDialog = guest.getByRole('dialog', { name: 'Mimic' });
+  await guestDialog.getByRole('button', { name: 'Last 3 s', exact: true }).click();
+  const plays = harness.plays.length;
+  if (browserName !== 'webkit') {
+    await guestDialog.getByRole('button', { name: 'Preview' }).click();
+    await expect(guestDialog.getByRole('button', { name: 'Preview' })).toBeVisible({
+      timeout: 10000,
+    });
+  }
+  // The guest captures; the host is told quietly and sees it as a labelled band to copy.
+  await guestDialog.getByLabel('Clip name').fill('Guest draft');
+  await guestDialog.getByRole('button', { name: 'Capture', exact: true }).click();
+  await expect(guestDialog.getByRole('region', { name: 'Draft' })).toBeVisible();
+  await expect(page.getByText(/Fixture Guest captured a clip/)).toBeVisible();
+  await page.getByRole('button', { name: 'Mimic', exact: true }).click();
+  const bands = dialog.getByRole('list', { name: "Other people's selections" });
+  await expect(bands).toContainText('Fixture Guest’s selection');
+  await bands.getByRole('button', { name: 'Copy Fixture Guest’s selection to my drafts' }).click();
+  const hostDraft = dialog.getByRole('region', { name: 'Draft' });
+  await expect(hostDraft.getByLabel('Clip name')).toHaveValue('Guest draft');
+  // An independent copy: the guest's own draft is untouched when the host discards theirs.
+  await hostDraft.getByRole('button', { name: 'Discard' }).click();
+  await expect(guestDialog.getByRole('region', { name: 'Draft' })).toBeVisible();
+  const theirs = (await sendCommand(guest, 'draftList')).data as DraftReply;
+  expect(theirs.drafts.map((d) => d.name)).toEqual(['Guest draft']);
+  expect(harness.plays.length).toBe(plays);
+});
+
+test('guest storage: at the Temp budget new clips wait for the host, who allows more; a guest keeps a clip', async ({
+  page,
+  harness,
+}) => {
+  test.slow(); // the guest needs some recorded audio of their own
+  await useLocalGuests(page);
+  await host(page, harness);
+  await page.getByRole('button', { name: 'Access settings' }).click();
+  await page.getByLabel('Allow guest Mimic').check();
+  await expect(page.getByLabel('Allow guest Keep')).toBeChecked(); // on with the usual friend permissions
+  const storage = page.getByRole('form', { name: 'Keep and guest storage' });
+  await storage.getByLabel('Temp per guest (MB)').fill('1');
+  await storage.getByRole('button', { name: 'Save storage settings' }).click();
+  await expect(page.getByText('Keep and storage settings saved.')).toBeVisible();
+  await page.keyboard.press('Escape');
+  await page.getByRole('button', { name: 'Mimic', exact: true }).click();
+  const dialog = page.getByRole('dialog', { name: 'Mimic' });
+  await dialog.getByRole('button', { name: 'Start listening' }).click();
+  await expect(dialog.getByRole('status').first()).toContainText('Listening to Fixture');
+  await page.keyboard.press('Escape');
+  const guest = await joinGuest(page);
+  await guest.waitForTimeout(14000);
+  const view = (await sendCommand(guest, 'historyTimeline')).data as HistoryView;
+  const clip = (offset: number, name: string) =>
+    sendCommand(guest, 'mimicClip', {
+      startFrame: view.fromFrame! + Math.round(view.rate * offset),
+      endFrame: view.fromFrame! + Math.round(view.rate * (offset + 12)),
+      sourceId: view.sessionId,
+      name,
+    });
+  // 12 s at the fixture's 16 kHz is about 380 KB: two fit in 1 MB, the third waits.
+  expect((await clip(0.5, 'Budget one')).error).toBeUndefined();
+  expect((await clip(1, 'Budget two')).error).toBeUndefined();
+  expect((await clip(1.5, 'Budget three')).error).toMatch(/Waiting for the host to allow more/);
+  // The guest is told where they stand; the host gets a request, like the lobby's.
+  await guest.locator('#temp-manager > summary').click();
+  await expect(guest.locator('#temp-manager')).toContainText('waiting for the host to allow more');
+  const requests = page.getByRole('list', { name: 'Guests waiting for more storage' });
+  await expect(requests).toContainText('Fixture Guest asks for more Temp space');
+  await page.getByRole('button', { name: 'Access settings' }).click();
+  await expect(page.locator('.guest-usage')).toContainText(/Temp 0\.\d of 1\.0 MB/);
+  await page.keyboard.press('Escape');
+  await requests.getByRole('button', { name: 'Allow Fixture Guest more' }).click();
+  await expect(requests).toHaveCount(0);
+  expect((await clip(1.5, 'Budget three')).error).toBeUndefined();
+  await expect(playButton(page, 'Budget three')).toBeEnabled({ timeout: TEMP_READY });
+  // Keep: into the host's destination (no folder choice for a guest), right from Temp.
+  const source = guest
+    .locator('.temp-source')
+    .filter({ has: guest.getByText('Budget one', { exact: true }) });
+  await source.getByRole('button', { name: 'Keep normal permanently' }).click();
+  await expect(guest.getByText(/Kept: it is in the host/)).toBeVisible({ timeout: TEMP_READY });
+  await expect(guest.locator('#temp-manager')).not.toContainText('Permanent folder');
 });
 
 test('live Nostr/WebRTC: guests see Mimic only when allowed and can clip from it', async ({
@@ -1789,9 +2011,11 @@ test('live Nostr/WebRTC: guests see Mimic only when allowed and can clip from it
         .first(),
     ).toBeVisible({ timeout: 20000 });
     await dialog.getByRole('button', { name: 'Last 3 s' }).click();
-    await expect(dialog.getByRole('button', { name: 'Preview' })).toHaveCount(0); // audio never goes to guests
+    // 2.40: a guest can preview privately (in their own browser, never in the game).
+    await expect(dialog.getByRole('button', { name: 'Preview' })).toBeVisible();
     await dialog.getByLabel('Clip name').fill('Guest mimic');
-    await dialog.getByRole('button', { name: 'Mimic it' }).click();
+    await captureAndKeep(dialog);
+    await dialog.getByRole('button', { name: 'Discard' }).click();
     await expect(
       page.getByRole('button', { name: 'Play from start: Guest mimic', exact: true }),
     ).toBeEnabled();
@@ -1816,7 +2040,7 @@ test('live Nostr/WebRTC: guests see Mimic only when allowed and can clip from it
     // A guest can Undo their own clip from its notice (2.32); the host sees it leave Temp.
     await dialog.getByRole('button', { name: 'Last 3 s' }).click();
     await dialog.getByLabel('Clip name', { exact: true }).fill('Guest oops');
-    await dialog.getByRole('button', { name: 'Mimic it' }).click();
+    await captureAndKeep(dialog);
     const oops = page.getByRole('button', { name: 'Play from start: Guest oops', exact: true });
     await expect(oops).toBeEnabled({ timeout: 30000 });
     // The echo copy above may still be playing; Undo never stops another sound, so stop it first.
@@ -2724,6 +2948,9 @@ test('Mimic: a fresh clip can be played with a quick effect', async ({ page, har
   await page.waitForTimeout(2600);
   await page.keyboard.press('5');
   await dialog.getByLabel('Clip name').fill('Effect me');
+  // 2.40: Enter captures a draft, and Enter again keeps it in Temp.
+  await page.keyboard.press('Enter');
+  await expect(dialog.getByRole('region', { name: 'Draft' })).toBeVisible();
   await page.keyboard.press('Enter');
   const recent = dialog.getByRole('region', { name: 'Just mimicked' });
   await expect(recent.getByRole('button', { name: /Replay Effect me/ })).toBeVisible();
@@ -2748,6 +2975,9 @@ test('Mimic: Edit on a fresh clip opens its Edit copy in Temp', async ({ page, h
   await page.waitForTimeout(2600);
   await page.keyboard.press('5');
   await dialog.getByLabel('Clip name').fill('Trim me');
+  // 2.40: Enter captures a draft, and Enter again keeps it in Temp.
+  await page.keyboard.press('Enter');
+  await expect(dialog.getByRole('region', { name: 'Draft' })).toBeVisible();
   await page.keyboard.press('Enter');
   const recent = dialog.getByRole('region', { name: 'Just mimicked' });
   await expect(recent.getByRole('button', { name: /Replay Trim me/ })).toBeVisible();
@@ -2803,6 +3033,9 @@ test('Mimic: Keep on a fresh clip opens Keep permanently for it in Temp (host)',
   await page.waitForTimeout(2600);
   await page.keyboard.press('5');
   await dialog.getByLabel('Clip name').fill('Keeper');
+  // 2.40: Enter captures a draft, and Enter again keeps it in Temp.
+  await page.keyboard.press('Enter');
+  await expect(dialog.getByRole('region', { name: 'Draft' })).toBeVisible();
   await page.keyboard.press('Enter');
   const recent = () => dialog.getByRole('region', { name: 'Just mimicked' });
   await expect(recent().getByRole('button', { name: /Replay Keeper/ })).toBeVisible();
@@ -2840,6 +3073,9 @@ test('Edit copy: with transcripts on, a plain trim is named after its words', as
   await page.waitForTimeout(2600);
   await page.keyboard.press('5');
   await dialog.getByLabel('Clip name').fill('Words test');
+  // 2.40: Enter captures a draft, and Enter again keeps it in Temp.
+  await page.keyboard.press('Enter');
+  await expect(dialog.getByRole('region', { name: 'Draft' })).toBeVisible();
   await page.keyboard.press('Enter');
   const recent = dialog.getByRole('region', { name: 'Just mimicked' });
   await recent.getByRole('button', { name: 'Edit a copy of Words test' }).click();
@@ -2904,6 +3140,9 @@ test('accessibility: no serious or critical axe violations in the newer controls
   await page.waitForTimeout(2600);
   await page.keyboard.press('5');
   await dialog.getByLabel('Clip name').fill('Scan clip');
+  // 2.40: Enter captures a draft, and Enter again keeps it in Temp.
+  await page.keyboard.press('Enter');
+  await expect(dialog.getByRole('region', { name: 'Draft' })).toBeVisible();
   await page.keyboard.press('Enter');
   await expect(dialog.getByRole('region', { name: 'Just mimicked' })).toBeVisible();
   await expect(dialog.getByRole('button', { name: 'Edit a copy of Scan clip' })).toBeVisible();
@@ -2932,6 +3171,9 @@ test('Mimic on a phone: a fresh clip keeps its name readable beside Edit, Keep a
   await dialog
     .getByLabel('Clip name', { exact: true })
     .fill('A rather long clip name that someone typed');
+  // 2.40: Enter captures a draft, and Enter again keeps it in Temp.
+  await page.keyboard.press('Enter');
+  await expect(dialog.getByRole('region', { name: 'Draft' })).toBeVisible();
   await page.keyboard.press('Enter');
   const recent = dialog.getByRole('region', { name: 'Just mimicked' });
   const name = recent.locator('.mimic-recent-name').first();
@@ -2999,6 +3241,9 @@ test('Mimic fits a phone: header keeps Settings on screen and long clip names do
   await dialog
     .getByLabel('Clip name')
     .fill('A rather long clip name that would wrap on a phone screen');
+  // 2.40: Enter captures a draft, and Enter again keeps it in Temp.
+  await page.keyboard.press('Enter');
+  await expect(dialog.getByRole('region', { name: 'Draft' })).toBeVisible();
   await page.keyboard.press('Enter');
   await expect(dialog.getByRole('region', { name: 'Just mimicked' })).toBeVisible();
   const pastDialog = await page.evaluate(() => {
@@ -3983,7 +4228,7 @@ test('example session: plays example sounds in this browser, edits a copy, and l
   const sockets: string[] = [];
   page.on('websocket', (socket) => {
     const url = new URL(socket.url());
-    if (!(url.host === '127.0.0.1:5173' && url.pathname === '/')) sockets.push(socket.url());
+    if (!(url.host === `127.0.0.1:${PORT}` && url.pathname === '/')) sockets.push(socket.url());
   });
   await page.goto('/');
   await expect(page.getByRole('button', { name: /Play / })).toHaveCount(0);

@@ -40,7 +40,8 @@ public sealed partial class Bridge(ISoundpad pipe, StateStore store) : IDisposab
         mimicCapture.Dispose(); pcm.Dispose();
     }
     public Snapshot Snapshot => new(1, revision, available, error, parsed.Public, playback, disk.Counter, disk.Permissions, 2,
-        Convert.ToHexString(System.Security.Cryptography.HMACSHA256.HashData(Convert.FromBase64String(disk.IdentityKey), System.Text.Encoding.UTF8.GetBytes("workspace-host-v2"))).ToLowerInvariant(), disk.StatisticsVersion, typeof(Bridge).Assembly.GetName().Version?.ToString(3), managed?.Public.Revision ?? 0, MimicSnapshot, playbackSuspended);
+        Convert.ToHexString(System.Security.Cryptography.HMACSHA256.HashData(Convert.FromBase64String(disk.IdentityKey), System.Text.Encoding.UTF8.GetBytes("workspace-host-v2"))).ToLowerInvariant(), disk.StatisticsVersion, typeof(Bridge).Assembly.GetName().Version?.ToString(3), managed?.Public.Revision ?? 0, MimicSnapshot, playbackSuspended,
+        Interlocked.Read(ref draftsRevision), budgets.Revision, tempRecovery > 0 ? tempRecovery : null) { Permissions = PublicPermissions };
     public string? Website => disk.Website;
     public void SetWebsite(string site) { disk.Website = site; store.Save(disk); }
     private void Publish() { Interlocked.Increment(ref revision); Changed?.Invoke(Snapshot); }
@@ -134,6 +135,7 @@ public sealed partial class Bridge(ISoundpad pipe, StateStore store) : IDisposab
         // The host disconnected or turned this guest away: letting them back in records a new join time. Done here, in
         // arrival order, before anything that may wait, so a command they sent later never sees the old one.
         if (c.Op == "revokePeer" && actor == "host" && c.GuestId is { Length: > 0 and <= 128 } guestId) ForgetGuest(guestId);
+        if (await ExecuteKeep(c, actor, participant, requester, audience) is { } keep) return keep;
         var query = await Query(c, actor); if (query != null) return query;
         if (c.Op == "stop") return await ExecuteStop(c, actor, requester, audience, intent);
         if (c.Op == "panic") return await ExecutePanic(c, actor, intent);
@@ -226,7 +228,11 @@ public sealed partial class Bridge(ISoundpad pipe, StateStore store) : IDisposab
                         if (c.Delta is not (-1 or 1)) throw new InvalidDataException("Counter delta must be +1 or -1.");
                         disk.Counter = (int)Math.Clamp((long)disk.Counter + c.Delta.Value, 0, int.MaxValue); break;
                     case "reset": disk.Counter = 0; break;
-                    case "permissions": disk.Permissions = c.Permissions ?? throw new InvalidDataException("Missing permissions."); break;
+                    case "permissions":
+                        var permissions = c.Permissions ?? throw new InvalidDataException("Missing permissions.");
+                        // Guest Keep (2.40) lives in keep-settings.json, never in state.json; an older website leaves it as it is.
+                        if (permissions.GuestKeep is bool guestKeep && guestKeep != Keep.GuestKeep) SaveKeep(Keep with { GuestKeep = guestKeep });
+                        disk.Permissions = permissions with { GuestKeep = null }; break;
                     case "icon":
                         if (c.SoundId == null || !parsed.Indexes.ContainsKey(c.SoundId)) throw new InvalidDataException("Unknown sound.");
                         var iconIdentity = managed?.Annotation(c.SoundId);

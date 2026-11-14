@@ -48,7 +48,15 @@ export type DesktopEvents = {
   role: (role: HostRole) => void;
   session: (info: SessionInfo) => void;
   ownerAction: (action: OwnerAction) => void;
+  /** The window is closing while Temp holds clips (2.40): ask Keep selected / Quit anyway / Cancel. */
+  quitPrompt?: (prompt: QuitPrompt) => void;
 };
+export type QuitPrompt = { id: string; clips: number };
+const quitPromptSchema = z.object({
+  type: z.literal('quitPrompt'),
+  id: z.string().regex(/^[a-f0-9]{32}$/),
+  clips: z.number().int().positive().max(100000),
+});
 /** The identity the companion keeps for this launch; it came from an owner page, so check its shape. */
 const identitySchema = z.object({
   v: z.literal(1),
@@ -128,7 +136,8 @@ export type DesktopMessage =
   | { type: 'identity'; identity: HostIdentity }
   | { type: 'sessionSettings'; settings: SessionPolicy }
   | ({ type: 'session' } & SessionInfo)
-  | ({ type: 'ownerAction' } & OwnerAction);
+  | ({ type: 'ownerAction' } & OwnerAction)
+  | { type: 'quitAnswer'; id: string; action: 'keep' | 'quit' | 'cancel'; assetIds: string[] };
 export class LocalBridge {
   private socket?: WebSocket;
   private stopped = false;
@@ -196,6 +205,8 @@ export class LocalBridge {
           protocol: 3,
           clientId: this.clientId,
           ...(this.desktop?.ownerKey ? { ownerKey: this.desktop.ownerKey } : {}),
+          // 2.40: this page can show the quit prompt (only the window's page is ever asked).
+          quitPrompt: true,
         }),
       );
     };
@@ -215,6 +226,12 @@ export class LocalBridge {
             identity: role.identity ?? null,
             settings: role.settings ?? undefined,
           });
+          return;
+        }
+        if (data.type === 'quitPrompt') {
+          const prompt = quitPromptSchema.safeParse(data);
+          if (prompt.success)
+            this.desktop?.quitPrompt?.({ id: prompt.data.id, clips: prompt.data.clips });
           return;
         }
         if (data.type === 'session' || data.type === 'ownerAction') {

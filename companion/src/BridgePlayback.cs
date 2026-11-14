@@ -157,6 +157,9 @@ public sealed partial class Bridge
         catch (OperationCanceledException) when (intent.Withdrawn.IsCancellationRequested) { return null; }
         if (!answer.StartsWith("R-200", StringComparison.Ordinal)) throw new InvalidDataException("Soundpad rejected this action or its API does not support it.");
         NoteAudio();
+        // Its sound comes back into the recording history: Latest phrase skips it (2.40). A slice lasts its slice;
+        // a cue start the rest of the sound.
+        NoteOwnReplay(c.SoundId, slotIndex != null ? (long?)exact!.SliceMs : parsed.Public.Sounds.FirstOrDefault(s => s.Id == c.SoundId)?.DurationMs is long whole ? Math.Max(0, whole - (c.Op == "play" ? 0 : c.PositionMs ?? 0)) : null);
         var now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(); var person = Person(actor, participant); var epoch = Guid.NewGuid().ToString();
         SlotLease? free;
         lock (playbackSync)

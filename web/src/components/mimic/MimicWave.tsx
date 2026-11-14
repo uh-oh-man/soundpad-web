@@ -40,6 +40,8 @@ export type WaveExtras = {
   hidden?: Selection[];
   /** A word under the pointer in the transcript. */
   highlight?: Selection | null;
+  /** Other people's selections (2.40): coloured, labelled bands ("Alex's selection"). */
+  bands?: (Selection & { color: string; label: string })[];
   /** Called when a drag starts, so a view that follows live can hold still under the pointer. */
   onGrab?: () => void;
 };
@@ -79,7 +81,7 @@ export function MimicWave({
   const shown = draft ?? selection;
   const { start, end } = dragRange ?? visibleRange(peek.windowMs, viewSeconds * 1000, selection);
   const span = end - start;
-  const { marks, hidden, highlight } = extras;
+  const { marks, hidden, highlight, bands } = extras;
   useEffect(() => {
     const el = canvas.current;
     const ctx = el?.getContext('2d');
@@ -108,6 +110,22 @@ export function MimicWave({
         ctx.lineTo(h + height, 0);
       }
       ctx.stroke();
+      ctx.restore();
+    }
+    // Other people's selections sit under one's own, each in its own colour with its label.
+    if (bands?.length) {
+      ctx.save();
+      ctx.font = `${10 * ratio}px system-ui, sans-serif`;
+      for (const band of bands) {
+        const a = Math.max(0, x(band.from)),
+          b = Math.min(width, x(band.to));
+        if (b <= a) continue;
+        ctx.fillStyle = band.color + '2e';
+        ctx.fillRect(a, 0, b - a, height);
+        ctx.fillStyle = band.color;
+        ctx.fillRect(a, height - 3 * ratio, b - a, 3 * ratio);
+        ctx.fillText(band.label, a + 3 * ratio, height - 6 * ratio, Math.max(0, b - a - 4 * ratio));
+      }
       ctx.restore();
     }
     if (highlight) {
@@ -174,6 +192,7 @@ export function MimicWave({
     marks,
     hidden,
     highlight,
+    bands,
   ]);
   const at = (e: PointerEvent<HTMLCanvasElement>) => {
     const box = e.currentTarget.getBoundingClientRect();

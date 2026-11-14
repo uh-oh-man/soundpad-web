@@ -56,6 +56,21 @@ export const commandSchema = z
       'historySettings',
       'historyDiscard',
       'historyCorrect',
+      // Drafts (2.40): one person's editable selection on the history, pinned by the companion. A guest
+      // with Mimic has their own; the companion scopes every one to what that guest may see.
+      'draftCreate',
+      'draftList',
+      'draftUpdate',
+      'draftDiscard',
+      'draftCopy',
+      'draftKeep',
+      'draftPlay',
+      // Keep and guest storage (2.40): settings and grants are the host's; a guest may read their own status.
+      'keepSettings',
+      'budgetStatus',
+      'budgetGrant',
+      // After a crash (2.40): the host recovers or discards the previous session's Temp.
+      'tempRecover',
     ]),
     assetId: z.uuid().optional(),
     variantId: z.uuid().optional(),
@@ -70,6 +85,16 @@ export const commandSchema = z
     guestId: z.string().min(1).max(128).optional(),
     // beginSession (2.39): a new invitation (Replace invite), so guest join times and shares start over.
     newInvite: z.boolean().optional(),
+    // Drafts and Keep (2.40): the draft a command is about; each guest's Temp and kept allowance (MB),
+    // and whether kept audio counts per session or in total.
+    draftId: z
+      .string()
+      .regex(/^[a-f0-9]{32}$/)
+      .optional(),
+    tempMb: z.number().int().min(1).max(4096).optional(),
+    keptMb: z.number().int().min(1).max(65536).optional(),
+    budgetMode: z.enum(['session', 'total']).optional(),
+    guestKeep: z.boolean().optional(),
     sourceId: z.string().max(512).optional(),
     mimicEnd: z.number().int().nonnegative().safe().optional(),
     // Recording history (2.39): frames on the history timeline, waveform bins, the history length, the
@@ -112,6 +137,14 @@ export const commandSchema = z
         'length',
         'key',
         'stopIfPlaying',
+        // 2.40: Quick Mimic (draftCreate), Keep and close a draft, a budget request, Temp after a crash.
+        'phrase',
+        'recent',
+        'close',
+        'allow',
+        'deny',
+        'recover',
+        'discard',
       ])
       .optional(),
     permissions: z
@@ -123,6 +156,7 @@ export const commandSchema = z
         guestUploads: z.boolean().optional(),
         guestTransforms: z.boolean().optional(),
         guestMimic: z.boolean().optional(),
+        guestKeep: z.boolean().optional(),
       })
       .strict()
       .optional(),
@@ -226,7 +260,14 @@ export const snapshotSchema = z.object({
     guestUploads: z.boolean().optional(),
     guestTransforms: z.boolean().optional(),
     guestMimic: z.boolean().optional(),
+    // 2.40: guests may Keep clips into the host's chosen destination. Older companions omit it.
+    guestKeep: z.boolean().optional(),
   }),
+  // 2.40: these rise when drafts or guest budgets change, so pages fetch draftList or budgetStatus;
+  // tempRecovery counts the clips a crashed companion left in Temp until the host decides.
+  drafts: z.number().int().nonnegative().optional(),
+  budgets: z.number().int().nonnegative().optional(),
+  tempRecovery: z.number().int().positive().nullish(),
   // True after the host's Panic until they resume guest playback (2.35). Older companions omit it.
   playbackSuspended: z.boolean().nullish(),
   mimic: z
@@ -315,6 +356,10 @@ export const slowOps: readonly Command['op'][] = [
   'mimicLibraryImport',
   'trimAudio',
   'trimPreview',
+  'mimicPreview',
+  'draftKeep',
+  'draftPlay',
+  'tempRecover',
 ];
 /**
  * Playback and transport commands (2.35). They are answered quickly and a burst of them is normal use
@@ -340,6 +385,20 @@ export function isGuestAllowed(c: Command, s: Snapshot) {
   // what was recorded since they joined (and what the host shared).
   if (c.op === 'historyTimeline' || c.op === 'historyLevels' || c.op === 'historyTranscript')
     return s.permissions.guestMimic === true;
+  // Drafts and private preview (2.40): their own, scoped by the companion to what they may see.
+  // Play into game needs playback as well, like Mimic & play.
+  if (c.op === 'draftPlay')
+    return s.permissions.guestMimic === true && s.permissions.remotePlayback;
+  if (c.op.startsWith('draft') || c.op === 'mimicPreview') return s.permissions.guestMimic === true;
+  // Keep (2.40): into the host's destination, within their budget; never a path of their own.
+  if (c.op === 'keepAudio')
+    return (
+      s.permissions.guestKeep === true &&
+      c.destinationDirectory === undefined &&
+      c.categoryId === undefined &&
+      c.categoryName === undefined
+    );
+  if (c.op === 'budgetStatus') return true;
   if (c.op === 'trimAudio') return s.permissions.guestUploads !== false;
   // Undo of a guest's own clip or copy (2.32): the companion checks the guest added it.
   if (c.op === 'removeAudio') return s.permissions.guestUploads !== false;

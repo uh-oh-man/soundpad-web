@@ -47,7 +47,8 @@ public sealed partial class Bridge
     private int stateDirty, disposed;
 
     private static bool StartOperation(string op) => op is "play" or "startAt" or "region" or "audioPlay" or "reverse";
-    private static bool AutoplayOperation(Command c) => c.Autoplay && c.Op is "trimAudio" or "mimicClip" or "mimicLibraryImport";
+    // draftPlay (2.40) is always "make it (or reuse it) and play it".
+    private static bool AutoplayOperation(Command c) => c.Autoplay && c.Op is "trimAudio" or "mimicClip" or "mimicLibraryImport" || c.Op == "draftPlay";
     /// <summary>The quiet answer to playback input that no longer applies: never an error, nothing was played.</summary>
     private static Reply Superseded(Command c, string reason) => new("ack", c.Id, true, Data: new { superseded = true, reason, played = false });
     private bool IsNewest(Intent intent) => ReferenceEquals(newest, intent);
@@ -222,7 +223,7 @@ public sealed partial class Bridge
         try
         {
             if (!await SendStop()) return false;
-            NoteAudio(); SlotLease? free = null;
+            NoteAudio(); NoteOwnStop(); SlotLease? free = null;
             lock (playbackSync)
             {
                 if (playbackOwner < intent.Revision)
