@@ -115,6 +115,18 @@ const subscribe = (notify: () => void) => {
     listeners.delete(notify);
   };
 };
+/**
+ * The cached waveform of `soundId` on `hostId`, if one is held: a plain read that never asks the host
+ * (Stage G, 2.43: the header ribbon samples it every frame). `requestWaveform` fetches a missing one.
+ */
+export function peekWaveform(
+  hostId: string | null | undefined,
+  soundId: string,
+): CachedWaveform | undefined {
+  return hostId ? cache.get(hostId + ':' + soundId) : undefined;
+}
+/** Calls `listener` whenever any cached waveform arrives, changes or is cleared. Returns the unsubscribe. */
+export const subscribeWaveforms = subscribe;
 export function useWaveformData(hostId: string | null | undefined, id: string, enabled: boolean) {
   const version = useSyncExternalStore(subscribe, () => generation);
   const key = (hostId ?? '') + ':' + id;

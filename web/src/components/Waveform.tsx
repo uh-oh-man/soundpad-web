@@ -4,6 +4,8 @@ import { useWaveformData, clearWaveforms } from '../waveform-cache';
 import { HELD_BY_HOST, playback as intents } from '../playback';
 import type { Snapshot, Sound, Waveform as WaveData } from '../protocol';
 import { useTimeline } from '../timeline';
+import { makeBase, project, type PlayheadBase } from '../playhead';
+import { motionReduced } from '../motion';
 import type { Workspace } from '../workspace';
 export const formatTime = (ms: number | null | undefined, precision = 1) =>
   ms == null
@@ -11,45 +13,17 @@ export const formatTime = (ms: number | null | undefined, precision = 1) =>
     : `${Math.floor(ms / 60000)}:${((ms / 1000) % 60).toFixed(precision).padStart(precision + 3, '0')}`;
 export function usePlayhead(playback: Snapshot['playback']) {
   const [position, setPosition] = useState(playback.positionMs ?? 0);
-  const base = useRef({
-    position: playback.positionMs ?? 0,
-    at: performance.now(),
-    epoch: playback.epoch,
-    status: playback.status,
-    positionRevision: playback.positionRevision,
-  });
+  const base = useRef<PlayheadBase>(makeBase(playback, performance.now()));
   useEffect(() => {
-    const now = performance.now(),
-      previous = base.current;
-    const projected = previous.position + (previous.status === 'PLAYING' ? now - previous.at : 0),
-      sample = playback.positionMs ?? 0;
-    const next =
-      previous.epoch === playback.epoch &&
-      previous.positionRevision === playback.positionRevision &&
-      playback.status === 'PLAYING' &&
-      Math.abs(sample - projected) < 350
-        ? Math.max(sample, projected)
-        : sample;
-    base.current = {
-      position: next,
-      at: now,
-      epoch: playback.epoch,
-      status: playback.status,
-      positionRevision: playback.positionRevision,
-    };
+    // The extrapolation lives in playhead.ts (Stage G), shared with the header ribbon.
+    base.current = makeBase(playback, performance.now(), base.current);
     let frame = 0,
       timer: ReturnType<typeof setTimeout>;
     function update() {
-      const value = Math.min(
-        playback.durationMs ?? Infinity,
-        base.current.position +
-          (playback.status === 'PLAYING' && !document.hidden
-            ? performance.now() - base.current.at
-            : 0),
-      );
-      setPosition(Math.max(0, value));
+      setPosition(project(base.current, performance.now(), playback.durationMs, document.hidden));
       if (playback.status === 'PLAYING') {
-        if (matchMedia('(prefers-reduced-motion: reduce)').matches) timer = setTimeout(update, 200);
+        // Reduced motion (the system's, or Settings → Motion: Reduce): a few steps a second, no frames.
+        if (motionReduced()) timer = setTimeout(update, 200);
         else frame = requestAnimationFrame(update);
       }
     }
