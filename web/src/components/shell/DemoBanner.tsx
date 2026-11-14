@@ -14,7 +14,7 @@ export function DemoBanner() {
         browser, the guests are simulated, and leaving clears the example’s recordings, drafts and
         clips. Favourites and view settings stay on this browser.
       </span>
-      <button onClick={() => void controller.leave()}>
+      <button className="btn" onClick={() => void controller.leave()}>
         <LogOut size={15} aria-hidden="true" /> Leave example
       </button>
     </aside>

@@ -54,6 +54,13 @@ test('example copy: the start page says what can be tried, and the banner what l
   await expect(page.locator('.connected-guests')).toContainText('Alex (simulated)', {
     timeout: 10000,
   });
+  // The restyled dialogs (Stage G C3): Session & access with the appearance choices, then the board again.
+  await page.getByRole('button', { name: 'Access settings' }).click();
+  const settings = page.getByRole('dialog', { name: 'Session & access' });
+  await expect(settings.getByRole('radiogroup', { name: 'Navigation' })).toBeVisible();
+  expect(await axe(page)).toEqual([]);
+  await settings.getByRole('button', { name: 'Close dialog' }).click();
+  expect(await axe(page)).toEqual([]);
   await page.getByRole('button', { name: 'Leave example' }).click();
   await expect(page.getByRole('button', { name: 'Try the example' })).toBeVisible();
 });

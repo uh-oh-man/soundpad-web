@@ -229,7 +229,7 @@ export function SettingsDialog({
       </div>
       {host && !view.demo && missingFeatures(state.companionVersion).length > 0 && (
         // Features needing a newer companion are hidden, so say what an update would add. The example has no
-        // companion to update (it stands in for a 2.37 one, without the recording history, 2.39).
+        // companion to update (it stands in for one; see DEMO_COMPANION in demo/model.ts).
         <p className="companion-features" role="note">
           Your Windows companion is {state.companionVersion}. A newer one adds{' '}
           {missingFeatures(state.companionVersion).join(', ')}.{' '}
