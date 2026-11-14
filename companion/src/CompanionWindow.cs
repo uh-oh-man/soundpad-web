@@ -34,9 +34,11 @@ internal sealed class DesktopUi : IDisposable
 
     /// <summary>Opens the companion window on <paramref name="url"/>. <paramref name="failed"/> runs (on the UI thread)
     /// when WebView2 cannot run, after the window is gone; <paramref name="closing"/> runs when the person closes it.</summary>
-    public Task Open(string url, string origin, string directory, Action<string> failed, Action<bool> closing, bool hidden = false) => OnUi(() =>
+    /// <param name="asking">Asked when the person closes the window (2.40): true when the page was asked first (the quit
+    /// prompt), so the window stays open until it answers.</param>
+    public Task Open(string url, string origin, string directory, Action<string> failed, Action<bool> closing, bool hidden = false, Func<bool>? asking = null) => OnUi(() =>
     {
-        window = new CompanionWindow(url, origin, directory);
+        window = new CompanionWindow(url, origin, directory) { AskBeforeClosing = asking };
         DataFolder = directory;
         window.Failed += failed;
         window.Quitting += closing;
@@ -73,6 +75,9 @@ internal sealed class CompanionWindow : Form
     public event Action<string>? Failed;
     /// <summary>The person closed the window (true when Windows is ending the session). The companion quits.</summary>
     public event Action<bool>? Quitting;
+    /// <summary>True when closing must wait for the page's answer (the quit prompt, 2.40).</summary>
+    [System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)]
+    public Func<bool>? AskBeforeClosing { get; init; }
     // Charcoal, close to the website's background, so the window never flashes white while the page loads.
     private static readonly Color Charcoal = Color.FromArgb(0x17, 0x18, 0x1b);
 
@@ -223,6 +228,13 @@ internal sealed class CompanionWindow : Form
     {
         base.OnFormClosing(e);
         if (e.Cancel) return;
+        // Clips in Temp would be removed (2.40): the page asks first, and quits through the companion when told to.
+        if (!failing && !exiting && e.CloseReason == CloseReason.UserClosing && AskBeforeClosing?.Invoke() == true)
+        {
+            e.Cancel = true;
+            if (WindowState == FormWindowState.Minimized) WindowState = FormWindowState.Normal;
+            return;
+        }
         WindowPlacement.From(this).Save(placementPath);
         Hide();
         retry?.Dispose(); retry = null;

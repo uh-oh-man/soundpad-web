@@ -2,6 +2,7 @@ import { Link, LogOut, Radio, RotateCcw, Trash2 } from 'lucide-react';
 import { controller } from '../controller';
 import type { Snapshot } from '../protocol';
 import { SessionAccess } from './SessionAccess';
+import { KeepSettingsForm } from './StoragePanel';
 import { ConnectionDetails } from './ConnectionDetails';
 import { missingFeatures, supports } from '../version';
 import { DEMO_COPY, hostCopy } from '../hosting';
@@ -71,6 +72,15 @@ const permissionToggles: {
     label: 'Allow guest Mimic',
     v2: true,
     feature: 'mimic',
+  },
+  {
+    key: 'guestKeep',
+    title: 'Guest Keep',
+    description:
+      'Guests can keep clips permanently, into the folder you choose below and within their storage allowance.',
+    label: 'Allow guest Keep',
+    v2: true,
+    feature: 'drafts',
   },
 ];
 
@@ -169,6 +179,9 @@ export function SettingsDialog({
                 />
               </div>
             ))}
+          {!view.demo && supports(state.companionVersion, 'drafts') && (
+            <KeepSettingsForm state={state} connected={connected} />
+          )}
           <div className="invite-field">
             <label htmlFor="invite">Invitation link · anyone with this link can join</label>
             <input id="invite" value={view.invite} readOnly onFocus={(e) => e.target.select()} />

@@ -38,7 +38,7 @@ public sealed partial class Bridge
     }
     private bool GuestStillAllowed(string actor, string? requester, string? audience) => actor == "host" ||
         (disk.Permissions.RemotePlayback && (audioAudience == null || sessionAccepting && audience == audioAudience) && (requester == null || !revokedAudioPeers.ContainsKey(requester)));
-    private void AudioPermission(Command command, string actor, string? requester, string? audience)
+    private void AudioPermission(Command command, string actor, string? requester, string? audience, Participant? participant = null)
     {
         long now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
         if (command.V is not (1 or 2) || !Guid.TryParseExact(command.Id, "D", out _) || Math.Abs(now - command.At) > 90000) throw new InvalidDataException("Invalid or expired audio command.");
@@ -49,8 +49,17 @@ public sealed partial class Bridge
             if (requester == null || !disk.Permissions.GuestUploads || (audioAudience != null && (!sessionAccepting || audience != audioAudience)) || revokedAudioPeers.ContainsKey(requester))
                 throw new InvalidDataException("The host has not allowed guests to add or remove audio.");
             var asset = Audio.AssetById(command.AssetId ?? "");
-            if (asset.UploaderId != requester || asset.State == "permanent" || asset.Promotion != null || asset.Variants.Any(v => v.Permanent || v.LegacyApproval))
+            // Their own: added from this connection, or (2.40) by this participant in this launch, also before a reload.
+            bool own = asset.UploaderId == requester || budgets.OwnerOf(asset.Id) is { } maker && maker == PersonKey(actor, participant, requester);
+            if (!own || asset.State == "permanent" || asset.Promotion != null || asset.Variants.Any(v => v.Permanent || v.LegacyApproval))
                 throw new InvalidDataException("Guests can remove only temporary audio they added themselves.");
+            return;
+        }
+        if (actor != "host" && command.Op == "keepAudio")
+        {
+            // Guest Keep (2.40): no per-item approval, within their budget, while the host allows it.
+            if (!Keep.GuestKeep || !sessionAccepting || (audioAudience != null && audience != audioAudience) || requester != null && revokedAudioPeers.ContainsKey(requester))
+                throw new InvalidDataException("The host has not allowed guests to keep clips.");
             return;
         }
         if (actor != "host")
@@ -68,7 +77,7 @@ public sealed partial class Bridge
         if (StartOperation(c.Op)) return PlayManaged(c, actor, participant, intent, requester, audience);
         if (audioRequests.Count >= 64) foreach (var item in audioRequests.Where(e => e.Value.IsValueCreated && e.Value.Value.IsCompleted)) audioRequests.TryRemove(item.Key, out _);
         if (audioRequests.Count >= 128) return Task.FromResult(new Reply("ack", c.Id, false, "Audio processing is busy."));
-        return audioRequests.GetOrAdd(actor + ":" + requester + ":" + c.Id, _ => new(() => RunAudio(c, actor, requester, audience))).Value;
+        return audioRequests.GetOrAdd(actor + ":" + requester + ":" + c.Id, _ => new(() => RunAudio(c, actor, requester, audience, participant))).Value;
     }
     /// <summary>
     /// A play, cue start or region of a Temp or kept sound, "play this source" (audioPlay) or reverse (2.35).
@@ -198,23 +207,24 @@ public sealed partial class Bridge
         return saved with { Data = epoch != null ? new { assetId, state, played = true, epoch } : new { assetId, state, played = false } };
     }
     private static string? Field(Reply reply, string name) => reply.Data?.GetType().GetProperty(name)?.GetValue(reply.Data) as string;
-    private async Task<Reply> RunAudio(Command c, string actor, string? requester, string? audience)
+    private async Task<Reply> RunAudio(Command c, string actor, string? requester, string? audience, Participant? participant = null)
     {
         bool entered = false;
         try
         {
-            AudioPermission(c, actor, requester, audience);
+            AudioPermission(c, actor, requester, audience, participant);
             if (Interlocked.Increment(ref audioWaiting) > 2 && c.Op is not ("endSession" or "beginSession")) { Interlocked.Decrement(ref audioWaiting); return new("ack", c.Id, false, "Audio preparation is busy. Playback controls remain available; retry shortly."); }
             entered = true; await audioGate.EnterAsync(PriorityGate.Lane.Normal);
             try
             {
-                AudioPermission(c, actor, requester, audience);
+                AudioPermission(c, actor, requester, audience, participant);
                 await gate.EnterAsync(PriorityGate.Lane.Normal); try { if (disk.Receipts.ContainsKey(c.Id)) return new("ack", c.Id, true); } finally { gate.Release(); }
                 if (c.Op == "beginSession")
                 {
                     if (!Audio.Public.Blocked) Audio.BeginSession(); sessionAccepting = true; audioAudience = c.AudienceId; revokedAudioPeers.Clear();
                 }
-                else if (c.Op == "endSession") { if (!Audio.Public.Blocked) { Audio.RetireSession(); await Audio.Cleanup(); } }
+                // End hosting keeps Temp while the companion runs (2.40; until 2.39 it was cleared here). Quitting clears it.
+                else if (c.Op == "endSession") { }
                 else if (c.Op == "retryCleanup") await Audio.Recover();
                 else if (c.Op == "clearTemp")
                 {
@@ -255,6 +265,7 @@ public sealed partial class Bridge
                     await Audio.Remove(assetId);
                 }
                 else if (c.Op == "retryAudio") await Audio.RetryAsset(c.AssetId ?? throw new InvalidDataException("Choose a managed source."));
+                else if (c.Op == "keepAudio" && actor != "host") await GuestKeep(c, actor, participant, requester);
                 else if (c.Op == "keepAudio") await Audio.Promote(c.AssetId ?? throw new InvalidDataException("Open Temp to confirm a permanent destination."), c.VariantId ?? throw new InvalidDataException("Choose the normal or reversed variant."), c.DestinationDirectory, c.CategoryId, c.CategoryName, c.Confirmed);
                 else throw new InvalidDataException("Unsupported command.");
                 await gate.EnterAsync(PriorityGate.Lane.Normal); try { await RefreshInner(); SaveAudioReceipt(c); Publish(); } finally { gate.Release(); }
@@ -267,7 +278,8 @@ public sealed partial class Bridge
     }
     /// <summary>The caller holds the gate. Managed-audio changes are durable before their answer, as before.</summary>
     private void SaveAudioReceipt(Command c) { RememberReceipt(c); SaveNow(); }
-    public async Task<Reply> Upload(byte[] bytes, string name, string by, bool host = false, string owner = "anonymous", string? audience = null, bool mimic = false)
+    /// <param name="guest">Whose budget a guest's audio counts against (2.40): their participant id; <paramref name="owner"/> when absent.</param>
+    public async Task<Reply> Upload(byte[] bytes, string name, string by, bool host = false, string owner = "anonymous", string? audience = null, bool mimic = false, string? guest = null)
     {
         if (!sessionAccepting || (!host && (!(mimic ? disk.Permissions.GuestMimic : disk.Permissions.GuestUploads) || (audioAudience != null && audience != audioAudience) || revokedAudioPeers.ContainsKey(owner)))) return new("ack", "upload", false, "Guest uploads are disabled or this session ended.");
         if (Interlocked.Increment(ref audioWaiting) > 2) { Interlocked.Decrement(ref audioWaiting); return new("ack", "upload", false, "Audio processing is busy; retry shortly."); }
@@ -275,7 +287,11 @@ public sealed partial class Bridge
         try
         {
             if (!sessionAccepting || (!host && (!(mimic ? disk.Permissions.GuestMimic : disk.Permissions.GuestUploads) || (audioAudience != null && audience != audioAudience) || revokedAudioPeers.ContainsKey(owner)))) throw new InvalidDataException("Upload authorization changed.");
+            // A guest's new clip, copy or upload must fit their Temp budget, and pauses while they wait for more (2.40).
+            string budgetKey = guest ?? owner;
+            if (!host && budgets.CheckCreate(budgetKey, by, bytes.Length, Keep, TemporaryIds()) is { } refusal) { Publish(); throw new InvalidDataException(refusal); }
             var asset = await Audio.Upload(bytes, name, by, owner, host);
+            if (!host) budgets.NoteTemp(budgetKey, by, asset.Id, bytes.Length);
             await gate.EnterAsync(PriorityGate.Lane.Normal); try { await RefreshInner(); Publish(); } finally { gate.Release(); }
             return new("ack", "upload", true, Data: new { assetId = asset.Id, state = asset.State });
         }

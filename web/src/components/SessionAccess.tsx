@@ -3,6 +3,7 @@ import { controller } from '../controller';
 import { MAX_PLACES, places, type PermissionKey } from '../network/policy';
 import { supports } from '../version';
 import { LobbyRequests } from './LobbyRequests';
+import { GuestUsage } from './StoragePanel';
 
 type View = ReturnType<typeof controller.getSnapshot>;
 
@@ -20,6 +21,7 @@ export const GUEST_PERMISSIONS: {
   { key: 'guestUploads', label: 'Session uploads' },
   { key: 'guestTransforms', label: 'Reverse generation' },
   { key: 'guestMimic', label: 'Mimic', v2: true, feature: 'mimic' },
+  { key: 'guestKeep', label: 'Keep clips', v2: true, feature: 'drafts' },
 ];
 
 /**
@@ -92,7 +94,8 @@ export function SessionAccess({ view }: { view: View }) {
                 <Users size={17} /> {name} <small>{id.slice(0, 8)}</small>{' '}
                 <span className={`link-kind ${view.links[id] ?? 'direct'}`}>
                   {view.links[id] === 'relay' ? 'Relayed' : 'Direct'}
-                </span>
+                </span>{' '}
+                <GuestUsage participantId={person?.id} />
               </span>
               <details className="guest-permissions">
                 <summary aria-label={`Permissions for ${name}`}>

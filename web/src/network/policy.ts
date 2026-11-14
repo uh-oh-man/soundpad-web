@@ -30,6 +30,7 @@ export const PERMISSION_KEYS = [
   'guestUploads',
   'guestTransforms',
   'guestMimic',
+  'guestKeep',
   'guestCounter',
 ] as const satisfies readonly PermissionKey[];
 export type Override = Partial<Record<PermissionKey, boolean>>;

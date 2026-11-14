@@ -36,7 +36,7 @@ export type Outcome = {
   data?: unknown;
 };
 /** Commands that make a clip and can play it when it is ready. */
-export type MakeOp = 'trimAudio' | 'mimicClip' | 'mimicLibraryImport';
+export type MakeOp = 'trimAudio' | 'mimicClip' | 'mimicLibraryImport' | 'draftPlay';
 
 /** How long a repeat of the same failure stays unannounced: the life of an error notice. */
 const FAILURE_QUIET_MS = 8000;

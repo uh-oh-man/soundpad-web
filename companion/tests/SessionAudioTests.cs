@@ -44,6 +44,9 @@ public sealed class SessionAudioTests : IDisposable
         Assert.True((await bridge.Upload(File.ReadAllBytes(input), "Second.wav", "Bob")).Ok);
         Assert.True((await bridge.Execute(Cmd("endSession"), "host")).Ok);
         Assert.False((await bridge.Upload(File.ReadAllBytes(input), "Late.wav", "Guest")).Ok);
+        // End hosting keeps Temp while the companion runs (2.40); quitting removes it.
+        Assert.Contains(bridge.Snapshot.Library.Sounds, s => s.Temporary && s.UploadedBy == "Bob");
+        await bridge.CleanupSession(); await bridge.Poll(true);
         Assert.Equal(5, bridge.Snapshot.Library.Sounds.Length); Assert.Contains(bridge.Snapshot.Library.Sounds, s => s.AssetId == first.AssetId && !s.Temporary); Assert.All(originals, id => Assert.Contains(bridge.Snapshot.Library.Sounds, s => s.Id == id));
         Assert.DoesNotContain("DoRemoveSelectedEntries(true)", mock.Commands);
         Assert.Single(Directory.GetFiles(Path.Combine(folder, "library"), "*.wav", SearchOption.AllDirectories));
@@ -57,7 +60,9 @@ public sealed class SessionAudioTests : IDisposable
         var original = bridge.Snapshot.Library.Sounds[0].Id;
         for (int i = 0; i < 2; i++) Assert.True((await bridge.Execute(Cmd("reverse", original, bridge.Snapshot.Library.Version), "guest")).Ok);
         Assert.Single(bridge.Snapshot.Library.Sounds, s => s.Temporary); Assert.Equal(2, mock.Commands.Count(c => c == "DoPlaySound(5)"));
-        Assert.True((await bridge.Execute(Cmd("stop"), "host")).Ok); Assert.True((await bridge.Execute(Cmd("endSession"), "host")).Ok); Assert.Equal(4, bridge.Snapshot.Library.Sounds.Length);
+        Assert.True((await bridge.Execute(Cmd("stop"), "host")).Ok); Assert.True((await bridge.Execute(Cmd("endSession"), "host")).Ok);
+        Assert.Single(bridge.Snapshot.Library.Sounds, s => s.Temporary); // End hosting keeps Temp (2.40)
+        await bridge.CleanupSession(); await bridge.Poll(true); Assert.Equal(4, bridge.Snapshot.Library.Sounds.Length); // quitting removes it
     }
     [Fact]
     public async Task RecoveryCleanupNeverRemovesUnownedEntriesInExistingTemp()

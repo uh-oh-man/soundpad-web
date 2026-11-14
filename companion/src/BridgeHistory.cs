@@ -7,7 +7,8 @@ public sealed record MimicSettings(int Format = 1, int HistorySeconds = HistoryS
 /// <summary>The history timeline as one person may see it (reply of historyTimeline, 2.39).</summary>
 /// <param name="FromFrame">A guest's join frame (what they can see from); null for the host.</param>
 /// <param name="Shared">Earlier ranges the host shared with guests.</param>
-public sealed record HistoryTimelineReply(string? SessionId, int Rate, long LiveFrame, long? LiveWallUtcMs, long NowUtcMs, bool Recording, int WindowSeconds, HistoryRange[] Available, HistorySpan[] Spans, HistoryGap[] Gaps, long? FromFrame, HistoryRange[] Shared, bool Transcribing);
+/// <param name="Replays">2.40: spans where the companion itself played into the game (its own replay), clipped to what the asker may see.</param>
+public sealed record HistoryTimelineReply(string? SessionId, int Rate, long LiveFrame, long? LiveWallUtcMs, long NowUtcMs, bool Recording, int WindowSeconds, HistoryRange[] Available, HistorySpan[] Spans, HistoryGap[] Gaps, long? FromFrame, HistoryRange[] Shared, bool Transcribing, HistoryRange[]? Replays = null);
 /// <summary>A word as the website receives it (historyTranscript, 2.39). Frames are on the history timeline.</summary>
 public sealed record HistoryWordReply(long Id, long Start, long End, string Text, float Probability, int StretchMs, bool PauseBefore, bool PauseAfter, string Status, long PhraseId, int Revision, bool Corrected);
 
@@ -159,6 +160,9 @@ public sealed partial class Bridge
     private void CloseHistoryLocked()
     {
         var old = history;
+        // Drafts belong to the history they pin (2.40); its own-replay marks go with it.
+        ForgetDrafts(old);
+        if (old != null) ownReplays.Clear(old.SessionId);
         UseStoreLocked(null);
         if (old == null) return;
         old.Close(true);
@@ -354,7 +358,8 @@ public sealed partial class Bridge
                     var access = AccessFor(actor, participant, requester, h);
                     var t = h.Timeline(access);
                     HistoryRange[] shared; lock (sharedRanges) shared = [.. sharedRanges];
-                    return new("ack", c.Id, true, Data: new HistoryTimelineReply(h.SessionId, t.Rate, t.LiveFrame, t.LiveWallUtcMs, utcNow(), t.Recording, t.WindowSeconds, t.Available, t.Spans, t.Gaps, host ? null : access.FromFrame, host ? shared : [.. access.SharedRanges], transcriber.Enabled));
+                    var replays = ownReplays.Ranges(h.SessionId).Where(r => Math.Min(r.EndFrame, t.LiveFrame) > r.StartFrame).Select(r => Visible(access, r.StartFrame, Math.Min(r.EndFrame, t.LiveFrame))).OfType<HistoryRange>().ToArray();
+                    return new("ack", c.Id, true, Data: new HistoryTimelineReply(h.SessionId, t.Rate, t.LiveFrame, t.LiveWallUtcMs, utcNow(), t.Recording, t.WindowSeconds, t.Available, t.Spans, t.Gaps, host ? null : access.FromFrame, host ? shared : [.. access.SharedRanges], transcriber.Enabled, replays));
                 }
             case "historyLevels":
                 {

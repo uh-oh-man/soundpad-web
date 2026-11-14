@@ -72,14 +72,14 @@ public sealed partial class Bridge
     }
 
     /// <summary>Saves [start, stop) of the history, as <paramref name="access"/> may read it, as a Temp sound. Pins nothing.</summary>
-    private async Task<Reply> SaveMimic(HistoryStore h, HistoryAccess access, long start, long stop, string? name, string by, bool host, string owner, string? audience)
+    private async Task<Reply> SaveMimic(HistoryStore h, HistoryAccess access, long start, long stop, string? name, string by, bool host, string owner, string? audience, string? guest = null)
     {
         if (stop - start < (long)h.Rate * MimicMinimumMs / 1000) throw new InvalidDataException("Mimic had not started listening yet at that moment.");
         var samples = h.Read(access, start, (int)(stop - start));
         if (samples.All(s => Math.Abs(s) < 0.0005f)) throw new InvalidDataException("That selection is silent. Nothing was saved.");
         name = string.IsNullOrWhiteSpace(name) ? "Mimic " + DateTime.Now.ToString("HH.mm.ss") : name.Trim();
         if (name.Length > 100) name = name[..99].TrimEnd() + "…";
-        var reply = await Upload(MimicRing.Wav(samples, h.Rate), name + ".wav", by, host, owner, audience, mimic: true);
+        var reply = await Upload(MimicRing.Wav(samples, h.Rate), name + ".wav", by, host, owner, audience, mimic: true, guest: guest);
         if (reply.Ok && reply.Data?.GetType().GetProperty("assetId")?.GetValue(reply.Data) is string assetId)
         {
             lock (recentClips)
@@ -169,9 +169,11 @@ public sealed partial class Bridge
     }
 
     private static bool IsMimic(string op) => op is "mimicSources" or "mimicStart" or "mimicStop" or "mimicPeek" or "mimicClip" or "mimicTranscribe" or "mimicHotkey" or "mimicPreview" or "mimicLibrary" or "mimicLibraryImport"
-        or "historyTimeline" or "historyLevels" or "historyTranscript" or "historyShare" or "historyUnshare" or "historySettings" or "historyDiscard" or "historyCorrect";
+        or "historyTimeline" or "historyLevels" or "historyTranscript" or "historyShare" or "historyUnshare" or "historySettings" or "historyDiscard" or "historyCorrect"
+        || IsDraftOp(op);
     /// <summary>What a guest with Guest Mimic may ask of Mimic; everything else is the host's.</summary>
-    private static bool GuestMimicOp(string op) => op is "mimicPeek" or "mimicClip" or "historyTimeline" or "historyLevels" or "historyTranscript";
+    /// <summary>Since 2.40 also drafts, Quick Mimic and private preview (scoped by what they may see, rate limited).</summary>
+    private static bool GuestMimicOp(string op) => op is "mimicPeek" or "mimicClip" or "mimicPreview" or "historyTimeline" or "historyLevels" or "historyTranscript" || IsDraftOp(op);
 
     private VoiceReplayLibrary voiceReplay = new();
     /// <summary>Points at another Voice Replay Studio data folder; tests use a temporary one.</summary>
@@ -192,6 +194,7 @@ public sealed partial class Bridge
             if (!host && !GuestMimicOp(c.Op)) throw new InvalidDataException("Only the host can choose what Mimic listens to.");
             if (!host && !GuestMimicAllowed(requester, audience)) throw new InvalidDataException("The host has not enabled Mimic for guests.");
             if (ExecuteHistory(c, actor, participant, requester) is { } answered) return answered;
+            if (await ExecuteDrafts(c, actor, participant, requester, audience, intent) is { } drafted) return drafted;
             switch (c.Op)
             {
                 case "mimicSources":
@@ -269,18 +272,14 @@ public sealed partial class Bridge
                 case "mimicClip":
                     {
                         var (h, start, stop) = Selection(c);
-                        var result = (await SaveMimic(h, AccessFor(actor, participant, requester, h), start, stop, c.Name, Person(actor, participant).Name, host, requester ?? participant?.Id ?? actor, audience)) with { Id = c.Id };
+                        var result = (await SaveMimic(h, AccessFor(actor, participant, requester, h), start, stop, c.Name, Person(actor, participant).Name, host, requester ?? participant?.Id ?? actor, audience, PersonKey(actor, participant, requester))) with { Id = c.Id };
                         // "Mimic & play" as one command (2.35): plays only if nothing newer was asked for meanwhile.
                         return c.Autoplay ? await Autoplay(result, c, actor, participant, requester, audience, intent) : result;
                     }
                 case "mimicPreview":
-                    {
-                        // Host only (checked above): the audio goes to the host's own browser tab over loopback, to be
-                        // heard on that PC. It never reaches guests or Soundpad.
-                        var (h, start, stop) = Selection(c);
-                        if (stop - start < (long)h.Rate * MimicMinimumMs / 1000) throw new InvalidDataException("Mimic had not started listening yet at that moment.");
-                        return new("ack", c.Id, true, Data: new { wav = Convert.ToBase64String(MimicRing.Wav(h.Read(HistoryAccess.Host, start, (int)(stop - start)), h.Rate)) });
-                    }
+                    // The audio goes only to the person who asked (the host's tab over loopback; a guest, since 2.40,
+                    // scoped to what they may see). It never reaches Soundpad or anyone else.
+                    return Preview(c, actor, participant, requester);
                 case "mimicLibrary":
                     // Host only (checked above): clips saved in Voice Replay Studio on this PC, read without changing them.
                     return new("ack", c.Id, true, Data: new { available = voiceReplay.Exists, clips = voiceReplay.List() });

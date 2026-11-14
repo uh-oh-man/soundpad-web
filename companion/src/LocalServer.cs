@@ -50,10 +50,19 @@ public sealed class LocalServer(Bridge bridge, string origin, string? ownerKey =
     private string? session;
     private long sessionVersion;
 
-    private sealed class HostClient(string clientId, bool keyed)
+    // The quit prompt (2.40): closing the window while Temp holds clips asks its page first. Guarded by `roles`.
+    private Action<QuitAnswer>? quitAnswered;
+    private string? quitPromptId;
+    private long quitAskedAt;
+    /// <summary>A prompt the page has not answered for this long no longer holds the window open: the next close quits.</summary>
+    public TimeSpan QuitPromptPatience { get; init; } = TimeSpan.FromSeconds(30);
+
+    private sealed class HostClient(string clientId, bool keyed, bool quitPrompt = false)
     {
         public string ClientId { get; } = clientId;
         public bool Keyed { get; } = keyed;
+        /// <summary>The page said it can show the quit prompt (2.40); older pages would drop the connection over it.</summary>
+        public bool QuitPrompt { get; } = quitPrompt;
         public bool Owner;
         public bool Ended;                        // its last session command was End hosting (2.36)
         public string? RoleSent;
@@ -193,7 +202,9 @@ public sealed class LocalServer(Bridge bridge, string origin, string? ownerKey =
                             bridge.NoteGuest(person, requester, root.TryGetProperty("joinedAt", out var joined) && joined.ValueKind == JsonValueKind.Number && joined.TryGetInt64(out long joinedAt) ? joinedAt : null);
                         // Expensive work is admitted sixteen at a time. Playback control never counts against that.
                         SemaphoreSlim? slot = null;
-                        if (command.Op is "mimicSources" or "mimicStart" or "mimicClip" or "mimicLibrary" or "mimicLibraryImport" or "mimicTranscribe" or "trimAudio" or "trimPreview" or "waveform" or "spotify" or "audioAssets" or "keepAudio" or "removeAudio" or "retryAudio" or "retryCleanup" or "cleanupCategories" or "clearTemp" or "beginSession" or "endSession")
+                        if (command.Op is "mimicSources" or "mimicStart" or "mimicClip" or "mimicLibrary" or "mimicLibraryImport" or "mimicTranscribe" or "trimAudio" or "trimPreview" or "waveform" or "spotify" or "audioAssets" or "keepAudio" or "removeAudio" or "retryAudio" or "retryCleanup" or "cleanupCategories" or "clearTemp" or "beginSession" or "endSession"
+                            // 2.40: previews, clips made from drafts, and Temp recovery are expensive too.
+                            or "mimicPreview" or "draftKeep" or "draftPlay" or "tempRecover")
                         {
                             if (!await queries.WaitAsync(0)) { running.Add(Answer(command.Id, Task.FromResult(new Reply("ack", command.Id, false, "Too many background requests.")), null)); continue; }
                             slot = queries;
@@ -229,7 +240,8 @@ public sealed class LocalServer(Bridge bridge, string origin, string? ownerKey =
         string? id = hello.TryGetProperty("clientId", out var c) && c.ValueKind == JsonValueKind.String ? c.GetString() : null;
         // A page without a usable id can never reclaim a held place; it still gets a role like any other page.
         if (string.IsNullOrEmpty(id) || id.Length > 64) id = "unnamed-" + Convert.ToHexString(RandomNumberGenerator.GetBytes(8));
-        var client = new HostClient(id, ownerKey != null && Matches(key, ownerKey));
+        bool quitPrompt = hello.TryGetProperty("quitPrompt", out var q) && q.ValueKind == JsonValueKind.True;
+        var client = new HostClient(id, ownerKey != null && Matches(key, ownerKey), quitPrompt);
         string? warning = null;
         lock (roles)
         {
@@ -338,6 +350,26 @@ public sealed class LocalServer(Bridge bridge, string origin, string? ownerKey =
                     foreach (var view in hosts) if (view != from) view.Signal.Writer.TryWrite(0);
                 }
                 return;
+            case "quitAnswer":
+                {
+                    // Only the window's own page answers the window's question.
+                    if (!from.Keyed) return;
+                    string? id = root.TryGetProperty("id", out var i) && i.ValueKind == JsonValueKind.String ? i.GetString() : null;
+                    string? choice = root.TryGetProperty("action", out var ch) && ch.ValueKind == JsonValueKind.String ? ch.GetString() : null;
+                    if (choice is not ("keep" or "quit" or "cancel")) return;
+                    var ids = new List<string>();
+                    if (root.TryGetProperty("assetIds", out var list) && list.ValueKind == JsonValueKind.Array)
+                        foreach (var item in list.EnumerateArray().Take(256))
+                            if (item.ValueKind == JsonValueKind.String && Guid.TryParse(item.GetString(), out _)) ids.Add(item.GetString()!);
+                    Action<QuitAnswer>? answered;
+                    lock (roles)
+                    {
+                        if (id == null || id != quitPromptId) return;
+                        answered = quitAnswered; quitAnswered = null; quitPromptId = null;
+                    }
+                    answered?.Invoke(new(choice, [.. ids]));
+                    return;
+                }
             case "ownerAction":
                 var action = root.TryGetProperty("action", out var a) && a.ValueKind == JsonValueKind.String ? a.GetString() : null;
                 if (action is not ("rotate" or "disconnect")) return;
@@ -348,6 +380,28 @@ public sealed class LocalServer(Bridge bridge, string origin, string? ownerKey =
                 target?.Forward.Writer.TryWrite(Json.Write(new { type = "ownerAction", action, peer }));
                 return;
         }
+    }
+
+    /// <summary>
+    /// The window is being closed while Temp holds <paramref name="clips"/> clips (2.40): asks the window's page, which
+    /// shows "N clips in Temp will be removed: Keep selected / Quit anyway / Cancel" and answers with a quitAnswer
+    /// message. False when there is no page to ask (no window, an older website, a prompt left unanswered for
+    /// <see cref="QuitPromptPatience"/>): the window then closes as before. <paramref name="answered"/> runs once.
+    /// </summary>
+    public bool AskQuit(int clips, Action<QuitAnswer> answered)
+    {
+        HostClient? page;
+        string id = Guid.NewGuid().ToString("N");
+        lock (roles)
+        {
+            page = owner is { Keyed: true, QuitPrompt: true, Ended: false } o ? o : hosts.FirstOrDefault(h => h.Keyed && h.QuitPrompt);
+            if (page == null) return false;
+            long now = Environment.TickCount64;
+            if (quitPromptId != null && now - quitAskedAt >= (long)QuitPromptPatience.TotalMilliseconds) { quitPromptId = null; quitAnswered = null; return false; }
+            if (quitPromptId == null) quitAskedAt = now;
+            quitPromptId = id; quitAnswered = answered;
+        }
+        return page.Forward.Writer.TryWrite(Json.Write(new { type = "quitPrompt", id, clips }));
     }
 
     private static async Task<string> Receive(WebSocket socket, CancellationToken cancel)

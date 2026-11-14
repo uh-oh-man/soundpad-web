@@ -40,6 +40,8 @@ import { Modal, dialogOpen } from './components/Modal';
 import { Sidebar } from './components/Sidebar';
 import { SettingsDialog } from './components/SettingsDialog';
 import { LobbyRequests } from './components/LobbyRequests';
+import { BudgetRequests, QuitPromptDialog, TempRecovery } from './components/StoragePanel';
+import { useBudgetSync, useDraftStore, useDraftSync } from './mimic/draft-store';
 import type { ConnectionInfo } from './network/session';
 import { WhatsNew } from './components/WhatsNew';
 import { MimicPanel } from './components/MimicPanel';
@@ -404,6 +406,12 @@ function App() {
   const mimicSupported = supports(state.companionVersion, 'mimic');
   const canMimic = connected && mimicSupported && (host || state.permissions.guestMimic === true);
   const mimicListening = mode !== 'landing' && !!state.mimic?.active;
+  // Drafts, guest Keep and storage budgets (2.40): a guest also needs a host page that relays them.
+  const draftsReady =
+    connected && supports(state.companionVersion, 'drafts') && (host || controller.relaysDrafts());
+  useDraftSync(state, draftsReady && canMimic);
+  useBudgetSync(state, host, draftsReady);
+  const { budget } = useDraftStore();
   // After the host's Panic (2.35): guests cannot start audio until the host resumes; the host can.
   const suspended = mode !== 'landing' && state.playbackSuspended === true;
   const held = guestHeld(state, host);
@@ -678,6 +686,8 @@ function App() {
                     </p>
                   )}
                   {host && <LobbyRequests requests={view.requests} />}
+                  {host && budget?.host && <BudgetRequests requests={budget.host.requests} />}
+                  {host && !!state.tempRecovery && <TempRecovery clips={state.tempRecovery} />}
                 </div>
                 <div className="board-actions">
                   {canMimic && (
@@ -1025,6 +1035,7 @@ function App() {
           />
         </Modal>
       )}
+      {view.quitPrompt && host && <QuitPromptDialog clips={view.quitPrompt.clips} />}
       {mimicOpen && mode !== 'landing' && (
         <Modal label="Mimic" onClose={() => setMimicOpen(false)}>
           <MimicPanel

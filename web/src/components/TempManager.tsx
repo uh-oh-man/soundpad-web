@@ -9,6 +9,9 @@ import { Headphones, Play } from 'lucide-react';
 import { onTempRequest, type TempRequest } from '../edit-copy';
 import { removeNewTempAudio } from '../remove-temp';
 import { guestHeld, HELD_BY_HOST, intentKey, playback, usePendingIntent } from '../playback';
+import { recall, remember } from '../sections';
+import { useDraftStore } from '../mimic/draft-store';
+import { formatMb } from '../mimic/drafts';
 const variant = z.object({
   id: z.string(),
   soundId: z.string().nullable(),
@@ -90,7 +93,8 @@ export function TempManager({
   host: boolean;
   connected: boolean;
 }) {
-  const [open, setOpen] = useState(false),
+  // Temp remembers whether it was open and what was searched (2.40), across a reload too.
+  const [open, setOpen] = useState(() => recall('temp').open === true),
     [data, setData] = useState<z.infer<typeof response>>(),
     [error, setError] = useState(''),
     [pending, setPending] = useState('');
@@ -111,7 +115,20 @@ export function TempManager({
   }>();
   const [refresh, setRefresh] = useState(0);
   // Search (2.25), like the Voice Replay Studio list: a long session's Temp holds many sources.
-  const [find, setFind] = useState('');
+  const [find, setFind] = useState(() => recall('temp').find ?? '');
+  useEffect(() => remember('temp', { open, find }), [open, find]);
+  // Guest Keep and storage (2.40): a guest keeps clips into the host's destination, within their budget,
+  // and only while connected; they may remove their own Temp clips.
+  const drafts = supports(state.companionVersion, 'drafts') && (host || controller.relaysDrafts());
+  const { budget } = useDraftStore();
+  const own = !host ? budget?.guest?.own : undefined;
+  const guestKeeps = !host && drafts && state.permissions.guestKeep === true;
+  const me = controller.getSnapshot().profile.name;
+  const keepBlocked = !connected
+    ? 'Reconnecting: Keep waits until you are connected again.'
+    : own?.waiting === 'kept'
+      ? 'Waiting for the host to allow more kept audio.'
+      : '';
   // A clip whose Edit copy (2.21) or Keep (2.26) was asked for from Mimic, opened once Temp lists it.
   // It is dropped if it can't be met within 20 s (2.29.3), so it never opens long after the press.
   const [wanted, setWanted] = useState<TempRequest & { at: number }>();
@@ -196,7 +213,12 @@ export function TempManager({
       }
       if (op === 'keepAudio') {
         setSaving(undefined);
-        controller.notify('Permanent file and Soundpad entry verified.', 'success');
+        controller.notify(
+          host
+            ? 'Permanent file and Soundpad entry verified.'
+            : 'Kept: it is in the host\u2019s Soundpad for good.',
+          'success',
+        );
       }
       if (op === 'trimAudio') {
         setTrimming(undefined);
@@ -382,9 +404,21 @@ export function TempManager({
       {open && (
         <div className="temp-manager-body">
           <p className="muted">
-            Session audio uses Soundpad’s normal mic playback. Only the host can save a permanent
-            copy.
+            Session audio uses Soundpad’s normal mic playback.{' '}
+            {guestKeeps
+              ? 'You can keep clips permanently; they go where the host chose.'
+              : drafts && state.permissions.guestKeep
+                ? 'The host and guests the host allows can save a permanent copy.'
+                : 'Only the host can save a permanent copy.'}{' '}
+            {drafts && 'Temp stays until the companion quits.'}
           </p>
+          {own && (
+            <p className={own.paused ? 'warning' : 'muted'} role="status">
+              Your Temp: {formatMb(own.tempBytes, own.tempLimitBytes)} · kept{' '}
+              {formatMb(own.keptBytes, own.keptLimitBytes)}
+              {own.waiting ? ' · waiting for the host to allow more' : ''}
+            </p>
+          )}
           {error && (
             <p className="warning" role="alert">
               {error}
@@ -713,6 +747,18 @@ export function TempManager({
                           ? 'accepted — move to permanent storage'
                           : v.state}
                     </span>
+                    {guestKeeps && !v.permanent && v.state === 'ready' && v.nativeLabel && (
+                      <button
+                        aria-disabled={!!pending || !!keepBlocked || undefined}
+                        title={keepBlocked || 'Kept into the host\u2019s chosen folder'}
+                        onClick={() => {
+                          if (pending || keepBlocked) return;
+                          void run('keepAudio', { assetId: a.id, variantId: v.id });
+                        }}
+                      >
+                        Keep {v.orientation} permanently
+                      </button>
+                    )}
                     {host && !v.permanent && v.state === 'ready' && v.nativeLabel && (
                       <button
                         aria-disabled={!!pending || undefined}
@@ -754,6 +800,26 @@ export function TempManager({
                   )}
                 </div>
               )}
+              {!host &&
+                drafts &&
+                a.hasTemporary &&
+                a.uploader === me &&
+                state.permissions.guestUploads !== false && (
+                  <div className="temp-actions">
+                    <button
+                      aria-disabled={!!pending || undefined}
+                      onClick={() => {
+                        if (
+                          !pending &&
+                          confirm(`Remove your clip \u201c${a.name}\u201d from Temp?`)
+                        )
+                          void run('removeAudio', { assetId: a.id, action: 'stopIfPlaying' });
+                      }}
+                    >
+                      Remove my clip
+                    </button>
+                  </div>
+                )}
               {host && (
                 <details>
                   <summary>File locations</summary>
@@ -810,7 +876,7 @@ export function TempManager({
                     if (
                       !pending &&
                       confirm(
-                        'Clear all temporary audio now? Reversed sounds, uploads and edited copies are removed from Soundpad and deleted, as when hosting ends. Audio you kept permanently stays. Hosting continues.',
+                        'Clear all temporary audio now? Reversed sounds, uploads and edited copies are removed from Soundpad and deleted. Audio you kept permanently stays. Hosting continues.',
                       )
                     )
                       void run('clearTemp');

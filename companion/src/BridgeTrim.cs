@@ -148,7 +148,7 @@ public sealed partial class Bridge
             // Voice Replay Studio imports (2.29.3).
             name = name.Replace('/', '-').Replace('\\', '-');
             if (name.Length > 100) name = name[..99].TrimEnd() + "\u2026";
-            var saved = (await Upload(wav, name + ".wav", Person(actor, participant).Name, actor == "host", owner, audience)) with { Id = c.Id };
+            var saved = (await Upload(wav, name + ".wav", Person(actor, participant).Name, actor == "host", owner, audience, guest: PersonKey(actor, participant, requester))) with { Id = c.Id };
             return c.Autoplay ? await Autoplay(saved, c, actor, participant, requester, audience, intent) : saved;
             }
             finally { Interlocked.Decrement(ref editing); }
