@@ -136,6 +136,12 @@ test('example voices and sentences: search finds a word; "hello [laugh]" with a 
   await expect(result.getByText('Voice clip', { exact: true })).toBeVisible();
   await expect(result.locator('mark').first()).toHaveText('Eagle');
   expect(await axe(page)).toEqual([]);
+  // Section memory: the tab shown comes back when Voices is shown again.
+  await voices.getByRole('tab', { name: 'Words' }).click();
+  await closeSection(page, 'Voices');
+  await page.getByRole('button', { name: 'Voices', exact: true }).click();
+  await expect(voices.getByRole('tab', { name: 'Words' })).toHaveAttribute('aria-selected', 'true');
+  await voices.getByRole('tab', { name: 'Library' }).click();
   await closeSection(page, 'Voices');
   // Sentences (2.42): a missing word and the named laugh.
   await page.getByRole('button', { name: 'Sentences', exact: true }).click();

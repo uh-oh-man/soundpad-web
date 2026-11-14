@@ -60,7 +60,8 @@ import {
   type Selection,
   type Sentence,
 } from '../library/sentences';
-import { VoiceAvatar } from './VoiceShared';
+import { VoiceAvatar, useSectionScroll } from './VoiceShared';
+import { remember } from '../sections';
 
 type Props = {
   state: Snapshot;
@@ -83,6 +84,11 @@ export function SentencesPanel({ state, host, connected, canPlay, openId = null 
   const rights = sentenceRights(list, state.permissions, host);
   const [tab, setTab] = useState<Tab>('sentences');
   const [open, setOpen] = useState<string | null>(openId);
+  // Section memory (Stage G): the open sentence and the scroll position are written here; the shell
+  // shows the sentence again by passing it as `openId` (and the scroll comes back with it).
+  useEffect(() => remember('sentences', { sentenceId: open ?? undefined }), [open]);
+  const panel = useRef<HTMLDivElement>(null);
+  useSectionScroll('sentences', panel, !!list, !!openId);
   useEffect(() => {
     void refreshSentences();
   }, []);
@@ -92,7 +98,7 @@ export function SentencesPanel({ state, host, connected, canPlay, openId = null 
     ['sets', 'Sets'],
   ];
   return (
-    <div className="voices-panel sentences-panel">
+    <div className="voices-panel sentences-panel" ref={panel}>
       <p className="muted voices-intro">
         Every word comes from a recording in the voice library. Missing words stay marked and play
         as a gap or a bleep.
