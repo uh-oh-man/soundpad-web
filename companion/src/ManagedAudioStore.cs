@@ -252,6 +252,8 @@ public sealed partial class ManagedAudioStore
     }
     public void RetryJournal() { if (blocked) { journal = new(); Load(); } RequireWritable(); }
 }
+/// <summary>Temporary files of one source at a moment (2.40 crash recovery): its variant ids and staged input, if any.</summary>
+public sealed record TemporaryFiles(string AssetId, string[] VariantIds, string? InputPath);
 /// <summary>A variant that can be played without preparation; see <see cref="ManagedAudioStore.Ready"/>.</summary>
 public sealed record ReadyAudio(string AssetId, string State, string VariantId, string SoundId, string Path, long Bytes, string? SourcePath);
 /// <summary>Size and modified time of a managed file, and of the library original it was made from (if any).</summary>

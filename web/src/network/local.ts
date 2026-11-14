@@ -360,7 +360,18 @@ export class LocalBridge {
     this.socket.send(JSON.stringify(message));
     return true;
   }
-  async upload(bytes: Uint8Array, name: string, by: string, host = false, owner = 'host') {
+  /**
+   * `guest` (2.40) is a guest uploader's participant id. Only for a companion that knows the header: an older one's
+   * CORS preflight does not allow it, which would block the upload.
+   */
+  async upload(
+    bytes: Uint8Array,
+    name: string,
+    by: string,
+    host = false,
+    owner = 'host',
+    guest?: string,
+  ) {
     const response = await fetch(`http://127.0.0.1:${this.address.port}/session-audio`, {
       method: 'POST',
       headers: {
@@ -371,6 +382,7 @@ export class LocalBridge {
         'X-Audio-Actor': host ? 'host' : 'guest',
         'X-Audio-Owner': owner,
         'X-Audio-Audience': this.audience ?? '',
+        ...(guest && { 'X-Audio-Guest': guest }),
       },
       body: bytes as Uint8Array<ArrayBuffer>,
     });

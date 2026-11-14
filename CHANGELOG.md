@@ -2,6 +2,34 @@
 
 Notable changes to Soundpad Web. Versions follow the website's `package.json`; the Windows companion is versioned separately and only needs updating when a release says so.
 
+## 2.40.0 — Drafts, and guests who can keep
+
+**Update the companion** for this one. With an older companion, Mimic's **Mimic it** works as before.
+
+### Added
+
+- **Capture makes a draft.** In Mimic, **Capture** (and Enter) no longer adds a clip to Temp straight away: it opens an editable **draft** for whoever captured it. Drag its edges into the audio around it, **Preview** it privately, **Play into game**, then **Keep in Temp** (or **Keep in Temp and close draft**), or **Discard** it. A draft protects its audio, so it is not lost when that part of the history would otherwise expire.
+- **Everyone has their own drafts.** Each person sees one draft at a time, with the rest under **Draft history**. Other people's drafts show as coloured bands ("Alex's selection") over audio you may see, with **Copy to my drafts**. When someone captures, the others get a quiet notice. Mimic and Temp remember what you had open after you close them or reload the page.
+- **Latest phrase** and **Last 10 seconds** make a draft in one click. Latest phrase skips a phrase that is entirely Soundpad playing something you sent it, but keeps people talking over it.
+- **Guests can preview privately.** A guest allowed to use Mimic can listen to a selection or draft in their own browser (up to 30 seconds, only audio they may see). It never plays into the game, and there is no download button.
+- **Guests can keep clips.** A new permission, **Keep clips** (on by default, and can be turned off per guest), lets guests keep clips into the folder and category the host sets once in **Settings**. Guests can never choose a folder.
+- **Storage budgets per guest.** The host sets how much each guest may add to Temp and to kept sounds (per session or in total). A guest who reaches a budget sees "Waiting for the host to allow more", and the host gets an **Allow more / Not now** request; an allowance lasts until the companion closes, and nothing kept is ever deleted. Usage shows in the host's guest list.
+
+### Changed
+
+- **End hosting keeps Temp.** Temp now stays until the companion quits, so ending and resuming hosting no longer loses clips.
+- **Quitting asks first.** Closing the companion window with clips in Temp asks: **Keep selected**, **Quit anyway** or **Cancel** (in the window's page, or in a small dialog when no page can answer).
+- **After a crash**, the next start offers **Recover previous session's Temp** or **Discard**. Discard removes only what the crashed session left.
+- Guests can remove their own Temp clips, also after reloading their page. Keep is unavailable, with a reason, while a guest is reconnecting.
+
+### Reviewed
+
+A review found seven problems, all fixed before release: guests' drafts could use up the space that protects the host's own drafts (each guest now has a share, the host can discard anyone's draft, and a guest's drafts go when they are removed or away for 10 minutes); other people's draft names could show words from before a guest joined; a guest's upload budget restarted when they reloaded; Discard after a crash also deleted clips made since; and End hosting then closing the window quit without asking.
+
+### Tests
+
+- 20 new companion tests (drafts and their protected audio, budgets, guest previews and keeps, the quit prompt, crash recovery), new website unit tests, and 3 new browser tests (capture, edit and keep a draft; a guest's preview limited to what they may see; a budget pause the host allows).
+
 ## 2.39.0 — Ten minutes of history, word by word
 
 **Update the companion** for this one. With an older companion, Mimic keeps its 30-second view.

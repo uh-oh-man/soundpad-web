@@ -17,6 +17,12 @@ public sealed class Draft
     public long Start { get; set; }
     public long End { get; set; }
     public string? Name { get; set; }
+    /// <summary>
+    /// True when the owner typed <see cref="Name"/>. Otherwise it was made from the words of <see cref="NameRange"/>
+    /// that the owner may see, and someone who may not see all of that range is shown a name from their own words.
+    /// </summary>
+    public bool NameTyped { get; set; }
+    public HistoryRange NameRange { get; set; }
     public long Created { get; init; }
     public long Updated { get; set; }
     /// <summary>The Temp clip made from this draft, and the range it was made from (Play and Keep reuse it while the range is unchanged).</summary>

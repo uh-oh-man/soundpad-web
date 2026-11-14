@@ -343,3 +343,38 @@ describe('the quit prompt (2.40)', () => {
     bridge.close();
   });
 });
+
+describe('guest uploads (2.40 review)', () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it('send the guest’s participant id, so a reload gives no fresh storage budget', async () => {
+    const calls: { url: string; headers: Record<string, string> }[] = [];
+    vi.stubGlobal(
+      'WebSocket',
+      class {
+        readyState = 0;
+        close() {}
+        send() {}
+      },
+    );
+    vi.stubGlobal('fetch', async (url: string, init: { headers: Record<string, string> }) => {
+      calls.push({ url, headers: init.headers });
+      return new Response(JSON.stringify({ type: 'ack', ok: true, data: { assetId: 'a' } }));
+    });
+    const bridge = new LocalBridge(
+      { port: 1, token: 'a'.repeat(64) },
+      () => {},
+      () => {},
+    );
+    await bridge.upload(new Uint8Array([1]), 'a.wav', 'Ann', false, 'peer-1', 'ann-id');
+    // Without one (the host's own upload, or an older companion whose CORS check would refuse the header): not sent.
+    await bridge.upload(new Uint8Array([1]), 'b.wav', 'Host', true);
+    expect(calls[0].headers).toMatchObject({
+      'X-Audio-Actor': 'guest',
+      'X-Audio-Owner': 'peer-1',
+      'X-Audio-Guest': 'ann-id',
+    });
+    expect(calls[1].headers).not.toHaveProperty('X-Audio-Guest');
+    bridge.close();
+  });
+});

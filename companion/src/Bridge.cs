@@ -79,6 +79,8 @@ public sealed partial class Bridge(ISoundpad pipe, StateStore store) : IDisposab
         // Keep the recording history moving through silence even when nobody is looking (2.39): loopback delivers
         // nothing while its source is quiet, and the history takes silence in small steps.
         try { mimicCapture.Pump(); } catch (Exception ex) when (ex is not OutOfMemoryException) { }
+        // Drafts of guests who left a while ago go, so their pins do not hold the recording history (2.40).
+        ReleaseAwayGuests();
         // Soundpad's own statistics files are read before the gate is taken (2.35), so a play never waits for them.
         if (library) await Task.Run(nativeStatistics.Refresh);
         // Skipped while the gate stays busy, as before. It waits a moment first (2.35): the deferred state save

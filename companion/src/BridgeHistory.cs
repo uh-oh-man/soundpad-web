@@ -284,12 +284,15 @@ public sealed partial class Bridge
                 forgottenGuests.Remove(forgottenGuests.MinBy(p => p.Value).Key);
             forgottenGuests[participantId] = now;
         }
+        // Their drafts go too (2.40), so their pins no longer hold the recording history.
+        ReleaseDraftsOf(participantId);
     }
-    /// <summary>A new invitation or ended hosting session starts with nobody admitted and nothing shared.</summary>
+    /// <summary>A new invitation or ended hosting session starts with nobody admitted, nothing shared and no guest drafts.</summary>
     private void ForgetGuests()
     {
         lock (guestJoins) { guestJoins.Clear(); forgottenGuests.Clear(); }
         lock (sharedRanges) sharedRanges.Clear();
+        ReleaseGuestDrafts();
     }
 
     /// <summary>

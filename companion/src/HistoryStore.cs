@@ -79,6 +79,10 @@ public sealed partial class HistoryStore : IDisposable
     /// <summary>The next frame to be captured. Record this when a guest is admitted and pass it to <see cref="HistoryAccess.Guest"/>.</summary>
     public long LiveFrame { get { lock (gate) return live; } }
     public int WindowSeconds { get { lock (gate) return windowSeconds; } }
+    /// <summary>Frames per segment: pins keep whole segments.</summary>
+    public int SegmentFrames => segmentFrames;
+    /// <summary>The bytes all pins together may keep (<see cref="HistoryOptions.PinBudgetBytes"/>).</summary>
+    public long PinBudgetBytes => pinBudgetBytes;
     /// <summary>Set when this store came from <see cref="Open"/>; null for a new session.</summary>
     public HistoryRecovery? Recovery { get; private set; }
 

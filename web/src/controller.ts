@@ -752,7 +752,16 @@ export class Controller {
         },
         {
           layouts: (layouts) => current() && this.update({ layouts }),
-          upload: (bytes, name, by, peer) => this.bridge!.upload(bytes, name, by, false, peer),
+          // A 2.40 companion counts a guest's upload against their participant id, like their clips (and refuses one without it).
+          upload: (bytes, name, by, peer, guest) =>
+            this.bridge!.upload(
+              bytes,
+              name,
+              by,
+              false,
+              peer,
+              supports(this.view.state.companionVersion, 'drafts') ? guest : undefined,
+            ),
         },
         undefined,
         {

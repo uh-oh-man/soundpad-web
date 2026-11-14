@@ -30,10 +30,10 @@ Open the invite link in a modern browser (Chrome, Edge, Firefox or Safari, on a 
 
 ![Mimic window with a live transcript; the selected line becomes the clip's name. Fixture audio, not a real session.](docs/screenshots/v28-mimic.png)
 
-The host chooses an app (for example Discord) or an output device. The companion keeps the last 30 seconds **in memory on the host PC**. Anyone allowed can then:
+The host chooses an app (for example Discord) or an output device. The companion keeps a rolling **recording history** on the host PC (10 minutes by default, deleted when it quits; companions before 2.39 kept 30 seconds in memory). Anyone allowed can then:
 
-- open **Mimic**, see that audio as a live waveform with an optional transcript, and select a moment by dragging, clicking a transcript line, or pressing **3**, **5** or **0**;
-- **Mimic it** to save it as a Temp sound, or **Mimic & play** it through Soundpad. The host can **Preview** it privately first;
+- open **Mimic**, look back through the history with word-by-word subtitles, and select a moment by dragging, clicking words, or **Latest phrase** / **Last 10 seconds**;
+- **Capture** it as a draft of their own (since 2.40), adjust it, **Preview** it privately, **Play into game**, and **Keep in Temp**; guests allowed to keep clips can keep them too, within the budget the host sets;
 - from **Just mimicked**: replay, reverse, play with an effect (Chipmunk, Slow-mo, Echo, Slow same voice), or open the clip in **Edit copy** with one press. The host can also **Keep** a clip permanently from there, or **Undo** one made by mistake from its notice.
 
 The host can also press a hotkey **in any app** to save the last few seconds mid-game: F6 by default, or F7–F10 if a game already uses F6. The waveform zooms to the last 30, 10 or 5 seconds for picking short moments. Mimic is off until the host starts it, never records a microphone, and everyone is told when it listens. Clips you saved in the Voice Replay Studio desktop app can be imported into the session from the Mimic window too. Full guide: [docs/MIMIC.md](docs/MIMIC.md).

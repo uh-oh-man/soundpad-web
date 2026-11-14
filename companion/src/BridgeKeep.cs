@@ -3,6 +3,31 @@ namespace SoundpadWeb;
 /// <summary>A person's choice at the quit prompt (2.40): keep these clips first, quit anyway, or cancel.</summary>
 public sealed record QuitAnswer(string Action, string[] AssetIds);
 
+/// <summary>
+/// What closing the companion window does while Temp holds clips (2.40). The window's page asks when it can; when no
+/// page can (End hosting closed its connection, an older website, a prompt left unanswered), the window asks itself,
+/// so quitting never removes Temp clips without asking.
+/// </summary>
+public static class QuitQuestion
+{
+    /// <param name="askPage">Asks the window's page (<see cref="LocalServer.AskQuit"/>): false when there is none to ask.</param>
+    /// <param name="askHere">Asks in the window itself: "keep", "quit" or "cancel".</param>
+    /// <param name="clipIds">The clips in Temp, for "keep" asked in the window (it keeps them all).</param>
+    /// <param name="answered">Runs once with the person's answer, unless it was "quit" asked in the window.</param>
+    /// <returns>True when the window stays open for now (asked the page, cancelled, or keeping the clips before quitting).</returns>
+    public static bool Ask(int clips, Func<int, Action<QuitAnswer>, bool> askPage, Func<int, string> askHere, Func<string[]> clipIds, Action<QuitAnswer> answered)
+    {
+        if (clips <= 0) return false;
+        if (askPage(clips, answered)) return true;
+        switch (askHere(clips))
+        {
+            case "quit": return false;
+            case "keep": answered(new("keep", clipIds())); return true;
+            default: return true;
+        }
+    }
+}
+
 // Guest Keep and storage budgets, Temp lifecycle and crash recovery (2.40). See reports/OVERHAUL-PLAN.md, "Data
 // lifecycle, updates and setup" and the budget bullets in "Playback and connection are first priorities".
 public sealed partial class Bridge
@@ -12,6 +37,11 @@ public sealed partial class Bridge
     private readonly GuestBudgets budgets = new(Path.Combine(store.DirectoryPath, "guest-kept.json"));
     /// <summary>Temp clips a launch that did not close normally left, until the host recovers or discards them.</summary>
     private volatile int tempRecovery;
+    /// <summary>
+    /// Exactly the temporary files that launch left (2.40), so Discard removes those and nothing made since: hosting
+    /// goes on in the same journal session meanwhile, and its new clips land in the same Temp category.
+    /// </summary>
+    private volatile TemporaryFiles[] tempLeftovers = [];
     private string KeepSettingsPath => Path.Combine(store.DirectoryPath, "keep-settings.json");
     private KeepSettings Keep { get { lock (keepGate) return keepSettings ??= KeepSettings.Load(KeepSettingsPath); } }
     /// <summary>Test seam and harness: guest budgets as they stand.</summary>
@@ -43,6 +73,12 @@ public sealed partial class Bridge
             catch (Exception ex) when (ex is not OutOfMemoryException) { return 0; }
         }
     }
+    /// <summary>The clips <see cref="TemporaryClipCount"/> counts (Keep at the companion window's own quit question).</summary>
+    public string[] TemporaryClipIds()
+    {
+        try { return [.. Audio.Public.Assets.Where(IsTemporaryClip).Select(a => a.Id)]; }
+        catch (Exception ex) when (ex is not OutOfMemoryException) { return []; }
+    }
     private static bool IsTemporaryClip(AudioAssetView a) => a.Variants.Any(v => v.Current && !v.Permanent && !v.LegacyApproval && v.NativeLabel != null && v.State != "cleanup-pending");
 
     /// <summary>The temporary variant Keep takes for a clip: its normal one, else its reversed one.</summary>
@@ -65,12 +101,21 @@ public sealed partial class Bridge
         catch (Exception ex) when (ex is not OutOfMemoryException) { left = 0; }
         if (left > 0)
         {
+            tempLeftovers = Audio.CurrentTemporaryFiles();
             tempRecovery = left; recoveryPending = false;
             Log($"The companion did not close normally last time: {left} clip(s) from that session are still in Temp. Recover or discard them.");
             Publish();
             return;
         }
         await CleanupSession();
+    }
+
+    /// <summary>True when every temporary file there is now is one the last launch left (nothing was made since).</summary>
+    private bool OnlyLeftoversInTemp()
+    {
+        var left = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var f in tempLeftovers) { foreach (var v in f.VariantIds) left.Add(f.AssetId + "/" + v); if (f.InputPath != null) left.Add(f.AssetId + "|" + f.InputPath); }
+        return Audio.CurrentTemporaryFiles().All(f => f.VariantIds.All(v => left.Contains(f.AssetId + "/" + v)) && (f.InputPath == null || left.Contains(f.AssetId + "|" + f.InputPath)));
     }
 
     /// <summary>Quit prompt "Keep selected" (2.40): these clips are kept permanently, in the host's Keep destination, before quitting.</summary>
@@ -160,13 +205,24 @@ public sealed partial class Bridge
                             if (c.Action == "recover") { if (!Audio.Public.Blocked) await Audio.Recover(); }
                             else if (!Audio.Public.Blocked)
                             {
+                                // Only what the last launch left: clips made since (hosting carries on in the same
+                                // journal session and Temp category) stay, as does the session itself.
                                 await StopTemporaryPlayback();
-                                Audio.RetireSession(); await Audio.Cleanup();
-                                if (sessionAccepting) Audio.BeginSession();
+                                if (OnlyLeftoversInTemp())
+                                {
+                                    // Nothing new: the cleanup an ordinary quit would have done, Temp category and all.
+                                    Audio.RetireSession(); await Audio.Cleanup();
+                                    if (sessionAccepting) Audio.BeginSession();
+                                }
+                                else foreach (var files in tempLeftovers)
+                                {
+                                    try { await Audio.RetireFiles(files); }
+                                    catch (InvalidDataException ex) { Log("A clip from the last session could not be discarded: " + ex.Message); }
+                                }
                             }
                         }
                         finally { audioGate.Release(); }
-                        int was = tempRecovery; tempRecovery = 0;
+                        int was = tempRecovery; tempRecovery = 0; tempLeftovers = [];
                         Log(c.Action == "recover" ? $"Recovered {was} clip(s) in Temp from the last session" : "Discarded the last session's Temp");
                         await gate.EnterAsync(PriorityGate.Lane.Normal); try { await RefreshInner(); Publish(); } finally { gate.Release(); }
                         return new("ack", c.Id, true);

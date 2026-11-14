@@ -416,4 +416,52 @@ public sealed class HostSessionTests : IDisposable
         await Task.Delay(400);
         Assert.False(server.AskQuit(1, _ => { })); // the page never answered: the window closes
     }
+
+    private static byte[] Wave()
+    {
+        using var stream = new MemoryStream();
+        using (var writer = new NAudio.Wave.WaveFileWriter(stream, new NAudio.Wave.WaveFormat(16000, 16, 1)))
+            for (int i = 0; i < 8000; i++) writer.WriteSample((float)Math.Sin(i / 10.0) * 0.4f);
+        return stream.ToArray();
+    }
+
+    [Fact]
+    public async Task AfterEndHostingTheWindowAsksItselfBeforeQuittingRemovesTemp()
+    {
+        // 2.40 review: End hosting closes the window page's connection, so no page can ask; the window must.
+        await using var mock = new MockSoundpad(); using var pipe = new SoundpadPipe(mock.Name, true); using var bridge = new Bridge(pipe, new StateStore(folder));
+        await bridge.Poll(true);
+        await using var server = new LocalServer(bridge, Site, Key); await server.Start();
+        var window = await Page.Open(server, new { token = server.Token, protocol = 3, clientId = "window", ownerKey = Key, quitPrompt = true });
+        Assert.Equal("owner", Role(await window.Next("role")));
+        var begin = Cmd("beginSession");
+        await window.Send(new { actor = "host", command = begin });
+        Assert.True((await window.Next("ack")).GetProperty("ok").GetBoolean());
+        Assert.True((await bridge.Upload(Wave(), "Still in Temp.wav", "Host", true, "host")).Ok);
+        // While the page is there, it is asked and the window is not.
+        var asked = new List<int>(); var answers = new List<QuitAnswer>();
+        string Here(int clips) { asked.Add(clips); return "keep"; }
+        Assert.True(QuitQuestion.Ask(bridge.TemporaryClipCount, server.AskQuit, Here, bridge.TemporaryClipIds, answers.Add));
+        var prompt = await window.Next("quitPrompt");
+        await window.Send(new { type = "quitAnswer", id = prompt.GetProperty("id").GetString(), action = "cancel" });
+        for (int i = 0; i < 50 && answers.Count == 0; i++) await Task.Delay(20);
+        Assert.Empty(asked); Assert.Equal("cancel", Assert.Single(answers).Action); answers.Clear();
+        // End hosting, as the website does it: the command, then the page closes its connection. Temp stays.
+        await window.Send(new { actor = "host", command = Cmd("endSession") });
+        await window.Next("ack");
+        await window.DisposeAsync();
+        await Task.Delay(200);
+        Assert.Equal(1, bridge.TemporaryClipCount);
+        // Closing the window now asks in the window itself; Keep them keeps every clip before quitting.
+        Assert.True(QuitQuestion.Ask(bridge.TemporaryClipCount, server.AskQuit, Here, bridge.TemporaryClipIds, answers.Add));
+        Assert.Equal([1], asked);
+        var keep = Assert.Single(answers);
+        Assert.Equal("keep", keep.Action);
+        Assert.Equal(1, await bridge.KeepForQuit(keep.AssetIds));
+        Assert.Equal(0, bridge.TemporaryClipCount);
+        // Quit anyway closes, Cancel keeps the window open, and with nothing in Temp nobody is asked.
+        Assert.False(QuitQuestion.Ask(1, server.AskQuit, _ => "quit", () => [], _ => throw new InvalidOperationException()));
+        Assert.True(QuitQuestion.Ask(1, server.AskQuit, _ => "cancel", () => [], _ => throw new InvalidOperationException()));
+        Assert.False(QuitQuestion.Ask(0, (_, _) => throw new InvalidOperationException(), _ => throw new InvalidOperationException(), () => [], _ => { }));
+    }
 }

@@ -396,7 +396,9 @@ export function MimicHistory({
     if (!quick && !chosen) return;
     setBusy(true);
     try {
-      const named = name.trim() || suggestion;
+      // Only a typed name: otherwise the companion names the draft from the words this person may see, and
+      // shows others a name only from words they may see (2.40).
+      const named = name.trim();
       const draft = draftSchema.parse(
         await controller.run('draftCreate', {
           ...(quick ? { action: quick } : chosen),
@@ -462,6 +464,19 @@ export function MimicHistory({
     try {
       await controller.run('draftDiscard', { draftId: draft.id });
       closeDraft();
+      await refreshDrafts();
+    } catch {
+      /* Controller shows the error. */
+    } finally {
+      setBusy(false);
+    }
+  }
+  /** Host (2.40): lets go of someone else's draft, such as one a guest left behind holding recording history. */
+  async function discardBand(id: string) {
+    if (busy) return;
+    setBusy(true);
+    try {
+      await controller.run('draftDiscard', { draftId: id });
       await refreshDrafts();
     } catch {
       /* Controller shows the error. */
@@ -735,6 +750,16 @@ export function MimicHistory({
               >
                 <Copy size={14} /> Copy to my drafts
               </button>
+              {host && (
+                <button
+                  type="button"
+                  aria-disabled={busy || undefined}
+                  aria-label={`Discard ${bandLabel(band)}`}
+                  onClick={() => void discardBand(band.id)}
+                >
+                  <Trash2 size={14} /> Discard
+                </button>
+              )}
             </li>
           ))}
         </ul>

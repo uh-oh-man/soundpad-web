@@ -83,7 +83,7 @@ public sealed class LocalServer(Bridge bridge, string origin, string? ownerKey =
             if (context.Request.Headers.Origin != origin || context.Request.Host.Host != "127.0.0.1") { context.Response.StatusCode = 403; return; }
             context.Response.Headers.AccessControlAllowOrigin = origin;
             context.Response.Headers.AccessControlAllowMethods = "POST, OPTIONS";
-            context.Response.Headers.AccessControlAllowHeaders = "Authorization, X-Audio-Name, X-Audio-By, X-Audio-Actor, X-Audio-Owner, X-Audio-Audience, Content-Type";
+            context.Response.Headers.AccessControlAllowHeaders = "Authorization, X-Audio-Name, X-Audio-By, X-Audio-Actor, X-Audio-Owner, X-Audio-Audience, X-Audio-Guest, Content-Type";
             if (context.Request.Method == "OPTIONS") { context.Response.StatusCode = 204; return; }
             var supplied = context.Request.Headers.Authorization.ToString();
             var expected = "Bearer " + Token;
@@ -94,7 +94,12 @@ public sealed class LocalServer(Bridge bridge, string origin, string? ownerKey =
             try { name = Uri.UnescapeDataString(context.Request.Headers["X-Audio-Name"].ToString()); by = Uri.UnescapeDataString(context.Request.Headers["X-Audio-By"].ToString()); }
             catch (UriFormatException) { context.Response.StatusCode = 400; return; }
             if (name.Length > 256 || by.Length > 80) { context.Response.StatusCode = 400; return; }
-            var result = await bridge.Upload(input.ToArray(), name, by, context.Request.Headers["X-Audio-Actor"] == "host", context.Request.Headers["X-Audio-Owner"].ToString()[..Math.Min(128, context.Request.Headers["X-Audio-Owner"].ToString().Length)], context.Request.Headers["X-Audio-Audience"].ToString());
+            bool hostUpload = context.Request.Headers["X-Audio-Actor"] == "host";
+            // A guest's upload counts against their participant (2.40), as their clips and copies do, so a reload (a new
+            // connection id) gives no fresh budget. The host page sends it; one without it is refused.
+            var guest = context.Request.Headers["X-Audio-Guest"].ToString();
+            if (!hostUpload && guest.Length is 0 or > 128) { context.Response.ContentType = "application/json"; await context.Response.WriteAsync(Json.Write(new Reply("ack", "upload", false, "Reload the host page to let guests upload."))); return; }
+            var result = await bridge.Upload(input.ToArray(), name, by, hostUpload, context.Request.Headers["X-Audio-Owner"].ToString()[..Math.Min(128, context.Request.Headers["X-Audio-Owner"].ToString().Length)], context.Request.Headers["X-Audio-Audience"].ToString(), guest: hostUpload ? null : guest);
             context.Response.ContentType = "application/json";
             await context.Response.WriteAsync(Json.Write(result));
         });
@@ -348,6 +353,14 @@ public sealed class LocalServer(Bridge bridge, string origin, string? ownerKey =
                     if (owner != from || from.Ended) return;
                     session = root.GetRawText(); sessionVersion++;
                     foreach (var view in hosts) if (view != from) view.Signal.Writer.TryWrite(0);
+                }
+                // Who is in the session (2.40): drafts of guests who have been gone a while are let go.
+                if (root.TryGetProperty("people", out var people) && people.ValueKind == JsonValueKind.Object)
+                {
+                    var ids = new List<string>();
+                    foreach (var person in people.EnumerateObject().Take(256))
+                        if (person.Value.ValueKind == JsonValueKind.Object && person.Value.TryGetProperty("id", out var pid) && pid.ValueKind == JsonValueKind.String && pid.GetString() is { Length: > 0 and <= 128 } id) ids.Add(id);
+                    bridge.NotePresent(ids);
                 }
                 return;
             case "quitAnswer":

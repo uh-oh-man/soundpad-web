@@ -314,7 +314,14 @@ export class Session {
     private extensions?: {
       layouts?: (layouts: SharedLayout[]) => void;
       waveform?: (data: unknown) => void;
-      upload: (bytes: Uint8Array, name: string, by: string, peer: string) => Promise<unknown>;
+      /** `guest` is the uploader's participant id (2.40), whose storage budget the upload counts against. */
+      upload: (
+        bytes: Uint8Array,
+        name: string,
+        by: string,
+        peer: string,
+        guest?: string,
+      ) => Promise<unknown>;
     },
     /** This page's website version, told to the other side; tests pass their own. */
     private site: string = APP_VERSION,
@@ -409,6 +416,7 @@ export class Session {
               name,
               this.people.get(peerId)?.name ?? 'Guest',
               peerId,
+              this.people.get(peerId)?.id,
             );
             this.broadcast();
             return JSON.stringify(result ?? {});

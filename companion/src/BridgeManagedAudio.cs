@@ -233,6 +233,8 @@ public sealed partial class Bridge
                     // goes through the same arbitration as Stop (2.35): no start asked for earlier plays after it.
                     await StopTemporaryPlayback();
                     int cleared = await Audio.ClearTemporary();
+                    // The last launch's leftovers went with everything else: nothing is left to recover or discard (2.40).
+                    tempRecovery = 0; tempLeftovers = [];
                     Log($"Cleared {cleared} temporary audio file(s) and the Temp category");
                     await gate.EnterAsync(PriorityGate.Lane.Normal); try { await RefreshInner(); SaveAudioReceipt(c); Publish(); } finally { gate.Release(); }
                     return new("ack", c.Id, true, Data: new { cleared, pending = Audio.Public.Assets.Count(a => a.State == "cleanup-pending") });

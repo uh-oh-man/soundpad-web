@@ -1907,6 +1907,12 @@ test('Mimic drafts: a guest previews privately only what was recorded since join
   await expect(guestDialog.getByRole('region', { name: 'Draft' })).toBeVisible();
   const theirs = (await sendCommand(guest, 'draftList')).data as DraftReply;
   expect(theirs.drafts.map((d) => d.name)).toEqual(['Guest draft']);
+  // The host may let go of a guest's draft (2.40 review: so drafts left behind never hold the recording
+  // history); it closes on the guest's side too.
+  await bands.getByRole('button', { name: 'Discard Fixture Guest’s selection' }).click();
+  await expect(bands).toHaveCount(0);
+  await expect(guestDialog.getByRole('region', { name: 'Draft' })).toHaveCount(0);
+  expect(((await sendCommand(guest, 'draftList')).data as DraftReply).drafts).toEqual([]);
   expect(harness.plays.length).toBe(plays);
 });
 

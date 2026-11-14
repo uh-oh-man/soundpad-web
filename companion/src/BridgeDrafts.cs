@@ -9,6 +9,14 @@ namespace SoundpadWeb;
 public sealed partial class Bridge
 {
     public const int MaxDraftsPerPerson = 50;
+    /// <summary>
+    /// Each guest's drafts may keep at most this share (percent) of the recording history's pin budget, and all guests'
+    /// drafts together at most <see cref="GuestsPinPercent"/>: the rest is the host's, so guests' drafts never stop the
+    /// host's Capture (2.40).
+    /// </summary>
+    public const int GuestPinPercent = 25, GuestsPinPercent = 50;
+    /// <summary>A guest's drafts go once they have been out of the session this long (a reload or a short drop keeps them).</summary>
+    public const int AwayGuestDraftMinutes = 10;
     /// <summary>Longest private preview (guests and host alike) and longest draft: the longest clip.</summary>
     public const int PreviewMaxMs = MimicWindowMs;
     /// <summary>Guest previews are sent at this rate (mono 16-bit, about 1 MB for 30 s) over the guest's connection.</summary>
@@ -21,6 +29,11 @@ public sealed partial class Bridge
     private RateWindow previewRate = new(GuestPreviewsPerMinute, TimeSpan.FromMinutes(1));
     private readonly ConcurrentDictionary<string, byte> previewing = new();
     private readonly byte[] draftTagKey = RandomNumberGenerator.GetBytes(32);
+    /// <summary>Guests in the session (participant ids from the owner page's session summary) and since when others have been away. Guarded by <see cref="drafts"/>.</summary>
+    private HashSet<string> guestsHere = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, long> guestsAway = new(StringComparer.Ordinal);
+    /// <summary>Test seam: the guests whose drafts are waiting to be let go because they left.</summary>
+    public IReadOnlyCollection<string> GuestsAway { get { lock (drafts) return [.. guestsAway.Keys]; } }
 
     /// <summary>Test seam: another preview limit (a clock the test controls).</summary>
     internal void UsePreviewLimit(RateWindow limit) => previewRate = limit;
@@ -65,6 +78,97 @@ public sealed partial class Bridge
         if (gone.Length > 0) Interlocked.Increment(ref draftsRevision);
     }
 
+    /// <summary>Lets go of the drafts <paramref name="which"/> picks, and their pins. True when any went.</summary>
+    private bool ReleaseDrafts(Func<Draft, bool> which)
+    {
+        var h = history; Draft[] gone;
+        lock (drafts) { gone = [.. drafts.Values.Where(which)]; foreach (var d in gone) drafts.Remove(d.Id); }
+        if (gone.Length == 0) return false;
+        if (h != null) foreach (var d in gone) { try { h.Unpin(d.PinKey); } catch (Exception ex) when (ex is HistoryException or InvalidOperationException) { } }
+        DraftsChanged();
+        return true;
+    }
+
+    /// <summary>The host disconnected or turned this guest away (2.40): their drafts go with them.</summary>
+    private void ReleaseDraftsOf(string participantId)
+    {
+        lock (drafts) { guestsAway.Remove(participantId); guestsHere.Remove(participantId); }
+        ReleaseDrafts(d => d.Owner == participantId);
+    }
+
+    /// <summary>A new invitation, End hosting or quitting (2.40): every guest's drafts go; the host's stay.</summary>
+    private void ReleaseGuestDrafts()
+    {
+        lock (drafts) { guestsHere = new(StringComparer.Ordinal); guestsAway.Clear(); }
+        ReleaseDrafts(d => d.Owner != "host");
+    }
+
+    /// <summary>
+    /// Who is in the session now (2.40): the participant ids of the owner page's session summary. A guest who is no
+    /// longer listed keeps their drafts through a reload or a short drop, and loses them once they have been away
+    /// <see cref="AwayGuestDraftMinutes"/>, so drafts nobody will come back for do not hold the recording history.
+    /// </summary>
+    public void NotePresent(IEnumerable<string> participantIds)
+    {
+        long now = utcNow();
+        var here = new HashSet<string>(participantIds.Where(id => id is { Length: > 0 and <= 128 }).Take(256), StringComparer.Ordinal);
+        lock (drafts)
+        {
+            foreach (var id in guestsHere) if (!here.Contains(id) && guestsAway.Count < MaxGuestJoins) guestsAway.TryAdd(id, now);
+            foreach (var id in here) guestsAway.Remove(id);
+            guestsHere = here;
+        }
+        ReleaseAwayGuests();
+    }
+    private void ReleaseAwayGuests()
+    {
+        long now = utcNow(); HashSet<string> gone;
+        lock (drafts)
+        {
+            if (guestsAway.Count == 0) return;
+            gone = new(guestsAway.Where(g => now - g.Value >= AwayGuestDraftMinutes * 60000L).Select(g => g.Key), StringComparer.Ordinal);
+            foreach (var id in gone) guestsAway.Remove(id);
+        }
+        if (gone.Count > 0 && ReleaseDrafts(d => gone.Contains(d.Owner))) Log("Let go of the drafts of guests who left a while ago");
+    }
+
+    /// <summary>
+    /// Room for a guest's draft over [start, end) (2.40), counted in the whole segments pins keep: at most
+    /// <see cref="GuestPinPercent"/> of the pin budget for one guest and <see cref="GuestsPinPercent"/> for all guests
+    /// together, so the rest stays for the host. The caller holds <see cref="drafts"/>.
+    /// </summary>
+    private void RequireGuestPinRoom(HistoryStore h, string owner, string? replacing, long start, long end)
+    {
+        if (owner == "host") return;
+        long segment = Math.Max(1, h.SegmentFrames);
+        HashSet<long> theirs = [], guests = [];
+        void Add(HashSet<long> set, long a, long z) { for (long i = a / segment; i <= (z - 1) / segment; i++) set.Add(i); }
+        foreach (var d in drafts.Values)
+        {
+            if (d.Owner == "host" || d.Id == replacing || d.SessionId != h.SessionId) continue;
+            Add(guests, d.Start, d.End);
+            if (d.Owner == owner) Add(theirs, d.Start, d.End);
+        }
+        Add(theirs, start, end); Add(guests, start, end);
+        long bytes = segment * 2;
+        if (theirs.Count * bytes > h.PinBudgetBytes * GuestPinPercent / 100)
+            throw new InvalidDataException("Your drafts already keep as much recording history as a guest may. Keep or discard one of your drafts first.");
+        if (guests.Count * bytes > h.PinBudgetBytes * GuestsPinPercent / 100)
+            throw new InvalidDataException("Guests' drafts already keep as much recording history as guests may. Keep or discard one of your drafts first, or ask the host.");
+    }
+
+    /// <summary>
+    /// The name of a draft as <paramref name="access"/> may see it (2.40): a name its owner typed as it is; one made from
+    /// the transcript only when the reader may see all the audio it was made from, otherwise one made from the words of
+    /// <paramref name="part"/> the reader may see (or none). Also the range such a name comes from.
+    /// </summary>
+    private (string? Name, bool Typed, HistoryRange From) NameFor(HistoryStore h, HistoryAccess access, Draft d, HistoryRange part)
+    {
+        if (d.NameTyped) return (d.Name, true, default);
+        if (d.Name != null && access.Allows(d.NameRange.StartFrame, d.NameRange.EndFrame)) return (d.Name, false, d.NameRange);
+        return (WordsOf(h, access, part.StartFrame, part.EndFrame), false, part);
+    }
+
     private Draft OwnDraft(Command c, string owner)
     {
         lock (drafts)
@@ -90,14 +194,16 @@ public sealed partial class Bridge
         return best;
     }
 
-    private Draft NewDraft(HistoryStore h, HistoryAccess access, string owner, string ownerName, long start, long end, string? name)
+    private Draft NewDraft(HistoryStore h, HistoryAccess access, string owner, string ownerName, long start, long end, string? name, bool typed, HistoryRange nameFrom)
     {
         RequireDraftLength(h, start, end);
         long now = utcNow();
-        var draft = new Draft { Id = Guid.NewGuid().ToString("N"), Owner = owner, OwnerName = ownerName, SessionId = h.SessionId, Start = start, End = end, Name = CleanName(name), Created = now, Updated = now };
+        var clean = CleanName(name);
+        var draft = new Draft { Id = Guid.NewGuid().ToString("N"), Owner = owner, OwnerName = ownerName, SessionId = h.SessionId, Start = start, End = end, Name = clean, NameTyped = typed && clean != null, NameRange = nameFrom, Created = now, Updated = now };
         lock (drafts)
         {
             if (drafts.Values.Count(d => d.Owner == owner) >= MaxDraftsPerPerson) throw new InvalidDataException($"You have {MaxDraftsPerPerson} drafts. Keep or discard some first.");
+            RequireGuestPinRoom(h, owner, null, start, end);
             // Pinned before anyone can see it: a draft never shows audio that expiry could still take.
             h.Pin(access, draft.PinKey, start, end);
             drafts[draft.Id] = draft;
@@ -128,6 +234,9 @@ public sealed partial class Bridge
         var h = CurrentHistory() ?? throw new InvalidDataException("Mimic has not recorded anything yet.");
         if (c.SourceId != null && c.SourceId != h.SessionId) throw new InvalidDataException("Mimic restarted since you looked. Look again.");
         var access = AccessFor(actor, participant, requester, h);
+        // A guest who sends a draft command is here, whatever the last session summary said.
+        if (!host) lock (drafts) { guestsAway.Remove(owner); guestsHere.Add(owner); }
+        ReleaseAwayGuests();
         switch (c.Op)
         {
             case "draftList":
@@ -136,8 +245,9 @@ public sealed partial class Bridge
                     var mine = all.Where(d => d.Owner == owner).OrderByDescending(d => d.Updated).Select(View).ToArray();
                     var others = new List<DraftBand>();
                     foreach (var d in all.Where(d => d.Owner != owner).OrderByDescending(d => d.Updated))
-                        // A guest sees other people's selections only where they may see the history itself.
-                        if (Visible(access, d.Start, d.End) is { } part) others.Add(new(d.Id, d.OwnerName, Tag(d.Owner), part.StartFrame, part.EndFrame, d.Name));
+                        // A guest sees other people's selections only where they may see the history itself, and
+                        // their names only from words they may see.
+                        if (Visible(access, d.Start, d.End) is { } part) others.Add(new(d.Id, d.OwnerName, Tag(d.Owner), part.StartFrame, part.EndFrame, NameFor(h, access, d, part).Name));
                     return new("ack", c.Id, true, Data: new { drafts = mine, others, sessionId = h.SessionId });
                 }
             case "draftCreate":
@@ -160,8 +270,10 @@ public sealed partial class Bridge
                         var (_, s, e) = Selection(c);
                         range = new(s, e);
                     }
-                    string? name = CleanName(c.Name) ?? WordsOf(h, access, range.StartFrame, range.EndFrame);
-                    var draft = NewDraft(h, access, owner, person.Name, range.StartFrame, range.EndFrame, name);
+                    // A typed name, or the words of the range this person may see (2.40: the page sends only a typed one).
+                    string? typed = CleanName(c.Name);
+                    string? name = typed ?? WordsOf(h, access, range.StartFrame, range.EndFrame);
+                    var draft = NewDraft(h, access, owner, person.Name, range.StartFrame, range.EndFrame, name, typed != null, range);
                     Log($"{person.Name} captured a draft ({range.Frames / (double)h.Rate:0.0} s)");
                     DraftsChanged();
                     return new("ack", c.Id, true, Data: View(draft));
@@ -171,7 +283,9 @@ public sealed partial class Bridge
                     Draft source;
                     lock (drafts) source = c.DraftId is { } id && drafts.TryGetValue(id, out var d) && d.SessionId == h.SessionId ? d : throw new InvalidDataException("That selection is gone.");
                     var part = Visible(access, source.Start, source.End) ?? throw new InvalidDataException("That selection is from before you joined. Ask the host to share it.");
-                    var copy = NewDraft(h, access, owner, person.Name, part.StartFrame, part.EndFrame, source.Name);
+                    // Named from what the copier may see, never from words of the original they may not.
+                    var (name, typed, from) = NameFor(h, access, source, part);
+                    var copy = NewDraft(h, access, owner, person.Name, part.StartFrame, part.EndFrame, name, typed, from);
                     DraftsChanged();
                     return new("ack", c.Id, true, Data: View(copy));
                 }
@@ -185,9 +299,13 @@ public sealed partial class Bridge
                     {
                         if (!drafts.ContainsKey(draft.Id)) throw new InvalidDataException("That draft is gone. It may have been kept or discarded.");
                         // Moved or extended into the surrounding history: the new range is pinned before the old one is let go.
-                        if (start != draft.Start || end != draft.End) h.ReplacePin(access, draft.PinKey, start, end);
+                        if (start != draft.Start || end != draft.End)
+                        {
+                            RequireGuestPinRoom(h, owner, draft.Id, start, end);
+                            h.ReplacePin(access, draft.PinKey, start, end);
+                        }
                         draft.Start = start; draft.End = end;
-                        if (c.Name != null) draft.Name = CleanName(c.Name);
+                        if (c.Name != null) { draft.Name = CleanName(c.Name); draft.NameTyped = draft.Name != null; }
                         draft.Updated = utcNow();
                     }
                     DraftsChanged();
@@ -195,9 +313,12 @@ public sealed partial class Bridge
                 }
             case "draftDiscard":
                 {
-                    var draft = OwnDraft(c, owner);
-                    lock (drafts) drafts.Remove(draft.Id);
-                    h.Unpin(draft.PinKey);
+                    // The host may let go of anyone's draft (2.40), such as one a guest left behind; a guest only their own.
+                    Draft draft;
+                    lock (drafts) draft = c.DraftId is { } id && drafts.TryGetValue(id, out var d) && (d.Owner == owner || host) ? d : throw new InvalidDataException("That draft is gone. It may have been kept or discarded.");
+                    bool removed; lock (drafts) removed = drafts.Remove(draft.Id);
+                    if (removed) h.Unpin(draft.PinKey);
+                    if (removed && draft.Owner != owner) Log($"The host discarded {draft.OwnerName}'s draft");
                     DraftsChanged();
                     return new("ack", c.Id, true);
                 }

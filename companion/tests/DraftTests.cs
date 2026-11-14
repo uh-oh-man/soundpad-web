@@ -41,6 +41,8 @@ public sealed class DraftTests : IDisposable
             Bridge.UseClock(() => Now);
         }
         public void Advance(double seconds) { Capture.Advance(TimeSpan.FromSeconds(seconds)); Interlocked.Add(ref now, (long)(seconds * 1000)); }
+        /// <summary>Only the clock moves (minutes go by without recording more).</summary>
+        public void Wait(double seconds) => Interlocked.Add(ref now, (long)(seconds * 1000));
         public async Task Start()
         {
             await Bridge.Poll(true);
@@ -147,6 +149,135 @@ public sealed class DraftTests : IDisposable
         Assert.Equal(("Alice", S(9)), (hersAsBand.GetProperty("ownerName").GetString(), hersAsBand.GetProperty("startFrame").GetInt64()));
         // Her drafts start where she may see: a draft of audio before she joined is refused.
         Assert.Contains("before you joined", await Refused(rig.AsAlice(Range("draftCreate", rig.Session, 2, 4))));
+    }
+
+    private static readonly Participant Bob = new("22222222-2222-2222-2222-222222222222", "Bob"), Carol = new("33333333-3333-3333-3333-333333333333", "Carol");
+    private static Task<Reply> As(Rig rig, Participant who, Command c) => rig.Bridge.Execute(c, "guest", who, "peer-" + who.Name);
+    private static string Id(Reply reply) => Body(reply).GetProperty("id").GetString()!;
+    private static IEnumerable<string> Owners(Bridge bridge) => bridge.History!.Pins(HistoryAccess.Host).Keys;
+
+    [Fact]
+    public async Task GuestDraftsHaveTheirOwnShareOfThePinBudgetAndTheHostCanLetThemGo()
+    {
+        // Eight 10 s segments of protected audio: a guest may hold two, all guests together four; the rest is the host's.
+        await using var rig = new Rig(folder, new HistoryOptions { PinBudgetBytes = 8 * 10L * Rate * 2 }); var bridge = rig.Bridge;
+        await rig.Start();
+        foreach (var guest in new[] { Alice, Bob, Carol }) bridge.NoteGuest(guest, "peer-" + guest.Name, rig.Now);
+        rig.Advance(65);
+        var alice1 = Id(await Ok(As(rig, Alice, Range("draftCreate", rig.Session, 1, 3))));
+        await Ok(As(rig, Alice, Range("draftCreate", rig.Session, 11, 13)));
+        await Ok(As(rig, Alice, Range("draftCreate", rig.Session, 12, 14))); // the same segment costs nothing more
+        Assert.Contains("as a guest may", await Refused(As(rig, Alice, Range("draftCreate", rig.Session, 21, 23))));
+        // Moving one of hers into a third segment is refused the same way; her draft keeps its range.
+        Assert.Contains("as a guest may", await Refused(As(rig, Alice, Range("draftUpdate", rig.Session, 21, 33) with { DraftId = alice1 })));
+        Assert.Equal(new HistoryRange(S(1), S(3)), bridge.History!.Pins(HistoryAccess.Host)["draft:" + alice1]);
+        await Ok(As(rig, Bob, Range("draftCreate", rig.Session, 21, 23)));
+        await Ok(As(rig, Bob, Range("draftCreate", rig.Session, 31, 33)));
+        // Four segments are held by guests: Carol's draft in a fifth is refused, though she has none yet.
+        Assert.Contains("Guests' drafts", await Refused(As(rig, Carol, Range("draftCreate", rig.Session, 41, 43))));
+        // The host is never held back by guests' drafts.
+        await Ok(bridge.Execute(Range("draftCreate", rig.Session, 41, 43), "host"));
+        var host = Id(await Ok(bridge.Execute(Range("draftCreate", rig.Session, 51, 53), "host")));
+        // The host may discard anyone's draft; a guest only their own.
+        Assert.Contains("gone", await Refused(As(rig, Bob, Cmd("draftDiscard") with { DraftId = alice1 })));
+        Assert.Contains("gone", await Refused(As(rig, Bob, Cmd("draftDiscard") with { DraftId = host })));
+        await Ok(bridge.Execute(Cmd("draftDiscard") with { DraftId = alice1 }, "host"));
+        Assert.DoesNotContain("draft:" + alice1, Owners(bridge));
+        Assert.Contains("gone", await Refused(As(rig, Alice, Cmd("draftUpdate") with { DraftId = alice1, Name = "Mine" })));
+        // Room again for Carol.
+        await Ok(As(rig, Carol, Range("draftCreate", rig.Session, 1, 3)));
+        Assert.Equal(7, Owners(bridge).Count());
+    }
+
+    [Fact]
+    public async Task AGuestsDraftsGoWhenTheHostRemovesThemOrTheyHaveBeenAwayAWhile()
+    {
+        await using var rig = new Rig(folder); var bridge = rig.Bridge;
+        await rig.Start();
+        foreach (var guest in new[] { Alice, Bob, Carol }) bridge.NoteGuest(guest, "peer-" + guest.Name, rig.Now);
+        rig.Advance(12);
+        var host = Id(await Ok(bridge.Execute(Range("draftCreate", rig.Session, 1, 3), "host")));
+        await Ok(As(rig, Alice, Range("draftCreate", rig.Session, 2, 4)));
+        await Ok(As(rig, Bob, Range("draftCreate", rig.Session, 3, 5)));
+        await Ok(As(rig, Carol, Range("draftCreate", rig.Session, 4, 6)));
+        Assert.Equal(4, Owners(bridge).Count());
+        // Disconnected or turned away by the host: Alice's drafts go, with their pins.
+        await bridge.Execute(Cmd("revokePeer") with { GuestId = Alice.Id, OwnerId = "peer-Alice" }, "host");
+        Assert.Equal(3, Owners(bridge).Count());
+        Assert.Single(Body(await Ok(bridge.Execute(Cmd("draftList"), "host"))).GetProperty("others").EnumerateArray(), b => b.GetProperty("ownerName").GetString() == "Bob");
+        // Bob leaves (the owner page's session summary no longer lists him). A reload's few seconds keep his drafts...
+        bridge.NotePresent([Bob.Id, Carol.Id]);
+        bridge.NotePresent([Carol.Id]);
+        Assert.Equal(new[] { Bob.Id }, bridge.GuestsAway);
+        rig.Wait(60);
+        bridge.NotePresent([Bob.Id, Carol.Id]); // back after a reload
+        Assert.Empty(bridge.GuestsAway);
+        bridge.NotePresent([Carol.Id]);
+        rig.Wait(Bridge.AwayGuestDraftMinutes * 60 - 30);
+        await bridge.Poll(false);
+        Assert.Equal(3, Owners(bridge).Count());
+        // ...but once he has been away a while, they go.
+        rig.Wait(60);
+        await bridge.Poll(false);
+        Assert.Equal(2, Owners(bridge).Count());
+        Assert.Empty(bridge.GuestsAway);
+        // End hosting lets go of every guest's draft; the host's own stay.
+        await Ok(bridge.Execute(Cmd("endSession"), "host"));
+        Assert.Equal(new[] { "draft:" + host }, Owners(bridge));
+    }
+
+    [Fact]
+    public async Task ANewInvitationLetsGoOfGuestsDrafts()
+    {
+        await using var rig = new Rig(folder); var bridge = rig.Bridge;
+        await rig.Start();
+        bridge.NoteGuest(Alice, "peer-Alice", rig.Now);
+        rig.Advance(8);
+        await Ok(As(rig, Alice, Range("draftCreate", rig.Session, 2, 4)));
+        await Ok(bridge.Execute(Range("draftCreate", rig.Session, 1, 3), "host"));
+        await Ok(bridge.Execute(Cmd("beginSession") with { NewInvite = true }, "host"));
+        Assert.Single(Owners(bridge));
+    }
+
+    private static HashSet<string> Tones(string? name) => [.. System.Text.RegularExpressions.Regex.Matches(name ?? "", @"Fixture tone \d+").Select(m => m.Value)];
+
+    [Fact]
+    public async Task DraftNamesShowOthersOnlyWordsTheyMaySee()
+    {
+        await using var rig = new Rig(folder); var bridge = rig.Bridge;
+        await rig.Start();
+        await Ok(bridge.Execute(Cmd("mimicTranscribe") with { Action = "enable" }, "host"));
+        rig.Advance(6.8);
+        bridge.NoteGuest(Alice, "peer-a", rig.Now); // Alice joins after the tones at 2, 4 and 6 s
+        rig.Advance(8);
+        // Words before and after her join, as the host sees them: the tones from 1 to 6.5 s, and from 7 to 13 s.
+        string? before = null, after = null;
+        for (int i = 0; i < 100 && (Tones(before).Count < 3 || Tones(after).Count < 3); i++)
+        {
+            await Task.Delay(100);
+            var words = Body(await Ok(bridge.Execute(Cmd("historyTranscript") with { StartFrame = S(1), EndFrame = S(13) }, "host"))).GetProperty("words").EnumerateArray().ToArray();
+            string Text(Func<long, bool> at) => string.Join(" ", words.Where(w => at(w.GetProperty("start").GetInt64())).Select(w => w.GetProperty("text").GetString()));
+            before = Text(s => s < S(6.6)); after = Text(s => s > S(7));
+        }
+        Assert.Equal(3, Tones(before).Count);
+        // The host captures 1 to 13 s without typing a name: named after every word in it.
+        var all = Body(await Ok(bridge.Execute(Range("draftCreate", rig.Session, 1, 13), "host")));
+        string draft = all.GetProperty("id").GetString()!;
+        Assert.Superset(Tones(before), Tones(all.GetProperty("name").GetString()));
+        var typed = Id(await Ok(bridge.Execute(Range("draftCreate", rig.Session, 1, 13) with { Name = "Host's pick" }, "host")));
+        // Alice sees the band from her join, named only from words she may see; a typed name as typed.
+        var bands = Body(await Ok(rig.AsAlice(Cmd("draftList")))).GetProperty("others").EnumerateArray().ToDictionary(b => b.GetProperty("id").GetString()!, b => b.GetProperty("name").GetString());
+        Assert.Empty(Tones(bands[draft]).Intersect(Tones(before)));
+        Assert.NotEmpty(Tones(bands[draft]));
+        Assert.Equal("Host's pick", bands[typed]);
+        // Her copy is named from what she may see too, and so is the clip Keep makes of it.
+        var copy = Body(await Ok(rig.AsAlice(Cmd("draftCopy") with { DraftId = draft })));
+        Assert.Empty(Tones(copy.GetProperty("name").GetString()).Intersect(Tones(before)));
+        await Ok(rig.AsAlice(Cmd("draftKeep") with { DraftId = copy.GetProperty("id").GetString() }));
+        Assert.All(bridge.Snapshot.Library.Sounds.Where(s => s.Temporary), s => Assert.Empty(Tones(s.Name).Intersect(Tones(before))));
+        // The host, who may see everything, sees her copy's name as she does.
+        var hers = Body(await Ok(bridge.Execute(Cmd("draftList"), "host"))).GetProperty("others").EnumerateArray().Single();
+        Assert.Equal(copy.GetProperty("name").GetString(), hers.GetProperty("name").GetString());
     }
 
     // ---- Quick Mimic and own replay -------------------------------------------------------------------------------
@@ -414,5 +545,105 @@ public sealed class DraftTests : IDisposable
             await fourth.Poll(true);
             Assert.Null(fourth.Snapshot.TempRecovery); // nothing to recover after an ordinary quit
         }
+    }
+
+    [Fact]
+    public async Task DiscardingTheLastSessionsTempKeepsClipsMadeSince()
+    {
+        await using var mock = new MockSoundpad(); using var pipe = new SoundpadPipe(mock.Name, true);
+        using (var crashed = new Bridge(pipe, new StateStore(folder)))
+        {
+            await crashed.Poll(true);
+            await Ok(crashed.Execute(Cmd("beginSession"), "host"));
+            Assert.True((await crashed.Upload(Wave(), "Left over.wav", "Host", true, "host")).Ok);
+            Assert.True((await crashed.Upload(Wave(7), "Also left.wav", "Host", true, "host")).Ok);
+        } // the process died
+        using var next = new Bridge(pipe, new StateStore(folder));
+        await next.StartupCleanup();
+        await next.Poll(true);
+        Assert.Equal(2, next.Snapshot.TempRecovery);
+        // The window page starts hosting before the host has answered, and new clips land in Temp meanwhile.
+        await Ok(next.Execute(Cmd("beginSession"), "host"));
+        Assert.True((await next.Upload(Wave(5), "Made since.wav", "Host", true, "host")).Ok);
+        Assert.True((await next.Upload(Wave(4), "From a guest.wav", "Alice", false, "peer-a", guest: Alice.Id)).Ok);
+        await Ok(next.Execute(Cmd("tempRecover") with { Action = "discard" }, "host"));
+        await next.Poll(true);
+        Assert.Null(next.Snapshot.TempRecovery);
+        // Only what the crashed launch left went; the clips made since are still in Temp and still play.
+        var temp = next.Snapshot.Library.Sounds.Where(s => s.Temporary).Select(s => s.Name).Order().ToArray();
+        Assert.Equal(new[] { "From a guest", "Made since" }, temp);
+        Assert.Equal(2, next.TemporaryClipCount);
+        await Ok(next.Execute(Cmd("play") with { SoundId = next.Snapshot.Library.Sounds.First(s => s.Name == "Made since").Id }, "host"));
+        await Ok(next.Execute(Cmd("stop"), "host"));
+        await next.CleanupSession();
+    }
+
+    [Fact]
+    public async Task ClearTempAlsoEndsTheCrashRecoveryQuestion()
+    {
+        await using var mock = new MockSoundpad(); using var pipe = new SoundpadPipe(mock.Name, true);
+        using (var crashed = new Bridge(pipe, new StateStore(folder)))
+        {
+            await crashed.Poll(true);
+            await Ok(crashed.Execute(Cmd("beginSession"), "host"));
+            Assert.True((await crashed.Upload(Wave(), "Left over.wav", "Host", true, "host")).Ok);
+        }
+        using var next = new Bridge(pipe, new StateStore(folder));
+        await next.StartupCleanup();
+        await next.Poll(true);
+        Assert.Equal(1, next.Snapshot.TempRecovery);
+        await Ok(next.Execute(Cmd("clearTemp"), "host"));
+        Assert.Null(next.Snapshot.TempRecovery);
+        await next.CleanupSession();
+    }
+
+    private static byte[] LongWave(int seconds)
+    {
+        using var stream = new MemoryStream();
+        using (var writer = new NAudio.Wave.WaveFileWriter(stream, new NAudio.Wave.WaveFormat(16000, 16, 1)))
+            for (int i = 0; i < 16000 * seconds; i++) writer.WriteSample((float)Math.Sin(i / (8.0 + seconds)) * 0.4f);
+        return stream.ToArray();
+    }
+
+    [Fact]
+    public async Task AGuestsUploadsCountAgainstTheirParticipantAlsoAfterAReload()
+    {
+        const string site = "https://example.test";
+        await using var mock = new MockSoundpad(); using var pipe = new SoundpadPipe(mock.Name, true);
+        using var bridge = new Bridge(pipe, new StateStore(folder)); await bridge.Poll(true);
+        await Ok(bridge.Execute(Cmd("beginSession"), "host"));
+        await Ok(bridge.Execute(Cmd("keepSettings") with { TempMb = 1 }, "host"));
+        await using var server = new LocalServer(bridge, site); await server.Start();
+        using var client = new HttpClient();
+        async Task<JsonElement> Upload(byte[] wave, string name, string peer, string? guest)
+        {
+            using var request = new HttpRequestMessage(HttpMethod.Post, $"http://127.0.0.1:{server.Port}/session-audio") { Content = new ByteArrayContent(wave) };
+            request.Headers.Add("Origin", site);
+            request.Headers.Add("Authorization", "Bearer " + server.Token);
+            request.Headers.Add("X-Audio-Name", name); request.Headers.Add("X-Audio-By", "Alice");
+            request.Headers.Add("X-Audio-Actor", "guest"); request.Headers.Add("X-Audio-Owner", peer);
+            if (guest != null) request.Headers.Add("X-Audio-Guest", guest);
+            using var response = await client.SendAsync(request);
+            Assert.Equal(System.Net.HttpStatusCode.OK, response.StatusCode);
+            return JsonSerializer.Deserialize<JsonElement>(await response.Content.ReadAsStringAsync());
+        }
+        // About 600 KB each: one fits the 1 MB Temp budget, two do not.
+        var first = await Upload(LongWave(19), "First.wav", "peer-before-reload", Alice.Id);
+        Assert.True(first.GetProperty("ok").GetBoolean());
+        string firstId = first.GetProperty("data").GetProperty("assetId").GetString()!;
+        // A reload is a new connection id: the budget is still hers, so the second waits for the host.
+        var second = await Upload(LongWave(20), "Second.wav", "peer-after-reload", Alice.Id);
+        Assert.False(second.GetProperty("ok").GetBoolean());
+        Assert.StartsWith(GuestBudgets.Waiting, second.GetProperty("error").GetString());
+        // Her row in the host's list holds the upload.
+        var usage = Body(await Ok(bridge.Execute(Cmd("budgetStatus"), "host"))).GetProperty("guests").EnumerateArray().Single();
+        Assert.Equal(Alice.Id, usage.GetProperty("id").GetString());
+        Assert.InRange(usage.GetProperty("tempBytes").GetInt64(), 550_000, 700_000);
+        // A guest upload without a participant is refused (the host page always sends it).
+        var anonymous = await Upload(LongWave(2), "Nobody.wav", "peer-x", null);
+        Assert.False(anonymous.GetProperty("ok").GetBoolean());
+        // After the reload she may still take back her own upload, and then the second fits.
+        await Ok(bridge.Execute(Cmd("removeAudio") with { AssetId = firstId }, "guest", Alice, "peer-after-reload"));
+        Assert.True((await Upload(LongWave(20), "Second.wav", "peer-after-reload", Alice.Id)).GetProperty("ok").GetBoolean());
     }
 }

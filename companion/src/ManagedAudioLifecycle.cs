@@ -74,6 +74,26 @@ public sealed partial class ManagedAudioStore
         if (asset.Input != null) asset.Input.State = "retired";
         asset.State = "cleanup-pending"; Save(); await Cleanup(assetId);
     }
+    /// <summary>The app's temporary files as they stand (2.40 crash recovery): each source and its owned, not yet removed temporary variants and staged input.</summary>
+    public TemporaryFiles[] CurrentTemporaryFiles() =>
+        [.. journal.Assets.Select(a => new TemporaryFiles(a.Id, [.. a.Variants.Where(v => v.OwnsFile && !v.Permanent && !v.LegacyApproval && v.State != "removed").Select(v => v.Id)], a.Input?.Path))
+            .Where(t => t.VariantIds.Length > 0 || t.InputPath != null)];
+    /// <summary>
+    /// Retires exactly these temporary files of one source and cleans them up (2.40: Discard after a crash), as
+    /// <see cref="Remove"/> does for a whole source, but leaving every other file, the open session and the Temp
+    /// category alone. A source that is gone, or has a permanent save in progress, is left as it is.
+    /// </summary>
+    public async Task RetireFiles(TemporaryFiles files)
+    {
+        RequireWritable();
+        var asset = journal.Assets.SingleOrDefault(a => a.Id == files.AssetId);
+        if (asset == null || asset.Promotion is { State: not "committed" }) return;
+        bool any = false;
+        foreach (var variant in asset.Variants.Where(v => files.VariantIds.Contains(v.Id) && v.OwnsFile && !v.Permanent && !v.LegacyApproval && v.State != "removed" && !v.Retired)) { variant.Retired = true; any = true; }
+        if (files.InputPath != null && asset.Input is { State: not "retired" } input && input.Path == files.InputPath) { input.State = "retired"; any = true; }
+        if (!any) return;
+        asset.State = "cleanup-pending"; Save(); await Cleanup(asset.Id);
+    }
     public async Task Recover(bool retireSession = false)
     {
         RetryJournal(); if (retireSession) RetireSession();

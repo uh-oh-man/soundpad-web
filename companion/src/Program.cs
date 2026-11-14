@@ -167,9 +167,9 @@ internal static class Program
                     hidden: args.Contains("--hidden-window"),
                     asking: () =>
                     {
-                        // Clips in Temp would be removed by quitting (2.40): the window's page asks Keep selected / Quit anyway / Cancel.
-                        int clips = bridge.TemporaryClipCount;
-                        return clips > 0 && server.AskQuit(clips, answer =>
+                        // Clips in Temp would be removed by quitting (2.40): the window's page asks Keep selected / Quit anyway
+                        // / Cancel; with no page to ask (after End hosting, say), the window asks Keep them / Quit anyway / Cancel.
+                        return QuitQuestion.Ask(bridge.TemporaryClipCount, server.AskQuit, ui.AskQuit, bridge.TemporaryClipIds, answer =>
                         {
                             if (answer.Action == "cancel") return;
                             _ = Task.Run(async () =>

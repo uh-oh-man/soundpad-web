@@ -48,6 +48,39 @@ internal sealed class DesktopUi : IDisposable
         return true;
     });
 
+    /// <summary>
+    /// The window's own quit question (2.40), for when its page cannot ask (after End hosting, say): "keep", "quit" or
+    /// "cancel". Called on the UI thread while the window is closing.
+    /// </summary>
+    public string AskQuit(int clips)
+    {
+        var keep = new TaskDialogButton("Keep them");
+        var quit = new TaskDialogButton("Quit anyway");
+        var page = new TaskDialogPage
+        {
+            Caption = "Soundpad Web",
+            Heading = clips == 1 ? "1 clip in Temp will be removed" : $"{clips} clips in Temp will be removed",
+            Text = "Quitting removes the clips in Temp. Keep them to save them in your Keep folder first.",
+            Icon = TaskDialogIcon.Warning,
+            AllowCancel = true,
+            Buttons = { keep, quit, TaskDialogButton.Cancel },
+            DefaultButton = keep,
+        };
+        try
+        {
+            var owner = window is { IsDisposed: false } w ? w : null;
+            if (owner?.WindowState == FormWindowState.Minimized) owner.WindowState = FormWindowState.Normal;
+            var chosen = owner != null ? TaskDialog.ShowDialog(owner, page) : TaskDialog.ShowDialog(page);
+            return chosen == keep ? "keep" : chosen == quit ? "quit" : "cancel";
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or System.ComponentModel.Win32Exception)
+        {
+            // No task dialog here: the plain message box asks the same.
+            var answer = MessageBox.Show($"{page.Heading} when Soundpad Web quits. Keep them first?", "Soundpad Web", MessageBoxButtons.YesNoCancel, MessageBoxIcon.Warning);
+            return answer == DialogResult.Yes ? "keep" : answer == DialogResult.No ? "quit" : "cancel";
+        }
+    }
+
     /// <summary>Ends the message loop once the companion has finished its cleanup.</summary>
     public void Quit() { try { marshal.BeginInvoke(() => { window?.CloseForExit(); Context.ExitThread(); }); } catch (InvalidOperationException) { } }
 
