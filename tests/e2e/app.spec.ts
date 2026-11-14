@@ -3291,11 +3291,14 @@ test('Mimic on a phone: a fresh clip keeps its name readable beside Edit, Keep a
   }
 });
 
-test('on a phone, keyboard focus is never hidden behind the player bar', async ({
+test('on a phone, keyboard focus is never hidden behind the player bar or the notices', async ({
   page,
   harness,
 }) => {
   // 2.27.2: Tab put Edit copy's Save copy and Save & play under the bar at the bottom of a phone screen.
+  // 2.41: notices moved above the player, and Tab put Save copy under them (CI, WebKit). Chromium only
+  // passed because its focus() centres the Name field, which left Save copy in view with nothing to
+  // scroll, while WebKit's scrolls Name only to the bottom edge, so Tab then scrolled Save copy there too.
   await page.setViewportSize({ width: 375, height: 812 });
   await host(page, harness);
   await page
@@ -3310,19 +3313,58 @@ test('on a phone, keyboard focus is never hidden behind the player bar', async (
     .getByRole('button', { name: 'Edit copy' })
     .click();
   const form = page.getByRole('form', { name: 'Edit a copy of Focus tone' });
-  await page.evaluate(() => window.scrollTo(0, 0));
-  await form.getByLabel('Name').focus();
-  for (const name of ['Save copy', 'Save & play', 'Preview']) {
-    await page.keyboard.press('Tab');
-    await expect(form.getByRole('button', { name })).toBeFocused();
-    // What is drawn at the focused control's centre is the control itself, not the player bar.
-    const shown = await page.evaluate(() => {
+  const notices = page.locator('.notification-stack .toast');
+  /** Shows a notice with a button, so it stays 10 s: long enough for a slow runner to tab past it. */
+  const notice = (message: string) =>
+    page.evaluate(async (message) => {
+      const path = '/src/notifications.ts';
+      const { notify } = await import(path);
+      notify(message, 'info', { label: 'Undo', run: () => {} });
+    }, message);
+  /** Where the focused control's centre is: drawn on top, and not under the notices or the player bar. */
+  const focusedShown = () =>
+    page.evaluate(() => {
       const el = document.activeElement as HTMLElement;
       const r = el.getBoundingClientRect();
-      const hit = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
-      return hit === el || el.contains(hit);
+      const x = r.left + r.width / 2,
+        y = r.top + r.height / 2;
+      const hit = document.elementFromPoint(x, y);
+      // By box as well as by hit test: parts of the notices let the pointer through to what is under them.
+      const under = [...document.querySelectorAll('.notification-stack, .player')]
+        .filter((overlay) => !overlay.contains(el))
+        .map((overlay) => overlay.getBoundingClientRect())
+        .some((b) => b.height > 0 && x >= b.left && x <= b.right && y >= b.top && y <= b.bottom);
+      return { onTop: hit === el || el.contains(hit), under };
     });
-    expect(shown, `${name} is visible when focused`).toBe(true);
+  for (const [round, count] of [
+    ['one notice', 1],
+    ['two notices', 2],
+  ] as const) {
+    await notice(
+      round === 'one notice'
+        ? 'Fixture notice while tabbing.'
+        : 'A second, longer fixture notice, so the notices stand taller over the bottom of the screen.',
+    );
+    expect(await notices.count(), round).toBeGreaterThanOrEqual(count);
+    // Save copy peeks out above the player bar, as the next control does while someone tabs down the
+    // page. Both engines then scroll it up only as far as the bottom edge they keep clear
+    // (scroll-padding), which is under the notices unless that edge counts them too.
+    await form.getByRole('button', { name: 'Save copy' }).evaluate((el) => {
+      const bar = document.querySelector('.player')!.getBoundingClientRect().top;
+      window.scrollBy(0, el.getBoundingClientRect().top - (bar - 20));
+    });
+    await form
+      .getByLabel('Name')
+      .evaluate((el) => (el as HTMLElement).focus({ preventScroll: true }));
+    for (const name of ['Save copy', 'Save & play', 'Preview']) {
+      await page.keyboard.press('Tab');
+      await expect(form.getByRole('button', { name })).toBeFocused();
+      await expect(notices.first(), `a notice shows while ${name} has focus`).toBeVisible();
+      expect(await focusedShown(), `${name} is visible when focused, ${round}`).toEqual({
+        onTop: true,
+        under: false,
+      });
+    }
   }
 });
 
