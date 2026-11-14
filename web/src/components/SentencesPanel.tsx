@@ -62,8 +62,6 @@ import {
   type Sentence,
 } from '../library/sentences';
 import { VoiceAvatar } from './VoiceShared';
-import '../voices.css';
-import '../sentences.css';
 
 type Props = {
   state: Snapshot;

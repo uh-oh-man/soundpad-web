@@ -198,6 +198,10 @@
   outline-offset: 1px;
   z-index: 2;
 }
+/* With keyboard focus the focus ring's offset applies, as before this file loaded last (2.43). */
+.timeline-piece.selected:focus-visible {
+  outline-offset: 3px;
+}
 .timeline-piece.kind-pause {
   background: repeating-linear-gradient(
     90deg,

@@ -52,7 +52,6 @@ import {
 import { PAGE } from './VoiceShared';
 import { useSentenceStore } from '../library/sentence-store';
 import { usePreviewAudio } from '../preview-audio';
-import '../voices.css';
 
 type Props = { state: Snapshot; host: boolean; connected: boolean; canPlay: boolean };
 type Tab = 'library' | 'review' | 'words' | 'voices' | 'index';

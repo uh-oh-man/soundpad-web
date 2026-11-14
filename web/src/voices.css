@@ -25,7 +25,8 @@
   resize: vertical;
 }
 .voices-panel h3 {
-  margin: 6px 0 2px;
+  /* The bottom margin is .dialog h3's, which won while this file loaded before the legacy rules (2.43). */
+  margin: 6px 0 12px;
   font-size: 14px;
 }
 .voices-intro,
@@ -47,7 +48,6 @@
 .voices-search {
   display: flex;
   align-items: center;
-  gap: 8px;
 }
 .voices-search input {
   flex: 1 1 auto;
@@ -88,6 +88,11 @@
   color: var(--text-primary);
   border-color: var(--accent);
   background: color-mix(in srgb, var(--accent) 15%, transparent);
+}
+/* Hovered, a pressed toggle shows the plain button hover, as it did before this file loaded last (2.43). */
+:is(.voices-types, .voices-voice-keys, .voices-detail-head) button[aria-pressed='true']:hover:not(:disabled) {
+  background: var(--surface-hover);
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--line));
 }
 .voices-bulk {
   padding: 8px;

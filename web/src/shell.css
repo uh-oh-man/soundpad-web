@@ -1,0 +1,6 @@
+/*
+ * Shell layout (Stage G): the shell grid, topbar, sidebar frame, section navigation, section headers
+ * (layout only), the board toolbar, the editor panel, splitter and sheet, the notice dock, Activity and the
+ * Temp details layout. Owned by WP-A. Only selectors for WP-A components; overrides studio.css by load
+ * order at equal specificity, never with !important.
+ */

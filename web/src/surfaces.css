@@ -1,0 +1,6 @@
+/*
+ * Surfaces (Stage G): the landing, the example banner, simulated and host-only tags, the modal look
+ * (.dialog, .scrim), Settings, Session & access, Storage, WhatsNew, GuestName, PersonalLayout and
+ * OrganizeSound. Owned by WP-C. Only selectors for WP-C components; overrides studio.css by load order at
+ * equal specificity, never with !important.
+ */

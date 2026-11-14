@@ -1,0 +1,5 @@
+/*
+ * Playback look (Stage G): the player, Kick, Spotify, tiles and the grid, quick actions, the Speed menu,
+ * waveforms and the header ribbon. Owned by WP-B. Only selectors for WP-B components; overrides studio.css
+ * by load order at equal specificity, never with !important.
+ */

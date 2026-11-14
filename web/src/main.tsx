@@ -58,11 +58,17 @@ import { useAppearance } from './appearance';
 import { GuestName } from './components/GuestName';
 import { organization } from './shared-layout';
 import { clearWaveforms } from './waveform-cache';
+// Stylesheets in their cascade order (Stage G spec 3.1). Each later file overrides earlier ones at equal
+// specificity; see the ownership note at the top of each file. The DM Sans font goes after tokens.css.
 import './tokens.css';
-import './styles.css';
-import './v2.css';
-import './polish.css';
+import './studio.css';
+import './controls.css';
 import './mimic.css';
+import './voices.css';
+import './sentences.css';
+import './shell.css';
+import './playback.css';
+import './surfaces.css';
 
 const PROJECT_URL = 'https://github.com/uh-oh-man/soundpad-web';
 const viewLabels: Record<(typeof viewModes)[number], string> = {
