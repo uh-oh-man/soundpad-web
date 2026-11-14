@@ -51,6 +51,7 @@ public sealed partial class Bridge
     /// the same copy but returns its first <see cref="TrimPreviewSeconds"/> s as WAV to the host's own browser
     /// tab, like Mimic's Preview, and saves nothing. With <c>autoplay</c> (2.35) the new copy is played when it is
     /// ready, but only if <paramref name="intent"/>, reserved when the command arrived, is still the newest.
+    /// Since 2.43 (gate soundEdit) the source can also be <c>soundId</c>, any sound in the library (Speed on a board tile).
     /// </summary>
     private async Task<Reply> TrimAudio(Command c, string actor, Participant? participant, string? requester, string? audience, bool preview = false, Intent? intent = null)
     {
@@ -58,7 +59,11 @@ public sealed partial class Bridge
         {
             long now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
             if (c.V is not (1 or 2) || !Guid.TryParseExact(c.Id, "D", out _) || Math.Abs(now - c.At) > 30000) throw new InvalidDataException("Invalid or expired command.");
-            if (c.AssetId == null || c.PositionMs is not long from || c.EndMs is not long to || from < 0 || to - from < TrimMinimumMs)
+            // The source is a Temp asset, or (2.43, gate soundEdit) a sound in the library: exactly one of the two.
+            if ((c.AssetId == null) == (c.SoundId == null)) throw new InvalidDataException("Choose one source to copy.");
+            if (c.SoundId != null && (c.SoundId.StartsWith("sentence:", StringComparison.Ordinal) || c.SoundId.StartsWith("palette:", StringComparison.Ordinal)))
+                throw new InvalidDataException("Sentences and palette words are made from recordings; edit them in Sentences or Voices instead.");
+            if (c.PositionMs is not long from || c.EndMs is not long to || from < 0 || to - from < TrimMinimumMs)
                 throw new InvalidDataException($"Choose a start and end at least {TrimMinimumMs / 1000.0:0.0} s apart.");
             // Check the guest before any decoding: this work is heavy and must not be free to trigger.
             var owner = requester ?? participant?.Id ?? actor;
@@ -71,15 +76,28 @@ public sealed partial class Bridge
             try
             {
             string? path; string original;
-            await audioGate.EnterAsync(PriorityGate.Lane.Normal);
-            try
+            // A library sound the companion manages (Temp, a kept copy, a native sound it reversed) is copied from its
+            // asset, as Edit copy does; any other Soundpad sound from the file the library index names. The path always
+            // comes from the companion's own index, never from the command.
+            var managedId = c.AssetId ?? (c.SoundId != null ? managed?.Annotation(c.SoundId)?.AssetId : null);
+            if (managedId != null)
             {
-                var asset = Audio.AssetById(c.AssetId);
-                original = asset.Name;
-                path = asset.Variants.FirstOrDefault(v => v.Orientation == "normal" && v.Current && !v.Retired && File.Exists(v.Path))?.Path ?? asset.SourcePath;
+                await audioGate.EnterAsync(PriorityGate.Lane.Normal);
+                try
+                {
+                    var asset = Audio.AssetById(managedId);
+                    original = asset.Name;
+                    path = asset.Variants.FirstOrDefault(v => v.Orientation == "normal" && v.Current && !v.Retired && File.Exists(v.Path))?.Path ?? asset.SourcePath;
+                }
+                catch (Exception ex) when (ex is KeyNotFoundException or InvalidOperationException) { throw new InvalidDataException("Unknown source."); }
+                finally { audioGate.Release(); }
             }
-            catch (Exception ex) when (ex is KeyNotFoundException or InvalidOperationException) { throw new InvalidDataException("Unknown source."); }
-            finally { audioGate.Release(); }
+            else
+            {
+                var library = parsed;
+                if (!available || !library.Paths.TryGetValue(c.SoundId!, out path)) throw new InvalidDataException("That sound is no longer in Soundpad. Refresh and choose it again.");
+                original = library.Public.Sounds.FirstOrDefault(s => s.Id == c.SoundId)?.Name ?? "Sound";
+            }
             if (path == null || !File.Exists(path)) throw new InvalidDataException("The original audio for that source is no longer available.");
             string sourcePath = path;
             var effect = c.Action ?? "none";
@@ -111,7 +129,7 @@ public sealed partial class Bridge
             if (name.Length > 100) name = name[..99].TrimEnd() + "\u2026";
             var saved = (await Upload(wav, name + ".wav", Person(actor, participant).Name, actor == "host", owner, audience, guest: PersonKey(actor, participant, requester))) with { Id = c.Id };
             // Provenance for the voice library (2.41): an edited copy of that source.
-            if (saved.Ok && Field(saved, "assetId") is string copyId) NoteProvenance(copyId, new LibrarySource { Kind = "copy", SourceAssetId = c.AssetId });
+            if (saved.Ok && Field(saved, "assetId") is string copyId) NoteProvenance(copyId, new LibrarySource { Kind = "copy", SourceAssetId = managedId, SoundId = managedId == null ? c.SoundId : null });
             return c.Autoplay ? await Autoplay(saved, c, actor, participant, requester, audience, intent) : saved;
             }
             finally { Interlocked.Decrement(ref editing); }
