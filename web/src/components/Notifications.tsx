@@ -1,17 +1,26 @@
+import { useEffect, useRef } from 'react';
 import { Check, Info, TriangleAlert, X } from 'lucide-react';
 import { createPortal } from 'react-dom';
 import { dismissNotice, holdNotice, useNotices } from '../notifications';
+import { watchFocusClearance } from '../focus-clear';
 import { useNoticeSlot } from './Modal';
 /**
  * Notices sit at the bottom right, above the player, clear of the header, the example banner, Stop
  * and Panic (2.41). While a dialog is open they move into it, at its foot, where they never cover
- * its close button and Tab reaches their Undo inside the dialog's focus trap.
+ * its close button and Tab reaches their Undo inside the dialog's focus trap. Keyboard focus is
+ * kept clear of them (focus-clear.ts).
  */
 export function Notifications() {
   const notices = useNotices();
   const slot = useNoticeSlot();
+  const element = useRef<HTMLElement>(null);
+  useEffect(() => watchFocusClearance(element.current, !!slot), [slot]);
   const stack = (
-    <aside className={`notification-stack${slot ? ' in-dialog' : ''}`} aria-label="Notifications">
+    <aside
+      ref={element}
+      className={`notification-stack${slot ? ' in-dialog' : ''}`}
+      aria-label="Notifications"
+    >
       {notices.map((notice) => (
         <div
           className={`toast notice-${notice.kind}`}
