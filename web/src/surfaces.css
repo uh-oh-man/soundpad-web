@@ -96,9 +96,9 @@
 
 /* ---- Modals ------------------------------------------------------------------------------------------ */
 
+/* A plain tint, no blur: a full-window blur is costly on every frame behind an open dialog. */
 .scrim {
-  background: color-mix(in srgb, var(--surface-0) 74%, transparent);
-  backdrop-filter: blur(calc(var(--blur) / 3));
+  background: color-mix(in srgb, var(--surface-0) 80%, transparent);
 }
 .dialog {
   border: 1px solid var(--line);
