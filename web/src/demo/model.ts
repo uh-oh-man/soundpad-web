@@ -29,9 +29,18 @@ import {
   wordsWithin,
   type DemoWord,
 } from './library';
-import { clampSpeed, editedLengthMs, type ClipEdit, type Effect, type Level } from './dsp';
+import {
+  clampSpeed,
+  editedLengthMs,
+  type ClipEdit,
+  type Effect,
+  type Level,
+  type MixPart,
+} from './dsp';
 import { DemoHistory, loopMs, type Range } from './history';
 import { ALEX_BAND_MS, DemoDrafts } from './drafts';
+import { DemoVoices, LIBRARY_UNAVAILABLE } from './voices';
+import { DemoSentences } from './sentences';
 
 /**
  * The example session: a stand-in for the companion and the guest room that runs entirely in
@@ -74,6 +83,10 @@ export interface DemoEngine {
     maxMs: number,
   ): Promise<{ wav: string; seconds: number }>;
   previewLoop(fromMs: number, toMs: number): Promise<{ wav: string; seconds: number }>;
+  /** Makes `target` from a mix of parts (sentences, palette words); resolves with its length in ms. */
+  mix(target: string, parts: MixPart[]): Promise<number>;
+  /** A WAV (base64) of a mix, for a private preview. */
+  previewMix(parts: MixPart[], maxMs: number): Promise<{ wav: string; seconds: number }>;
   waveform(clip: string): Level[] | null;
   forget(clip: string): void;
   close(): void;
@@ -103,12 +116,13 @@ export type DemoOptions = {
 /**
  * The companion version the example reports, so the page shows the controls of that version. Stage G raised it
  * from 2.37 to 2.40 with the recording history (2.39: a virtual history over the example's loop, see
- * `history.ts`) and drafts (2.40: `drafts.ts`, with a simulated guest's selection). Every op of every feature
- * up to this version is answered here, or refused with an honest reason on the allow-list in
- * tests/unit/demo-coverage.test.ts, which fails when that is not so. Raise it only together with the ops of
- * the features it unlocks, and that test.
+ * `history.ts`) and drafts (2.40: `drafts.ts`, with a simulated guest's selection), then to 2.42 with the voice
+ * library (2.41: `voices.ts`, three simulated voices from the example's own clips) and sentences with the
+ * speaking palette (2.42: `sentences.ts`). Every op of every feature up to this version is answered here, or
+ * refused with an honest reason on the allow-list in tests/unit/demo-coverage.test.ts, which fails when that
+ * is not so. Raise it only together with the ops of the features it unlocks, and that test.
  */
-export const DEMO_COMPANION = '2.40.0';
+export const DEMO_COMPANION = '2.42.0';
 export const DEMO_HOST_ID = 'de30'.padEnd(64, '0');
 /** Features that need the host's PC: the example says so instead of pretending. */
 export const UNAVAILABLE = {
@@ -238,6 +252,8 @@ export class DemoModel {
   private drafts = new DemoDrafts(this.history);
   /** The clip each draft last played into the game, made from the loop when it was played. */
   private draftClips = new Map<string, string>();
+  private library: DemoVoices;
+  private composer: DemoSentences;
   private permissions: Snapshot['permissions'] = {
     remotePlayback: true,
     guestCounter: false,
@@ -247,6 +263,7 @@ export class DemoModel {
     guestTransforms: true,
     guestMimic: false,
     guestKeep: false,
+    guestLibraryEdit: true,
   };
   private stats = new Map<string, Stats>();
   private activity: Activity[] = [];
@@ -304,6 +321,8 @@ export class DemoModel {
       ),
       children: [],
     }));
+    this.library = new DemoVoices(DemoModel.soundId, (id) => engine.duration(id), Date.now());
+    this.composer = new DemoSentences(this.library);
   }
 
   /** The library's sound id for a sound key (tests and the engine use it). */
@@ -364,7 +383,9 @@ export class DemoModel {
         ? {
             status: playing.status,
             positionMs: Math.round(this.engine.position()),
-            durationMs: sound?.durationMs ?? null,
+            // A sentence or palette word is no library sound: its length is the audio made for it.
+            durationMs:
+              sound?.durationMs ?? (Math.round(this.engine.duration(playing.soundId)) || null),
             soundId: playing.soundId,
             epoch: playing.epoch,
             requester: playing.requester,
@@ -388,6 +409,8 @@ export class DemoModel {
       counterSession: this.counterSession,
       drafts: this.drafts.revision,
       budgets: 1,
+      voiceLibrary: this.library.revision,
+      sentences: this.composer.revision,
       permissions: this.permissions,
       playbackSuspended: this.suspended,
       mimic: {
@@ -668,6 +691,86 @@ export class DemoModel {
         return this.draftPlay(c, by, !!guest);
       case 'budgetStatus':
         return this.budgetStatus(person, host);
+      // ---- The voice library (2.41): see voices.ts.
+      case 'libraryStatus':
+        return this.library.status(host || this.permissions.guestLibraryEdit !== false);
+      case 'libraryList':
+        return this.library.list(c);
+      case 'libraryGet':
+        return this.library.getView(c);
+      case 'librarySearch':
+        return this.library.search(c);
+      case 'libraryVocabulary':
+        return this.library.vocabulary(c);
+      case 'libraryAudit':
+        return this.library.auditOf(c);
+      case 'libraryEdit':
+        return this.changeLibrary(() => this.library.edit(c, person.name));
+      case 'libraryRemove':
+        return this.changeLibrary(() => this.library.remove(c, person.name));
+      case 'libraryUndo':
+        return this.changeLibrary(() => this.library.undo(c, person.name));
+      case 'libraryVoice':
+        return this.changeLibrary(() => this.library.voice(c, person.name));
+      case 'libraryWanted':
+        return this.changeLibrary(() => this.library.want(c, person.name));
+      case 'libraryRetry':
+        this.library.get(c.recordingId);
+        return { queued: false }; // Its words are hand-placed and always ready.
+      case 'libraryPreview':
+        return this.libraryPreview(c);
+      case 'librarySettings':
+        this.hostOnly(host);
+        return this.changeLibrary(() => this.library.settings(c));
+      case 'libraryAdd':
+        throw Error(LIBRARY_UNAVAILABLE.add);
+      case 'libraryIndex':
+        throw Error(LIBRARY_UNAVAILABLE.index);
+      case 'historySearch':
+        this.sameRecording(c);
+        return this.history.search(c.query ?? '', Date.now());
+      case 'speakerGroups':
+        return { enabled: false, groups: [], unassigned: 0 };
+      case 'speakerName':
+      case 'speakerLink':
+        throw Error(LIBRARY_UNAVAILABLE.speakers);
+      // ---- Sentences and the speaking palette (2.42): see sentences.ts.
+      case 'sentenceList':
+        return this.composer.list();
+      case 'sentenceGet':
+        return this.composer.view(this.composer.find(c.sentenceId));
+      case 'sentenceAlternatives':
+        return this.composer.alternativesView(c);
+      case 'sentenceCreate':
+        return this.changeSentences(() => this.composer.create(c.sentence, person.name));
+      case 'sentenceText':
+        return this.changeSentences(() => this.composer.text(c));
+      case 'sentenceEdit':
+        return this.changeSentences(() => this.composer.edit(c));
+      case 'sentenceDiscard':
+        return this.changeSentences(() => this.composer.discard(c));
+      case 'sentenceKeep':
+        // Kept for this example only: the version's audio is made again from its pieces when it plays.
+        return this.changeSentences(() => this.composer.keep(c, person.name));
+      case 'sentencePreview': {
+        const { pieces, settings, sentence } = this.composer.piecesFor(c);
+        const heard = await this.engine.previewMix(this.composer.render(pieces, settings), 30000);
+        return { ...heard, revision: sentence.revision };
+      }
+      case 'sentencePlay':
+        return this.sentencePlay(c, by, !!guest);
+      case 'paletteSearch':
+        return this.composer.palette(c);
+      case 'paletteTap':
+        return this.paletteTap(c, by, !!guest);
+      case 'paletteMark':
+        return this.changeSentences(() => this.composer.mark(c, person.name));
+      case 'performance':
+        return this.changeSentences(() => this.composer.perform(c, person.name));
+      case 'performanceSets':
+        return c.action
+          ? this.changeSentences(() => this.composer.setsCommand(c))
+          : this.composer.setsCommand(c);
       case 'keepSettings':
       case 'budgetGrant':
       case 'tempRecover':
@@ -1338,6 +1441,72 @@ export class DemoModel {
       return { draftId: draft.id, ...superseded('suspended') };
     }
     return { draftId: draft.id, ...this.start(id, 0, null, false, by, c.id) };
+  }
+
+  // ---- Voice library and sentences ----------------------------------------------------------
+
+  private changeLibrary<T>(change: () => T) {
+    const result = change();
+    this.publish();
+    return result;
+  }
+
+  private changeSentences<T>(change: () => T) {
+    const result = change();
+    this.publish();
+    return result;
+  }
+
+  /** A private preview of a recording or a sound, or a word of it (heard only in this browser). */
+  private libraryPreview(c: Command) {
+    const clip = c.recordingId ? this.library.get(c.recordingId).soundId : this.sound(c.soundId).id;
+    const length = this.engine.duration(clip);
+    const from = Math.max(0, Math.min(c.positionMs ?? 0, length));
+    const to = Math.max(from + 1, Math.min(c.endMs ?? length, length));
+    return this.engine.previewClip(clip, { fromMs: from, toMs: to, effect: 'none' }, 30000);
+  }
+
+  /**
+   * Play into game: the sentence (or a kept version) is mixed from its pieces and played with a `sentence:` id, as
+   * a real host does, so the player names the sentence. Only the newest click plays.
+   */
+  private async sentencePlay(
+    c: Command,
+    by: { id: string; name: string; source: 'host' | 'guest' },
+    guest: boolean,
+  ) {
+    const mine = ++this.intent;
+    const { pieces, settings, sentence } = this.composer.piecesFor(c);
+    const parts = this.composer.render(pieces, settings);
+    if (!parts.length) throw Error('There is nothing to play in this sentence yet.');
+    const id = 'sentence:' + sentence.id;
+    await this.engine.mix(id, parts);
+    if (this.closed) throw Error('The example has ended.');
+    if (mine !== this.intent) return superseded('newer');
+    if (guest && this.suspended) return superseded('suspended');
+    return { ...this.start(id, 0, null, false, by, c.id), detail: { revision: sentence.revision } };
+  }
+
+  /** A palette tap: into the game (a `palette:` id), or heard privately; noted in a performance being recorded. */
+  private async paletteTap(
+    c: Command,
+    by: { id: string; name: string; source: 'host' | 'guest' },
+    guest: boolean,
+  ) {
+    if (!c.sentence?.item) throw Error('Choose a palette item.');
+    const { recording, startMs, endMs, label } = this.composer.tapped(c.sentence.item);
+    const parts = [
+      { clip: recording.soundId, atMs: 0, fromMs: startMs, toMs: endMs, fadeInMs: 3, fadeOutMs: 5 },
+    ];
+    if (c.action !== 'game')
+      return { ...(await this.engine.previewMix(parts, 30000)), text: label };
+    const mine = ++this.intent;
+    const id = 'palette:' + recording.id;
+    await this.engine.mix(id, parts);
+    if (this.closed) throw Error('The example has ended.');
+    if (mine !== this.intent) return superseded('newer');
+    if (guest && this.suspended) return superseded('suspended');
+    return { ...this.start(id, 0, null, false, by, c.id), detail: { text: label } };
   }
 
   /** Storage figures: fixed in the example, since nothing is kept on a disk. */

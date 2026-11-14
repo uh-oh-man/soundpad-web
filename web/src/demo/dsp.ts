@@ -266,3 +266,67 @@ export function loopLevels(
   }
   return levels;
 }
+
+/**
+ * One part of a mix (the example's sentences and palette): a range of a clip, placed at `atMs`, with a gain,
+ * fades, a speed (tape-style) and optionally reversed; or a sine tone (a bleep) of `toMs - fromMs`.
+ */
+export type MixPart = {
+  clip?: string;
+  tone?: number;
+  atMs: number;
+  fromMs: number;
+  toMs: number;
+  gain?: number;
+  fadeInMs?: number;
+  fadeOutMs?: number;
+  speed?: number;
+  reverse?: boolean;
+};
+
+/** Mixes parts onto one mono track at `rate`; a clip `pcm` does not know is left out. */
+export function mixParts(
+  rate: number,
+  parts: MixPart[],
+  pcm: (clip: string) => Pcm | undefined,
+): Pcm {
+  const pieces = parts.flatMap((part) => {
+    let audio: Float32Array;
+    if (part.tone) {
+      const n = Math.max(0, Math.round(((part.toMs - part.fromMs) * rate) / 1000));
+      audio = new Float32Array(n);
+      for (let i = 0; i < n; i++) audio[i] = Math.sin((2 * Math.PI * part.tone * i) / rate);
+    } else {
+      const source = part.clip ? pcm(part.clip) : undefined;
+      if (!source) return [];
+      let cut = slice(source, part.fromMs, part.toMs);
+      if (part.reverse) cut = reverse(cut);
+      // To the mix's rate, and to the part's speed, in one resample.
+      const speed = (part.speed && part.speed > 0 ? part.speed : 1) * (source.rate / rate);
+      if (Math.abs(speed - 1) > 1e-6) cut = resample(cut, speed);
+      audio = cut.channels[0] ?? new Float32Array(0);
+    }
+    return [{ part, audio }];
+  });
+  const end = pieces.reduce(
+    (m, { part, audio }) => Math.max(m, Math.round((part.atMs * rate) / 1000) + audio.length),
+    0,
+  );
+  const out = new Float32Array(Math.max(1, end));
+  for (const { part, audio } of pieces) {
+    const start = Math.round((part.atMs * rate) / 1000);
+    const fadeIn = Math.round(((part.fadeInMs ?? 0) * rate) / 1000),
+      fadeOut = Math.round(((part.fadeOutMs ?? 0) * rate) / 1000);
+    const gain = part.gain ?? 1;
+    for (let i = 0; i < audio.length && start + i < out.length; i++) {
+      let g = gain;
+      if (fadeIn && i < fadeIn) g *= i / fadeIn;
+      if (fadeOut && i > audio.length - fadeOut) g *= (audio.length - i) / fadeOut;
+      out[start + i] += audio[i] * g;
+    }
+  }
+  let peak = 0;
+  for (const v of out) peak = Math.max(peak, Math.abs(v));
+  if (peak > 0.99) for (let i = 0; i < out.length; i++) out[i] *= 0.99 / peak;
+  return { rate, channels: [out] };
+}

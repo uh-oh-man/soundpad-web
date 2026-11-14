@@ -5,6 +5,7 @@
  */
 import { expect, test, type Page } from '@playwright/test';
 import AxeBuilder from '@axe-core/playwright';
+import { closeSection, section } from './helpers/shell';
 
 /** Serious and critical axe findings, as readable lines. */
 async function axe(page: Page, disable: string[] = []) {
@@ -108,4 +109,57 @@ test('example Mimic: rolling history, a Latest phrase draft, preview and play, t
   await expect(page.locator('.notification-stack .toast').first()).toBeVisible();
   await page.getByRole('button', { name: 'Leave example' }).click();
   await expect(page.getByRole('button', { name: 'Try the example' })).toBeVisible();
+});
+
+test('example voices and sentences: search finds a word; "hello [laugh]" with a bleep plays, is kept and reopens', async ({
+  page,
+}) => {
+  if (!(await startExample(page))) return;
+  // Voices (2.41): the example's own clips, with simulated voices.
+  await page.getByRole('button', { name: 'Voices', exact: true }).click();
+  const voices = section(page, 'Voices');
+  await expect(voices.getByRole('list', { name: 'Recordings' })).toContainText(
+    'One small step (Apollo 11)',
+  );
+  await voices.getByLabel('Search the voice library').fill('eagle');
+  const result = voices
+    .getByRole('list', { name: 'Search results' })
+    .getByRole('listitem')
+    .filter({ hasText: 'The Eagle has landed (Apollo 11)' });
+  await expect(result.getByText('Voice clip', { exact: true })).toBeVisible();
+  await expect(result.locator('mark').first()).toHaveText('Eagle');
+  expect(await axe(page)).toEqual([]);
+  await closeSection(page, 'Voices');
+  // Sentences (2.42): a missing word and the named laugh.
+  await page.getByRole('button', { name: 'Sentences', exact: true }).click();
+  const sentences = section(page, 'Sentences');
+  await sentences.getByLabel('New sentence').fill('hello [laugh]');
+  await sentences.getByRole('button', { name: 'New sentence' }).click();
+  const builder = sentences.getByRole('region', { name: /^Sentence / });
+  const timeline = builder.getByRole('group', { name: 'Timeline' });
+  const hello = timeline.getByRole('button', { name: /^Missing word “hello”/ });
+  await expect(hello).toBeVisible();
+  await expect(timeline.getByRole('button', { name: /\[laugh\]/ })).toBeVisible();
+  await hello.click();
+  const missing = builder.getByRole('region', { name: /^Piece Missing “hello”/ });
+  await missing.getByRole('radio', { name: 'Bleep' }).click();
+  await expect(
+    timeline.getByRole('button', { name: /^Missing word “hello”.*plays as a bleep/ }),
+  ).toBeVisible();
+  await builder.getByRole('button', { name: 'Play into game' }).click();
+  await expect(page.getByText('Sentence: hello [laugh]', { exact: true })).toBeVisible();
+  await builder.getByRole('button', { name: 'Keep', exact: true }).click();
+  await expect(builder.getByText('Kept · version 1')).toBeVisible();
+  expect(await axe(page)).toEqual([]);
+  // Reopened from the list, it is the kept sentence with its version.
+  await closeSection(page, 'Sentences');
+  await page.getByRole('button', { name: 'Sentences', exact: true }).click();
+  await sentences
+    .getByRole('list', { name: 'Kept sentences' })
+    .getByRole('button', { name: /hello \[laugh\]/ })
+    .click();
+  await expect(builder.getByText('Kept · version 1')).toBeVisible();
+  await expect(
+    builder.getByRole('region', { name: 'Versions' }).getByText(/^Version 1 ·/),
+  ).toBeVisible();
 });

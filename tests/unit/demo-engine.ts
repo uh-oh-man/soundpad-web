@@ -5,7 +5,12 @@
 import { expect } from 'vitest';
 import { DemoModel, type DemoEngine, type DemoSessionInfo } from '../../web/src/demo/model';
 import { DEMO_SOUNDS } from '../../web/src/demo/library';
-import { editedLengthMs, waveformLevels, type ClipEdit } from '../../web/src/demo/dsp';
+import {
+  editedLengthMs,
+  waveformLevels,
+  type ClipEdit,
+  type MixPart,
+} from '../../web/src/demo/dsp';
 import { command, type Command, type Snapshot } from '../../web/src/protocol';
 import { ALEX } from '../../web/src/demo/model';
 
@@ -81,6 +86,19 @@ export class FakeEngine implements DemoEngine {
   }
   async previewClip(_source: string, edit: ClipEdit) {
     return { wav: 'UklGRg==', seconds: editedLengthMs(edit) / 1000 };
+  }
+  /** Every mix made (sentences, palette words), with its parts. */
+  mixes: { target: string; parts: MixPart[] }[] = [];
+  mix(target: string, parts: MixPart[]) {
+    this.mixes.push({ target, parts });
+    return this.make(target, Math.max(1, ...parts.map((p) => p.atMs + (p.toMs - p.fromMs))));
+  }
+  async previewMix(parts: MixPart[]) {
+    this.mixes.push({ target: 'preview', parts });
+    return {
+      wav: 'UklGRg==',
+      seconds: Math.max(0.001, ...parts.map((p) => (p.atMs + p.toMs - p.fromMs) / 1000)),
+    };
   }
   previews: { from: number; to: number }[] = [];
   async previewLoop(from: number, to: number) {

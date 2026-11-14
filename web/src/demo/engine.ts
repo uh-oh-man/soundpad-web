@@ -7,12 +7,14 @@ import {
   lengthMs,
   loopLevels,
   loopSlice,
+  mixParts,
   reverse,
   slice,
   waveformLevels,
   wav,
   type ClipEdit,
   type Level,
+  type MixPart,
   type Pcm,
 } from './dsp';
 
@@ -207,6 +209,24 @@ export class WebAudioEngine implements DemoEngine {
     return this.loop
       ? loopLevels(this.loop.peaks, fromMs, toMs, count)
       : new Array<number>(count).fill(0);
+  }
+
+  async mix(target: string, parts: MixPart[]) {
+    await breath();
+    return this.store(
+      target,
+      mixParts(this.rate, parts, (clip) => this.clips.get(clip)?.pcm),
+    );
+  }
+
+  async previewMix(parts: MixPart[], maxMs: number) {
+    await breath();
+    const part = slice(
+      mixParts(this.rate, parts, (clip) => this.clips.get(clip)?.pcm),
+      0,
+      maxMs,
+    );
+    return { wav: base64(wav(part)), seconds: lengthMs(part) / 1000 };
   }
 
   async decode(target: string, bytes: Uint8Array) {

@@ -25,6 +25,8 @@ import {
 } from '../../web/src/demo/dsp';
 import { command, snapshotSchema, statisticsSchema, waveformSchema } from '../../web/src/protocol';
 import { DEFAULT_POLICY } from '../../web/src/network/policy';
+import { getSchema, searchSchema, statusSchema } from '../../web/src/library/voices';
+import { changedSchema, sentenceSchema } from '../../web/src/library/sentences';
 
 beforeEach(() => {
   vi.useFakeTimers();
@@ -480,5 +482,91 @@ describe('example session audio helpers', () => {
       'Houston, Tranquility Base here.',
       'The Eagle has landed.',
     ]);
+  });
+});
+
+describe('example voice library and sentences', () => {
+  it('has three simulated voices from the example clips, with words to search and changes to undo', async () => {
+    const { send } = setup();
+    const status = statusSchema.parse(await send('libraryStatus'));
+    expect(status.voices.map((v) => [v.name, v.count])).toEqual([
+      ['Neil Armstrong (simulated)', 1],
+      ['Tranquility Base (simulated)', 1],
+      ['Studio Audience (simulated)', 1],
+    ]);
+    expect(status.unreviewed).toBe(1);
+    const found = searchSchema.parse(await send('librarySearch', { query: 'eagle has' }));
+    expect(found.results).toHaveLength(1);
+    expect(found.results[0].context.filter((w) => w.hit).map((w) => w.t)).toEqual(['Eagle', 'has']);
+    const id = found.results[0].id;
+    const { group } = (await send('libraryEdit', { recordingId: id, addTags: ['moon'] })) as {
+      group: number;
+    };
+    expect(getSchema.parse(await send('libraryGet', { recordingId: id })).recording.tags).toContain(
+      'moon',
+    );
+    await send('libraryUndo', { auditId: group });
+    expect(
+      getSchema.parse(await send('libraryGet', { recordingId: id })).recording.tags,
+    ).not.toContain('moon');
+    await expect(send('libraryIndex', { categories: ['Speech'] })).rejects.toThrow(
+      'Not available in the example',
+    );
+  });
+
+  it('builds "hello [laugh]": a missing word that bleeps and the named laugh, played with a sentence id', async () => {
+    const { send, state, engine } = setup();
+    const sentence = sentenceSchema.parse(
+      await send('sentenceCreate', { sentence: { text: 'hello [laugh]' } }),
+    );
+    expect(sentence.pieces.map((p) => [p.kind, p.text])).toEqual([
+      ['missing', 'hello'],
+      ['named', '[laugh]'],
+    ]);
+    expect(sentence.missing).toBe(1);
+    // Layout: the laugh follows the missing word's room.
+    expect(sentence.pieces[1].offsetMs).toBe(sentence.pieces[0].durationMs);
+    const edited = changedSchema.parse(
+      await send('sentenceEdit', {
+        sentenceId: sentence.id,
+        sentence: { do: 'missing', pieces: [sentence.pieces[0].id], mode: 'bleep' },
+      }),
+    ).sentence;
+    expect(edited.pieces[0].missing).toBe('bleep');
+    const kept = (await send('sentenceKeep', { sentenceId: sentence.id })) as { version: number };
+    expect(kept.version).toBe(1);
+    const result = (await send('sentencePlay', {
+      sentenceId: sentence.id,
+      sentence: { version: 1 },
+    })) as { played: boolean };
+    expect(result.played).toBe(true);
+    expect(state().playback.soundId).toBe(`sentence:${sentence.id}`);
+    expect(state().playback.identitySource).toBe('web');
+    const parts = engine.mixes.at(-1)!.parts;
+    expect(parts[0]).toMatchObject({ tone: 1000, atMs: 0 });
+    expect(parts[1]).toMatchObject({ clip: id('audience-laugh') });
+    // Reopened later, it is still kept, with its version.
+    const again = sentenceSchema.parse(await send('sentenceGet', { sentenceId: sentence.id }));
+    expect(again.kept).toBe(true);
+    expect(again.versions.map((v) => v.n)).toEqual([1]);
+  });
+
+  it('matches the longest recorded phrase, and keeps unchanged words when the text changes', async () => {
+    const { send } = setup();
+    const s = sentenceSchema.parse(
+      await send('sentenceCreate', { sentence: { text: 'one small step zebra' } }),
+    );
+    expect(s.pieces.map((p) => [p.kind, p.text])).toEqual([
+      ['word', 'one small step'],
+      ['missing', 'zebra'],
+    ]);
+    const changed = sentenceSchema.parse(
+      await send('sentenceText', {
+        sentenceId: s.id,
+        sentence: { text: 'one small step the Eagle' },
+      }),
+    );
+    expect(changed.pieces[0].id).toBe(s.pieces[0].id);
+    expect(changed.pieces.map((p) => p.text)).toEqual(['one small step', 'the Eagle']);
   });
 });

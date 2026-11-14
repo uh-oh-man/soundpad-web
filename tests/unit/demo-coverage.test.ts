@@ -20,6 +20,27 @@ import {
   draftSchema,
   hostBudgetSchema,
 } from '../../web/src/mimic/drafts';
+import {
+  auditSchema,
+  getSchema,
+  historySearchSchema,
+  listSchema as recordingsSchema,
+  searchSchema,
+  speakerGroupsSchema,
+  statusSchema,
+  vocabularySchema,
+} from '../../web/src/library/voices';
+import {
+  alternativesSchema,
+  changedSchema,
+  listSchema as sentencesSchema,
+  paletteSchema,
+  performanceSchema,
+  sentenceSchema,
+  setsSchema,
+  takeSchema,
+} from '../../web/src/library/sentences';
+import { LIBRARY_UNAVAILABLE } from '../../web/src/demo/voices';
 import { HOST, setup } from './demo-engine';
 
 type Op = Command['op'];
@@ -162,6 +183,10 @@ const HONESTLY_UNAVAILABLE: Partial<Record<Op, string>> = {
   keepSettings: UNAVAILABLE.other,
   budgetGrant: UNAVAILABLE.other,
   tempRecover: UNAVAILABLE.other,
+  libraryAdd: LIBRARY_UNAVAILABLE.add,
+  libraryIndex: LIBRARY_UNAVAILABLE.index,
+  speakerName: LIBRARY_UNAVAILABLE.speakers,
+  speakerLink: LIBRARY_UNAVAILABLE.speakers,
 };
 
 const wav = z.object({ wav: z.string().min(1), seconds: z.number().positive() });
@@ -174,7 +199,13 @@ type Context = {
   clip: string;
   draft: z.infer<typeof draftSchema>;
   band: string;
+  recording: string;
+  voice: string;
+  sentence: z.infer<typeof sentenceSchema>;
+  named: string;
 };
+const group = z.object({ group: z.number().int().positive() });
+const played = z.object({ played: z.literal(true), epoch: z.uuid() });
 type Check = (ctx: Context) => { fields?: Partial<Command>; schema: ZodType };
 
 /** One schema-checked command per answered op, in the order a visitor might use them. */
@@ -277,6 +308,124 @@ const CHECKS: [Op, Check][] = [
     (c) => ({ fields: { assetId: c.clip }, schema: z.object({ removed: z.literal(true) }) }),
   ],
   ['clearTemp', () => ({ schema: z.object({ cleared: z.number(), pending: z.number() }) })],
+  // The voice library (2.41).
+  ['libraryStatus', () => ({ schema: statusSchema.extend({ count: z.literal(3) }) })],
+  ['libraryList', () => ({ fields: { reviewed: false, limit: 100 }, schema: recordingsSchema })],
+  ['libraryGet', (c) => ({ fields: { recordingId: c.recording }, schema: getSchema })],
+  [
+    'librarySearch',
+    () => ({
+      fields: { query: 'eagle', limit: 100 },
+      schema: searchSchema.extend({ total: z.literal(1) }),
+    }),
+  ],
+  [
+    'libraryVocabulary',
+    (c) => ({ fields: { voiceId: c.voice, limit: 100 }, schema: vocabularySchema }),
+  ],
+  [
+    'libraryEdit',
+    (c) => ({ fields: { recordingId: c.recording, addTags: ['moon'] }, schema: group }),
+  ],
+  [
+    'libraryAudit',
+    (c) => ({
+      fields: { recordingId: c.recording },
+      schema: z.object({ entries: z.array(auditSchema).min(1) }),
+    }),
+  ],
+  ['libraryUndo', () => ({ fields: { auditId: 1 }, schema: group })],
+  ['libraryVoice', () => ({ fields: { action: 'create', name: 'Robo' }, schema: group })],
+  [
+    'libraryWanted',
+    (c) => ({ fields: { action: 'add', voiceId: c.voice, query: 'hello' }, schema: group }),
+  ],
+  ['libraryRetry', (c) => ({ fields: { recordingId: c.recording }, schema: z.object({}) })],
+  [
+    'libraryPreview',
+    (c) => ({ fields: { recordingId: c.recording, positionMs: 300, endMs: 600 }, schema: wav }),
+  ],
+  ['librarySettings', () => ({ fields: { guestLibraryEdit: false }, schema: nothing })],
+  [
+    'historySearch',
+    (c) => ({ fields: { query: 'landed', sourceId: c.sessionId }, schema: historySearchSchema }),
+  ],
+  ['speakerGroups', () => ({ schema: speakerGroupsSchema })],
+  // Sentences and the speaking palette (2.42).
+  [
+    'sentenceList',
+    () => ({ schema: sentencesSchema.extend({ named: sentencesSchema.shape.named.min(1) }) }),
+  ],
+  ['sentenceGet', (c) => ({ fields: { sentenceId: c.sentence.id }, schema: sentenceSchema })],
+  [
+    'sentenceText',
+    (c) => ({
+      fields: { sentenceId: c.sentence.id, sentence: { text: 'one small step [laugh] hello' } },
+      schema: sentenceSchema,
+    }),
+  ],
+  [
+    'sentenceEdit',
+    (c) => ({
+      fields: {
+        sentenceId: c.sentence.id,
+        sentence: { do: 'missing', pieces: [c.sentence.pieces.at(-1)!.id], mode: 'bleep' },
+      },
+      schema: changedSchema,
+    }),
+  ],
+  [
+    'sentenceAlternatives',
+    (c) => ({
+      fields: { sentenceId: c.sentence.id, sentence: { pieces: [c.sentence.pieces[0].id] } },
+      schema: alternativesSchema,
+    }),
+  ],
+  ['sentencePreview', (c) => ({ fields: { sentenceId: c.sentence.id }, schema: wav })],
+  [
+    'sentenceKeep',
+    (c) => ({
+      fields: { sentenceId: c.sentence.id },
+      schema: z.object({ version: z.literal(1), durationMs: z.number().positive() }),
+    }),
+  ],
+  [
+    'sentencePlay',
+    (c) => ({ fields: { sentenceId: c.sentence.id, sentence: { version: 1 } }, schema: played }),
+  ],
+  ['paletteSearch', () => ({ fields: { query: 'step' }, schema: paletteSchema })],
+  ['performance', () => ({ fields: { action: 'start' }, schema: performanceSchema })],
+  [
+    'paletteTap',
+    (c) => ({
+      fields: {
+        action: 'game',
+        sentence: { item: { namedId: c.named, startMs: 0, endMs: 0, text: '[laugh]' } },
+      },
+      schema: played,
+    }),
+  ],
+  // The tap above was recorded: stopping makes it an editable take.
+  ['performance', () => ({ fields: { action: 'stop' }, schema: takeSchema })],
+  [
+    'paletteMark',
+    (c) => ({
+      fields: { name: 'gasp', recordingId: c.recording, sentence: { startMs: 100, endMs: 600 } },
+      schema: z.object({ namedId: z.string(), name: z.literal('gasp') }),
+    }),
+  ],
+  [
+    'performanceSets',
+    () => ({ fields: { action: 'create', set: { name: 'Moon' } }, schema: setsSchema }),
+  ],
+  [
+    'sentenceDiscard',
+    (c) => ({
+      fields: { sentenceId: c.sentence.id },
+      schema: z.object({ removed: z.literal(true) }),
+    }),
+  ],
+  ['libraryRemove', (c) => ({ fields: { recordingId: c.recording }, schema: group })],
   [
     'panic',
     () => ({ fields: { action: 'enable' }, schema: z.object({ suspended: z.literal(true) }) }),
@@ -285,7 +434,7 @@ const CHECKS: [Op, Check][] = [
 ];
 const CHECKED = new Set(CHECKS.map(([op]) => op));
 /** Ops the scenario sends to build its context (their answers are checked there). */
-const SETUP: Op[] = ['mimicStart', 'draftCreate'];
+const SETUP: Op[] = ['mimicStart', 'draftCreate', 'sentenceCreate'];
 
 const inScope = (f: Feature) => supports(DEMO_COMPANION, f);
 const scoped = (want: boolean) =>
@@ -346,12 +495,24 @@ describe('example coverage of DEMO_COMPANION', () => {
         sourceId: timeline.sessionId!,
       }),
     ).assetId;
+    // The voice library and a sentence with a recorded phrase, the named laugh and a missing word.
+    const status = statusSchema.parse(await send('libraryStatus'));
+    const recordings = recordingsSchema.parse(await send('libraryList', { limit: 100 }));
+    const sentence = sentenceSchema.parse(
+      await send('sentenceCreate', { sentence: { text: 'one small step [laugh] hello' } }),
+    );
+    expect(sentence.pieces.map((p) => p.kind)).toEqual(['word', 'named', 'missing']);
+    const sentences = sentencesSchema.parse(await send('sentenceList'));
     const ctx: Context = {
       sessionId: timeline.sessionId!,
       live: timeline.liveFrame,
       clip,
       draft,
       band: band.id,
+      recording: recordings.items.find((r) => r.voiceId === status.voices[0].id)!.id,
+      voice: status.voices[0].id,
+      sentence,
+      named: sentences.named[0].id,
     };
     const problems: string[] = [];
     for (const [op, check] of CHECKS) {
