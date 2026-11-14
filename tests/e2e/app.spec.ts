@@ -4824,22 +4824,20 @@ test('palette: a recorded performance of my own palette taps opens as an editabl
     .first()
     .click();
   await expect(sentences.getByText('Recording your performance: 2 taps')).toBeVisible();
-  // The page counts a tap at once; a preview tap made while the previous preview is still loading reaches
-  // the companion when that one has loaded. Stop once the companion has both, as a person would.
-  await expect
-    .poll(async () => {
-      const status = (await sendCommand(page, 'performance', { action: 'status' })) as {
-        data?: { taps: number };
-      };
-      return status.data?.taps;
-    })
-    .toBe(2);
+  // Two more taps in quick succession, then Stop at once (2.43): a preview tap made while the previous
+  // preview is still being made waits its turn, and Stop waits until the companion has every tap the
+  // page counted. Before, the second of them reached the companion after Stop and was lost (or was
+  // dropped for the newer one).
+  const tone = palette.getByRole('button', { name: /^Play “tone”/ }).first();
+  await tone.click();
+  await tone.click();
+  await expect(sentences.getByText('Recording your performance: 4 taps')).toBeVisible();
   await sentences.getByRole('button', { name: 'Stop recording' }).click();
   await sentences.getByRole('button', { name: 'Open the take as a sentence' }).click();
   const builder = sentences.getByRole('region', { name: /^Sentence / });
-  await expect(builder.getByLabel('Sentence text')).toHaveValue(/^Fixture tone$/i);
+  await expect(builder.getByLabel('Sentence text')).toHaveValue(/^Fixture tone tone tone$/i);
   const timeline = builder.getByRole('group', { name: 'Timeline' });
-  await expect(timeline.getByRole('button')).toHaveCount(2);
+  await expect(timeline.getByRole('button')).toHaveCount(4);
   // The take is a sentence like any other: a piece moves from the keyboard (Alt+→ nudges it 10 ms).
   await timeline.getByRole('button').first().focus();
   await page.keyboard.press('Alt+ArrowRight');

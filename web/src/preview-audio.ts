@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { controller } from './controller';
 import type { Command } from './protocol';
 
-type Request = { op: Command['op']; fields: Partial<Command>; loop: boolean };
+type Request = { op: Command['op']; fields: Partial<Command>; loop: boolean; keep?: boolean };
 
 /**
  * Host-only private preview (Mimic 2.12, Edit copy 2.20): the companion hands audio to this tab over
@@ -13,13 +13,22 @@ type Request = { op: Command['op']; fields: Partial<Command>; loop: boolean };
  * prepares it, so Stop also cancels a preview still on its way. A newer preview replaces an older one
  * (2.23: Loop restarts it whenever the cut changes). The companion makes one copy at a time, so while
  * one preview is being made a newer request waits, and only the latest one runs (2.29.3; before, it
- * collided with the one in progress and was refused).
+ * collided with the one in progress and was refused). A request made with `keep` (a palette tap while a
+ * performance records, 2.43) is never dropped: it waits its turn behind the others, because the
+ * companion notes each tap when it arrives. `settled()` resolves once nothing is being made or waiting.
  */
 export function usePreviewAudio() {
   const audio = useRef<HTMLAudioElement | null>(null);
   const generation = useRef(0);
   const busy = useRef(false);
-  const waiting = useRef<Request | null>(null);
+  const waiting = useRef<Request[]>([]);
+  const idle = useRef<(() => void)[]>([]);
+  const wake = useCallback(() => {
+    if (busy.current || waiting.current.length) return;
+    const resolve = idle.current;
+    idle.current = [];
+    for (const r of resolve) r();
+  }, []);
   const [previewing, setPreviewing] = useState(false);
   const release = useCallback(() => {
     if (!audio.current) return;
@@ -29,29 +38,46 @@ export function usePreviewAudio() {
   }, []);
   const stop = useCallback(() => {
     generation.current++;
-    waiting.current = null;
+    // Kept requests (palette taps while a performance records) still go: the companion notes them.
+    waiting.current = waiting.current.filter((w) => w.keep);
     release();
     setPreviewing(false);
-  }, [release]);
+    if (!busy.current) wake();
+  }, [release, wake]);
   useEffect(() => stop, [stop]);
   const fetchAndPlay = useCallback(
     async ({ op, fields, loop }: Request, mine: number) => {
       busy.current = true;
+      // The companion is free again once it has answered: the next waiting request goes then, while this
+      // one starts to play.
+      let done = false;
+      const next = () => {
+        if (done) return;
+        done = true;
+        busy.current = false;
+        const waiting1 = waiting.current.shift();
+        if (waiting1) void fetchAndPlay(waiting1, generation.current);
+        else wake();
+      };
       try {
-        const result = z
-          .object({ wav: z.string().max(8_000_000) })
-          .parse(await controller.run(op, fields));
+        let answer: unknown;
+        try {
+          answer = await controller.run(op, fields);
+        } finally {
+          next();
+        }
+        const result = z.object({ wav: z.string().max(8_000_000) }).parse(answer);
         if (mine !== generation.current) return; // stopped or replaced meanwhile
         release();
         const bytes = Uint8Array.from(atob(result.wav), (c) => c.charCodeAt(0));
-        const next = new Audio(URL.createObjectURL(new Blob([bytes], { type: 'audio/wav' })));
-        next.loop = loop;
-        next.onended = () => {
+        const sound = new Audio(URL.createObjectURL(new Blob([bytes], { type: 'audio/wav' })));
+        sound.loop = loop;
+        sound.onended = () => {
           if (mine === generation.current) stop();
         };
-        audio.current = next;
+        audio.current = sound;
         try {
-          await next.play();
+          await sound.play();
         } catch {
           // The browser refused to play (no output device, or it decided the click was too long ago).
           if (mine !== generation.current) return;
@@ -63,28 +89,38 @@ export function usePreviewAudio() {
         }
       } catch {
         if (mine === generation.current) stop(); // the controller already shows command errors
-      } finally {
-        busy.current = false;
-        const next = waiting.current;
-        waiting.current = null;
-        if (next) void fetchAndPlay(next, generation.current);
       }
     },
-    [release, stop],
+    [release, stop, wake],
   );
   const play = useCallback(
-    async (op: Command['op'], fields: Partial<Command>, { loop = false } = {}) => {
+    async (
+      op: Command['op'],
+      fields: Partial<Command>,
+      { loop = false, keep = false }: { loop?: boolean; keep?: boolean } = {},
+    ) => {
       const mine = ++generation.current;
       setPreviewing(true);
-      // One at a time: the newest request waits for the one being made, older waiting ones are dropped.
-      if (busy.current) waiting.current = { op, fields, loop };
-      else await fetchAndPlay({ op, fields, loop }, mine);
+      // One at a time: the newest request waits for the one being made. Older waiting ones are dropped,
+      // except those made with keep, which each still go in their turn.
+      if (busy.current) {
+        waiting.current = [...waiting.current.filter((w) => w.keep), { op, fields, loop, keep }];
+      } else await fetchAndPlay({ op, fields, loop, keep }, mine);
     },
     [fetchAndPlay],
+  );
+  /** Resolves once no preview is being made and none waits (each has been answered). */
+  const settled = useCallback(
+    () =>
+      new Promise<void>((resolve) => {
+        if (!busy.current && !waiting.current.length) resolve();
+        else idle.current.push(resolve);
+      }),
+    [],
   );
   /** Turns repeating on or off for the sound already playing (Loop ticked mid-preview). */
   const setLooping = useCallback((on: boolean) => {
     if (audio.current) audio.current.loop = on;
   }, []);
-  return { previewing, play, stop, setLooping };
+  return { previewing, play, stop, setLooping, settled };
 }

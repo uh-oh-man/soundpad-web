@@ -1494,6 +1494,9 @@ function PalettePanel({
   const [items, setItems] = useState<PaletteItem[]>([]);
   const [sets, setSets] = useState<{ active: string; sets: PerformanceSet[] } | null>(null);
   const [recording, setRecording] = useState<{ taps: number } | null>(null);
+  /** Game taps sent while recording, not yet answered; Stop waits for them (and for preview taps). */
+  const tapsSent = useRef(new Set<Promise<unknown>>());
+  const stopping = useRef(false);
   const [take, setTake] = useState<string | null>(null);
   const [naming, setNaming] = useState<PaletteItem | null>(null);
   const [name, setName] = useState('');
@@ -1536,12 +1539,40 @@ function PalettePanel({
     active ? favorites.some((f) => sameRef(f, itemRef(item))) : item.favorite;
   const tap = (item: PaletteItem) => {
     const ref = itemRef(item);
-    if (recording) setRecording({ taps: recording.taps + 1 });
-    if (mode === 'game' && canGame)
-      void controller
+    if (recording) setRecording((r) => r && { taps: r.taps + 1 });
+    if (mode === 'game' && canGame) {
+      const sent = controller
         .run('paletteTap', { action: 'game', sentence: { item: ref } })
         .catch(() => {});
-    else void preview.play('paletteTap', { action: 'preview', sentence: { item: ref } });
+      if (recording) {
+        tapsSent.current.add(sent);
+        void sent.then(() => tapsSent.current.delete(sent));
+      }
+    }
+    // While recording, a preview tap made while the previous one is still being made waits its turn
+    // instead of being dropped: the companion notes a tap when it arrives (2.43; one was lost before).
+    else
+      void preview.play(
+        'paletteTap',
+        { action: 'preview', sentence: { item: ref } },
+        { keep: !!recording },
+      );
+  };
+  /** Stop recording: once every tap counted here has reached the companion, so none is lost. */
+  const stopRecording = async () => {
+    if (stopping.current) return;
+    stopping.current = true;
+    try {
+      await Promise.all([...tapsSent.current, preview.settled()]);
+      const t = takeSchema.parse(await controller.run('performance', { action: 'stop' }));
+      setRecording(null);
+      setTake(t.sentenceId);
+      await refreshSentences();
+    } catch {
+      setRecording(null);
+    } finally {
+      stopping.current = false;
+    }
   };
   const toggleFavorite = (item: PaletteItem) => {
     if (!active) return;
@@ -1606,17 +1637,7 @@ function PalettePanel({
               <button
                 type="button"
                 className="primary"
-                onClick={() =>
-                  void controller
-                    .run('performance', { action: 'stop' })
-                    .then((r) => {
-                      const t = takeSchema.parse(r);
-                      setRecording(null);
-                      setTake(t.sentenceId);
-                      return refreshSentences();
-                    })
-                    .catch(() => setRecording(null))
-                }
+                onClick={() => void stopRecording()}
               >
                 <Square size={13} /> Stop recording
               </button>
