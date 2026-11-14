@@ -1,4 +1,251 @@
 /*
- * Shared control primitives (Stage G spec 2.4): .btn and its variants, .icon-btn, .chip, .segmented,
- * .field, .card, .kbd, .popover, .skip-link, .sr-only and the focus ring. Owned by Phase 0, then frozen.
+ * Shared control primitives (Stage G spec 2.4). Owned by Phase 0 and frozen while the work packages
+ * run. Components adopt them by class; the legacy element rules in studio.css stay as they are. Global
+ * element selectors (*, body, button, input, select) live only in tokens.css, studio.css and here.
  */
+
+body {
+  font-family: var(--font-ui);
+  background-color: var(--bg-app);
+  background-image: var(--bg-glow);
+  background-repeat: no-repeat;
+}
+
+/* Focus: a 2 px gap, then a 2 px ring, measured against the page around the control. */
+:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+.btn,
+.icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  min-height: 36px;
+  padding: 0 var(--space-3);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-s);
+  background: var(--surface-2);
+  color: var(--text-primary);
+  font: inherit;
+  cursor: pointer;
+  transition:
+    background var(--dur-fast) var(--ease-out),
+    border-color var(--dur-fast) var(--ease-out),
+    transform var(--dur-press) var(--ease-out);
+}
+.icon-btn {
+  width: 36px;
+  height: 36px;
+  padding: 0;
+}
+.btn:hover:not(:disabled, [aria-disabled='true']),
+.icon-btn:hover:not(:disabled, [aria-disabled='true']) {
+  background: var(--surface-hover);
+}
+.btn:active:not(:disabled, [aria-disabled='true']),
+.icon-btn:active:not(:disabled, [aria-disabled='true']) {
+  transform: scale(0.98);
+}
+.btn-primary {
+  background: var(--accent-fill);
+  border-color: var(--accent-fill);
+  color: var(--text-on-accent);
+  box-shadow: var(--glow-soft);
+}
+.btn-primary:hover:not(:disabled, [aria-disabled='true']) {
+  background: var(--accent-fill-hover);
+}
+.btn-danger {
+  background: var(--danger-fill);
+  border-color: var(--danger-fill);
+  color: var(--text-on-accent);
+}
+.btn-danger:hover:not(:disabled, [aria-disabled='true']) {
+  background: color-mix(in srgb, var(--danger-fill) 88%, white);
+}
+.btn-warning {
+  background: var(--warning);
+  border-color: var(--warning);
+  color: var(--text-on-warning);
+}
+.btn-warning:hover:not(:disabled, [aria-disabled='true']) {
+  background: color-mix(in srgb, var(--warning) 88%, white);
+}
+/* Busy or unavailable: looks it, keeps focus, and the press is ignored in code (never pointer-events). */
+:is(.btn, .icon-btn)[aria-disabled='true'],
+:is(.btn, .icon-btn):disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+@media (pointer: coarse) {
+  .btn {
+    min-height: 44px;
+  }
+  .icon-btn {
+    width: 44px;
+    height: 44px;
+  }
+}
+/* Where box-shadow already shows a state, the ring is an outline instead. */
+:is(.btn-primary, .segmented [aria-pressed='true']):focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  min-height: 24px;
+  padding: 2px var(--space-2);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-pill);
+  background: var(--surface-2);
+  color: var(--text-muted);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.segmented {
+  display: inline-flex;
+  gap: 2px;
+  padding: 2px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-s);
+  background: var(--surface-1);
+}
+.segmented > button {
+  min-height: 32px;
+  padding: 0 var(--space-3);
+  border: 0;
+  border-radius: calc(var(--radius-s) - 2px);
+  background: transparent;
+  color: var(--text-muted);
+}
+.segmented > button[aria-pressed='true'] {
+  background: var(--accent-soft);
+  color: var(--text-primary);
+  box-shadow: var(--glow-soft);
+}
+
+.field {
+  display: grid;
+  gap: var(--space-1);
+  color: var(--text-muted);
+  font-size: 12px;
+}
+.field :is(input, select, textarea) {
+  min-height: 36px;
+  padding: 0 var(--space-3);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-s);
+  background: var(--surface-2);
+  color: var(--text-primary);
+  font: inherit;
+}
+
+.card {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface-2);
+  box-shadow: var(--shadow-1);
+}
+
+.kbd {
+  display: inline-block;
+  min-width: 20px;
+  padding: 1px 6px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: var(--surface-2);
+  color: var(--text-muted);
+  font: inherit;
+  font-size: 12px;
+  text-align: center;
+}
+
+/* A floating panel that is not a dialog (Kick details, Speed menu): never role="dialog". */
+.popover {
+  z-index: var(--z-popover);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface-3);
+  box-shadow: var(--shadow-2);
+  color: var(--text-primary);
+}
+
+/* Visually hidden until focused, then pinned at the top left above everything. */
+.skip-link {
+  position: fixed;
+  top: var(--space-2);
+  left: var(--space-2);
+  z-index: var(--z-skip);
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-s);
+  background: var(--accent-fill);
+  color: var(--text-on-accent);
+  text-decoration: none;
+  transform: translateY(-200%);
+}
+.skip-link:focus,
+.skip-link:focus-visible {
+  transform: none;
+}
+
+/* Visually hidden, still read by screen readers (moved here from the legacy styles). */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* Times, counts and sizes line up. */
+.tabular,
+time,
+output {
+  font-variant-numeric: tabular-nums;
+}
+
+@media (forced-colors: active) {
+  :focus-visible {
+    outline: 2px solid Highlight;
+    outline-offset: 2px;
+    box-shadow: none;
+  }
+  .header-ribbon {
+    display: none;
+  }
+  .now-playing,
+  .intent-pending {
+    outline: 2px solid Highlight;
+  }
+  .sound-entry:not(.now-playing, .intent-pending) {
+    outline: 1px solid CanvasText;
+  }
+}
+/* More contrast: control borders are 2 px and quick tile actions always show. */
+@media (prefers-contrast: more) {
+  .btn,
+  .icon-btn,
+  .field :is(input, select, textarea) {
+    border-width: 2px;
+  }
+  .tile-quick {
+    opacity: 1;
+  }
+}
+:root[data-contrast='high'] :is(.btn, .icon-btn, .field :is(input, select, textarea)) {
+  border-width: 2px;
+}
+:root[data-contrast='high'] .tile-quick {
+  opacity: 1;
+}

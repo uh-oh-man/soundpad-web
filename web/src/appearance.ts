@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 export const themes = [
-  { id: 'red-blue', name: 'Red & Blue' },
+  // The id is what browsers have stored since 2.23; the look is Stage G's Blue studio (2.43).
+  { id: 'red-blue', name: 'Blue studio' },
   { id: 'purple', name: 'Original Purple' },
   { id: 'ocean', name: 'Ocean' },
 ] as const;

@@ -1,52 +1,198 @@
+/*
+ * Design tokens (Stage G, 2.43): every colour once, by role, plus spacing, radii, motion, layers and the
+ * accessibility media rules. Owned by Phase 0 and frozen while the work packages run; packages read
+ * these tokens and never redefine them. Three themes share the ids the site has always stored:
+ * `red-blue` (shown as "Blue studio", the default), `purple` ("Original Purple") and `ocean`.
+ * Contrast pairs are checked by tests/unit/tokens.test.ts.
+ */
+:root,
+:root[data-theme='red-blue'] {
+  --bg-app: #070b14;
+  --bg-glow: radial-gradient(1100px 380px at 62% -6%, #0f2d6255, transparent 70%);
+  --surface-0: #070b14;
+  --surface-1: #0b1220;
+  --surface-2: #111a2c;
+  --surface-3: #172238;
+  --surface-hover: #1d2a44;
+  --surface-glass: color-mix(in srgb, var(--surface-1) 82%, transparent);
+  --blur: 14px;
+  --line: #24314b;
+  --line-strong: #5b77a3;
+  --text-primary: #eaf1ff;
+  --text-muted: #a9b9d6;
+  --text-dim: #8596b6;
+  --text-on-accent: #ffffff;
+  --text-on-warning: #1a0f00;
+  --accent: #5aaaff;
+  --accent-text: #8cc6ff;
+  --accent-fill: #1a63d1;
+  --accent-fill-hover: #1f6fe0;
+  --accent-soft: #10264a;
+  --selection: color-mix(in srgb, var(--accent) 22%, transparent);
+  --queued: color-mix(in srgb, var(--accent) 60%, transparent);
+  --focus: #8fd0ff;
+  --focus-ring: 0 0 0 2px var(--surface-0), 0 0 0 4px var(--focus);
+  --wave: #4f8fe0;
+  --wave-played: var(--accent-text);
+  --ribbon-deep: #12306b;
+  --ribbon-strand: #3d8bff;
+  --ribbon-crest: #d6f0ff;
+  --glow-active:
+    0 0 0 1px var(--accent), 0 0 18px color-mix(in srgb, var(--accent) 35%, transparent);
+  --glow-soft: 0 0 0 1px color-mix(in srgb, var(--accent) 30%, transparent);
+}
 :root {
-  --surface-0: #0d1015;
-  --surface-1: #131820;
-  --surface-2: #1c232d;
-  --surface-hover: #252e3b;
-  --line: #303b4a;
-  --text-primary: #edf2f8;
-  --text-muted: #a7b2c3;
-  --text-dim: #7f8da2;
-  --accent: #7cb5ff;
-  --accent-strong: #3688ed;
-  --play: #ed7885;
-  --danger: #f07b85;
-  --warning: #e0bc77;
-  --success: #7fc7a2;
-  --wave: #7c9fca;
-  --overlay-bottom: #080c14ed;
-  --shadow: #0006;
+  /* Shared by every theme. */
+  --danger: #ff6b78;
+  --danger-fill: #c92a3a;
+  --danger-soft: #2a0f16;
+  --warning: #ffb547;
+  --warning-soft: #2a1d06;
+  --success: #45d69b;
+  --voice-1: #f2a65a;
+  --voice-2: #7fd1ae;
+  --voice-3: #c792ea;
+  --voice-4: #f07178;
+  --voice-5: #ffcb6b;
+  --voice-6: #5ad1e6;
+  --voice-7: #e88fd0;
+  --voice-8: #a8d86a;
+  --shadow-1: 0 1px 2px #0008;
+  --shadow-2: 0 8px 24px #0009;
+  --radius-s: 8px;
   --radius: 12px;
-  /* Layers (Stage G): today's values; P0.5 sets the final ones. */
+  --radius-l: 16px;
+  --radius-pill: 999px;
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 32px;
+  --dur-press: 90ms;
+  --dur-fast: 120ms;
+  --dur-panel: 180ms;
+  --ease-out: cubic-bezier(0.2, 0.7, 0.2, 1);
+  /* Layers, lowest first. */
   --z-tile: 1;
   --z-sticky: 4;
-  --z-player: 5;
+  --z-panel: 8;
   --z-header: 10;
+  --z-player: 12;
   --z-wave-tools: 12;
+  --z-popover: 20;
+  --z-notices: 25;
   --z-scrim: 30;
-  --z-notices: 100;
-  /* Same-value names for the colours voices.css and sentences.css wrote out (2.42). */
+  --z-skip: 40;
+  --topbar-h: 64px;
+  --sidebar-w: 234px;
+  --ribbon-h: 120px;
+  --font-ui: 'DM Sans Variable', 'Segoe UI Variable Text', 'Segoe UI', system-ui, sans-serif;
+  /* Same-value names for the colours voices.css and sentences.css used to write out (2.42 values). */
   --voice-fallback-ink: #0b0f17;
   --voice-fallback-amber: #e2a03f;
   --voice-fallback-dark: #111;
   --voice-fallback-secondary: #9aa;
   --voice-fallback-surface: #1b2230;
   --voice-fallback-clash: #d9634c;
+  /* Old names, kept as aliases until Phase 3 folds the legacy CSS. */
+  --play: var(--accent);
+  --accent-strong: var(--accent-fill);
+  --overlay-bottom: #070b14ed;
+  --shadow: #0006;
+  --amber: var(--warning);
+  --muted: var(--text-muted);
+  --text-secondary: var(--text-muted);
 }
+@media (max-width: 700px) {
+  :root {
+    --ribbon-h: 56px;
+  }
+}
+/* Original Purple, retuned to the owner's reference photo. */
 :root[data-theme='purple'] {
-  --surface-0: #101115;
-  --surface-1: #15151d;
-  --surface-2: #20202b;
-  --surface-hover: #2a2838;
-  --line: #373344;
-  --accent: #b3a3f4;
-  --accent-strong: #927adf;
-  --play: #c2a7f4;
-  --wave: #a59bd5;
+  --bg-app: #0b0918;
+  --bg-glow: radial-gradient(1100px 380px at 62% -6%, #3b1d8f40, transparent 70%);
+  --surface-0: #0b0918;
+  --surface-1: #110d22;
+  --surface-2: #18122f;
+  --surface-3: #20183d;
+  --surface-hover: #281e4b;
+  --line: #2c2347;
+  --line-strong: #7a63b0;
+  --text-primary: #f1ecff;
+  --text-muted: #bfb3dc;
+  --text-dim: #9a8cbf;
+  --accent: #a77bff;
+  --accent-text: #c9b0ff;
+  --accent-fill: #6a3df0;
+  --accent-fill-hover: #7448f5;
+  --accent-soft: #251a4a;
+  --focus: #d6c2ff;
+  --wave: #9d7cf0;
+  --ribbon-deep: #3b1d8f;
+  --ribbon-strand: #8f5bff;
+  --ribbon-crest: #eadcff;
+  --overlay-bottom: #0b0918ed;
 }
 :root[data-theme='ocean'] {
-  --accent: #80cbc4;
-  --accent-strong: #369d9b;
-  --play: #e4b885;
-  --wave: #7ab7bb;
+  --bg-app: #061012;
+  --bg-glow: radial-gradient(1100px 380px at 62% -6%, #0d4a5240, transparent 70%);
+  --surface-0: #061012;
+  --surface-1: #0a171a;
+  --surface-2: #0f2125;
+  --surface-3: #152b30;
+  --surface-hover: #1b363c;
+  --line: #1e3a3e;
+  --line-strong: #4f8a86;
+  --text-primary: #e8f6f5;
+  --text-muted: #a6c4c2;
+  --text-dim: #84a6a4;
+  --accent: #5fd0c4;
+  --accent-text: #8fe0d7;
+  --accent-fill: #127a72;
+  --accent-fill-hover: #0f6e67;
+  --accent-soft: #0f3534;
+  --focus: #9ff0e6;
+  --wave: #3fa79c;
+  --ribbon-deep: #0d4a52;
+  --ribbon-strand: #2fb5a8;
+  --ribbon-crest: #d4fbf6;
+  --overlay-bottom: #061012ed;
+}
+
+/* More contrast: from the system, or Settings → Appearance → Contrast: High. */
+@media (prefers-contrast: more) {
+  :root,
+  :root[data-theme] {
+    --line: var(--line-strong);
+    --text-dim: var(--text-muted);
+    --glow-active: 0 0 0 2px var(--accent);
+    --glow-soft: none;
+    --blur: 0px;
+  }
+}
+:root[data-contrast='high'],
+:root[data-contrast='high'][data-theme] {
+  --line: var(--line-strong);
+  --text-dim: var(--text-muted);
+  --glow-active: 0 0 0 2px var(--accent);
+  --glow-soft: none;
+  --blur: 0px;
+}
+
+/* Glass becomes solid when transparency is reduced or blur is unavailable. */
+@media (prefers-reduced-transparency: reduce) {
+  :root,
+  :root[data-theme] {
+    --surface-glass: var(--surface-1);
+    --blur: 0px;
+  }
+}
+@supports not (backdrop-filter: blur(1px)) {
+  :root,
+  :root[data-theme] {
+    --surface-glass: var(--surface-1);
+    --blur: 0px;
+  }
 }
