@@ -251,7 +251,7 @@ describe('history protocol', () => {
       expect(isGuestAllowed(c(op), allowed)).toBe(false);
   });
 
-  it('reads the history state from a 2.38 snapshot and works without it', () => {
+  it('reads the history state from a 2.39 snapshot and works without it', () => {
     const raw = {
       v: 1,
       revision: 1,
@@ -280,7 +280,7 @@ describe('history protocol', () => {
     const { history, ...older } = raw.mimic;
     expect(history.sessionId).toBe('abc');
     expect(parseSnapshot({ ...raw, mimic: older }).mimic?.history).toBeUndefined();
-    expect(supports('2.37.0', 'history')).toBe(false);
-    expect(supports('2.38.0', 'history')).toBe(true);
+    expect(supports('2.38.0', 'history')).toBe(false);
+    expect(supports('2.39.0', 'history')).toBe(true);
   });
 });

@@ -1,6 +1,6 @@
 namespace SoundpadWeb;
 
-// Word timing for Mimic transcripts (2.38). The method is "anchor-valley" from the word-timing evaluation
+// Word timing for Mimic transcripts (2.39). The method is "anchor-valley" from the word-timing evaluation
 // (harness WordTiming*.cs): Whisper's DTW time is a point INSIDE each word, so between the anchors of two
 // neighbouring words there is exactly one boundary, taken from the audio (a pause if there is one, otherwise the
 // quietest plausible frame). No timestamp Whisper returns is used as a cut by itself.
@@ -40,7 +40,7 @@ public sealed class SpeechEnergy
 
     /// <summary>
     /// True when the last <paramref name="ms"/> are a pause relative to this audio: under the background plus 6 dB
-    /// (or 35 dB under the loud speech), so a steady game or music bed does not hide every pause (2.38).
+    /// (or 35 dB under the loud speech), so a steady game or music bed does not hide every pause (2.39).
     /// </summary>
     public bool QuietAtEnd(double ms) => QuietBetween(DurationMs - ms, DurationMs);
     public bool QuietBetween(double fromMs, double toMs)

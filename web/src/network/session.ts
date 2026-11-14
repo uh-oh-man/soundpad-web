@@ -224,8 +224,9 @@ export class Session {
   /** When each participant's last connection left, so a reload keeps their place for a while. */
   private left = new Map<string, number>();
   /**
-   * Host: when each participant was first let in by this page (2.38). Relayed with their commands so the
-   * companion shows them the recording history from then on; a reconnect never moves it.
+   * Host: when each participant was first let in by this page (2.39). Relayed with their commands so the
+   * companion shows them the recording history from then on; a reconnect never moves it. The host's Disconnect
+   * or Turn away ends it, so letting them back in counts from then (the companion forgets its copy too).
    */
   private joined = new Map<string, number>();
   /** Participants for peers whose hello named nobody (pages older than names), stable per peer. */
@@ -793,9 +794,19 @@ export class Session {
   private stateFor(peer: string, state: Snapshot) {
     const id = this.people.get(peer)?.id;
     const override = id ? this.policy.overrides[id] : undefined;
+    // How much history a crash recovered, and the host's disk problems, are the host's (2.39): they describe
+    // recording from before any guest joined.
+    const history = state.mimic?.history;
+    const base =
+      history && (history.recoveredMs || history.problem)
+        ? {
+            ...state,
+            mimic: { ...state.mimic!, history: { ...history, recoveredMs: 0, problem: null } },
+          }
+        : state;
     return override
-      ? { ...state, permissions: effectivePermissions(state.permissions, override) }
-      : state;
+      ? { ...base, permissions: effectivePermissions(base.permissions, override) }
+      : base;
   }
   private participantOf(peer: string, raw: unknown) {
     const person = participantSchema.safeParse(raw);
@@ -997,6 +1008,7 @@ export class Session {
     const request = this.requests.get(id);
     if (!request) return;
     this.requests.delete(id);
+    this.joined.delete(id);
     this.setPolicy(
       {
         ...this.policy,
@@ -1450,6 +1462,8 @@ export class Session {
   /** Host: disconnects a guest on every connection they have (2.37: direct and relay). */
   disconnect(peer: string) {
     const id = this.people.get(peer)?.id;
+    // Letting them back in later is a new join: they never see what was recorded while they were out (2.39).
+    if (id) this.joined.delete(id);
     const peers = id ? this.peersOf(id) : [peer];
     if (!peers.includes(peer)) peers.push(peer);
     for (const p of peers) this.send({ v: 1, type: 'revoked' }, p);

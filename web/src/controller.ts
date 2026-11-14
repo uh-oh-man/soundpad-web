@@ -635,7 +635,11 @@ export class Controller {
   }
   /** Host (2.37): turns a waiting guest away. */
   turnAway(id: string) {
-    if (this.owns()) this.room()!.turnAway(id);
+    if (!this.owns()) return;
+    this.room()!.turnAway(id);
+    // The companion forgets when they were let in before, so a later admission counts from then (2.39).
+    if (!this.demo && supports(this.view.state.companionVersion, 'history'))
+      void this.run('revokePeer', { guestId: id }).catch(() => {});
   }
   /** Host (2.37): "Let guests in at once" or "Ask me first". */
   setAdmission(admission: SessionPolicy['admission']) {
@@ -697,7 +701,12 @@ export class Controller {
       const audienceId = crypto.randomUUID();
       this.bridge!.setAudience(audienceId);
       if (companionAtLeast(this.view.state.companionVersion, 2, 2))
-        await this.bridge!.send(command('beginSession', { audienceId }), 'host');
+        // newInvite (2.39): only a new invitation starts the recording history's guest join times and shares over;
+        // a reload, a window taking over or a promoted view keeps them.
+        await this.bridge!.send(
+          command('beginSession', { audienceId, ...(rotate && { newInvite: true }) }),
+          'host',
+        );
       const key = 'soundpad-identity-' + this.address!.token;
       // A 2.36 companion keeps the launch's identity in memory, so a reloaded, restarted or promoted
       // owner keeps the same invitation and guests reconnect by themselves. This tab's own copy is the
@@ -937,7 +946,9 @@ export class Controller {
         this.notify('Companion is disconnected.', 'error');
       return;
     }
-    void this.run('revokePeer', { ownerId: peer }).catch(() => {});
+    // guestId (2.39): their recording-history join time ends, so letting them back in counts from then.
+    const guestId = this.view.people[peer]?.id;
+    void this.run('revokePeer', { ownerId: peer, ...(guestId && { guestId }) }).catch(() => {});
     this.room()?.disconnect(peer);
   }
   async leave() {

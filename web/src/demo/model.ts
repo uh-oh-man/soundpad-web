@@ -98,7 +98,11 @@ export type DemoOptions = {
   visible?: () => boolean;
 };
 
-/** The companion version the example reports, so every control the website has is shown. */
+/**
+ * The companion version the example reports. Every control the website has is shown except the recording history
+ * (2.39), which the example does not simulate: its Mimic keeps the 30 s view, listening to a loop of the example
+ * clips. Raise this only together with the history ops (historyTimeline, historyLevels, historyTranscript, ...).
+ */
 export const DEMO_COMPANION = '2.37.0';
 export const DEMO_HOST_ID = 'de30'.padEnd(64, '0');
 /** Features that need the host's PC: the example says so instead of pretending. */

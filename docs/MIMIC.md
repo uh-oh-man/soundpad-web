@@ -1,12 +1,15 @@
 # Mimic
 
-Mimic turns something that was *just said* into a sound. The host's companion keeps the last 30 seconds of one app or output device in memory. Anyone allowed to use Mimic can open the **Mimic** window, see that audio as a live waveform with an optional transcript, select a moment, and play it back through Soundpad.
+Mimic turns something that was *just said* into a sound. Since 2.39 the host's companion keeps a rolling **recording history** of one app or output device (10 minutes by default, 1 minute to 1 hour), on the host PC's disk until the companion quits; companions before 2.39 kept the last 30 seconds in memory. Anyone allowed to use Mimic can open the **Mimic** window, see that audio as a live waveform with an optional transcript, select a moment, and play it back through Soundpad.
 
 Mimic came from a separate desktop project, **Voice Replay Studio**: a rolling "instant replay" recorder with a clip editor, Whisper transcription and Soundpad import. Since 2.4.0 both live in this repository.
 
 | Part | Where |
 | --- | --- |
-| Capture and the rolling buffer | `companion/src/MimicCapture.cs` |
+| Capture | `companion/src/MimicCapture.cs` |
+| Recording history (2.39) | `companion/src/History*.cs`, `BridgeHistory.cs` |
+| Word timing and stored words (2.39) | `companion/src/WordTiming.cs`, `TranscriptWords.cs` |
+| The history view (2.39) | `web/src/components/mimic/MimicHistory.tsx`, `MimicOverview.tsx`, `web/src/mimic/history.ts` |
 | Live transcript (Whisper) | `companion/src/MimicTranscript.cs` |
 | F6 hotkey | `companion/src/MimicHotkey.cs` |
 | Commands, permissions, clips, recent list | `companion/src/BridgeMimic.cs` |
@@ -72,11 +75,12 @@ Like Voice Replay Studio's trim, it saves a new Temp sound and never changes the
 ## Transcripts
 
 - **Off until the host turns it on.** The first time, **Get transcripts** downloads Whisper's English `base.en` model (~148 MB) to `%LOCALAPPDATA%\SoundpadWeb\models\` in the background, with progress shown. If Voice Replay Studio already downloaded the model on this PC, that copy is reused.
-- **Recognition runs on the host PC.** Audio is never uploaded. People allowed to use Mimic receive only the text of the last 30 seconds, with timings.
+- **Recognition runs on the host PC.** Audio is never uploaded. People allowed to use Mimic receive only the text, with timings.
+- **Word by word (2.39).** Each word gets its own start and end, found from Whisper's alignment and the audio itself, so a word can be clicked, highlighted and clipped. Words the method is unsure about are underlined with dots. On synthetic test speech about 13 % of single-word cuts clip part of the word or catch a neighbour (18 % with background noise); real voices in a game have not been measured yet. **Subtitles: Gaming / Balanced / Fast** sets how much CPU recognition may use; Gaming (the default) uses one low-priority thread.
 - **Lines appear when the speaker pauses** (0.4 s), so no sentence is split; splitting made Whisper guess missing words. After 15 s of unbroken speech it cuts anyway and holds back the unfinished sentence. Silent stretches are skipped, which saves CPU and avoids words invented from silence.
 - **Light on a gaming PC.** It uses 2 CPU threads on PCs with 8+ cores, otherwise 1. On the owner's PC, 11 s of speech took 2.7 s with 2 threads (4× faster than real time), with the same transcript as with 4 threads.
 - **English only**, with the same confidence filters as Voice Replay Studio.
-- Turning transcripts off, stopping, ending hosting and quitting all discard the text. Only a clip's name is kept.
+- Up to 2.38, turning transcripts off, stopping, ending hosting and quitting discarded the text. Since 2.39 the words stay with their audio in the history and go when it goes: when that audio leaves the history window, on **Discard**, and when the companion quits. Only a clip's name is kept after that.
 
 ## Privacy and safety
 
@@ -85,7 +89,9 @@ Like Voice Replay Studio's trim, it saves a new Temp sound and never changes the
 - **Everyone can see it.** Everyone gets a notice when Mimic starts (with the source) and stops, anyone joining while it is on is told immediately, every participant's header shows **Mimic on** while it runs, and every new clip is announced.
 - **Audio stays on the host PC.** Guests receive 300 peak levels for the waveform and, if the host enables it, the transcript text. If transcripts stop (turned off, or the speech engine fails), the stored lines are cleared at once, so guests stop receiving them. While transcripts are on, clips saved with the hotkey are named after their words, and those names show in everyone's Temp and **Just mimicked**. Clips are cut and imported on the host.
 - **Separate permissions.** Clipping needs **Guest Mimic**, playing needs **Remote playback**, and Edit copy needs uploads. Only the host chooses the source, transcripts and F6.
-- **Bounded.** The buffer is 45 s in memory: the 30 s window plus 15 s so a guest's selection survives the round trip. Each guest can add at most 6 new files per minute, the same limit as uploads, within Temp's 32 files / 256 MiB. Edit copies run one at a time, and the guest's permissions are checked before any decoding.
+- **Kept on disk until quit (2.39).** The recording history is written to `%LOCALAPPDATA%\SoundpadWeb\history\` and its words to `transcripts\` beside it, on the host PC only, for as long as the companion runs, within the chosen window. Quitting deletes both, also when Windows logs off or shuts down. If the companion crashes, the next start recovers that history (the host is told, with **Discard**). Stopping capture keeps the history until quit, with an honest gap.
+- **Guests see only what was recorded since they joined.** The companion enforces this on every query (waveform, words, clips, previews, and the timing details), unless the host uses **Share with guests** for an earlier part. A guest the host disconnects or turns away starts again from their next admission.
+- **Bounded.** Each guest can add at most 6 new files per minute, the same limit as uploads, within Temp's 32 files / 256 MiB. A clip is at most 30 s. Each guest can add at most 6 new files per minute, the same limit as uploads, within Temp's 32 files / 256 MiB. Edit copies run one at a time, and the guest's permissions are checked before any decoding.
 - **Light on the host, however many guests.** The waveform is computed at most every 100 ms and shared by everyone: at most about 3% of a CPU core on the owner's PC.
 - **Be fair to the people you record.** Mimic captures other people's voices. Tell your session it is on; the badge exists for that reason.
 

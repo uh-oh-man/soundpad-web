@@ -156,7 +156,7 @@ public static partial class WordTimingEval
 
     // ---- fixtures and ground truth -----------------------------------------------------------------------------
 
-    /// <summary>Fixtures with ground truth (also used by WordPipelineEval.cs, the 2.38 production pipeline check).</summary>
+    /// <summary>Fixtures with ground truth (also used by WordPipelineEval.cs, the 2.39 production pipeline check).</summary>
     public static List<Fixture> LoadFixtures(string folder)
     {
         var list = new List<Fixture>();

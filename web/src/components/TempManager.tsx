@@ -94,6 +94,9 @@ export function TempManager({
     [data, setData] = useState<z.infer<typeof response>>(),
     [error, setError] = useState(''),
     [pending, setPending] = useState('');
+  // Whether the error shown came from loading the list (a later load clears it) or from an action the person took
+  // (it stays until their next action): a refresh landing just after a refused Keep must not hide the refusal.
+  const loadFailed = useRef(false);
   const [saving, setSaving] = useState<{ asset: Asset; variant: Variant }>(),
     [directory, setDirectory] = useState(''),
     [category, setCategory] = useState('');
@@ -135,11 +138,16 @@ export function TempManager({
         .then((raw) => {
           if (live) {
             setData(response.parse(raw));
-            setError('');
+            if (loadFailed.current) {
+              loadFailed.current = false;
+              setError('');
+            }
           }
         })
         .catch((e) => {
-          if (live) setError(String(e.message));
+          if (!live) return;
+          loadFailed.current = true;
+          setError(String(e.message));
         });
     }, 300);
     return () => {
@@ -162,6 +170,7 @@ export function TempManager({
     // Busy buttons stay enabled (aria-disabled) so they keep keyboard focus; ignore presses until done.
     if (pending) return;
     setPending(fields.assetId ?? 'manager');
+    loadFailed.current = false;
     setError('');
     try {
       // Save & play (2.27), like Mimic & play: the copy plays through Soundpad as soon as it is made.

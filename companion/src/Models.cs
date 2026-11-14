@@ -39,9 +39,13 @@ public record Command(int V, string Id, long At, string Op, string? SoundId = nu
     long? PositionMs = null, string? Epoch = null, long? EndMs = null, bool Repeat = false, string? Action = null, string? AssetId = null, string? VariantId = null, string? Orientation = null, string? DestinationDirectory = null, int? CategoryId = null, string? CategoryName = null, bool Confirmed = false, string? AudienceId = null, string? OwnerId = null, string? SourceId = null, long? MimicEnd = null, string? Name = null, double? Speed = null, bool KeepPitch = false,
     // trimAudio, mimicClip, mimicLibraryImport (2.35): play the new clip when it is ready, if nothing newer was asked for meanwhile.
     bool Autoplay = false,
-    // Recording history (2.38): a range of frames on the history timeline, waveform bins, the history length in seconds,
+    // Recording history (2.39): a range of frames on the history timeline, waveform bins, the history length in seconds,
     // the subtitles setting, and a transcript correction (word id and its text).
-    long? StartFrame = null, long? EndFrame = null, int? Bins = null, int? Seconds = null, string? Subtitles = null, long? WordId = null, string? Text = null);
+    long? StartFrame = null, long? EndFrame = null, int? Bins = null, int? Seconds = null, string? Subtitles = null, long? WordId = null, string? Text = null,
+    // beginSession (2.39): true when the invitation is new (Replace invite), so guest join times and shares start over.
+    bool? NewInvite = null,
+    // revokePeer (2.39): the participant the host disconnected or turned away, whose recording-history join time ends.
+    string? GuestId = null);
 public record Reply(string Type, string Id, bool Ok, string? Error = null, object? Data = null);
 public static class Json
 {

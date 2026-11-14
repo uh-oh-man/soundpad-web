@@ -47,7 +47,7 @@ export const FEATURES = {
   intents: [2, 35],
   desktopSession: [2, 36],
   sessionControl: [2, 37],
-  history: [2, 38],
+  history: [2, 39],
 } as const satisfies Record<string, readonly [number, number]>;
 
 /** True when the website changed version since this browser last used it (and it had used it before). */

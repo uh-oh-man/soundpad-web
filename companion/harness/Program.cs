@@ -5,7 +5,7 @@ if (args.FirstOrDefault() == "--real-slice-audio-probe") { Environment.ExitCode 
 if (args.FirstOrDefault() == "--real-exact-playback-probe") { Environment.ExitCode = await RealExactPlaybackProbe.Run(); return; }
 if (args.FirstOrDefault() == "--real-slot-probe") { Environment.ExitCode = await RealSlotProbe.Run(); return; }
 if (args.FirstOrDefault() == "--word-timing-eval" && args.Length >= 2) { await WordTimingEval.Run(args); return; } // see WordTimingEval.cs
-if (args.FirstOrDefault() == "--word-pipeline-eval" && args.Length >= 2) { Environment.ExitCode = await WordPipelineEval.Run(args); return; } // see WordPipelineEval.cs (2.38)
+if (args.FirstOrDefault() == "--word-pipeline-eval" && args.Length >= 2) { Environment.ExitCode = await WordPipelineEval.Run(args); return; } // see WordPipelineEval.cs (2.39)
 if (args.FirstOrDefault() == "--mock-only")
 {
     await using var isolated = new MockSoundpad(); isolated.DurationMs = 600000;
@@ -50,7 +50,7 @@ if (args.FirstOrDefault() == "--mimic-stream-transcript" && args.Length == 2)
     var audio = MimicTranscriber.Resample(mono.ToArray(), provider.WaveFormat.SampleRate, 48000);
     var data = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "SoundpadWeb");
     using var transcriber = new MimicTranscriber(new WhisperEngine(Path.Combine(data, "models", "ggml-base.en.bin"), null, Path.Combine(data, "native", "whisper-1.9.1")));
-    // A throwaway history in a temporary folder (2.38), never the companion's own data folder.
+    // A throwaway history in a temporary folder (2.39), never the companion's own data folder.
     var (store, words, folder) = HistorySinkFixture.Temporary(48000);
     try
     {
@@ -454,7 +454,9 @@ int Option(string name) { int at = Array.IndexOf(args, name); return at >= 0 && 
 mock.LatencyMs = Option("--latency-ms"); mock.SlowMs = Option("--slow-add-ms"); mock.SlowPrefix = "DoAddSound(";
 using var pipe = new SoundpadPipe(mock.Name, true);
 using var bridge = new Bridge(pipe, new StateStore(directory));
-bridge.UseMimicCapture(new MimicFixture());
+// The tone has been playing for 10 s when Mimic starts listening, so the browser tests' "Last 3 s" and "Last 10 s"
+// right after Start find that much recorded (2.39: the history view selects only audio that exists).
+bridge.UseMimicCapture(new MimicFixture { PrefillSeconds = 10 });
 bridge.UseTranscriptEngine(new TranscriptFixture());
 bridge.UseHotkeys(key => new HotkeyFixture(key) { Taken = key == "F9" }); // F9 plays a key another app owns
 bridge.UseVoiceReplayLibrary(VoiceReplayFixture.Create(Path.Combine(directory, "voice-replay"))); // never the real library

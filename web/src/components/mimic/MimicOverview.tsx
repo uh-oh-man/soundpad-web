@@ -2,7 +2,7 @@ import { useEffect, useRef, type KeyboardEvent, type PointerEvent } from 'react'
 import { formatSpan, framesToMs, msToFrames, type FrameRange } from '../../mimic/history';
 
 /**
- * The whole recording history as one small waveform (2.38): the part the main waveform shows is outlined; drag
+ * The whole recording history as one small waveform (2.39): the part the main waveform shows is outlined; drag
  * or click to move it there. Recording never pauses while the view moves.
  */
 export function MimicOverview({

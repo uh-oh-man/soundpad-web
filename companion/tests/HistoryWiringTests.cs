@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Text.Json;
 using NAudio.CoreAudioApi;
 using SoundpadWeb.Testing;
@@ -5,7 +6,7 @@ using Xunit;
 namespace SoundpadWeb.Tests;
 
 /// <summary>
-/// Mimic recording into the rolling history (2.38): capture → history wiring with the fixture source (no audio device),
+/// Mimic recording into the rolling history (2.39): capture → history wiring with the fixture source (no audio device),
 /// gaps, window changes, crash recovery, guest scoping of every query, output-only capture and expired answers.
 /// </summary>
 [Collection("History")]
@@ -39,6 +40,8 @@ public sealed class HistoryWiringTests : IDisposable
         }
         /// <summary>Moves the fixture source and the clock on together.</summary>
         public void Advance(double seconds) { Capture.Advance(TimeSpan.FromSeconds(seconds)); Interlocked.Add(ref now, (long)(seconds * 1000)); }
+        /// <summary>Sets the wall clock forward or back without any audio passing (Windows time sync stepping it).</summary>
+        public void StepClock(double seconds) => Interlocked.Add(ref now, (long)(seconds * 1000));
         /// <summary>Starts listening and delivers the first packet at once, as a real capture would (it anchors the run's wall time).</summary>
         public async Task Start()
         {
@@ -230,7 +233,7 @@ public sealed class HistoryWiringTests : IDisposable
         // Transcript: only words whose audio she may hear.
         var herWords = Body(await Ok(AsAlice(Cmd("historyTranscript") with { StartFrame = 0, EndFrame = S(30) }))).GetProperty("words");
         Assert.All(herWords.EnumerateArray(), w => Assert.True(w.GetProperty("start").GetInt64() >= from));
-        // The pre-2.38 peek is scoped the same way (levels and transcript lines).
+        // The pre-2.39 peek is scoped the same way (levels and transcript lines).
         var peek = Data<MimicPeek>(await Ok(AsAlice(Cmd("mimicPeek"))));
         long windowStart = peek.End - S(30);
         Assert.All(peek.Levels.Take((int)((from - windowStart) * Bridge.MimicBuckets / S(30)) - 1), l => Assert.Equal(0, l));
@@ -266,7 +269,7 @@ public sealed class HistoryWiringTests : IDisposable
     [Fact]
     public async Task OnlyOutputsAreEverCaptured()
     {
-        // The explicit check (2.38), without opening any device: an input endpoint id or data flow is refused.
+        // The explicit check (2.39), without opening any device: an input endpoint id or data flow is refused.
         Assert.Throws<InvalidDataException>(() => WasapiMimicCapture.RequireOutput("{0.0.1.00000000}.{6a1c0d2e-1111-2222-3333-444455556666}", DataFlow.Capture));
         Assert.Throws<InvalidDataException>(() => WasapiMimicCapture.RequireOutput("{0.0.0.00000000}.{6a1c0d2e-1111-2222-3333-444455556666}", DataFlow.Capture));
         Assert.Throws<InvalidDataException>(() => WasapiMimicCapture.RequireOutput("{0.0.1.00000000}.{6a1c0d2e-1111-2222-3333-444455556666}", DataFlow.Render));
@@ -293,7 +296,7 @@ public sealed class HistoryWiringTests : IDisposable
         await rig.Start();
         rig.Advance(100);
         string session = bridge.Snapshot.Mimic!.History!.SessionId!;
-        // 90 s old: far older than the 45 s buffer before 2.38.
+        // 90 s old: far older than the 45 s buffer before 2.39.
         var old = await bridge.Execute(Cmd("mimicClip") with { StartFrame = S(10), EndFrame = S(10.5), SourceId = session, Name = "Ninety seconds ago" }, "host");
         Assert.True(old.Ok, old.Error);
         var journal = JsonSerializer.Deserialize<AudioJournal>(File.ReadAllText(Path.Combine(folder, "managed-audio", "journal.json")), SoundpadWeb.Json.Options)!;
@@ -340,5 +343,262 @@ public sealed class HistoryWiringTests : IDisposable
         await Ok(bridge.Execute(Cmd("mimicStop"), "host"));
         await bridge.HotkeyPressed();
         Assert.Contains("not listening", bridge.Snapshot.Mimic!.HotkeyStatus);
+    }
+
+    // ---- Review fixes (2.39) ---------------------------------------------------------------------------------
+
+    private static long[] WordStarts(JsonElement reply) => [.. reply.GetProperty("words").EnumerateArray().Select(w => w.GetProperty("start").GetInt64())];
+
+    /// <summary>Waits until the host's transcript holds a word that starts before <paramref name="before"/> seconds.</summary>
+    private static async Task WaitForWords(Bridge bridge, double before)
+    {
+        for (int i = 0; i < 100; i++)
+        {
+            long live = Data<HistoryTimelineReply>(await Ok(bridge.Execute(Cmd("historyTimeline"), "host"))).LiveFrame;
+            if (WordStarts(Body(await Ok(bridge.Execute(Cmd("historyTranscript") with { StartFrame = 0, EndFrame = live }, "host")))).Any(s => s < S(before))) return;
+            await Task.Delay(100);
+        }
+        Assert.Fail("No words were recognised.");
+    }
+
+    [Fact]
+    public async Task AGuestTheHostDisconnectedCountsFromTheirNextAdmission()
+    {
+        await using var rig = new Rig(folder); var bridge = rig.Bridge; await bridge.Poll(true);
+        await Ok(bridge.Execute(Cmd("beginSession"), "host"));
+        await Ok(bridge.Execute(Cmd("permissions") with { Permissions = new(GuestMimic: true) }, "host"));
+        await rig.Start();
+        rig.Advance(10);
+        Participant bob = new("bob-id", "Bob");
+        long admitted = rig.Now;
+        bridge.NoteGuest(bob, "peer-1", admitted);
+        rig.Advance(10);
+        long first = Data<HistoryTimelineReply>(await Ok(bridge.Execute(Cmd("historyTimeline"), "guest", bob, "peer-1"))).FromFrame!.Value;
+        Assert.InRange(first, S(9), S(11));
+        // The host disconnects Bob (his connection's audio and his join time both end).
+        await Ok(bridge.Execute(Cmd("revokePeer") with { OwnerId = "peer-1", GuestId = bob.Id }, "host"));
+        // A command still on its way from him, with the old join time or none, does not bring the old time back.
+        bridge.NoteGuest(bob, "peer-1", admitted);
+        bridge.NoteGuest(bob, "peer-1", null);
+        rig.Advance(15); // talked about while he is out
+        Assert.False((await bridge.Execute(Cmd("historyTimeline"), "guest", bob, "peer-1")).Ok); // that connection is revoked
+        rig.Advance(5);
+        // Let back in: from this admission, never from the first one.
+        bridge.NoteGuest(bob, "peer-2", rig.Now);
+        rig.Advance(5);
+        var back = Data<HistoryTimelineReply>(await Ok(bridge.Execute(Cmd("historyTimeline"), "guest", bob, "peer-2")));
+        Assert.InRange(back.FromFrame!.Value, S(39), S(41));
+        var during = await bridge.Execute(Cmd("mimicClip") with { StartFrame = S(25), EndFrame = S(26), SourceId = back.SessionId }, "guest", bob, "peer-2");
+        Assert.False(during.Ok); Assert.Contains("before you joined", during.Error);
+        // A guest id alone (Turn away) is accepted; a revokePeer naming nobody is refused.
+        await Ok(bridge.Execute(Cmd("revokePeer") with { GuestId = "carol-id" }, "host"));
+        Assert.False((await bridge.Execute(Cmd("revokePeer"), "host")).Ok);
+    }
+
+    [Fact]
+    public async Task AnOwnerPageReloadKeepsGuestJoinTimesAndSharesAndANewInviteResetsThem()
+    {
+        await using var rig = new Rig(folder); var bridge = rig.Bridge; await bridge.Poll(true);
+        string audience = Guid.NewGuid().ToString();
+        await Ok(bridge.Execute(Cmd("beginSession") with { AudienceId = audience }, "host"));
+        await Ok(bridge.Execute(Cmd("permissions") with { Permissions = new(GuestMimic: true) }, "host"));
+        await rig.Start();
+        rig.Advance(10);
+        Participant alice = new("alice-id", "Alice");
+        bridge.NoteGuest(alice, "peer-a", rig.Now);
+        rig.Advance(10);
+        await Ok(bridge.Execute(Cmd("historyShare") with { StartFrame = S(2), EndFrame = S(4) }, "host"));
+        long from = Data<HistoryTimelineReply>(await Ok(bridge.Execute(Cmd("historyTimeline"), "guest", alice, "peer-a", audience))).FromFrame!.Value;
+        // The owner page reloads (or the window takes over): the same invitation, so nothing is forgotten, even when
+        // the reloaded page's own record says she was let in just now.
+        audience = Guid.NewGuid().ToString();
+        await Ok(bridge.Execute(Cmd("beginSession") with { AudienceId = audience }, "host"));
+        rig.Advance(5);
+        bridge.NoteGuest(alice, "peer-a2", rig.Now);
+        var after = Data<HistoryTimelineReply>(await Ok(bridge.Execute(Cmd("historyTimeline"), "guest", alice, "peer-a2", audience)));
+        Assert.Equal(from, after.FromFrame);
+        Assert.Contains(new HistoryRange(S(2), S(4)), after.Shared);
+        // Replace invite: everyone starts over.
+        audience = Guid.NewGuid().ToString();
+        await Ok(bridge.Execute(Cmd("beginSession") with { AudienceId = audience, NewInvite = true }, "host"));
+        rig.Advance(5);
+        bridge.NoteGuest(alice, "peer-a3", rig.Now);
+        var fresh = Data<HistoryTimelineReply>(await Ok(bridge.Execute(Cmd("historyTimeline"), "guest", alice, "peer-a3", audience)));
+        Assert.True(fresh.FromFrame > from + S(9));
+        Assert.Empty(fresh.Shared);
+    }
+
+    [Fact]
+    public async Task AGuestNeverSeesAudioFromBeforeTheirJoinWhenTheClockWasSetBack()
+    {
+        await using var rig = new Rig(folder); var bridge = rig.Bridge; await bridge.Poll(true);
+        await Ok(bridge.Execute(Cmd("beginSession"), "host"));
+        await Ok(bridge.Execute(Cmd("permissions") with { Permissions = new(GuestMimic: true) }, "host"));
+        await rig.Start();
+        rig.Advance(100);
+        // Windows time sync sets the clock back 50 s: the history's wall times (anchored on the old clock) now run ahead.
+        rig.StepClock(-50);
+        rig.Advance(5);
+        Participant alice = new("alice-id", "Alice");
+        bridge.NoteGuest(alice, "peer-a", rig.Now);
+        var mine = Data<HistoryTimelineReply>(await Ok(bridge.Execute(Cmd("historyTimeline"), "guest", alice, "peer-a")));
+        Assert.True(mine.FromFrame >= mine.LiveFrame - S(1), $"from {mine.FromFrame} live {mine.LiveFrame}");
+        var early = await bridge.Execute(Cmd("mimicClip") with { StartFrame = S(60), EndFrame = S(61), SourceId = mine.SessionId }, "guest", alice, "peer-a");
+        Assert.False(early.Ok);
+        // Set back past this launch's start: answered, not an exception that ends the owner page's connection.
+        rig.StepClock(-3600);
+        Participant bob = new("bob-id", "Bob");
+        bridge.NoteGuest(bob, "peer-b", rig.Now);
+        var his = Data<HistoryTimelineReply>(await Ok(bridge.Execute(Cmd("historyTimeline"), "guest", bob, "peer-b")));
+        Assert.True(his.FromFrame >= his.LiveFrame - S(1));
+    }
+
+    /// <summary>A capture whose sink the test drives directly, at the real capture rate; opens no device.</summary>
+    private sealed class ScriptedCapture : IMimicCapture
+    {
+        public static readonly MimicSource Source = new("fixture:scripted", "Fixture: scripted", "output");
+        public IMimicSink? Sink;
+        public int Rate => WasapiMimicCapture.CaptureRate;
+        public IReadOnlyList<MimicSource> Sources() => [Source];
+        public Task Start(MimicSource source, IMimicSink sink) { Sink = sink; Running = true; SourceName = source.Name; Status = "Listening"; return Task.CompletedTask; }
+        public void Stop() { Sink = null; Running = false; SourceName = null; Status = "Off"; }
+        public void Pump() { }
+        public bool Running { get; private set; }
+        public string Status { get; private set; } = "Off";
+        public string? SourceName { get; private set; }
+        public void Dispose() => Stop();
+    }
+
+    [Fact]
+    public async Task SilenceIsDatedByItsFirstFrameAndASleepEndsTheRunInsteadOfInventingMinutes()
+    {
+        await using var mock = new MockSoundpad();
+        using var pipe = new SoundpadPipe(mock.Name, true);
+        using var bridge = new Bridge(pipe, new StateStore(folder));
+        var capture = new ScriptedCapture();
+        bridge.UseMimicCapture(capture); bridge.UseTranscriptEngine(new TranscriptFixture()); bridge.UseHotkey(new HotkeyFixture());
+        long now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+        bridge.UseClock(() => Interlocked.Read(ref now));
+        await bridge.Poll(true);
+        await Ok(bridge.Execute(Cmd("mimicStart") with { SourceId = ScriptedCapture.Source.Id }, "host"));
+        var sink = capture.Sink!;
+        long second = Stopwatch.Frequency;
+        // Listening started 1.5 s ago over a quiet output; the first pump pads that stretch (all but the last 0.1 s).
+        long started = now - 1500, ticks = Stopwatch.GetTimestamp();
+        long end = WasapiMimicCapture.PadSilence(sink, ticks - second * 3 / 2, ticks, 0);
+        var timeline = Data<HistoryTimelineReply>(await Ok(bridge.Execute(Cmd("historyTimeline"), "host")));
+        Assert.InRange(timeline.LiveFrame, 48000 * 14 / 10 - 2, 48000 * 14 / 10 + 2);
+        // The run starts when listening started, not when the silence was padded.
+        Assert.InRange(Assert.Single(timeline.Spans).WallStartUtcMs, started - 2, started + 2);
+        // The PC sleeps for an hour (QPC keeps counting): no hour of invented silence, no overrun, no future wall times.
+        Interlocked.Add(ref now, 3_600_000);
+        end = WasapiMimicCapture.PadSilence(sink, end, end + 3600 * second, 0);
+        Interlocked.Add(ref now, 2000);
+        WasapiMimicCapture.PadSilence(sink, end, end + 2 * second, 0);
+        var after = Data<HistoryTimelineReply>(await Ok(bridge.Execute(Cmd("historyTimeline"), "host")));
+        Assert.InRange(after.LiveFrame, timeline.LiveFrame + 48000 * 19 / 10, timeline.LiveFrame + 48000 * 21 / 10);
+        Assert.Equal(HistoryGapReason.Stopped, Assert.Single(after.Gaps).Reason);
+        Assert.InRange(after.Spans[^1].WallStartUtcMs, now - 2200, now - 1800);
+        Assert.True(after.LiveWallUtcMs <= now);
+        Assert.Null(bridge.Snapshot.Mimic!.History!.Problem); // nothing was lost to an overrun
+        Assert.Equal(0, bridge.History!.Totals(HistoryAccess.Host).Overruns);
+    }
+
+    [Fact]
+    public async Task WithTranscriptsOffWordsStillGoWithTheirAudio()
+    {
+        await using var rig = new Rig(folder); var bridge = rig.Bridge; await bridge.Poll(true);
+        await rig.Start();
+        await Ok(bridge.Execute(Cmd("mimicTranscribe") with { Action = "enable" }, "host"));
+        rig.Advance(12);
+        await WaitForWords(bridge, 10);
+        await Ok(bridge.Execute(Cmd("mimicTranscribe") with { Action = "disable" }, "host"));
+        string session = bridge.Snapshot.Mimic!.History!.SessionId!;
+        var path = Path.Combine(folder, "transcripts", session, "words.jsonl");
+        Assert.Contains(File.ReadAllLines(path), l => l.StartsWith("{\"w\""));
+        // Capture carries on with a one-minute window: the first words' audio expires, and so do they.
+        await Ok(bridge.Execute(Cmd("historySettings") with { Seconds = 60 }, "host"));
+        rig.Advance(90);
+        var words = Body(await Ok(bridge.Execute(Cmd("historyTranscript") with { StartFrame = 0, EndFrame = S(20) }, "host")));
+        Assert.Empty(WordStarts(words));
+        await Ok(bridge.Execute(Cmd("historySettings") with { Seconds = 60 }, "host")); // prunes now, not in 30 s
+        var stored = File.ReadAllLines(path).Where(l => l.StartsWith("{\"w\"")).Select(l => JsonDocument.Parse(l).RootElement.GetProperty("w").GetProperty("start").GetInt64());
+        Assert.All(stored, start => Assert.True(start >= S(20)));
+    }
+
+    [Fact]
+    public async Task GuestsGetWordIdsThatDoNotCountWhatWasSaidBeforeTheyJoined()
+    {
+        await using var rig = new Rig(folder); var bridge = rig.Bridge; await bridge.Poll(true);
+        await Ok(bridge.Execute(Cmd("beginSession"), "host"));
+        await Ok(bridge.Execute(Cmd("permissions") with { Permissions = new(GuestMimic: true) }, "host"));
+        await rig.Start();
+        await Ok(bridge.Execute(Cmd("mimicTranscribe") with { Action = "enable" }, "host"));
+        Participant alice = new("alice-id", "Alice");
+        bridge.NoteGuest(alice, "peer-a", rig.Now);
+        rig.Advance(12);
+        await WaitForWords(bridge, 10);
+        var host = Body(await Ok(bridge.Execute(Cmd("historyTranscript") with { StartFrame = 0, EndFrame = S(12) }, "host"))).GetProperty("words").EnumerateArray().ToArray();
+        var guest = Body(await Ok(bridge.Execute(Cmd("historyTranscript") with { StartFrame = 0, EndFrame = S(12) }, "guest", alice, "peer-a"))).GetProperty("words").EnumerateArray().ToArray();
+        var again = Body(await Ok(bridge.Execute(Cmd("historyTranscript") with { StartFrame = 0, EndFrame = S(12) }, "guest", alice, "peer-a"))).GetProperty("words").EnumerateArray().ToArray();
+        Assert.NotEmpty(guest);
+        Assert.Equal(1, host[0].GetProperty("id").GetInt64()); // the host's ids count from the start of the history
+        foreach (var w in guest)
+        {
+            var same = host.Single(h => h.GetProperty("start").GetInt64() == w.GetProperty("start").GetInt64());
+            Assert.NotEqual(same.GetProperty("id").GetInt64(), w.GetProperty("id").GetInt64());
+            Assert.NotEqual(same.GetProperty("phraseId").GetInt64(), w.GetProperty("phraseId").GetInt64());
+            Assert.InRange(w.GetProperty("id").GetInt64(), 1, 1L << 53);
+        }
+        // Stable between requests, and words of one phrase still share one phrase id.
+        Assert.Equal(guest.Select(w => w.GetProperty("id").GetInt64()), again.Select(w => w.GetProperty("id").GetInt64()));
+        var phrases = guest.GroupBy(w => w.GetProperty("phraseId").GetInt64()).Select(g => g.Select(w => host.Single(h => h.GetProperty("start").GetInt64() == w.GetProperty("start").GetInt64()).GetProperty("phraseId").GetInt64()).Distinct().Count());
+        Assert.All(phrases, count => Assert.Equal(1, count));
+    }
+
+    [Fact]
+    public async Task WordsPastWhatACrashKeptAreDroppedWhenTheHistoryIsRecovered()
+    {
+        string crashed;
+        long durable;
+        {
+            var store = HistoryStore.Create(folder, new HistoryOptions { Rate = Rate, TailSeconds = 600 });
+            crashed = store.SessionId;
+            for (int s = 0; s < 25; s++) store.Append(Enumerable.Range(0, Rate).Select(i => MimicFixture.Sample(s * (long)Rate + i)).ToArray());
+            Assert.True(store.Flush(30000));
+            durable = store.LiveFrame;
+            // Three more seconds reach memory but not the index before the process dies; their words were already saved.
+            for (int s = 25; s < 28; s++) store.Append(Enumerable.Range(0, Rate).Select(i => MimicFixture.Sample(s * (long)Rate + i)).ToArray());
+            TranscriptWords.Open(folder, crashed).Add([new(0, S(10), S(10.5), "Kept", 0.9f, 0, true, true, WordStatus.Done, 1), new(0, S(24.8), S(25.3), "Straddles", 0.9f, 0, true, true, WordStatus.Done, 2), new(0, S(26), S(26.5), "Lost", 0.9f, 0, true, true, WordStatus.Done, 3)], new(0, S(28)));
+            store.Abandon();
+        }
+        await using var rig = new Rig(folder); var bridge = rig.Bridge;
+        Assert.True(bridge.RecoverHistory() > 0);
+        long recovered = bridge.History!.LiveFrame;
+        Assert.InRange(recovered, S(20), durable);
+        var path = Path.Combine(folder, "transcripts", crashed, "words.jsonl");
+        Assert.DoesNotContain(File.ReadAllLines(path), l => l.Contains("Lost") || l.Contains("Straddles"));
+        // New audio reuses the frames after the recovered point: the old words never land on it.
+        await rig.Start();
+        rig.Advance(6);
+        var words = Body(await Ok(bridge.Execute(Cmd("historyTranscript") with { StartFrame = 0, EndFrame = S(30) }, "host"))).GetProperty("words").EnumerateArray().Select(w => w.GetProperty("text").GetString()!).ToArray();
+        Assert.Equal(["Kept"], words);
+    }
+
+    [Fact]
+    public async Task ClosingTheHistoryBeforeDisposeDeletesItAtOnceAndDisposeStaysHarmless()
+    {
+        // What a console close, logoff or shutdown now does before Windows ends the process (Program.cs).
+        await using var rig = new Rig(folder); var bridge = rig.Bridge; await bridge.Poll(true);
+        await rig.Start();
+        rig.Advance(3);
+        string session = bridge.Snapshot.Mimic!.History!.SessionId!;
+        bridge.CloseHistory();
+        Assert.False(Directory.Exists(Path.Combine(folder, "history", session)));
+        Assert.False(Directory.Exists(Path.Combine(folder, "transcripts", session)));
+        Assert.False(bridge.Snapshot.Mimic!.Active);
+        bridge.Dispose();
+        await using var next = new Rig(folder);
+        Assert.Equal(0, next.Bridge.RecoverHistory());
     }
 }

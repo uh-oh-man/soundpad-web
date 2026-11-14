@@ -20,11 +20,11 @@ const sourcesSchema = z.object({
   sources: z
     .array(z.object({ id: z.string().max(512), name: z.string().max(600), kind: z.string() }))
     .max(500),
-  // 2.38: the source the companion remembers from last time, when it is listed now.
+  // 2.39: the source the companion remembers from last time, when it is listed now.
   remembered: z.string().max(512).nullish(),
 });
 
-/** How much history the host can keep (2.38), in minutes. */
+/** How much history the host can keep (2.39), in minutes. */
 const HISTORY_MINUTES = [1, 2, 5, 10, 20, 30, 60];
 const SUBTITLES = [
   { value: 'gaming', label: 'Gaming (lightest)' },
@@ -114,7 +114,7 @@ export function MimicHostControls({ state, connected }: { state: Snapshot; conne
     try {
       const parsed = sourcesSchema.parse(await controller.run('mimicSources'));
       setSources(parsed.sources);
-      // The one still chosen, else the one the companion remembers (2.38), else this browser's memory.
+      // The one still chosen, else the one the companion remembers (2.39), else this browser's memory.
       const remembered = parsed.remembered;
       setSource((current) =>
         !parsed.sources.some((s) => s.id === current) &&
@@ -130,7 +130,7 @@ export function MimicHostControls({ state, connected }: { state: Snapshot; conne
   useEffect(() => {
     if (connected) void loadSources();
   }, [connected, loadSources]);
-  // The output went away (2.38): offer the outputs there are now; the history so far is kept.
+  // The output went away (2.39): offer the outputs there are now; the history so far is kept.
   const lost = !!mimic?.history?.sourceLost;
   useEffect(() => {
     if (lost && connected) void loadSources();

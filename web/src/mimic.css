@@ -352,7 +352,7 @@
   max-width: 9rem;
 }
 
-/* Recording history (2.38): navigation, overview, word-by-word transcript. */
+/* Recording history (2.39): navigation, overview, word-by-word transcript. */
 .mimic-history {
   display: grid;
   gap: 10px;

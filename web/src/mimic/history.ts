@@ -1,4 +1,4 @@
-// Pure helpers for the Mimic recording history (2.38): timeline math, the window the waveform shows, gaps, and
+// Pure helpers for the Mimic recording history (2.39): timeline math, the window the waveform shows, gaps, and
 // word selection in the transcript. No React, so unit tests use them directly. Frames are on the companion's
 // absolute history timeline (the capture rate); gaps take no frames.
 import { z } from 'zod';

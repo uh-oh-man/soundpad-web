@@ -2,7 +2,7 @@ namespace SoundpadWeb.Testing;
 
 /// <summary>
 /// Test-only speech engine: every burst of sound becomes one phrase, "Fixture tone N", with word timing like
-/// Whisper's (2.38): three tokens spread over the burst, each with a DTW point 60 % of the way through it.
+/// Whisper's (2.39): three tokens spread over the burst, each with a DTW point 60 % of the way through it.
 /// Never ships in the EXE.
 /// </summary>
 public sealed class TranscriptFixture : ITranscriptEngine

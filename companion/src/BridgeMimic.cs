@@ -2,7 +2,7 @@ namespace SoundpadWeb;
 
 public sealed partial class Bridge
 {
-    /// <summary>The live view of pre-2.38 websites (the newest 30 s, 300 buckets) and the longest clip.</summary>
+    /// <summary>The live view of pre-2.39 websites (the newest 30 s, 300 buckets) and the longest clip.</summary>
     public const int MimicWindowMs = 30000, MimicBuckets = 300, MimicMinimumMs = 150;
     private IMimicCapture mimicCapture = new WasapiMimicCapture();
     private MimicTranscriber transcriber = new(new WhisperEngine(
@@ -36,7 +36,7 @@ public sealed partial class Bridge
 
     /// <summary>
     /// End hosting: capture, transcripts and the hotkey stop, guests and shares are forgotten. The recording history
-    /// itself stays until the companion closes (2.38), with a "stopped" gap.
+    /// itself stays until the companion closes (2.39), with a "stopped" gap.
     /// </summary>
     private void StopMimic()
     {
@@ -99,7 +99,10 @@ public sealed partial class Bridge
     {
         transcriber.Dispose(); transcriber = new(engine);
         transcriber.UseMode(SubtitleModes.Parse(Settings.Subtitles) ?? SubtitleMode.Gaming);
-        var h = history; transcriber.Attach(h, h == null ? null : TranscriptWords.Open(HistoryRoot, h.SessionId));
+        var h = history;
+        TranscriptWords? words = null;
+        if (h != null) { words = TranscriptWords.Open(HistoryRoot, h.SessionId); words.CutAt(h.LiveFrame); } // as UseStoreLocked does
+        transcriber.Attach(h, words);
     }
 
     /// <summary>Replaces the capture backend; tests and the e2e harness use a deterministic fixture source.</summary>
@@ -109,7 +112,7 @@ public sealed partial class Bridge
     private (string SessionId, long End, string Access, int[] Levels)? lastPeek;
 
     /// <summary>
-    /// The newest 30 s as pre-2.38 websites show it. The end is shared by every viewer for 100 ms, so selections made
+    /// The newest 30 s as pre-2.39 websites show it. The end is shared by every viewer for 100 ms, so selections made
     /// by different people line up; levels come from the history's peak pyramid (no sample scan) and are clipped to
     /// what each person may see.
     /// </summary>
@@ -147,7 +150,7 @@ public sealed partial class Bridge
     }
 
     /// <summary>
-    /// The history frames a person selected (see docs/MIMIC.md, Protocol): either explicit frames (2.38) or, as older
+    /// The history frames a person selected (see docs/MIMIC.md, Protocol): either explicit frames (2.39) or, as older
     /// websites send it, a range of the 30 s peek they saw. Up to 30 s from anywhere in the history.
     /// </summary>
     private (HistoryStore History, long Start, long Stop) Selection(Command c)
@@ -194,7 +197,7 @@ public sealed partial class Bridge
                 case "mimicSources":
                     {
                         var sources = mimicCapture.Sources();
-                        // The source chosen last time (2.38): by id, or for an app by its name without the process id.
+                        // The source chosen last time (2.39): by id, or for an app by its name without the process id.
                         var remembered = sources.FirstOrDefault(s => s.Id == Settings.SourceId)
                             ?? (Settings.SourceName is { } named ? sources.FirstOrDefault(s => s.Kind == "app" && StableSourceName(s.Name) == StableSourceName(named)) : null);
                         return new("ack", c.Id, true, Data: new { sources, remembered = remembered?.Id });

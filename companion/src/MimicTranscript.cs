@@ -3,14 +3,14 @@ using Whisper.net.Ggml;
 namespace SoundpadWeb;
 
 // Live transcript for Mimic, using the local Whisper base.en model (docs/MIMIC.md). Speech is recognized on this
-// PC; only the resulting text reaches the session. Since 2.38 it recognises the recording history with word timing
+// PC; only the resulting text reaches the session. Since 2.39 it recognises the recording history with word timing
 // (WordTiming.cs) and keeps the words with the history (TranscriptWords.cs).
 
 public sealed record TranscriptLine(long StartMs, long EndMs, string Text);
 /// <summary>One recognised phrase, relative to the audio handed in. <paramref name="Tokens"/> carries word timing (null from engines without it).</summary>
 public sealed record TranscribedSpan(TimeSpan Start, TimeSpan End, string Text, float Probability = 1, TranscribedToken[]? Tokens = null);
 
-/// <summary>How hard speech recognition may work while the host plays (2.38). Gaming is the default.</summary>
+/// <summary>How hard speech recognition may work while the host plays (2.39). Gaming is the default.</summary>
 public enum SubtitleMode { Gaming, Balanced, Fast }
 public static class SubtitleModes
 {
@@ -32,7 +32,7 @@ public interface ITranscriptEngine : IDisposable
 public sealed class WhisperEngine(string modelPath, string? sharedModelPath = null, string? nativeDirectory = null, int? threads = null) : ITranscriptEngine
 {
     /// <summary>
-    /// Settings measured by the word-timing evaluation (2.38): Gaming 1 thread on a below-normal thread (about 90 % of
+    /// Settings measured by the word-timing evaluation (2.39): Gaming 1 thread on a below-normal thread (about 90 % of
     /// the CPU time is then low priority), Balanced 2 threads below normal (about half), Fast 2 threads at normal
     /// priority. All use a Whisper window sized to the audio, 3.5 to 4.8 times cheaper for short phrases.
     /// </summary>
@@ -181,7 +181,7 @@ public sealed class WhisperEngine(string modelPath, string? sharedModelPath = nu
 }
 
 /// <summary>
-/// Turns the recording history into word-timed transcript, chunk by chunk, behind live audio (2.38). Recent audio is
+/// Turns the recording history into word-timed transcript, chunk by chunk, behind live audio (2.39). Recent audio is
 /// recognised as it arrives; older stretches when someone views them (<see cref="Request"/>). Words are kept with
 /// the history in <see cref="TranscriptWords"/>, so turning transcripts off or a failure keeps what was recognised.
 /// </summary>
@@ -271,8 +271,27 @@ public sealed class MimicTranscriber(ITranscriptEngine engine) : IDisposable
         TranscriptWords? transcript;
         lock (gate) { if (source == null || !ReferenceEquals(source, store)) return []; transcript = words; }
         if (transcript == null) return [];
+        // A transcript never outlives its audio, also between prunes: only words whose audio is still held.
+        HistoryRange[] held;
+        try { held = source.Timeline(HistoryAccess.Host).Available; }
+        catch (HistoryException) { return []; }
         // The text itself is what would leak: a word is shown only when all of its audio is visible to the asker.
-        return transcript.Between(start, end).Where(w => access.Allows(w.Word.Start, w.Word.End)).ToList();
+        return transcript.Between(start, end)
+            .Where(w => access.Allows(w.Word.Start, w.Word.End) && held.Any(r => w.Word.Start < r.EndFrame && w.Word.End > r.StartFrame))
+            .ToList();
+    }
+
+    /// <summary>
+    /// Drops words whose audio has expired, also while transcripts are off (the live loop is not running then).
+    /// Throttled like the live loop's pruning unless <paramref name="force"/> (the window just shrank).
+    /// </summary>
+    public void PruneExpired(HistoryStore? source, bool force = false)
+    {
+        TranscriptWords? transcript;
+        lock (gate) { if (source == null || !ReferenceEquals(source, store)) return; transcript = words; }
+        if (transcript == null) return;
+        if (force) Interlocked.Exchange(ref prunedAt, long.MinValue / 2);
+        PruneIfDue(source, transcript);
     }
 
     /// <summary>Stores corrected text for a word; its boundaries are never touched.</summary>
@@ -298,7 +317,7 @@ public sealed class MimicTranscriber(ITranscriptEngine engine) : IDisposable
         return result;
     }
 
-    /// <summary>Phrases overlapping [start, end) as lines in milliseconds relative to <paramref name="start"/> (the pre-2.38 peek shape).</summary>
+    /// <summary>Phrases overlapping [start, end) as lines in milliseconds relative to <paramref name="start"/> (the pre-2.39 peek shape).</summary>
     public TranscriptLine[] Lines(HistoryStore? source, HistoryAccess access, long start, long end)
     {
         if (source == null) return [];

@@ -46,7 +46,7 @@ export const commandSchema = z
       'trimPreview',
       // Host only (2.35): stops Soundpad at once and holds guest playback until the host resumes it.
       'panic',
-      // Recording history (2.38). Timeline, levels and transcript are what a guest with Mimic may ask for,
+      // Recording history (2.39). Timeline, levels and transcript are what a guest with Mimic may ask for,
       // scoped by the companion to what was recorded since they joined; the rest is the host's.
       'historyTimeline',
       'historyLevels',
@@ -66,9 +66,13 @@ export const commandSchema = z
     confirmed: z.boolean().optional(),
     audienceId: z.uuid().optional(),
     ownerId: z.string().max(128).optional(),
+    // revokePeer (2.39): the participant the host disconnected or turned away; their history join time ends.
+    guestId: z.string().min(1).max(128).optional(),
+    // beginSession (2.39): a new invitation (Replace invite), so guest join times and shares start over.
+    newInvite: z.boolean().optional(),
     sourceId: z.string().max(512).optional(),
     mimicEnd: z.number().int().nonnegative().safe().optional(),
-    // Recording history (2.38): frames on the history timeline, waveform bins, the history length, the
+    // Recording history (2.39): frames on the history timeline, waveform bins, the history length, the
     // subtitles setting, and a transcript correction.
     startFrame: z.number().int().nonnegative().safe().optional(),
     endFrame: z.number().int().nonnegative().safe().optional(),
@@ -249,7 +253,7 @@ export const snapshotSchema = z.object({
         )
         .max(20)
         .nullish(),
-      // The rolling recording history (2.38). Older companions omit it.
+      // The rolling recording history (2.39). Older companions omit it.
       history: z
         .object({
           sessionId: z.string().max(64).nullable(),
@@ -332,7 +336,7 @@ export function isGuestAllowed(c: Command, s: Snapshot) {
   // "Make it and play it" (2.35) needs the same permission as playing it afterwards did.
   if (c.autoplay && !s.permissions.remotePlayback) return false;
   if (c.op === 'mimicPeek' || c.op === 'mimicClip') return s.permissions.guestMimic === true;
-  // The recording history (2.38): only what a guest may see of it, which the companion limits to
+  // The recording history (2.39): only what a guest may see of it, which the companion limits to
   // what was recorded since they joined (and what the host shared).
   if (c.op === 'historyTimeline' || c.op === 'historyLevels' || c.op === 'historyTranscript')
     return s.permissions.guestMimic === true;

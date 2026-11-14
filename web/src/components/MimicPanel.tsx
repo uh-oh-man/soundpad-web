@@ -60,7 +60,7 @@ export function MimicPanel({
   const mimic = state.mimic;
   const active = !!mimic?.active;
   const allowed = host || state.permissions.guestMimic === true;
-  // A 2.38 companion keeps a rolling recording history: its own view replaces the live 30 s buffer below.
+  // A 2.39 companion keeps a rolling recording history: its own view replaces the live 30 s buffer below.
   const historyMode = supports(state.companionVersion, 'history');
   const recorded = !!mimic?.history?.sessionId;
   const [peek, setPeek] = useState<MimicPeek | null>(null);

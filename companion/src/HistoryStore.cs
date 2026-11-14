@@ -3,7 +3,7 @@ namespace SoundpadWeb;
 
 /// <summary>
 /// Disk-backed rolling recording history for one companion session (reports/OVERHAUL-PLAN.md, "Rolling
-/// recording and clip editing" and "Data lifecycle"). Since 2.38 Mimic records into it (BridgeHistory.cs).
+/// recording and clip editing" and "Data lifecycle"). Since 2.39 Mimic records into it (BridgeHistory.cs).
 ///
 /// Audio is mono, stored as 16-bit PCM in fixed-length segment files under root/history/sessionId/. Frames
 /// are absolute for the whole session; a Stop, a lost device or an update leaves a zero-width

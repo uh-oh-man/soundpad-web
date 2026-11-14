@@ -4,7 +4,7 @@ namespace SoundpadWeb.Testing;
 public sealed class HistorySinkFixture(HistoryStore store) : IMimicSink
 {
     public void Write(ReadOnlySpan<float> mono) => store.Append(mono);
-    public void Silence(long frames) => store.AppendSilence(frames);
+    public void Silence(long frames, double endBehindSeconds) => store.AppendSilence(frames);
     public void Lost(string status) => store.EndRun(HistoryGapReason.DeviceLost);
     public void Drain() => store.Flush(10000);
 

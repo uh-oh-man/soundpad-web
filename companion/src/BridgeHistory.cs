@@ -1,17 +1,17 @@
 using System.Text.Json;
 namespace SoundpadWeb;
 
-/// <summary>The host's Mimic settings (2.38), in their own small file so older companions never see them.</summary>
+/// <summary>The host's Mimic settings (2.39), in their own small file so older companions never see them.</summary>
 public sealed record MimicSettings(int Format = 1, int HistorySeconds = HistoryStore.DefaultWindowSeconds, string Subtitles = "gaming", string? SourceId = null, string? SourceName = null);
 
-/// <summary>The history timeline as one person may see it (reply of historyTimeline, 2.38).</summary>
+/// <summary>The history timeline as one person may see it (reply of historyTimeline, 2.39).</summary>
 /// <param name="FromFrame">A guest's join frame (what they can see from); null for the host.</param>
 /// <param name="Shared">Earlier ranges the host shared with guests.</param>
 public sealed record HistoryTimelineReply(string? SessionId, int Rate, long LiveFrame, long? LiveWallUtcMs, long NowUtcMs, bool Recording, int WindowSeconds, HistoryRange[] Available, HistorySpan[] Spans, HistoryGap[] Gaps, long? FromFrame, HistoryRange[] Shared, bool Transcribing);
-/// <summary>A word as the website receives it (historyTranscript, 2.38). Frames are on the history timeline.</summary>
+/// <summary>A word as the website receives it (historyTranscript, 2.39). Frames are on the history timeline.</summary>
 public sealed record HistoryWordReply(long Id, long Start, long End, string Text, float Probability, int StretchMs, bool PauseBefore, bool PauseAfter, string Status, long PhraseId, int Revision, bool Corrected);
 
-// Rolling recording history (2.38): Mimic records into a HistoryStore under <data>\history\ for the whole companion
+// Rolling recording history (2.39): Mimic records into a HistoryStore under <data>\history\ for the whole companion
 // launch, instead of a 45-second ring in memory. See reports/OVERHAUL-PLAN.md, "Rolling recording and clip editing".
 public sealed partial class Bridge
 {
@@ -25,8 +25,21 @@ public sealed partial class Bridge
     private volatile bool sourceLost;
     private long recoveredMs;
     private readonly long launchedUtcMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
-    /// <summary>When each guest (by participant id) was first admitted in this hosting session, in UTC ms. Never lowered.</summary>
-    private readonly Dictionary<string, long> guestJoins = [];
+    /// <summary>
+    /// When a guest was admitted: the wall time (UTC ms) and, as a floor that clock changes and late run anchors
+    /// cannot move, the live frame of <paramref name="SessionId"/>'s history at that moment.
+    /// </summary>
+    private readonly record struct GuestJoin(long Wall, long Frame, string? SessionId);
+    /// <summary>When each guest (by participant id) was first admitted in this hosting session. Never lowered.</summary>
+    private readonly Dictionary<string, GuestJoin> guestJoins = [];
+    /// <summary>
+    /// Guests the host disconnected or turned away, and when (UTC ms). Their old join time is gone; only a new
+    /// admission (a join time after this) gives them one again. Guarded by <see cref="guestJoins"/>.
+    /// </summary>
+    private readonly Dictionary<string, long> forgottenGuests = [];
+    private const int MaxGuestJoins = 4096;
+    /// <summary>Turns word and phrase ids into ids that tell a guest nothing about how much was said before they joined.</summary>
+    private readonly byte[] guestIdKey = System.Security.Cryptography.RandomNumberGenerator.GetBytes(32);
     /// <summary>Earlier ranges the host shared with guests, for the current history session.</summary>
     private readonly List<HistoryRange> sharedRanges = [];
     private string HistoryRoot => store.DirectoryPath;
@@ -81,14 +94,25 @@ public sealed partial class Bridge
     private HistoryStore? CurrentHistory()
     {
         try { mimicCapture.Pump(); } catch (Exception ex) when (ex is not OutOfMemoryException) { }
-        return history;
+        var h = history;
+        // Words go with their audio also while transcripts are off (the live loop is the other place that prunes).
+        transcriber.PruneExpired(h);
+        return h;
     }
 
     /// <summary>The capture writes here; it follows <see cref="history"/>, so Discard can swap the store under a running capture.</summary>
     private sealed class HistorySink(Bridge bridge) : IMimicSink
     {
         public void Write(ReadOnlySpan<float> mono) => bridge.history?.Append(mono, bridge.utcNow() - (long)mono.Length * 1000 / Math.Max(1, bridge.history?.Rate ?? 1));
-        public void Silence(long frames) => bridge.history?.AppendSilence(frames);
+        // Dated by its first frame, so a run that silence opens starts when that silence began, not when it was padded.
+        public void Silence(long frames, double endBehindSeconds)
+        {
+            if (bridge.history is not { } h) return;
+            h.AppendSilence(frames, bridge.utcNow() - (long)Math.Round(endBehindSeconds * 1000) - frames * 1000 / Math.Max(1, h.Rate));
+        }
+        // The capture lost track of time (the PC slept, or nothing pumped it for a long while): end the run here, so
+        // the next audio opens a new run at the real clock instead of minutes of invented silence.
+        public void Paused() => bridge.history?.EndRun(HistoryGapReason.Stopped);
         public void Lost(string status) => bridge.SourceLost(status);
         public void Drain() => bridge.history?.Flush(10000);
     }
@@ -121,7 +145,15 @@ public sealed partial class Bridge
     {
         history = next;
         lock (sharedRanges) sharedRanges.Clear();
-        transcriber.Attach(next, next == null ? null : TranscriptWords.Open(HistoryRoot, next.SessionId));
+        TranscriptWords? words = null;
+        if (next != null)
+        {
+            words = TranscriptWords.Open(HistoryRoot, next.SessionId);
+            // After a crash the history resumes at its last durable frame, and new audio reuses the frames after it:
+            // words recognised past that point describe audio that is gone, so they go before anyone can see them.
+            words.CutAt(next.LiveFrame);
+        }
+        transcriber.Attach(next, words);
         lock (peekGate) lastPeek = null;
     }
     private void CloseHistoryLocked()
@@ -134,7 +166,7 @@ public sealed partial class Bridge
     }
 
     /// <summary>
-    /// Startup (2.38): a history left by a launch that did not close normally (a crash, power loss) is recovered into
+    /// Startup (2.39): a history left by a launch that did not close normally (a crash, power loss) is recovered into
     /// the same session and the host is told; any other leftover history is removed. Returns the recovered frames.
     /// </summary>
     public long RecoverHistory()
@@ -179,7 +211,7 @@ public sealed partial class Bridge
         }
     }
 
-    /// <summary>Ordinary quit (2.38): the session's history and transcript are deleted.</summary>
+    /// <summary>Ordinary quit (2.39): the session's history and transcript are deleted.</summary>
     public void CloseHistory()
     {
         lock (historyGate)
@@ -190,21 +222,69 @@ public sealed partial class Bridge
     }
 
     /// <summary>
-    /// Records when a guest was admitted (the owner page passes it with every relayed command, 2.38). The first time
+    /// Records when a guest was admitted (the owner page passes it with every relayed command, 2.39). The first time
     /// this hosting session sees a participant wins; it can never be lowered later. Clamped to this launch and to now.
+    /// A guest the host disconnected or turned away (<see cref="ForgetGuest"/>) counts again only from a new
+    /// admission: a join time sent after that.
     /// </summary>
     public void NoteGuest(Participant? participant, string? requester, long? joinedAtUtcMs)
     {
         var key = participant?.Id ?? requester;
         if (key == null || key.Length > 128) return;
+        lock (guestJoins)
+        {
+            if (guestJoins.ContainsKey(key)) return;
+            if (forgottenGuests.TryGetValue(key, out long forgotten))
+            {
+                if (joinedAtUtcMs is not long joined || joined < forgotten) return;
+                forgottenGuests.Remove(key);
+            }
+        }
         long now = utcNow();
-        long wall = Math.Clamp(joinedAtUtcMs ?? now, launchedUtcMs, now);
-        lock (guestJoins) if (!guestJoins.ContainsKey(key) && guestJoins.Count < 4096) guestJoins[key] = wall;
+        // Never throws, also when the clock was set back past this launch's start.
+        long wall = Math.Max(launchedUtcMs, Math.Min(joinedAtUtcMs ?? now, now));
+        var join = JoinAt(wall, now);
+        lock (guestJoins) if (!guestJoins.ContainsKey(key) && guestJoins.Count < MaxGuestJoins) guestJoins[key] = join;
     }
-    /// <summary>A new or ended hosting session starts with nobody admitted and nothing shared.</summary>
+
+    /// <summary>
+    /// A join at <paramref name="wall"/> on the current history. Its frame floor comes from the live frame and the time
+    /// elapsed since, on one clock: a run whose wall times were anchored late, or a clock that was set back, can make
+    /// the history's own wall times point earlier than the join, and must never show a guest audio from before it.
+    /// </summary>
+    private GuestJoin JoinAt(long wall, long now)
+    {
+        var h = CurrentHistory();
+        if (h == null) return new(wall, 0, null);
+        try
+        {
+            long live = h.LiveFrame;
+            long byElapsed = Math.Max(0, live - Math.Max(0, now - wall) * h.Rate / 1000);
+            return new(wall, Math.Max(byElapsed, h.FrameAtOrAfterWall(HistoryAccess.Host, wall)), h.SessionId);
+        }
+        catch (HistoryException) { return new(wall, 0, null); }
+    }
+
+    /// <summary>
+    /// The host disconnected or turned away this guest (revokePeer with a guestId, 2.39): their join time ends, so
+    /// letting them back in records a new one and they never see what was recorded while they were out.
+    /// </summary>
+    public void ForgetGuest(string participantId)
+    {
+        if (participantId.Length is 0 or > 128) return;
+        long now = utcNow();
+        lock (guestJoins)
+        {
+            guestJoins.Remove(participantId);
+            if (forgottenGuests.Count >= MaxGuestJoins && !forgottenGuests.ContainsKey(participantId))
+                forgottenGuests.Remove(forgottenGuests.MinBy(p => p.Value).Key);
+            forgottenGuests[participantId] = now;
+        }
+    }
+    /// <summary>A new invitation or ended hosting session starts with nobody admitted and nothing shared.</summary>
     private void ForgetGuests()
     {
-        lock (guestJoins) guestJoins.Clear();
+        lock (guestJoins) { guestJoins.Clear(); forgottenGuests.Clear(); }
         lock (sharedRanges) sharedRanges.Clear();
     }
 
@@ -216,15 +296,33 @@ public sealed partial class Bridge
     {
         if (actor == "host") return HistoryAccess.Host;
         var key = participant?.Id ?? requester ?? "guest";
-        long wall;
+        GuestJoin join;
         lock (guestJoins)
         {
-            if (!guestJoins.TryGetValue(key, out wall)) guestJoins[key] = wall = utcNow();
+            if (!guestJoins.TryGetValue(key, out join))
+            {
+                // Never admitted through the owner page (or disconnected since): from now. A disconnected guest's
+                // stray query must not become their join time, or a later admission would count from it.
+                join = new(utcNow(), h.LiveFrame, h.SessionId);
+                if (!forgottenGuests.ContainsKey(key) && guestJoins.Count < MaxGuestJoins) guestJoins[key] = join;
+            }
         }
-        long from = h.FrameAtOrAfterWall(HistoryAccess.Host, wall);
+        long from = h.FrameAtOrAfterWall(HistoryAccess.Host, join.Wall);
+        // The frame floor belongs to the history it was taken on (Discard starts a new one).
+        if (join.SessionId == h.SessionId) from = Math.Max(from, Math.Min(join.Frame, h.LiveFrame));
         HistoryRange[] shared;
         lock (sharedRanges) shared = [.. sharedRanges];
-        return HistoryAccess.Guest(from, shared, wall);
+        return HistoryAccess.Guest(from, shared, join.Wall);
+    }
+
+    /// <summary>A word or phrase id as a guest sees it: stable for this launch, but not a count of what came before.</summary>
+    private long GuestId(long value, byte kind)
+    {
+        Span<byte> input = stackalloc byte[9];
+        input[0] = kind;
+        BitConverter.TryWriteBytes(input[1..], value);
+        var mac = System.Security.Cryptography.HMACSHA256.HashData(guestIdKey, input);
+        return (long)(BitConverter.ToUInt64(mac, 0) & ((1UL << 52) - 1)) + 1;
     }
 
     /// <summary>A typed history refusal as the person sees it.</summary>
@@ -243,7 +341,7 @@ public sealed partial class Bridge
         return new(start, end);
     }
 
-    /// <summary>The 2.38 history commands. Null when the op is not one of them.</summary>
+    /// <summary>The 2.39 history commands. Null when the op is not one of them.</summary>
     private Reply? ExecuteHistory(Command c, string actor, Participant? participant, string? requester)
     {
         bool host = actor == "host";
@@ -275,7 +373,8 @@ public sealed partial class Bridge
                     var access = AccessFor(actor, participant, requester, h);
                     var visible = h.Timeline(access).Available;
                     var words = transcriber.WordsBetween(h, access, range.StartFrame, range.EndFrame)
-                        .Select(w => new HistoryWordReply(w.Word.Id, w.Word.Start, w.Word.End, w.Correction?.Text ?? w.Word.Text, w.Word.Probability, w.Word.StretchMs, w.Word.PauseBefore, w.Word.PauseAfter, w.Word.Status, w.Word.PhraseId, w.Word.Revision, w.Correction != null)).ToArray();
+                        // Ids count every word and phrase since the history began; a guest gets ids that do not say how many came before they joined.
+                        .Select(w => new HistoryWordReply(host ? w.Word.Id : GuestId(w.Word.Id, 1), w.Word.Start, w.Word.End, w.Correction?.Text ?? w.Word.Text, w.Word.Probability, w.Word.StretchMs, w.Word.PauseBefore, w.Word.PauseAfter, w.Word.Status, host ? w.Word.PhraseId : GuestId(w.Word.PhraseId, 2), w.Word.Revision, w.Correction != null)).ToArray();
                     var pending = transcriber.PendingBetween(h, visible, range.StartFrame, range.EndFrame);
                     // Viewing an older stretch asks for it to be recognised (only what this person may see).
                     foreach (var p in pending) transcriber.Request(p);
@@ -324,6 +423,8 @@ public sealed partial class Bridge
                     {
                         if (seconds is < HistoryStore.MinWindowSeconds or > HistoryStore.MaxWindowSeconds) throw new InvalidDataException($"Keep {HistoryStore.MinWindowSeconds / 60} to {HistoryStore.MaxWindowSeconds / 60} minutes of history.");
                         history?.SetWindow(seconds);
+                        // A shorter window drops audio at once; its words go with it.
+                        transcriber.PruneExpired(history, force: true);
                         next = next with { HistorySeconds = seconds };
                         Log($"Recording history keeps the last {seconds / 60.0:0.#} minutes");
                     }

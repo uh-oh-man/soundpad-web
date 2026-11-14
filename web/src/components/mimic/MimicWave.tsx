@@ -25,7 +25,7 @@ const EDGE_PX = 8;
 
 export type WavePeek = { windowMs: number; levels: number[] };
 
-/** Extras the recording history view draws (2.38); the live 30 s view of older companions has none. */
+/** Extras the recording history view draws (2.39); the live 30 s view of older companions has none. */
 export type WaveExtras = {
   /** Where the zoom choice is remembered, and the zoom to start with. */
   storageKey?: string;

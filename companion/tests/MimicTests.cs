@@ -77,7 +77,7 @@ public sealed class MimicTests : IDisposable
         var fixture = new MimicFixture(); bridge.UseMimicCapture(fixture); await bridge.Poll(true);
         Assert.True((await bridge.Execute(Cmd("beginSession"), "host")).Ok);
         Assert.True((await bridge.Execute(Cmd("permissions") with { Permissions = new(GuestMimic: true, GuestUploads: false) }, "host")).Ok);
-        // Alice was admitted before capture started (2.38: guests see the history from their join time).
+        // Alice was admitted before capture started (2.39: guests see the history from their join time).
         bridge.NoteGuest(new("guest-1", "Alice"), "peer-1", null);
         Assert.True((await bridge.Execute(Cmd("mimicStart") with { SourceId = MimicFixture.Source.Id }, "host")).Ok);
         fixture.Advance(TimeSpan.FromSeconds(31));
@@ -98,7 +98,7 @@ public sealed class MimicTests : IDisposable
         var journal = JsonSerializer.Deserialize<AudioJournal>(File.ReadAllText(Path.Combine(folder, "managed-audio", "journal.json")), Json.Options)!;
         using (var wave = new NAudio.Wave.WaveFileReader(journal.Assets.Single().Variants.Single().Path))
             Assert.InRange(wave.TotalTime.TotalMilliseconds, 480, 520);
-        // 2.38: the selection stays available for as long as the history keeps it (here the shortest, one minute,
+        // 2.39: the selection stays available for as long as the history keeps it (here the shortest, one minute,
         // plus up to one 10 s segment), and is then answered as gone, never cut from other audio.
         fixture.Advance(TimeSpan.FromSeconds(45));
         Assert.True((await bridge.Execute(Cmd("mimicClip") with { MimicEnd = peek.End, PositionMs = fromMs, EndMs = fromMs + 500, Name = "Still there" }, "guest", new("guest-1", "Alice"), "peer-1")).Ok);
@@ -129,7 +129,7 @@ public sealed class MimicTests : IDisposable
         public void Dispose() => inner.Dispose();
     }
 
-    /// <summary>A history (2.38) and its transcript in their own folder under this test's folder.</summary>
+    /// <summary>A history (2.39) and its transcript in their own folder under this test's folder.</summary>
     private (HistoryStore Store, TranscriptWords Words) NewHistory(string name = "history")
     {
         var root = Path.Combine(folder, name); Directory.CreateDirectory(root);
@@ -156,7 +156,7 @@ public sealed class MimicTests : IDisposable
         for (int i = 0; i < 200 && transcriber.Enabled; i++) await Task.Delay(100);
         Assert.False(transcriber.Enabled);
         Assert.StartsWith("Transcripts stopped", transcriber.Status);
-        // 2.38: words describe the history's audio and stay with it; only recognising stops.
+        // 2.39: words describe the history's audio and stay with it; only recognising stops.
         Assert.Single(transcriber.Lines(store, HistoryAccess.Host, 0, store.LiveFrame));
     }
 
@@ -254,7 +254,7 @@ public sealed class MimicTests : IDisposable
     [Fact]
     public async Task PausesAreFoundUnderASteadyBackgroundNotOnlyInSilence()
     {
-        // Game sound is rarely silent: speech over a steady bed, then the bed alone. The pre-2.38 rule (RMS under
+        // Game sound is rarely silent: speech over a steady bed, then the bed alone. The pre-2.39 rule (RMS under
         // 0.004) never fired here, so every chunk was a forced 15 s cut; a pause relative to the background does.
         var engine = new TranscriptFixture();
         using var transcriber = new MimicTranscriber(engine);

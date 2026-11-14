@@ -6,6 +6,7 @@ Every release stays on GitHub permanently, so any earlier version can be restore
 
 | Version | What it is | Git tag | Download |
 | --- | --- | --- | --- |
+| 2.39.0 | Ten minutes of history, word by word | `v2.39.0` | [Release](https://github.com/uh-oh-man/soundpad-web/releases/tag/v2.39.0) |
 | 2.38.0 | Try the example | `v2.38.0` | [Release](https://github.com/uh-oh-man/soundpad-web/releases/tag/v2.38.0) |
 | 2.37.0 | Sturdier connections, exact starts | `v2.37.0` | [Release](https://github.com/uh-oh-man/soundpad-web/releases/tag/v2.37.0) |
 | 2.36.0 | Hosting without a browser tab | `v2.36.0` | [Release](https://github.com/uh-oh-man/soundpad-web/releases/tag/v2.36.0) |
@@ -106,8 +107,9 @@ Your data in `%LOCALAPPDATA%\SoundpadWeb` keeps working (Temp's 16 MiB per-sound
 - 2.4.0 adds one optional setting (`guestMimic`) to `state.json`. Older companions ignore it.
 - 2.5.0 adds `models\` (the Whisper model, if you downloaded it) and `native\` (Whisper's libraries). Older versions ignore both; delete them to free ~150 MB if you go back for good.
 - Mimic clips are ordinary Temp entries, so older companions manage, keep or clean them up like any upload.
-- The Mimic buffer is never written to disk, so there is nothing to remove.
+- Up to 2.38 the Mimic buffer is never written to disk (see 2.39.0 below).
 - 2.36.0 adds `companion.log`, `window.json` and `webview2\` (the window's browser profile). Older versions ignore them; delete them if you go back for good. `state.json` is unchanged.
+- 2.39.0 adds `history\` and `transcripts\` (the recording history and its words, deleted when the companion quits normally) and `mimic-settings.json`. Older companions ignore all three; if you go back after a crash, delete `history\` and `transcripts\` yourself, because an older companion will not remove them. `state.json` and the journal are unchanged.
 - 2.37.0 adds `slots\` (three small slot files and `slots.json`). The slot files sit in the companion's Temp category in Soundpad while it runs and are removed with it. If you go back to an older companion while slot files are still in that category (after a crash), it sees them as sounds it did not make and leaves the category alone, and Temp asks you to remove its entries in Soundpad; nothing of yours is touched. The state and journal formats are unchanged.
 
 ### Tested, not just argued (2.10.1)

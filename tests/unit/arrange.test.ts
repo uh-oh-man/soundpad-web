@@ -246,9 +246,13 @@ describe('feature gates for older companions', () => {
     expect(missingFeatures('2.37.0')).toEqual([
       'a rolling recording history of up to an hour, with clickable word-by-word subtitles',
     ]);
-    expect(missingFeatures('2.38.0')).toEqual([]);
-    expect(supports('2.37.0', 'history')).toBe(false);
-    expect(supports('2.38.0', 'history')).toBe(true);
+    // 2.38.0 (Try the example) changed the website only, so its companion lacks the history.
+    expect(missingFeatures('2.38.0')).toEqual([
+      'a rolling recording history of up to an hour, with clickable word-by-word subtitles',
+    ]);
+    expect(missingFeatures('2.39.0')).toEqual([]);
+    expect(supports('2.38.0', 'history')).toBe(false);
+    expect(supports('2.39.0', 'history')).toBe(true);
     expect(supports('2.36.0', 'sessionControl')).toBe(false);
     expect(supports('2.37.0', 'sessionControl')).toBe(true);
     expect(supports('2.35.0', 'desktopSession')).toBe(false);

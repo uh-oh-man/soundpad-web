@@ -2,7 +2,7 @@ using System.Text.Json;
 namespace SoundpadWeb;
 
 /// <summary>
-/// One recognised word on the history's absolute frame timeline (2.38). Boundaries are stored unpadded, as
+/// One recognised word on the history's absolute frame timeline (2.39). Boundaries are stored unpadded, as
 /// computed; padding (20 ms before, 10 ms after) is applied only when audio is cut.
 /// </summary>
 /// <param name="Id">Stable for the life of the history and never reused.</param>
@@ -190,6 +190,33 @@ public sealed class TranscriptWords
             dropped = 0;
             var lines = words.Select(w => Json.Write(new Line(W: w))).Concat(covered.Select(c => Json.Write(new Line(C: [c.StartFrame, c.EndFrame])))).ToList();
             Persist(() => { Directory.CreateDirectory(Folder); var temporary = WordsPath + ".tmp"; File.WriteAllLines(temporary, lines); File.Move(temporary, WordsPath, true); });
+        }
+    }
+
+    /// <summary>
+    /// Drops words and recognised stretches that reach <paramref name="end"/> or beyond (audio a crash lost: the history
+    /// resumes at its last durable frame and new audio reuses the frames after it), and rewrites the file when anything
+    /// changed. A word straddling <paramref name="end"/> goes too: part of its audio is gone.
+    /// </summary>
+    public void CutAt(long end)
+    {
+        lock (gate)
+        {
+            int before = words.Count;
+            words.RemoveAll(w => w.End > end);
+            foreach (var id in corrections.Keys.Where(id => !words.Any(w => w.Id == id)).ToArray()) corrections.Remove(id);
+            var kept = covered.Where(c => c.StartFrame < end).Select(c => new HistoryRange(c.StartFrame, Math.Min(c.EndFrame, end))).ToList();
+            bool changed = words.Count != before || kept.Count != covered.Count || kept.Where((k, i) => k != covered[i]).Any();
+            covered.Clear(); covered.AddRange(kept);
+            if (!changed) return;
+            var lines = words.Select(w => Json.Write(new Line(W: w))).Concat(covered.Select(c => Json.Write(new Line(C: [c.StartFrame, c.EndFrame])))).ToList();
+            var fixes = corrections.Values.ToArray();
+            Persist(() =>
+            {
+                Directory.CreateDirectory(Folder);
+                var temporary = WordsPath + ".tmp"; File.WriteAllLines(temporary, lines); File.Move(temporary, WordsPath, true);
+                if (File.Exists(CorrectionsPath)) { var fixesTemporary = CorrectionsPath + ".tmp"; File.WriteAllText(fixesTemporary, Json.Write(fixes)); File.Move(fixesTemporary, CorrectionsPath, true); }
+            });
         }
     }
 

@@ -1431,14 +1431,20 @@ test('Mimic: host listens, everyone sees it, and a selection becomes a playable 
     page.getByRole('button', { name: 'Play from start: Fixture mimic', exact: true }),
   ).toBeEnabled();
   await page.getByRole('button', { name: 'Mimic', exact: true }).click();
-  // The recording history view (2.38) starts at the newest 10 s; these drags measure the 30 s view.
+  // The recording history view (2.39) starts at the newest 10 s; these drags measure the 30 s view.
   await dialog
     .getByRole('group', { name: 'Waveform zoom' })
     .getByRole('button', { name: '30 s', exact: true })
     .click();
   // Dragging selects an exact range; Clear returns to the live view.
   const canvas = dialog.locator('.mimic-wave canvas');
-  const box = (await canvas.boundingBox())!;
+  // The window scrolls as the selection's actions come and go (2.39 has more in it), so measure the
+  // waveform again before each drag rather than reusing where it was.
+  const measure = async () => {
+    await canvas.scrollIntoViewIfNeeded();
+    return (await canvas.boundingBox())!;
+  };
+  let box = await measure();
   await page.mouse.move(box.x + box.width * 0.8, box.y + box.height / 2);
   await page.mouse.down();
   await page.mouse.move(box.x + box.width * 0.9, box.y + box.height / 2);
@@ -1466,6 +1472,7 @@ test('Mimic: host listens, everyone sees it, and a selection becomes a playable 
     'aria-pressed',
     'true',
   );
+  box = await measure();
   await page.mouse.move(box.x + box.width * 0.6, box.y + box.height / 2);
   await page.mouse.down();
   await page.mouse.move(box.x + box.width * 0.9, box.y + box.height / 2);
@@ -1479,6 +1486,7 @@ test('Mimic: host listens, everyone sees it, and a selection becomes a playable 
   await page.keyboard.press('Shift+ArrowLeft');
   await expect(canvas).toHaveAccessibleName(/showing the last 30 seconds/);
   // A new drag in that widened view stays in it until release: 80%–90% of 30 s is −6 s to −3 s.
+  box = await measure();
   await page.mouse.move(box.x + box.width * 0.8, box.y + box.height / 2);
   await page.mouse.down();
   await page.mouse.move(box.x + box.width * 0.85, box.y + box.height / 2);
@@ -1528,7 +1536,7 @@ test('Mimic transcript: words appear, a click and a Shift-click select them, and
   await dialog.getByRole('button', { name: 'Start listening' }).click();
   await dialog.getByLabel('Transcribe Mimic audio').check();
   const transcript = dialog.getByRole('list', { name: 'Transcript' });
-  // Each sentence is a row of word buttons (2.38): "Fixture" "tone" "N".
+  // Each sentence is a row of word buttons (2.39): "Fixture" "tone" "N".
   const sentence = transcript
     .getByRole('listitem')
     .filter({ has: page.getByRole('button', { name: 'Fixture', exact: true }) })
@@ -1591,7 +1599,7 @@ test('Mimic keyboard: number keys grab recent audio, Enter mimics, Escape clears
   await expect(dialog).toHaveCount(0);
 });
 
-/** What historyTimeline answers (2.38), as far as these tests read it. */
+/** What historyTimeline answers (2.39), as far as these tests read it. */
 type HistoryView = {
   sessionId: string;
   rate: number;
@@ -1777,7 +1785,7 @@ test('live Nostr/WebRTC: guests see Mimic only when allowed and can clip from it
     await expect(
       dialog
         .getByRole('list', { name: 'Transcript' })
-        .getByRole('button', { name: 'Fixture', exact: true }) // one button per word (2.38)
+        .getByRole('button', { name: 'Fixture', exact: true }) // one button per word (2.39)
         .first(),
     ).toBeVisible({ timeout: 20000 });
     await dialog.getByRole('button', { name: 'Last 3 s' }).click();
@@ -3986,6 +3994,11 @@ test('example session: plays example sounds in this browser, edits a copy, and l
     'Example session: nothing here reaches Soundpad.',
   );
   await expect(page.locator('header .status')).toHaveText('Example session');
+  // There is no companion to update (the example stands in for one without the 2.39 recording history).
+  await page.getByRole('button', { name: 'Access settings' }).click();
+  await expect(page.getByRole('dialog').first()).toBeVisible();
+  await expect(page.getByText('A newer one adds', { exact: false })).toHaveCount(0);
+  await page.keyboard.press('Escape');
   // Every example sound and category is there, and playing one shows it in the player.
   await expect(
     page.getByRole('navigation', { name: 'Sound categories' }).getByRole('button'),
@@ -4035,6 +4048,12 @@ test('example session: plays example sounds in this browser, edits a copy, and l
   await page.getByRole('button', { name: 'Confirm permanent save' }).click();
   await expect(page.locator('#temp-manager [role="alert"]')).toContainText(
     'Not available in the example',
+  );
+  // ...and keeps saying so: the Temp list refreshing after the new copy must not hide the refusal.
+  await page.waitForTimeout(1500);
+  await expect(page.locator('#temp-manager [role="alert"]')).toContainText(
+    'Not available in the example',
+    { timeout: 100 },
   );
   // Leaving returns to the start page, with nothing left playing.
   await page.getByRole('button', { name: 'Leave example' }).click();

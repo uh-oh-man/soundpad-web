@@ -2,6 +2,36 @@
 
 Notable changes to Soundpad Web. Versions follow the website's `package.json`; the Windows companion is versioned separately and only needs updating when a release says so.
 
+## 2.39.0 — Ten minutes of history, word by word
+
+**Update the companion** for this one. With an older companion, Mimic keeps its 30-second view.
+
+### Added
+
+- **Mimic keeps a recording history.** Instead of the last 30 seconds in memory, the companion now keeps a rolling history of the chosen output or app: 10 minutes by default, from 1 minute to 1 hour (**Keep the last** in Mimic's host controls). The Mimic window shows the newest 10 seconds with an overview of the whole history underneath: drag either to look back, use **Back 10 s** / **Forward 10 s** and **Go live**, and see the time of day and how far behind live you are. Recording carries on while you look around. Where capture was stopped or the output went away, the gap is drawn, not hidden.
+- **Word-by-word subtitles.** Each word has its own start and end: click a word to select it, Shift-click another to select everything between, and make a clip of exactly that. Words the companion is unsure about are underlined with dots. **Subtitles: Gaming / Balanced / Fast** decides how much CPU recognition may use; Gaming, the default, uses one low-priority thread so games are not slowed.
+- **Guests see only what was recorded since they joined.** The companion enforces it for the waveform, the words, clips and previews. The host can **Share with guests** an earlier part, and **Stop sharing**.
+- **Stopping capture keeps the history** until the companion quits. If the output device goes away, the history is kept and Mimic asks for another output. The companion remembers the output you used last.
+- **After a crash** the next start recovers the history and says so, with **Discard**.
+
+### Changed
+
+- The history and its words are written to `%LOCALAPPDATA%\SoundpadWeb\history\` and `transcripts\` while the companion runs, and deleted when it quits (also when Windows logs off or shuts down). Up to 2.38 Mimic audio was never written to disk. See [Mimic privacy](docs/MIMIC.md#privacy-and-safety).
+- Mimic refuses any source that is not an output device or an app's own sound, checked when capture starts as well as in the source list: it can never record a microphone.
+- A guest the host disconnects or turns away starts again from their next admission; a reload of the host's page no longer resets guests' join times or the host's shares.
+
+### Measured
+
+On synthetic test speech (two Windows voices, 144 sentences, real Whisper on this PC, nothing played): words found 99 % clean and 96 % with background noise; word edges within 15–20 ms (median); about 13 % of single-word cuts clip part of the word or catch a neighbour, 18 % with noise. Real game voices have not been measured yet, and no real capture device was used in testing.
+
+### Reviewed
+
+A review of the change found nine problems, all fixed before release, among them: a guest let back in after a Disconnect could see what was recorded while they were out; a guest's starting point could fall slightly before their join; a long pause in capture pushed history times into the future; closing the companion's console or logging off left the history on disk; word and phrase numbers told guests how much was said before they joined.
+
+### Tests
+
+- 26 new companion tests (history wiring, gaps, crash recovery, guest scoping on every query, outputs only, word timing including one real Whisper check), 24 new website unit tests, and 2 new browser tests (looking back and clipping words; a guest who cannot see before they joined).
+
 ## 2.38.0 — Try the example
 
 Website only; works with every companion. The companion reports 2.38.0 in this release, with no other change.

@@ -5,7 +5,7 @@ namespace SoundpadWeb.Tests;
 public sealed class SpeechCollection;
 
 /// <summary>
-/// The 2.38 word-timing pipeline (WordTiming.cs): anchor-valley boundaries on synthetic tones with known edges, the
+/// The 2.39 word-timing pipeline (WordTiming.cs): anchor-valley boundaries on synthetic tones with known edges, the
 /// status rule, and one optional check with real Whisper on real speech (skipped where the model is not installed).
 /// Runs on its own: a real recognition takes a CPU core for seconds, which would slow the timing-sensitive tests.
 /// </summary>

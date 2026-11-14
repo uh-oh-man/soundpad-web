@@ -444,7 +444,7 @@ function App() {
 
   // Mimic records other people's voices, so everyone is told when it starts, changes source or
   // stops, and anyone joining while it is on is told right away.
-  // How much a 2.38 companion keeps (its recording history), or the 30 s of older ones.
+  // How much a 2.39 companion keeps (its recording history), or the 30 s of older ones.
   const kept = state.mimic?.history
     ? `the last ${Math.round(state.mimic.history.seconds / 60)} min`
     : 'the last 30 s';

@@ -62,6 +62,8 @@ type PageOptions = {
   profile?: () => { id: string; name: string };
   /** Host: this many sounds with long names, so a full report takes seconds over the relay. */
   sounds?: number;
+  /** Host: more of the companion state (2.39: the recording history's snapshot). */
+  state?: Partial<Snapshot>;
 };
 function page(net: MemoryNetwork, invite: HostIdentity, id: string, options: PageOptions = {}) {
   let state: Snapshot = {
@@ -82,6 +84,7 @@ function page(net: MemoryNetwork, invite: HostIdentity, id: string, options: Pag
           },
         }
       : {}),
+    ...options.state,
   };
   let status = 'Connecting';
   let guests: string[] = [];
@@ -90,12 +93,15 @@ function page(net: MemoryNetwork, invite: HostIdentity, id: string, options: Pag
   let policy: SessionPolicy = { ...DEFAULT_POLICY, ...options.policy };
   const connections: ConnectionInfo[] = [];
   const commands: Command[] = [];
+  /** The join time relayed with each guest command (2.39), in order. */
+  const joins: (number | undefined)[] = [];
   const session = new Session(
     invite,
     options.host ? (options.identity ?? invite) : undefined,
     () => state,
-    async (c) => {
+    async (c, _peer, _person, joinedAt) => {
       commands.push(c);
+      joins.push(joinedAt);
       if (c.op === 'counter')
         state = { ...state, revision: state.revision + 1, counter: state.counter + (c.delta ?? 0) };
     },
@@ -135,6 +141,7 @@ function page(net: MemoryNetwork, invite: HostIdentity, id: string, options: Pag
     connection: () => connections.at(-1),
     connections,
     commands,
+    joins,
   };
 }
 /** Awaits a promise while the simulated clock runs (relay sends resolve on timers). */
@@ -501,5 +508,57 @@ describe('review fixes (2.37)', () => {
     await advance(1000);
     expect(h.requests()).toHaveLength(LIST);
     expect(peers.at(-1)!.received.map((m) => m.lobby)).toContain('full');
+  });
+});
+
+describe('recording history join times (2.39)', () => {
+  it('a reload keeps a guest’s join time; a Disconnect ends it, so letting them back in counts from then', async () => {
+    const net = new MemoryNetwork(),
+      a = await createIdentity(),
+      ann = person('Ann');
+    const h = page(net, a, 'host', { host: true }),
+      g = page(net, a, 'guest', { person: ann });
+    await until(() => g.status() === 'Connected');
+    await done(g.session.sendCommand(command('counter', { delta: 1 })));
+    const first = h.joins.at(-1)!;
+    expect(first).toBeTypeOf('number');
+    // A reload (a new peer id, the same participant) keeps the first join time.
+    await advance(5000);
+    await g.session.close();
+    const reloaded = page(net, a, 'guest-reloaded', { person: ann });
+    await until(() => reloaded.status() === 'Connected');
+    await done(reloaded.session.sendCommand(command('counter', { delta: 1 })));
+    expect(h.joins.at(-1)).toBe(first);
+    // The host disconnects her; what is recorded while she is out must stay hidden after she is let back in.
+    h.session.disconnect(h.guests()[0]);
+    await until(() => reloaded.status().includes('Access revoked'));
+    await advance(10000);
+    const back = page(net, a, 'guest-back', { person: ann });
+    await until(() => back.status() === 'Connected');
+    await done(back.session.sendCommand(command('counter', { delta: 1 })));
+    expect(h.joins.at(-1)!).toBeGreaterThanOrEqual(first + 15000);
+  });
+  it('guests never get the host’s recovered-history figure or disk problems', async () => {
+    const net = new MemoryNetwork(),
+      a = await createIdentity();
+    const history = {
+      sessionId: 'abc',
+      seconds: 600,
+      subtitles: 'gaming' as const,
+      sourceLost: false,
+      recoveredMs: 120000,
+      problem: 'The disk fell behind and some audio was lost; the gaps are marked.',
+    };
+    const mimic = { active: true, source: 'Output', status: 'Listening', windowMs: 30000, history };
+    const h = page(net, a, 'host', { host: true, state: { mimic } }),
+      g = page(net, a, 'guest', { person: person('Ann') });
+    await until(() => g.status() === 'Connected');
+    await until(() => g.state().mimic?.history?.sessionId === 'abc');
+    expect(g.state().mimic!.history).toMatchObject({ recoveredMs: 0, problem: null, seconds: 600 });
+    expect(g.state().mimic!.active).toBe(true);
+    h.session.broadcast();
+    await advance(500);
+    expect(g.state().mimic!.history!.recoveredMs).toBe(0);
+    expect(h.state().mimic!.history).toEqual(history); // the host's own state is untouched
   });
 });

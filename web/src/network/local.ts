@@ -278,7 +278,7 @@ export class LocalBridge {
     };
   }
   /**
-   * `joinedAt` (2.38, relayed guest commands only): when this page first admitted the guest, so the companion
+   * `joinedAt` (2.39, relayed guest commands only): when this page first admitted the guest, so the companion
    * shows them the recording history from then on. Older companions ignore it.
    */
   send(

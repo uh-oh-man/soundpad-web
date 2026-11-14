@@ -3,7 +3,7 @@ using NAudio.CoreAudioApi;
 using NAudio.Wave;
 namespace SoundpadWeb;
 
-// Mimic: what an app or output device plays, kept as a rolling recording history (2.38, HistoryStore), so a
+// Mimic: what an app or output device plays, kept as a rolling recording history (2.39, HistoryStore), so a
 // session can turn something that was just said into a sound. Ported from Voice Replay Studio (docs/MIMIC.md).
 // Capture never starts on its own, never records microphones or any other input, and audio never leaves this PC.
 
@@ -11,9 +11,9 @@ public sealed record MimicSource(string Id, string Name, string Kind);
 /// <summary>A clip made with Mimic this session, shown to everyone so they can replay it.</summary>
 public sealed record MimicClipInfo(string AssetId, string Name, string By, long At);
 public sealed record MimicState(bool Active, string? Source, string Status, int WindowMs, bool Transcribing = false, bool TranscriptModel = false, string TranscriptStatus = "Off", bool Hotkey = false, string HotkeyStatus = "Off", MimicClipInfo[]? Recent = null, int HotkeySeconds = 10, string HotkeyKey = "F6",
-    // 2.38: the rolling recording history. Older websites ignore it.
+    // 2.39: the rolling recording history. Older websites ignore it.
     MimicHistoryState? History = null);
-/// <summary>What the website shows about the recording history (2.38).</summary>
+/// <summary>What the website shows about the recording history (2.39).</summary>
 /// <param name="SessionId">Id of this launch's history, also the "ringId" of peeks; null before anything was recorded.</param>
 /// <param name="Seconds">How much history is kept (60 to 3600 s).</param>
 /// <param name="Subtitles">"gaming", "balanced" or "fast": how hard local speech recognition may work.</param>
@@ -30,8 +30,16 @@ public sealed record MimicPeek(long End, int Rate, int WindowMs, int[] Levels, b
 public interface IMimicSink
 {
     void Write(ReadOnlySpan<float> mono);
-    /// <summary>Digital silence: loopback delivers nothing while its source is quiet.</summary>
-    void Silence(long frames);
+    /// <summary>
+    /// Digital silence: loopback delivers nothing while its source is quiet. <paramref name="endBehindSeconds"/> is how
+    /// long before now the silence ends, so a run that silence opens is dated by its first frame.
+    /// </summary>
+    void Silence(long frames, double endBehindSeconds);
+    /// <summary>
+    /// The capture lost track of time: more silence passed than can be padded at once (the PC slept, or nothing
+    /// pumped the capture for a long while). The timeline should end its run here and start again at the clock.
+    /// </summary>
+    void Paused() { }
     /// <summary>The source went away (device unplugged, app closed). Audio already delivered stays.</summary>
     void Lost(string status);
     /// <summary>Waits until delivered audio is stored. Only for test fixtures that deliver minutes at once; never call it from a real capture thread.</summary>
@@ -66,7 +74,7 @@ public sealed class MimicRing(int rate, int seconds) : IMimicSink
             written += frames;
         }
     }
-    void IMimicSink.Silence(long frames) => WriteSilence(frames);
+    void IMimicSink.Silence(long frames, double endBehindSeconds) => WriteSilence(frames);
     void IMimicSink.Lost(string status) { }
     void IMimicSink.Drain() { }
     /// <summary>Samples in [start, end). Throws when any part has already been overwritten.</summary>
@@ -146,6 +154,8 @@ public sealed class WasapiMimicCapture(Func<string, DataFlow>? flowOf = null) : 
     public long Packets => Interlocked.Read(ref packets);
     private long packets;
     public void Pump() { lock (gate) PadSilence(0); }
+    /// <summary>The longest silence padded at once; a longer one ends the run instead. With a partly filled 10 s segment still in memory, this stays inside the history's 30 s in-memory tail.</summary>
+    public const double MaxPadSeconds = 15;
 
     public IReadOnlyList<MimicSource> Sources()
     {
@@ -169,7 +179,7 @@ public sealed class WasapiMimicCapture(Func<string, DataFlow>? flowOf = null) : 
     }
 
     /// <summary>
-    /// Mimic records what this PC plays, never a microphone (2.38: checked here, not only by the source list). Refuses
+    /// Mimic records what this PC plays, never a microphone (2.39: checked here, not only by the source list). Refuses
     /// an endpoint whose data flow is not Render, and capture endpoint ids ({0.0.1.…}) whatever they report.
     /// </summary>
     public static void RequireOutput(string endpointId, DataFlow flow)
@@ -312,14 +322,34 @@ public sealed class WasapiMimicCapture(Func<string, DataFlow>? flowOf = null) : 
     private void PadSilence(double incomingSeconds)
     {
         if (sink == null || !Running) return;
-        double gap = Stopwatch.GetElapsedTime(lastFrameTicks).TotalSeconds - incomingSeconds;
+        lastFrameTicks = PadSilence(sink, lastFrameTicks, Stopwatch.GetTimestamp(), incomingSeconds);
+    }
+
+    /// <summary>
+    /// Pads the silence between <paramref name="lastFrameTicks"/> (where delivered audio ends) and now, less the
+    /// <paramref name="incomingSeconds"/> about to be delivered, and returns where delivered audio ends afterwards.
+    /// Each step says how long before now it ends, so the history dates it correctly. A stretch longer than
+    /// <see cref="MaxPadSeconds"/> is not invented: the sink is told the capture paused, and padding starts again from
+    /// now (2.39: minutes of silence padded at once overran the history and pushed its wall times into the future).
+    /// </summary>
+    internal static long PadSilence(IMimicSink sink, long lastFrameTicks, long nowTicks, double incomingSeconds)
+    {
+        double gap = (nowTicks - lastFrameTicks) / (double)Stopwatch.Frequency - incomingSeconds;
         double keep = incomingSeconds == 0 ? Jitter : 0;
-        if (gap > Jitter + keep)
+        if (gap <= Jitter + keep) return lastFrameTicks;
+        double fill = gap - keep;
+        if (fill > MaxPadSeconds)
         {
-            double fill = Math.Min(gap - keep, 120);
-            for (long left = (long)(fill * Rate48); left > 0; left -= Rate48) sink.Silence(Math.Min(left, Rate48));
-            lastFrameTicks += (long)(fill * Stopwatch.Frequency);
+            sink.Paused();
+            return nowTicks - (long)((keep + incomingSeconds) * Stopwatch.Frequency);
         }
+        long total = (long)(fill * Rate48);
+        for (long left = total; left > 0; left -= Rate48)
+        {
+            long chunk = Math.Min(left, Rate48);
+            sink.Silence(chunk, (left - chunk) / (double)Rate48 + keep + incomingSeconds);
+        }
+        return lastFrameTicks + (long)(fill * Stopwatch.Frequency);
     }
 
     private void Fail(int session, string status)

@@ -56,7 +56,7 @@ const JUMP_SECONDS = 10;
 const VIEW_KEY = 'soundpad-web:mimic-history-view';
 
 /**
- * The Mimic window on a 2.38 companion: the rolling recording history. The main waveform shows the newest 10 s
+ * The Mimic window on a 2.39 companion: the rolling recording history. The main waveform shows the newest 10 s
  * (zoom 5/10/30 s), the overview the whole history; Back/Forward, dragging the overview and Go live move the view
  * while recording carries on. The transcript shows sentences of clickable words (click selects a word, Shift-click
  * a range to it). Guests see the history from when they joined, plus what the host shared.

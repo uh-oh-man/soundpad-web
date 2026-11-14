@@ -4,7 +4,7 @@ namespace SoundpadWeb.Testing;
 
 // --word-pipeline-eval <fixtures> [--limit N] [--conditions clean,pink+10] [--mode gaming|balanced|fast] [--model file]
 //
-// Runs the companion's OWN word-timing pipeline (2.38: WhisperEngine with DTW + token timestamps and the sized
+// Runs the companion's OWN word-timing pipeline (2.39: WhisperEngine with DTW + token timestamps and the sized
 // window, then WordAligner's anchor-valley) over the word-timing evaluation's fixture sentences and scores it with
 // the evaluation's ground truth and bad-cut rule (WordTimingEval.Score/Summarize), padded 20 ms before / 10 ms after.
 // It reads the model and the fixture WAVs only: no audio device, no Soundpad, nothing written.

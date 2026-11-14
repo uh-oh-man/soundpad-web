@@ -84,7 +84,7 @@ internal static class Program
                 .Cast<System.Reflection.AssemblyMetadataAttribute>().FirstOrDefault(a => a.Key == "WebsiteUrl")?.Value;
             bridge.MimicLog += message => Console.WriteLine($"[{DateTime.Now:HH:mm:ss}] Mimic: {message}");
             // Recording history left by a launch that did not close normally is recovered (the host can discard it);
-            // anything else left over is removed (2.38). This instance holds the data folder's lock, so nothing else uses it.
+            // anything else left over is removed (2.39). This instance holds the data folder's lock, so nothing else uses it.
             bridge.RecoverHistory();
             var site = Arg("--site") ?? bridge.Website ?? Environment.GetEnvironmentVariable("SOUNDPAD_WEB_URL") ?? builtInWebsite;
             if (string.IsNullOrWhiteSpace(site))
@@ -114,6 +114,9 @@ internal static class Program
             void CleanUpBeforeWindowsCloses(System.Runtime.InteropServices.PosixSignalContext context)
             {
                 Console.WriteLine("Closing: removing temporary audio...");
+                // An ordinary quit deletes the recording history and its transcript (2.39). Windows ends the process
+                // without unwinding Main, so Bridge.Dispose would never do it here; it is local files, so it goes first.
+                try { bridge.CloseHistory(); } catch (Exception) { /* removed by the next launch's recovery */ }
                 try
                 {
                     // Cleanup never removes anything while audio plays; stop it first, but only if it's a Temp sound.
@@ -190,6 +193,9 @@ internal static class Program
                     try { await bridge.StopTemporaryPlayback().WaitAsync(TimeSpan.FromSeconds(1)); } catch (Exception) { /* cleanup below retries next start */ }
                 }
                 try { await bridge.CleanupSession(); } catch (Exception) { Console.WriteLine("Temporary entries retained for cleanup on next launch."); }
+                // Before `cleaned`: on logoff or shutdown the window's closing callback returns once it is set, and Windows
+                // may end the process before Bridge.Dispose runs (which still does it, as a backstop, on every other exit).
+                try { bridge.CloseHistory(); } catch (Exception) { /* removed by the next launch's recovery */ }
                 cleaned.TrySetResult();
             }
             return Environment.ExitCode;
