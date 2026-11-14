@@ -29,7 +29,7 @@ For development, run `npm run dev`, then:
 .\artifacts\release\SoundpadWeb.exe --dev --site http://127.0.0.1:5173/
 ```
 
-This connects to real Soundpad if running. Routine browser tests instead launch a completely separate mock pipe via `companion/harness`; fixtures never ship in the EXE. Optional real Nostr/WebRTC browser integration tests: `$env:LIVE_RELAY='1'; npm run test:e2e -- --grep 'live Nostr'`. They still use a mock Soundpad, so no real audio plays. CI's default tests do not depend on public relay availability. The separate **Live relay guest tests** workflow runs them weekly (Mondays), on demand and when its file changes.
+This connects to real Soundpad if running. Routine browser tests instead launch a completely separate mock pipe via `companion/harness`; fixtures never ship in the EXE. Optional real Nostr/WebRTC browser integration tests: `$env:LIVE_RELAY='1'; npm run test:e2e -- --grep 'live Nostr'`. They still use a mock Soundpad, so no real audio plays. CI's default tests do not depend on public relay availability, and since 2.41.0 they do not connect to the relays at all: a fixture refuses every `wss://` connection unless `LIVE_RELAY` or `DEPLOYED_URL` is set (in Playwright's Windows WebKit, a host page's relay connections held up its companion socket for seconds). The separate **Live relay guest tests** workflow runs them weekly (Mondays), on demand and when its file changes.
 
 Responsiveness under load (2.41): `SoundpadWeb.Harness.exe --playback-bench --slow-work [--transcribe-burn-ms N]` runs the 2.35 playback bench against the mock with keep-pitch copies, previews, Mimic recording with simulated recognition load and Panic presses, and reports how long the receive loop was held and how fast Stop and Panic were answered.
 

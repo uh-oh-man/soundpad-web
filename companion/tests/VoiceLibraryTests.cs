@@ -494,7 +494,10 @@ public sealed class VoiceLibraryTests : IDisposable
         var spans = await WhisperEngine.InPieces(new float[60 * MimicTranscriber.SpeechRate], gate, piece =>
         {
             lock (order) order.Add("piece " + piece.Length / MimicTranscriber.SpeechRate);
-            live ??= Task.Run(async () => { await gate.WaitAsync(); lock (order) order.Add("live"); gate.Release(); });
+            // Queued for the engine here, while the first piece holds it, as a live subtitle that arrives meanwhile is.
+            // (Queued from Task.Run instead, it could reach the gate only after the second piece took it again: the
+            // test failed so on a busy PC, though a request that is already waiting always gets its turn.)
+            live ??= gate.WaitAsync().ContinueWith(_ => { lock (order) order.Add("live"); gate.Release(); }, TaskScheduler.Default);
             return Task.FromResult<IReadOnlyList<TranscribedSpan>>([new(TimeSpan.Zero, TimeSpan.FromSeconds(1), "word")]);
         }, CancellationToken.None);
         await live!;
