@@ -10,9 +10,9 @@ export function DemoBanner() {
     <aside className="demo-banner" aria-label="Example session">
       <Sparkles size={18} aria-hidden="true" />
       <span>
-        <strong>Example session: nothing here reaches Soundpad.</strong> Sounds play in this browser
-        and the guests are simulated. Leaving clears the example’s audio, copies and Mimic clips;
-        your favourites and view settings stay.
+        <strong>Example session: nothing here reaches Soundpad.</strong> Sounds play in this
+        browser, the guests are simulated, and leaving clears the example’s recordings, drafts and
+        clips. Favourites and view settings stay on this browser.
       </span>
       <button onClick={() => void controller.leave()}>
         <LogOut size={15} aria-hidden="true" /> Leave example

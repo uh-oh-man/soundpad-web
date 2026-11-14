@@ -293,7 +293,7 @@ describe('example session model', () => {
     expect(one.statistics.total).toBe(3);
     expect(Object.values(one.statistics.participants)).toEqual([
       { name: 'Host', count: 2 },
-      { name: 'Alex', count: 1 },
+      { name: 'Alex (simulated)', count: 1 },
     ]);
     expect(one.recent.map((r) => r.source)).toEqual(['host', 'host', 'guest']);
     const all = (await send('statistics')) as { totals: Record<string, { total: number }> };
@@ -463,16 +463,16 @@ describe('example session model', () => {
 });
 
 describe('example session guests', () => {
-  it('Alex joins after a few seconds as a direct guest', () => {
+  it('Alex joins after a few seconds as a direct guest, named as simulated', () => {
     const { model, session, notices } = setup();
     model.begin();
     vi.advanceTimersByTime(GUEST_JOIN_MS - 1);
     expect(session().guests).toEqual([]);
     vi.advanceTimersByTime(1);
     expect(session().guests).toEqual([ALEX.peer]);
-    expect(session().people[ALEX.peer].name).toBe('Alex');
+    expect(session().people[ALEX.peer].name).toBe('Alex (simulated)');
     expect(session().links[ALEX.peer]).toBe('direct');
-    expect(notices.at(-1)).toMatch(/Alex joined/);
+    expect(notices.at(-1)).toBe('Alex (simulated) joined (direct).');
     model.close();
   });
 
@@ -489,10 +489,10 @@ describe('example session guests', () => {
     expect(state().playback.requester).toBe('Host');
     await send('stop');
     await vi.advanceTimersByTimeAsync(ALEX_GAP_MS);
-    expect(state().playback).toMatchObject({ status: 'PLAYING', requester: 'Alex' });
-    expect(notices.at(-1)).toMatch(/^Alex played “/);
+    expect(state().playback).toMatchObject({ status: 'PLAYING', requester: 'Alex (simulated)' });
+    expect(notices.at(-1)).toMatch(/^Alex \(simulated\) played “/);
     const all = (await send('statistics')) as { recent: { name: string }[] };
-    expect(all.recent.at(-1)?.name).toBe('Alex');
+    expect(all.recent.at(-1)?.name).toBe('Alex (simulated)');
     model.close();
   });
 
@@ -519,7 +519,9 @@ describe('example session guests', () => {
     vi.advanceTimersByTime(GUEST_JOIN_MS);
     model.setPolicy({ ...model.getPolicy(), admission: 'ask' });
     vi.advanceTimersByTime(SAM_ASKS_MS);
-    expect(session().requests).toMatchObject([{ id: SAM.person.id, name: 'Sam', kind: 'admit' }]);
+    expect(session().requests).toMatchObject([
+      { id: SAM.person.id, name: 'Sam (simulated)', kind: 'admit' },
+    ]);
     model.turnAway(SAM.person.id);
     expect(session().requests).toEqual([]);
     expect(session().policy.turnedAway).toEqual([SAM.person]);
@@ -530,7 +532,7 @@ describe('example session guests', () => {
     model.rotate();
     expect(session().guests).toEqual([]);
     vi.advanceTimersByTime(GUEST_JOIN_MS);
-    expect(session().requests.map((r) => r.name)).toEqual(['Alex']);
+    expect(session().requests.map((r) => r.name)).toEqual(['Alex (simulated)']);
     await model.letIn(ALEX.person.id);
     expect(session().guests).toEqual([ALEX.peer]);
     model.setPolicy({ ...model.getPolicy(), admission: 'open' });

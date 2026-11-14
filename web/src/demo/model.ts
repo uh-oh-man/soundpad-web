@@ -111,7 +111,7 @@ export const UNAVAILABLE = {
   spotify:
     'Not available in the example: Spotify controls work with the Spotify app on the host’s PC.',
   hotkey:
-    'Not available in the example: the hotkey listens for a key in every app on the host’s PC, which a web page cannot do.',
+    'Not available in the example: the hotkey works only on the host’s PC, where it listens for a key in every app. A web page cannot do that.',
   library:
     'Not available in the example: Voice Replay Studio’s library is read from the host’s PC.',
   other: 'Not available in the example.',
@@ -143,15 +143,16 @@ const PLAYBACK_OPS: Command['op'][] = [
   'seek',
 ];
 
+/** A simulated guest. Their names say so (Stage G, spec 11.5), wherever the page shows them. */
 type Guest = { peer: string; person: Participant; link: Transport };
 export const ALEX: Guest = {
   peer: 'a1e5c0de-example',
-  person: { id: '0e7a3b1e-0000-4000-8000-00000000a1e5', name: 'Alex' },
+  person: { id: '0e7a3b1e-0000-4000-8000-00000000a1e5', name: 'Alex (simulated)' },
   link: 'direct',
 };
 export const SAM: Guest = {
   peer: '5a3c0de5-example',
-  person: { id: '0e7a3b1e-0000-4000-8000-0000000005a3', name: 'Sam' },
+  person: { id: '0e7a3b1e-0000-4000-8000-0000000005a3', name: 'Sam (simulated)' },
   link: 'relay',
 };
 
@@ -1175,7 +1176,7 @@ export class DemoModel {
         this.publishSession();
       });
       this.hooks.notify(
-        `${guest.person.name} ${full ? 'asks for an extra place' : 'wants to join'}. Let them in or turn them away (a simulated guest).`,
+        `${guest.person.name} ${full ? 'asks for an extra place' : 'wants to join'}. Let them in or turn them away.`,
       );
       this.publishSession();
       return;
@@ -1193,7 +1194,7 @@ export class DemoModel {
       ]),
     };
     this.hooks.notify(
-      `${guest.person.name} joined (a simulated guest, ${guest.link === 'relay' ? 'relayed' : 'direct'}).`,
+      `${guest.person.name} joined (${guest.link === 'relay' ? 'relayed' : 'direct'}).`,
       'success',
     );
     this.publishSession();
