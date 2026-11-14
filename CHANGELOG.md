@@ -2,6 +2,14 @@
 
 Notable changes to Soundpad Web. Versions follow the website's `package.json`; the Windows companion is versioned separately and only needs updating when a release says so.
 
+## 2.43.0 (unreleased) — Blue studio
+
+Work in progress (Stage G). This entry grows as the stage lands and is finished at release.
+
+### Changed
+
+- **One legacy stylesheet.** `styles.css`, `v2.css` and `polish.css` are now one `studio.css`, and `main.tsx` imports every stylesheet itself, in cascade order: `tokens.css`, `studio.css`, `controls.css`, `mimic.css`, `voices.css`, `sentences.css`, then `shell.css`, `playback.css` and `surfaces.css` for the new look. Inside `studio.css`, rules repeated for the same selector were merged into the last one wherever no rule in between with the same specificity sets the same property; the old centred notice positioning (unused since 2.41) is gone; the four `!important` overrides outside the reduced-motion rules became rules of enough specificity; and layers use `--z-*` tokens. Nothing looked different: a temporary spec compared exact screenshots (`maxDiffPixels: 0`) and a dump of about 45 computed style properties of every element, at rest, under keyboard focus on each control and on hover, across the start page, the example board at five widths in all five views, a paused sound, and the host's board, Mimic, Voices, Sentences, Settings, Temp, Edit copy and the expanded player, after each step. As in 2.9.2, the spec and its images were not kept.
+
 ## 2.42.0 — Sentences from recorded words
 
 **Update the companion** for this one. With an older companion, **Sentences** and the pinned sentence tiles are hidden, and everything else works as in 2.41.

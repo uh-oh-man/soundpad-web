@@ -357,7 +357,7 @@ p {
 .player {
   position: sticky;
   bottom: 0;
-  z-index: 5;
+  z-index: var(--z-player);
   background: color-mix(in srgb, var(--surface-1) 96%, transparent);
   border-top: 1px solid var(--line);
   min-height: 96px;
@@ -585,7 +585,7 @@ p {
 .scrim {
   position: fixed;
   inset: 0;
-  z-index: 30;
+  z-index: var(--z-scrim);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1109,8 +1109,9 @@ p {
   height: 3px;
   margin: 0;
 }
-.now-playing {
-  background: color-mix(in srgb, var(--accent) 11%, transparent) !important;
+/* The playing tile (specific enough to beat hover and pressed without !important; Stage G 2.43). */
+.sound-tile.sound-entry.now-playing {
+  background: color-mix(in srgb, var(--accent) 11%, transparent);
 }
 .now-playing .sound-hint {
   color: var(--accent);
@@ -1267,7 +1268,7 @@ p {
   padding: 4px 3px;
   color: var(--text-dim);
   background: var(--warning);
-  z-index: 2;
+  z-index: calc(var(--z-tile) + 1);
   min-width: 17px;
   touch-action: none;
 }
@@ -2083,8 +2084,10 @@ button:hover:not(:disabled) {
   border-color: var(--accent);
   background: color-mix(in srgb, var(--accent) 85%, white);
 }
+.sound-tile.sound-entry.now-playing {
+  border-color: var(--play);
+}
 .now-playing {
-  border-color: var(--play) !important;
   box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--play) 20%, transparent);
 }
 .tile-wave-surface,
@@ -2148,13 +2151,13 @@ button:hover:not(:disabled) {
     var(--overlay-bottom) 100%
   );
   pointer-events: none;
-  z-index: 1;
+  z-index: var(--z-tile);
 }
 .tile-label {
   position: absolute;
   inset: auto 0 0;
   padding: 32px 13px 12px;
-  z-index: 2;
+  z-index: calc(var(--z-tile) + 1);
   pointer-events: none;
   display: flex;
   flex-direction: column;
@@ -2229,7 +2232,7 @@ button:hover:not(:disabled) {
 .tile-playhead,
 .tile-cue {
   position: absolute;
-  z-index: 3;
+  z-index: calc(var(--z-tile) + 2);
   top: 0;
   bottom: 0;
   width: 1px;
@@ -2362,7 +2365,7 @@ button:hover:not(:disabled) {
   border: 1px solid var(--line);
   border-radius: var(--radius);
   box-shadow: 0 12px 35px var(--shadow);
-  z-index: 12;
+  z-index: var(--z-wave-tools);
   padding: 15px;
 }
 .player-wave .wave-navigation {
@@ -2404,7 +2407,7 @@ button:hover:not(:disabled) {
    button, which notices at the top used to cover. Inside a dialog they sit at its foot (.in-dialog). */
 .notification-stack {
   position: fixed;
-  z-index: 100;
+  z-index: var(--z-notices);
   bottom: calc(var(--player-height, 0px) + 16px);
   right: 20px;
   width: min(380px, calc(100vw - 32px));
@@ -2557,7 +2560,7 @@ button:hover:not(:disabled) {
   }
   .is-connected .topbar {
     min-height: 0;
-    z-index: 10;
+    z-index: var(--z-header);
   }
   .is-connected .workspace {
     min-height: 0;
@@ -2596,8 +2599,8 @@ button:hover:not(:disabled) {
     left: 0;
     right: 0;
   }
-  .project-footer {
-    margin-left: 0 !important;
+  .board-footer .project-footer {
+    margin-left: 0;
   }
 }
 @media (max-width: 600px) {
@@ -2729,8 +2732,9 @@ body,
   border-color: var(--line);
   color: var(--text-primary);
 }
-.project-footer > span {
-  display: inline !important;
+.project-footer > span,
+.board-footer .project-footer > span {
+  display: inline;
 }
 @media (prefers-reduced-motion: reduce) {
   .spinning {
@@ -3120,7 +3124,7 @@ html {
 .playback-suspended {
   position: sticky;
   top: 0;
-  z-index: 4;
+  z-index: var(--z-sticky);
   display: flex;
   flex-wrap: wrap;
   align-items: center;

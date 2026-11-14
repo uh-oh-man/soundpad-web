@@ -17,6 +17,21 @@
   --overlay-bottom: #080c14ed;
   --shadow: #0006;
   --radius: 12px;
+  /* Layers (Stage G): today's values; P0.5 sets the final ones. */
+  --z-tile: 1;
+  --z-sticky: 4;
+  --z-player: 5;
+  --z-header: 10;
+  --z-wave-tools: 12;
+  --z-scrim: 30;
+  --z-notices: 100;
+  /* Same-value names for the colours voices.css and sentences.css wrote out (2.42). */
+  --voice-fallback-ink: #0b0f17;
+  --voice-fallback-amber: #e2a03f;
+  --voice-fallback-dark: #111;
+  --voice-fallback-secondary: #9aa;
+  --voice-fallback-surface: #1b2230;
+  --voice-fallback-clash: #d9634c;
 }
 :root[data-theme='purple'] {
   --surface-0: #101115;

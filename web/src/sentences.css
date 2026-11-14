@@ -29,8 +29,8 @@
   white-space: nowrap;
 }
 .warning-badge {
-  border-color: var(--amber, #e2a03f);
-  color: var(--amber, #e2a03f);
+  border-color: var(--amber, var(--voice-fallback-amber));
+  color: var(--amber, var(--voice-fallback-amber));
 }
 .sentence-builder {
   display: grid;
@@ -62,8 +62,8 @@
 /* Missing words: pulsing, or (reduced motion) a static dashed marker with a "!" badge. */
 .sentence-word.missing,
 .timeline-piece.kind-missing {
-  border: 1px dashed var(--amber, #e2a03f);
-  background: color-mix(in srgb, var(--amber, #e2a03f) 12%, transparent);
+  border: 1px dashed var(--amber, var(--voice-fallback-amber));
+  background: color-mix(in srgb, var(--amber, var(--voice-fallback-amber)) 12%, transparent);
   color: var(--text-primary);
 }
 .missing-pulse {
@@ -72,10 +72,12 @@
 @keyframes missing-pulse {
   0%,
   100% {
-    box-shadow: 0 0 0 0 color-mix(in srgb, var(--amber, #e2a03f) 0%, transparent);
+    box-shadow: 0 0 0 0
+      color-mix(in srgb, var(--amber, var(--voice-fallback-amber)) 0%, transparent);
   }
   50% {
-    box-shadow: 0 0 0 3px color-mix(in srgb, var(--amber, #e2a03f) 45%, transparent);
+    box-shadow: 0 0 0 3px
+      color-mix(in srgb, var(--amber, var(--voice-fallback-amber)) 45%, transparent);
   }
 }
 .missing-static {
@@ -88,8 +90,8 @@
   width: 14px;
   height: 14px;
   border-radius: 50%;
-  background: var(--amber, #e2a03f);
-  color: #111;
+  background: var(--amber, var(--voice-fallback-amber));
+  color: var(--voice-fallback-dark);
   font-size: 10px;
   font-weight: 700;
   line-height: 14px;
@@ -163,7 +165,7 @@
   position: absolute;
   top: -18px;
   font-size: 10px;
-  color: var(--text-secondary, #9aa);
+  color: var(--text-secondary, var(--voice-fallback-secondary));
   border-left: 1px solid var(--line);
   padding-left: 3px;
   height: 64px;
@@ -177,7 +179,11 @@
   padding: 0 6px;
   border-radius: 6px;
   border: 1px solid color-mix(in srgb, var(--voice, var(--line)) 80%, transparent);
-  background: color-mix(in srgb, var(--voice, var(--surface-2)) 30%, var(--surface-1, #1b2230));
+  background: color-mix(
+    in srgb,
+    var(--voice, var(--surface-2)) 30%,
+    var(--surface-1, var(--voice-fallback-surface))
+  );
   color: var(--text-primary);
   font-size: 12px;
   overflow: hidden;
@@ -218,12 +224,12 @@
   background-image: repeating-linear-gradient(
     135deg,
     transparent 0 5px,
-    color-mix(in srgb, #d9634c 35%, transparent) 5px 8px
+    color-mix(in srgb, var(--voice-fallback-clash) 35%, transparent) 5px 8px
   );
 }
 .timeline-piece.source-missing,
 .timeline-piece.source-changed {
-  border-color: #d9634c;
+  border-color: var(--voice-fallback-clash);
 }
 .timeline-text {
   overflow: hidden;
@@ -305,7 +311,7 @@
   width: 10px;
   height: 10px;
   border-radius: 50%;
-  background: #d9634c;
+  background: var(--voice-fallback-clash);
 }
 .sentence-sets {
   display: grid;

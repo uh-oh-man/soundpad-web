@@ -90,7 +90,8 @@
   background: color-mix(in srgb, var(--accent) 15%, transparent);
 }
 /* Hovered, a pressed toggle shows the plain button hover, as it did before this file loaded last (2.43). */
-:is(.voices-types, .voices-voice-keys, .voices-detail-head) button[aria-pressed='true']:hover:not(:disabled) {
+:is(.voices-types, .voices-voice-keys, .voices-detail-head)
+  button[aria-pressed='true']:hover:not(:disabled) {
   background: var(--surface-hover);
   border-color: color-mix(in srgb, var(--accent) 45%, var(--line));
 }
@@ -107,7 +108,7 @@
   border-radius: 50%;
   font-size: 11px;
   font-weight: 700;
-  color: #0b0f17;
+  color: var(--voice-fallback-ink);
   background: var(--text-dim);
 }
 .voice-avatar.unassigned {
@@ -189,8 +190,8 @@
   color: var(--success);
 }
 .type-badge.sentence {
-  border-color: var(--amber, #e2a03f);
-  color: var(--amber, #e2a03f);
+  border-color: var(--amber, var(--voice-fallback-amber));
+  color: var(--amber, var(--voice-fallback-amber));
 }
 .voices-context,
 .voices-words {
