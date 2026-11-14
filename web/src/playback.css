@@ -3,3 +3,818 @@
  * waveforms and the header ribbon. Owned by WP-B. Only selectors for WP-B components; overrides studio.css
  * by load order at equal specificity, never with !important.
  */
+
+/* ---------- Grid and tiles (spec 5.1) ---------- */
+.sound-grid {
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 14px;
+}
+.view-large.sound-grid {
+  grid-template-columns: repeat(auto-fill, minmax(228px, 1fr));
+}
+.sound-tile {
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  transition:
+    border-color var(--dur-fast) var(--ease-out),
+    box-shadow var(--dur-fast) var(--ease-out),
+    transform var(--dur-press) var(--ease-out);
+}
+.sound-tile:hover {
+  background: var(--surface-2);
+  border-color: var(--line-strong);
+}
+/* Lifted a pixel on hover, only on the grid views and only when motion is allowed. */
+@media (prefers-reduced-motion: no-preference) {
+  html:not([data-motion='reduce']) .sound-grid > .sound-tile:hover {
+    transform: translateY(-1px);
+  }
+}
+.sound-grid > .sound-tile:has(:is(.tile-play-strip, .tile-art-button):active:not(:disabled)) {
+  transform: scale(0.98);
+}
+/* Keyboard focus anywhere in a tile outlines the whole tile (the control keeps its own ring). */
+.sound-tile.sound-entry:has(:focus-visible) {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+.sound-button {
+  position: relative;
+}
+.sound-grid :is(.tile-wave-surface, .tile-art-button) {
+  height: auto;
+  min-height: 0;
+  aspect-ratio: 5 / 4;
+  background: var(--surface-2);
+}
+.tile-shade {
+  background: linear-gradient(
+    180deg,
+    transparent 30%,
+    color-mix(in srgb, var(--bg-app) 45%, transparent) 58%,
+    color-mix(in srgb, var(--bg-app) 85%, transparent) 100%
+  );
+}
+.tile-label .sound-name {
+  font-size: 13px;
+}
+.tile-play-strip {
+  min-height: 36px;
+  background: var(--surface-1);
+  color: var(--text-muted);
+  font-size: 11px;
+  letter-spacing: 1px;
+}
+.tile-play-strip svg {
+  color: var(--accent);
+  opacity: 1;
+}
+.sound-tile:hover .tile-play-strip:not(:disabled) {
+  background: var(--surface-hover);
+}
+.sound-entry > progress {
+  accent-color: var(--wave-played);
+}
+
+/* ---------- States (spec 5.2): shape and text as well as colour ---------- */
+.tile-chip {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  z-index: calc(var(--z-tile) + 3);
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  max-width: calc(100% - 16px);
+  padding: 2px 8px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-pill);
+  background: var(--surface-glass);
+  backdrop-filter: blur(var(--blur));
+  color: var(--text-primary);
+  font-size: 11px;
+  font-weight: 650;
+  letter-spacing: 0.6px;
+  line-height: 18px;
+  text-transform: uppercase;
+  pointer-events: none;
+}
+.tile-chip-queued {
+  border-style: dashed;
+  border-color: var(--accent);
+}
+.tile-chip-playing {
+  border-color: var(--accent);
+  color: var(--accent-text);
+}
+.tile-chip .eq {
+  display: inline-flex;
+  align-items: flex-end;
+  gap: 2px;
+  height: 10px;
+}
+.tile-chip .eq i {
+  width: 2px;
+  height: 100%;
+  border-radius: 1px;
+  background: currentColor;
+  transform-origin: bottom;
+}
+.tile-chip .eq i:nth-child(1) {
+  transform: scaleY(0.6);
+}
+.tile-chip .eq i:nth-child(3) {
+  transform: scaleY(0.4);
+}
+@keyframes tile-eq {
+  from {
+    transform: scaleY(0.3);
+  }
+  to {
+    transform: scaleY(1);
+  }
+}
+/* Only animated when motion is allowed: a 0.01 ms infinite animation would still be running. */
+@media (prefers-reduced-motion: no-preference) {
+  html:not([data-motion='reduce']) .tile-chip-playing:not(.is-paused) .eq i {
+    animation: tile-eq 0.8s ease-in-out infinite alternate;
+  }
+  html:not([data-motion='reduce']) .tile-chip-playing:not(.is-paused) .eq i:nth-child(2) {
+    animation-delay: -0.3s;
+  }
+  html:not([data-motion='reduce']) .tile-chip-playing:not(.is-paused) .eq i:nth-child(3) {
+    animation-delay: -0.55s;
+  }
+  html:not([data-motion='reduce']) .tile-chip-queued {
+    animation: intent-pulse 1.1s ease-in-out infinite;
+  }
+}
+/* Queued: a dashed outline while the click waits for the companion. */
+.sound-tile.sound-entry.intent-pending {
+  outline: 1.5px dashed var(--queued);
+  outline-offset: -1.5px;
+  border-color: var(--queued);
+  background: var(--surface-2);
+}
+/* Playing: a solid accent edge (border plus the glow's 1 px ring) and the glow. */
+.sound-tile.sound-entry.now-playing {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 7%, var(--surface-2));
+}
+.sound-tile.now-playing {
+  box-shadow: var(--glow-active);
+}
+/* Focus beats the queued outline, so the focused tile is always clear. */
+.sound-tile.sound-entry.intent-pending:has(:focus-visible) {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+/* Held by the host's Panic: desaturated, with a lock on the play strip. */
+.playback-held .sound-tile {
+  filter: saturate(0.35);
+}
+html[data-motion='reduce'] :is(.sound-entry .spinning, .player.intent-pending .playback-icon) {
+  animation: none;
+}
+
+/* ---------- Quick actions (spec 5.3) ---------- */
+.sound-grid .tile-quick {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  z-index: calc(var(--z-tile) + 3);
+  display: flex;
+  gap: 4px;
+  opacity: 0;
+  transition: opacity var(--dur-fast) var(--ease-out);
+}
+/* Opacity only: the buttons stay focusable and in place, so nothing shifts when they show. */
+.sound-grid .sound-entry:is(:hover, :focus-within) .tile-quick,
+.sound-grid .tile-quick:has([aria-expanded='true']) {
+  opacity: 1;
+}
+@media (hover: none) {
+  .sound-grid .tile-quick {
+    opacity: 1;
+  }
+}
+@media (prefers-contrast: more) {
+  .sound-grid .tile-quick {
+    opacity: 1;
+  }
+}
+:root[data-contrast='high'] .sound-grid .tile-quick {
+  opacity: 1;
+}
+.sound-grid .tile-quick .icon-button {
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-s);
+  background: var(--surface-glass);
+  backdrop-filter: blur(var(--blur));
+  color: var(--text-primary);
+}
+.sound-grid .tile-quick .icon-button:hover:not(:disabled) {
+  background: var(--surface-hover);
+}
+/* Elsewhere (list, details, waveforms) the quick buttons sit in the action row. */
+.tile-quick {
+  display: contents;
+}
+.sound-grid .tile-quick {
+  display: flex;
+}
+
+/* ---------- Speed menu (a popover, not a dialog) ---------- */
+.speed-menu {
+  position: fixed;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 156px;
+  padding: 4px;
+}
+.speed-menu [role='menuitem'] {
+  justify-content: flex-start;
+  min-height: 32px;
+  padding: 6px 10px;
+  border: 0;
+  border-radius: var(--radius-s);
+  background: transparent;
+  color: var(--text-primary);
+  font-size: 13px;
+}
+.speed-menu [role='menuitem']:is(:hover, :focus-visible) {
+  background: var(--surface-hover);
+}
+.speed-menu .speed-more {
+  margin-top: 2px;
+  border-top: 1px solid var(--line);
+  border-radius: 0 0 var(--radius-s) var(--radius-s);
+  color: var(--accent-text);
+}
+
+/* ---------- Narrow (spec 9) ---------- */
+@media (max-width: 700px) {
+  .sound-grid {
+    grid-template-columns: repeat(auto-fill, minmax(108px, 1fr));
+    gap: 10px;
+  }
+  .view-large.sound-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .sound-grid .tile-label {
+    padding: 22px 8px 8px;
+  }
+  .sound-grid .tile-label .sound-name {
+    font-size: 12px;
+  }
+  .sound-grid .tile-label .sound-hint {
+    display: none;
+  }
+  .sound-grid .tile-play-strip {
+    min-height: 40px;
+    padding: 5px 8px;
+    gap: 6px;
+    letter-spacing: 0.3px;
+    line-height: 1.2;
+    text-align: left;
+  }
+  .sound-grid .sound-entry .sound-actions {
+    padding: 0 4px 6px;
+  }
+  .sound-entry .sound-actions button {
+    padding: 6px;
+  }
+  .tile-chip {
+    top: 6px;
+    left: 6px;
+    padding: 1px 6px;
+  }
+  .sound-grid .tile-quick {
+    top: 6px;
+    right: 6px;
+  }
+  /* Narrow tiles keep the chip's shape (bars, or a dashed ring) and drop its word for the quick buttons. */
+  .tile-chip {
+    gap: 0;
+    min-width: 14px;
+    min-height: 14px;
+    font-size: 0;
+    letter-spacing: 0;
+  }
+}
+
+@media (forced-colors: active) {
+  .tile-chip {
+    border: 1px solid CanvasText;
+    backdrop-filter: none;
+  }
+  .sound-grid .tile-quick {
+    opacity: 1;
+  }
+}
+
+/* ---------- Player (spec 5.4): one 72 px glass row on desktop ---------- */
+.player.player-v2 {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  min-height: 72px;
+  padding: 8px 20px;
+  background: var(--surface-glass);
+  backdrop-filter: blur(var(--blur));
+  border-top: 1px solid var(--line);
+  z-index: var(--z-player);
+}
+.player-v2 .player-track {
+  flex: 0 1 240px;
+  min-width: 140px;
+}
+.player-v2 .playback-icon {
+  width: 44px;
+  height: 44px;
+  border-color: var(--line);
+  background: var(--surface-2);
+}
+.player-v2 .player-track strong {
+  font-size: 13px;
+  font-weight: 600;
+}
+.player-v2 .player-track small {
+  margin-top: 3px;
+  color: var(--text-dim);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.player-v2 .player-wave {
+  flex: 1 1 640px;
+  min-width: 160px;
+  max-width: 640px;
+  padding: 6px 10px 4px;
+  border-radius: 10px;
+  background: var(--surface-1);
+}
+.player-wave .wave-block.compact {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  column-gap: 8px;
+}
+.player-wave .wave-block.compact > .wave-surface {
+  grid-column: 1 / -1;
+  height: 34px;
+  border: 0;
+  background: transparent;
+}
+.player-wave .wave-surface path {
+  stroke: var(--wave);
+}
+.player-wave .wave-playhead {
+  background: var(--wave-played);
+}
+.player-wave .wave-block.compact > .wave-caption {
+  padding: 2px 0 0;
+  justify-content: flex-start;
+  gap: 10px;
+  font-size: 12px;
+  color: var(--text-dim);
+}
+/* The compact player shows only "position / length"; the view's edges are in the waveform itself. */
+.player-wave .wave-block.compact > .wave-caption > span:not(:nth-child(2)) {
+  display: none;
+}
+.player-wave .wave-block.compact > .wave-caption > span:nth-child(2) {
+  color: var(--text-muted);
+}
+.player-wave .wave-block.compact > .wave-navigation {
+  min-height: 0;
+  padding-top: 2px;
+}
+.player-wave .wave-block.compact > .wave-navigation button {
+  min-height: 24px;
+  padding: 2px 6px;
+}
+.player-v2 .unknown-progress {
+  border: 0;
+  padding: 6px 2px;
+  color: var(--text-dim);
+}
+.player-v2 .unknown-progress progress {
+  accent-color: var(--wave-played);
+}
+.player-v2 .transport {
+  flex: none;
+  gap: 8px;
+  margin-left: auto;
+}
+.player-v2 .transport .icon-button {
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: var(--radius-s);
+  color: var(--text-muted);
+}
+.player-v2 .transport .icon-button:hover:not(:disabled) {
+  color: var(--text-primary);
+  border-color: var(--line);
+}
+/* Stop and Panic are filled and at least 44 x 40, so they are found without looking. */
+.player-v2 .stop.btn,
+.player-v2 .panic.btn {
+  min-width: 44px;
+  min-height: 40px;
+  padding: 0 14px;
+  margin: 0;
+  font-weight: 650;
+  gap: 6px;
+}
+.player-v2 .stop.btn {
+  border-color: var(--danger-fill);
+  background: var(--danger-fill);
+  color: var(--text-on-accent);
+}
+.player-v2 .panic.btn {
+  border-color: var(--warning);
+  background: var(--warning);
+  color: var(--text-on-warning);
+}
+.player-v2 .stop.btn:hover:not(:disabled, [aria-disabled='true']) {
+  background: color-mix(in srgb, var(--danger-fill) 88%, white);
+  border-color: color-mix(in srgb, var(--danger-fill) 88%, white);
+}
+.player-v2 .panic.btn:hover:not(:disabled, [aria-disabled='true']) {
+  background: color-mix(in srgb, var(--warning) 88%, white);
+  border-color: color-mix(in srgb, var(--warning) 88%, white);
+}
+/* The filled buttons' ring is an outline, clear of their fill. */
+.player-v2 :is(.stop, .panic).btn:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+  box-shadow: none;
+}
+html[data-motion='reduce'] .player.intent-pending .playback-icon {
+  animation: none;
+}
+
+/* ---------- Kick (spec 5.6) ---------- */
+.player-v2 .counter.kick {
+  position: static;
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 0 0 16px;
+  margin: 0;
+  border: 0;
+  border-left: 1px solid var(--line);
+  grid-column: auto;
+  justify-content: flex-start;
+}
+.player-v2 .kick .counter-label {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 650;
+  letter-spacing: 1.2px;
+}
+.kick .kick-count {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  min-width: 44px;
+}
+.player-v2 .kick output {
+  font-size: 24px;
+  font-weight: 650;
+  line-height: 1.1;
+  min-width: 28px;
+  text-align: center;
+}
+.kick .kick-session {
+  color: var(--text-dim);
+  font-size: 11px;
+  white-space: nowrap;
+}
+.player-v2 .kick > button {
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  border-radius: var(--radius-s);
+}
+.player-v2 .kick > .kick-increase {
+  border-color: var(--line-strong);
+  background: var(--surface-2);
+}
+.player-v2 .kick > .kick-more {
+  width: 28px;
+  border-color: transparent;
+  background: transparent;
+  color: var(--text-muted);
+}
+.player-v2 .kick > .kick-more[aria-expanded='true'] {
+  color: var(--text-primary);
+  border-color: var(--line);
+}
+.player-v2 .kick > .kick-more[aria-expanded='true'] svg {
+  transform: rotate(180deg);
+}
+/* Above the player, at its right edge: never over Stop or Panic, and inside the viewport. */
+.kick-details {
+  position: fixed;
+  right: max(12px, env(safe-area-inset-right));
+  bottom: calc(var(--player-height, 72px) + 8px);
+  width: min(260px, calc(100vw - 24px));
+  padding: 12px;
+}
+.kick-details dl {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin: 0 0 10px;
+}
+.kick-details dl > div {
+  padding: 6px 8px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-s);
+  background: var(--surface-2);
+}
+.kick-details dt {
+  color: var(--text-dim);
+  font-size: 11px;
+  letter-spacing: 0.6px;
+  text-transform: uppercase;
+}
+.kick-details dd {
+  margin: 2px 0 0;
+  font-size: 18px;
+  font-weight: 650;
+}
+.kick-detail-actions {
+  display: flex;
+  gap: 8px;
+}
+.kick .kick-detail-actions button {
+  flex: 1;
+  width: auto;
+  height: auto;
+  min-height: 36px;
+  padding: 6px 10px;
+  font-size: 13px;
+}
+.kick .kick-detail-actions .danger-link {
+  margin: 0;
+  padding: 6px 10px;
+  border: 1px solid color-mix(in srgb, var(--danger) 45%, var(--line));
+  border-radius: var(--radius-s);
+  background: var(--danger-soft);
+  justify-content: center;
+}
+
+/* ---------- Player at 1000 px and below: two rows, Stop and Panic always visible ---------- */
+@media (max-width: 1000px) {
+  .player.player-v2 {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-areas:
+      'track track'
+      'wave wave'
+      'transport kick';
+    row-gap: 8px;
+    column-gap: 12px;
+    padding: 10px 14px calc(10px + env(safe-area-inset-bottom));
+    min-height: 0;
+  }
+  .player-v2 .player-track {
+    grid-area: track;
+    min-width: 0;
+  }
+  .player-v2 .player-wave {
+    grid-area: wave;
+    max-width: none;
+    display: none;
+  }
+  .player-v2.expanded .player-wave {
+    display: block;
+  }
+  .player-v2 .transport {
+    grid-area: transport;
+    margin: 0;
+    flex-wrap: nowrap;
+  }
+  .player-v2 .counter.kick {
+    grid-area: kick;
+    padding: 0;
+    border-left: 0;
+    border-top: 0;
+  }
+  .player-v2 .mobile-expand {
+    display: flex;
+    margin-left: auto;
+  }
+}
+@media (max-width: 700px) {
+  .player-v2 .transport {
+    gap: 4px;
+  }
+  .player-v2 .transport .icon-button {
+    width: 36px;
+    height: 40px;
+  }
+  .player-v2 .stop.btn,
+  .player-v2 .panic.btn {
+    padding: 0 10px;
+  }
+  .player-v2 .kick .counter-label {
+    display: none;
+  }
+  .player-v2 .kick output {
+    font-size: 20px;
+  }
+}
+
+/* ---------- Compact Spotify (spec 5.5): one 56 px row, more controls inline ---------- */
+.spotify-player.spotify-compact {
+  padding: 6px;
+  margin-bottom: 20px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface-2);
+}
+.spotify-compact .spotify-row {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  min-height: 40px;
+  min-width: 0;
+}
+.spotify-compact .spotify-art {
+  width: 40px;
+  height: 40px;
+  flex: none;
+  object-fit: cover;
+  border-radius: var(--radius-s);
+}
+.spotify-compact .spotify-art-placeholder {
+  display: grid;
+  place-items: center;
+  background: var(--surface-1);
+  color: var(--success);
+}
+.spotify-compact .spotify-meta {
+  flex: 1;
+  min-width: 0;
+  margin: 0 4px 0 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.spotify-compact .spotify-meta :is(strong, span) {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-size: 12px;
+}
+.spotify-compact .spotify-meta strong {
+  color: var(--text-primary);
+  font-weight: 600;
+}
+.spotify-compact .spotify-meta span {
+  color: var(--text-dim);
+}
+.spotify-compact .spotify-row .icon-button {
+  flex: none;
+  width: 34px;
+  height: 36px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: var(--radius-s);
+  color: var(--text-primary);
+}
+.spotify-compact .spotify-row .icon-button:hover:not(:disabled) {
+  border-color: var(--line);
+}
+.spotify-compact .spotify-art-toggle {
+  position: relative;
+  flex: none;
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-s);
+  background: transparent;
+}
+.spotify-compact .spotify-art-chevron {
+  position: absolute;
+  right: -3px;
+  bottom: -3px;
+  display: grid;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  border: 1px solid var(--line-strong);
+  border-radius: 50%;
+  background: var(--surface-3);
+  color: var(--text-primary);
+}
+.spotify-compact .spotify-art-toggle[aria-expanded='true'] .spotify-art-chevron svg {
+  transform: rotate(180deg);
+}
+.spotify-compact .spotify-glyph {
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  flex: none;
+  border-radius: var(--radius-s);
+  background: var(--surface-1);
+  color: var(--success);
+}
+.spotify-compact .spotify-off {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  font-size: 12px;
+  font-weight: 650;
+  color: var(--text-primary);
+}
+.spotify-compact .spotify-off small {
+  font-weight: 400;
+  color: var(--text-dim);
+  font-size: 12px;
+}
+.spotify-compact .spotify-enable {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 24px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+.spotify-compact .spotify-enable input {
+  width: 18px;
+  height: 18px;
+  margin: 0;
+  accent-color: var(--success);
+}
+.spotify-compact .spotify-more {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--line);
+}
+.spotify-compact .spotify-progress {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.spotify-compact .spotify-progress progress {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  accent-color: var(--success);
+}
+.spotify-compact .spotify-progress small {
+  flex: none;
+  color: var(--text-dim);
+  font-size: 12px;
+}
+.spotify-compact .spotify-scope {
+  text-align: left;
+  color: var(--text-dim);
+}
+.spotify-compact .warning {
+  margin: 8px 0 0;
+}
+.spotify-compact .spotify-enable[hidden] {
+  display: none;
+}
+/* Off: the switch sits at the end of the one row. */
+.spotify-player.spotify-compact.is-off {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.spotify-compact.is-off .spotify-row {
+  flex: 1;
+}
+.spotify-compact.is-off .warning {
+  flex-basis: 100%;
+}
+.spotify-compact.is-on .spotify-enable {
+  margin-top: 8px;
+}
+.spotify-compact.is-on .spotify-scope {
+  margin-top: 4px;
+}
+
