@@ -35,6 +35,33 @@ public sealed class Tests : IDisposable
     [Fact] public void RasterValidation() { Assert.Throws<InvalidDataException>(() => IconData.Normalize("data:image/svg+xml;base64,PHN2Zz4=")); Assert.Throws<InvalidDataException>(() => IconData.Normalize("data:image/png;base64," + new string('A', 180001))); using var bmp = new System.Drawing.Bitmap(12, 12); using var m = new MemoryStream(); bmp.Save(m, System.Drawing.Imaging.ImageFormat.Png); Assert.StartsWith("data:image/png;base64,", IconData.Normalize("data:image/png;base64," + Convert.ToBase64String(m.ToArray()))); }
     [Fact] public async Task RealPipeReadsLargeUtf8MessagesAndReconnects() { await using var mock = new MockSoundpad(); mock.AllXml = "<Soundlist>" + string.Concat(Enumerable.Repeat("é猫", 60000)) + "</Soundlist>"; using (var p = new SoundpadPipe(mock.Name)) { Assert.Equal(mock.AllXml, await p.Request("GetSoundlist()")); Assert.Equal("R-200", await p.Request("IsAlive()")); } await Task.Delay(50); using var p2 = new SoundpadPipe(mock.Name); Assert.Equal("R-200", await p2.Request("IsAlive()")); }
     [Fact] public async Task CounterDeduplicatesAcrossRestartAndEnforcesPermissions() { await using var mock = new MockSoundpad(); using var pipe = new SoundpadPipe(mock.Name); var b = new Bridge(pipe, Store); var c = Cmd("counter", delta: 1); Assert.False((await b.Execute(c, "guest")).Ok); Assert.True((await b.Execute(c, "host")).Ok); Assert.True((await b.Execute(c, "host")).Ok); Assert.Equal(1, b.Snapshot.Counter); var restarted = new Bridge(pipe, Store); Assert.True((await restarted.Execute(c, "host")).Ok); Assert.Equal(1, restarted.Snapshot.Counter); Assert.False((await b.Execute(Cmd("reset"), "guest")).Ok); Assert.False((await b.Execute(Cmd("record"), "host")).Ok); }
+    [Fact]
+    public async Task SessionCounterFollowsTheLifetimeCountInMemoryOnly()
+    {
+        // 2.43 (Kick session count): +1 and -1 move both counts, the session count never goes below 0, Reset clears both,
+        // and a restarted companion starts a new session at 0 while the lifetime count survives in state.json.
+        await using var mock = new MockSoundpad(); using var pipe = new SoundpadPipe(mock.Name);
+        var b = new Bridge(pipe, Store);
+        Assert.True((await b.Execute(Cmd("counter", delta: 1), "host")).Ok);
+        Assert.True((await b.Execute(Cmd("counter", delta: 1), "host")).Ok);
+        Assert.Equal((2, 2), (b.Snapshot.Counter, b.Snapshot.CounterSession));
+        Assert.True((await b.Execute(Cmd("counter", delta: -1), "host")).Ok);
+        Assert.Equal((1, 1), (b.Snapshot.Counter, b.Snapshot.CounterSession));
+        var restarted = new Bridge(pipe, Store);
+        Assert.Equal((1, 0), (restarted.Snapshot.Counter, restarted.Snapshot.CounterSession));
+        Assert.True((await restarted.Execute(Cmd("counter", delta: -1), "host")).Ok);
+        Assert.Equal((0, 0), (restarted.Snapshot.Counter, restarted.Snapshot.CounterSession));
+        Assert.True((await restarted.Execute(Cmd("counter", delta: 1), "host")).Ok);
+        Assert.True((await restarted.Execute(Cmd("counter", delta: 1), "host")).Ok);
+        Assert.True((await restarted.Execute(Cmd("reset"), "host")).Ok);
+        Assert.Equal((0, 0), (restarted.Snapshot.Counter, restarted.Snapshot.CounterSession));
+        // A repeated command (same id) changes nothing, and the session count is never written to state.json.
+        var once = Cmd("counter", delta: 1);
+        Assert.True((await restarted.Execute(once, "host")).Ok); Assert.True((await restarted.Execute(once, "host")).Ok);
+        Assert.Equal((1, 1), (restarted.Snapshot.Counter, restarted.Snapshot.CounterSession));
+        Assert.DoesNotContain("countersession", File.ReadAllText(Path.Combine(directory, "state.json")), StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("\"counterSession\":1", Json.Write(restarted.Snapshot));
+    }
     [Fact] public async Task SerializesConcurrentCounterChanges() { await using var mock = new MockSoundpad(); using var pipe = new SoundpadPipe(mock.Name); var b = new Bridge(pipe, Store); var results = await Task.WhenAll(Enumerable.Range(0, 15).Select(_ => b.Execute(Cmd("counter", delta: 1), "host"))); Assert.All(results, r => Assert.True(r.Ok)); Assert.Equal(15, b.Snapshot.Counter); }
     [Fact] public async Task PlaybackUsesGlobalIndexAndRejectsStaleLibrary() { await using var mock = new MockSoundpad(); using var pipe = new SoundpadPipe(mock.Name); using var b = new Bridge(pipe, Store); await b.Poll(true); var sound = b.Snapshot.Library.Sounds[2]; Assert.True((await b.Execute(Cmd("play", sound.Id, b.Snapshot.Library.Version), "guest")).Ok); Assert.Contains("DoPlaySound(3)", mock.Commands); var version = b.Snapshot.Library.Version; mock.AllXml = MockSoundpad.Sounds.Replace("index=\"3\"", "index=\"9\""); mock.CategoryXml = MockSoundpad.Categories.Replace("index=\"3\"", "index=\"9\""); mock.Commands.Clear(); Assert.True((await b.Execute(Cmd("play", sound.Id, version), "guest")).Ok); Assert.Contains("DoPlaySound(9)", mock.Commands); Assert.DoesNotContain("DoPlaySound(3)", mock.Commands); /* 2.15.9: the moved sound plays at its fresh index, never the stale one */ Assert.True((await b.Execute(Cmd("stop"), "host")).Ok); }
     [Fact]

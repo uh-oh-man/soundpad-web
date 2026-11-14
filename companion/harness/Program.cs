@@ -437,7 +437,12 @@ if (args.FirstOrDefault() == "--analyze-file" && args.Length == 2)
     finally { if (Directory.Exists(scratch)) Directory.Delete(scratch, true); }
     return;
 }
-var directory = Path.Combine(Path.GetTempPath(), "soundpad-web-e2e-" + Guid.NewGuid().ToString("N"));
+// --data-dir <folder> (2.43): use (and keep) this data folder instead of a new one that is deleted on exit, so a browser
+// test can start a second harness on the first one's state.json, as when the companion restarts. Only a folder in the
+// temp directory is accepted.
+int dataAt = Array.IndexOf(args, "--data-dir");
+var keptDirectory = dataAt >= 0 && dataAt + 1 < args.Length && Path.GetFullPath(args[dataAt + 1]).StartsWith(Path.GetFullPath(Path.GetTempPath()), StringComparison.OrdinalIgnoreCase) ? Path.GetFullPath(args[dataAt + 1]) : null;
+var directory = keptDirectory ?? Path.Combine(Path.GetTempPath(), "soundpad-web-e2e-" + Guid.NewGuid().ToString("N"));
 await using var mock = new MockSoundpad();
 Directory.CreateDirectory(directory);
 var all = System.Xml.Linq.XDocument.Parse(MockSoundpad.Sounds);
@@ -486,4 +491,4 @@ _ = Task.Run(() =>
 });
 try { while (!stop.IsCancellationRequested) { await Task.Delay(250, stop.Token); await bridge.Poll(false); } }
 catch (OperationCanceledException) { }
-finally { if (Directory.Exists(directory)) Directory.Delete(directory, true); }
+finally { if (keptDirectory == null && Directory.Exists(directory)) Directory.Delete(directory, true); }
