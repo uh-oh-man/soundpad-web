@@ -41,5 +41,13 @@ try {
     $process.Dispose()
     $resolvedSmoke = [System.IO.Path]::GetFullPath($smokePath)
     $expectedRoot = [System.IO.Path]::GetFullPath([System.IO.Path]::GetTempPath())
-    if ($resolvedSmoke.StartsWith($expectedRoot,[System.StringComparison]::OrdinalIgnoreCase) -and [System.IO.Path]::GetFileName($resolvedSmoke).StartsWith('soundpad-web-smoke-') -and (Test-Path -LiteralPath $resolvedSmoke)) { Remove-Item -LiteralPath $resolvedSmoke -Recurse -Force }
+    if ($resolvedSmoke.StartsWith($expectedRoot,[System.StringComparison]::OrdinalIgnoreCase) -and [System.IO.Path]::GetFileName($resolvedSmoke).StartsWith('soundpad-web-smoke-') -and (Test-Path -LiteralPath $resolvedSmoke)) {
+        # Since 2.36 the data folder holds the window's WebView2 profile, whose helper processes can keep files
+        # open for a few seconds after the companion exits. Retry, and never fail the smoke test over its own
+        # temporary folder (it failed CI on ddbe81e that way, with no other problem).
+        for ($attempt = 0; $attempt -lt 20 -and (Test-Path -LiteralPath $resolvedSmoke); $attempt++) {
+            try { Remove-Item -LiteralPath $resolvedSmoke -Recurse -Force -ErrorAction Stop } catch { Start-Sleep -Milliseconds 500 }
+        }
+        if (Test-Path -LiteralPath $resolvedSmoke) { Write-Output "::warning title=EXE smoke test::Could not remove $resolvedSmoke (still in use)." }
+    }
 }
