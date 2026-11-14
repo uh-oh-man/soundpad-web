@@ -296,6 +296,9 @@ p {
   display: flex;
   align-items: center;
   gap: 12px;
+  /* With Voices beside Mimic (2.41) the buttons wrap on a narrow screen instead of widening the page. */
+  flex-wrap: wrap;
+  justify-content: flex-end;
 }
 .toolbar {
   display: flex;

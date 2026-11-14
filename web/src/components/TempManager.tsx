@@ -123,6 +123,25 @@ export function TempManager({
   const { budget } = useDraftStore();
   const own = !host ? budget?.guest?.own : undefined;
   const guestKeeps = !host && drafts && state.permissions.guestKeep === true;
+  // The voice library (2.41): a kept clip can be added by hand (idempotent: one recording per file).
+  const libraryAdds =
+    supports(state.companionVersion, 'voiceLibrary') &&
+    (host || (controller.relaysLibrary() && state.permissions.guestLibraryEdit !== false));
+  async function addToLibrary(soundId: string, name: string) {
+    try {
+      const result = z
+        .object({ recordingId: z.string(), added: z.boolean() })
+        .parse(await controller.run('libraryAdd', { soundId }));
+      controller.notify(
+        result.added
+          ? `“${name}” is in the voice library; its words are found in the background.`
+          : `“${name}” was already in the voice library.`,
+        'success',
+      );
+    } catch {
+      /* Controller shows the error. */
+    }
+  }
   const me = controller.getSnapshot().profile.name;
   const keepBlocked = !connected
     ? 'Reconnecting: Keep waits until you are connected again.'
@@ -770,6 +789,19 @@ export function TempManager({
                         }}
                       >
                         Keep {v.orientation} permanently
+                      </button>
+                    )}
+                    {/* 2.41: clips kept before the voice library existed are added by hand (no automatic migration). */}
+                    {libraryAdds && v.permanent && v.soundId && (
+                      <button
+                        aria-disabled={!!pending || undefined}
+                        title="Make it a voice-library recording: its words are found in the background"
+                        onClick={() => {
+                          if (pending) return;
+                          void addToLibrary(v.soundId!, a.name);
+                        }}
+                      >
+                        Add to voice library
                       </button>
                     )}
                   </div>

@@ -9,14 +9,18 @@ public record Playback(string Status = "UNKNOWN", long? PositionMs = null, long?
     string? SoundId = null, string? Epoch = null, string? Requester = null, long SampledAt = 0, string IdentitySource = "unknown", long? RegionEndMs = null, bool Repeat = false, long PositionRevision = 0);
 public record Permissions(bool RemotePlayback = true, bool GuestCounter = false, bool GuestSeeking = true, bool GuestSpotify = true, bool GuestUploads = true, bool GuestTransforms = true, bool GuestMimic = false,
     // Guest Keep (2.40). Never written to state.json (null there): it lives in keep-settings.json, which older companions ignore.
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] bool? GuestKeep = null);
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] bool? GuestKeep = null,
+    // Guests may edit the voice library (2.41). Never written to state.json either: it lives in library\voice-library.v1.json.
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] bool? GuestLibraryEdit = null);
 public record Snapshot(int V, long Revision, bool Available, string? Error, Library Library, Playback Playback, int Counter, Permissions Permissions,
     int Protocol = 2, string? HostId = null, long StatisticsVersion = 0, string? CompanionVersion = null, long ManagedAudioVersion = 0, MimicState? Mimic = null,
     // True while the host has suspended guest playback with Panic (2.35). In memory only: a restart clears it.
     bool PlaybackSuspended = false,
     // 2.40: rises when anyone's drafts change (pages fetch draftList), when guest budgets or their requests change
     // (budgetStatus), and the number of Temp clips a crashed launch left, waiting for the host's Recover or Discard.
-    long Drafts = 0, long Budgets = 0, int? TempRecovery = null);
+    long Drafts = 0, long Budgets = 0, int? TempRecovery = null,
+    // 2.41: rises when the voice library, its word index, wanted-word notices or speaker groups change (pages fetch libraryStatus).
+    long VoiceLibrary = 0);
 public record Participant(string Id, string Name);
 public record ParticipantPlays(string Name, long Count);
 public sealed class SoundStatistics
@@ -54,7 +58,12 @@ public record Command(int V, string Id, long At, string Op, string? SoundId = nu
     string? GuestId = null,
     // Drafts (2.40): the draft a command is about; keep settings and guest budgets (MB per guest, and whether the
     // permanent budget counts each session or everything a guest ever kept).
-    string? DraftId = null, int? TempMb = null, int? KeptMb = null, string? BudgetMode = null, bool? GuestKeep = null);
+    string? DraftId = null, int? TempMb = null, int? KeptMb = null, string? BudgetMode = null, bool? GuestKeep = null,
+    // Voice library (2.41): which recording(s), metadata edits, an audit group to undo, search text and paging, a voice's
+    // colour, the Soundpad categories to index, a speaker group, and filters (kind of result, unassigned, tag).
+    string? RecordingId = null, string[]? RecordingIds = null, string? VoiceId = null, string[]? Tags = null, string[]? AddTags = null, string[]? RemoveTags = null,
+    bool? Favorite = null, string? Title = null, string? CorrectedText = null, bool? Reviewed = null, long? AuditId = null, string? Query = null, int? Offset = null, int? Limit = null,
+    string? Color = null, string[]? Categories = null, int? GroupId = null, string? Kind = null, bool? Unassigned = null, string? Tag = null, bool? GroupSpeakers = null, bool? GuestLibraryEdit = null);
 public record Reply(string Type, string Id, bool Ok, string? Error = null, object? Data = null);
 public static class Json
 {

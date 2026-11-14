@@ -22,6 +22,7 @@ export const GUEST_PERMISSIONS: {
   { key: 'guestTransforms', label: 'Reverse generation' },
   { key: 'guestMimic', label: 'Mimic', v2: true, feature: 'mimic' },
   { key: 'guestKeep', label: 'Keep clips', v2: true, feature: 'drafts' },
+  { key: 'guestLibraryEdit', label: 'Edit the voice library', v2: true, feature: 'voiceLibrary' },
 ];
 
 /**

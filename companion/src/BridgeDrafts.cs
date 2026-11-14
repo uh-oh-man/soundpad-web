@@ -337,11 +337,23 @@ public sealed partial class Bridge
                         if (saved.Ok && Field(saved, "assetId") is string assetId) lock (drafts) { draft.ClipAssetId = assetId; draft.ClipRange = range; }
                     }
                     if (!saved.Ok) return saved;
-                    bool close = c.Op == "draftKeep" && c.Action == "close";
+                    // "Keep in voice library" (2.41): kept permanently at once, as a library recording with this stretch of the
+                    // history as its provenance and its words copied from the transcript. A refusal leaves the clip in Temp
+                    // and the draft open.
+                    bool library = c.Op == "draftKeep" && c.Action == "library";
+                    string? recordingId = null;
+                    if (library && Field(saved, "assetId") is string keptId)
+                    {
+                        var source = new LibrarySource { Kind = "history", SessionId = h.SessionId, StartFrame = draft.Start, EndFrame = draft.End, Rate = h.Rate };
+                        try { recordingId = (await KeepIntoLibrary(keptId, actor, participant, requester, audience, source, WordsFromHistory(source)))?.Id; }
+                        catch (InvalidDataException ex) { DraftsChanged(); return new("ack", c.Id, false, ex.Message + " The clip is in Temp."); }
+                    }
+                    bool close = c.Op == "draftKeep" && c.Action is "close" or "library";
                     if (close) { lock (drafts) drafts.Remove(draft.Id); h.Unpin(draft.PinKey); }
                     DraftsChanged();
                     var result = c.Op == "draftPlay" ? await Autoplay(saved, c with { Autoplay = true }, actor, participant, requester, audience, intent) : saved;
-                    return result with { Id = c.Id, Data = Merge(result.Data, draft.Id, close) };
+                    var merged = Merge(result.Data, draft.Id, close);
+                    return result with { Id = c.Id, Data = library ? new { assetId = Field(saved, "assetId"), state = "permanent", played = false, draftId = draft.Id, closed = close, recordingId } : merged };
                 }
         }
         return null;

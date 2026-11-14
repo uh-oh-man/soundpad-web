@@ -209,7 +209,9 @@ public sealed class LocalServer(Bridge bridge, string origin, string? ownerKey =
                         SemaphoreSlim? slot = null;
                         if (command.Op is "mimicSources" or "mimicStart" or "mimicClip" or "mimicLibrary" or "mimicLibraryImport" or "mimicTranscribe" or "trimAudio" or "trimPreview" or "waveform" or "spotify" or "audioAssets" or "keepAudio" or "removeAudio" or "retryAudio" or "retryCleanup" or "cleanupCategories" or "clearTemp" or "beginSession" or "endSession"
                             // 2.40: previews, clips made from drafts, and Temp recovery are expensive too.
-                            or "mimicPreview" or "draftKeep" or "draftPlay" or "tempRecover")
+                            or "mimicPreview" or "draftKeep" or "draftPlay" or "tempRecover"
+                            // 2.41: previews from the voice library read files; adding and indexing do too.
+                            or "libraryPreview" or "libraryAdd" or "libraryIndex")
                         {
                             if (!await queries.WaitAsync(0)) { running.Add(Answer(command.Id, Task.FromResult(new Reply("ack", command.Id, false, "Too many background requests.")), null)); continue; }
                             slot = queries;

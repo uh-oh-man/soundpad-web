@@ -268,7 +268,12 @@ public sealed partial class Bridge
                 }
                 else if (c.Op == "retryAudio") await Audio.RetryAsset(c.AssetId ?? throw new InvalidDataException("Choose a managed source."));
                 else if (c.Op == "keepAudio" && actor != "host") await GuestKeep(c, actor, participant, requester);
-                else if (c.Op == "keepAudio") await Audio.Promote(c.AssetId ?? throw new InvalidDataException("Open Temp to confirm a permanent destination."), c.VariantId ?? throw new InvalidDataException("Choose the normal or reversed variant."), c.DestinationDirectory, c.CategoryId, c.CategoryName, c.Confirmed);
+                else if (c.Op == "keepAudio")
+                {
+                    await Audio.Promote(c.AssetId ?? throw new InvalidDataException("Open Temp to confirm a permanent destination."), c.VariantId ?? throw new InvalidDataException("Choose the normal or reversed variant."), c.DestinationDirectory, c.CategoryId, c.CategoryName, c.Confirmed);
+                    // Every kept clip is a voice-library recording (2.41).
+                    LibraryFromKeep(c.AssetId, "host", "Host");
+                }
                 else throw new InvalidDataException("Unsupported command.");
                 await gate.EnterAsync(PriorityGate.Lane.Normal); try { await RefreshInner(); SaveAudioReceipt(c); Publish(); } finally { gate.Release(); }
                 return new("ack", c.Id, true);

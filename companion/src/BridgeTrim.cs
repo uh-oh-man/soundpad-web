@@ -149,6 +149,8 @@ public sealed partial class Bridge
             name = name.Replace('/', '-').Replace('\\', '-');
             if (name.Length > 100) name = name[..99].TrimEnd() + "\u2026";
             var saved = (await Upload(wav, name + ".wav", Person(actor, participant).Name, actor == "host", owner, audience, guest: PersonKey(actor, participant, requester))) with { Id = c.Id };
+            // Provenance for the voice library (2.41): an edited copy of that source.
+            if (saved.Ok && Field(saved, "assetId") is string copyId) NoteProvenance(copyId, new LibrarySource { Kind = "copy", SourceAssetId = c.AssetId });
             return c.Autoplay ? await Autoplay(saved, c, actor, participant, requester, audience, intent) : saved;
             }
             finally { Interlocked.Decrement(ref editing); }
