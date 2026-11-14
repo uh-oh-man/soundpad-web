@@ -82,6 +82,8 @@ public sealed partial class Bridge
         public long StartedTick = Environment.TickCount64;
         /// <summary>Since it was last told to play, a reading saw the slot playing close to its own end (review, 2.37).</summary>
         public bool NearEnd;
+        /// <summary>One reading right at the end showed another length (2.37): the next one decides what it was.</summary>
+        public bool EndSuspect;
         /// <summary>A reading saw the slot playing since it was last told to play.</summary>
         public bool SeenPlaying;
         /// <summary>When it was paused (TickCount64), while it is paused: the end clock stands still meanwhile.</summary>
@@ -324,7 +326,7 @@ public sealed partial class Bridge
         {
             if (seen == playbackVersion && ReferenceEquals(slice, cut))
             {
-                cut.StartedTick = Environment.TickCount64; cut.NearEnd = false; cut.SeenPlaying = false; cut.PausedTick = null; seekSettlesUntil = Environment.TickCount64 + 1500; sampledTick = Environment.TickCount64;
+                cut.StartedTick = Environment.TickCount64; cut.NearEnd = false; cut.EndSuspect = false; cut.SeenPlaying = false; cut.PausedTick = null; seekSettlesUntil = Environment.TickCount64 + 1500; sampledTick = Environment.TickCount64;
                 playback = playback with { Status = "PLAYING", PositionMs = cut.OffsetMs, PositionRevision = playback.PositionRevision + 1, SampledAt = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() };
             }
         }

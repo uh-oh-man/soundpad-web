@@ -62,7 +62,15 @@ public sealed partial class Bridge
                 // The slot ended while it was being read (its length is gone with it): it is at its end, and the next
                 // look sees it stopped. Not a sign that another sound took over. Only when the length is missing: a
                 // different length is another sound, which ends the record's identity like any other (review, 2.37).
-                else if (atEnd && status != "STOPPED" && duration == null) { position = cut.OffsetMs + cut.SliceMs; duration = cut.SourceMs; cut.NearEnd = true; }
+                // A different length right at the end, after a reading near it, can be the same torn read: Soundpad
+                // answered "playing" and then, the slot gone, a length that is not the slot's (the test Soundpad does;
+                // a slow CI runner hit it, 2.37.0). One such reading is tolerated; the next look decides: stopped is the
+                // slot's natural end, the other length again is another sound, which then ends the identity.
+                else if (atEnd && status != "STOPPED" && (duration == null || cut.NearEnd && !cut.EndSuspect))
+                {
+                    if (duration != null) cut.EndSuspect = true;
+                    position = cut.OffsetMs + cut.SliceMs; duration = cut.SourceMs; cut.NearEnd = true;
+                }
                 // Stopped after the slice's own length, and a reading saw it close to its end: the slot played to its
                 // end, which is exactly the end of the region (or of the sound). A repeating region plays the slot
                 // again; no seek is involved. A stop without that reading was the person stopping it in Soundpad.

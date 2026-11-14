@@ -84,7 +84,9 @@ public sealed class Tests : IDisposable
         await ws.SendAsync(Encoding.UTF8.GetBytes(Json.Write(new { token = server.Token })), WebSocketMessageType.Text, true, CancellationToken.None);
         var bytes = new byte[50000]; var r = await ws.ReceiveAsync(bytes, CancellationToken.None); Assert.Contains("\"type\":\"state\"", Encoding.UTF8.GetString(bytes, 0, r.Count));
         await ws.SendAsync(Encoding.UTF8.GetBytes(Json.Write(new { actor = "host", command = Cmd("counter", delta: 1) })), WebSocketMessageType.Text, true, CancellationToken.None);
-        r = await ws.ReceiveAsync(bytes, CancellationToken.None); Assert.Contains("\"ok\":true", Encoding.UTF8.GetString(bytes, 0, r.Count));
+        // Since 2.35 answers are sent when ready, so a state report can come first (a slow CI runner did): read up to the answer.
+        string text; do { r = await ws.ReceiveAsync(bytes, CancellationToken.None); text = Encoding.UTF8.GetString(bytes, 0, r.Count); } while (!text.Contains("\"type\":\"ack\""));
+        Assert.Contains("\"ok\":true", text);
         await ws.CloseAsync(WebSocketCloseStatus.NormalClosure, "done", CancellationToken.None);
     }
 }

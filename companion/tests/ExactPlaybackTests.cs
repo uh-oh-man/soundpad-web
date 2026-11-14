@@ -126,7 +126,10 @@ public sealed class ExactPlaybackTests : IDisposable
         long before = await Total(bridge, sounds[0].Id); Clear(mock); int first = SlotPlays(mock).Length;
         var region = await bridge.Execute(Cmd("region", sounds[0].Id) with { PositionMs = 100, EndMs = 250, Repeat = true }, "guest", new(Guid.NewGuid().ToString(), "Alice"));
         Assert.True(Played(region), region.Error);
-        for (int i = 0; i < 12; i++) { await Task.Delay(60); await bridge.Poll(false); }
+        // Poll often, as the companion does near a slice's end, until it has looped a few times; a fixed number of
+        // 60 ms polls was too few on a slow CI runner (2.37.0), where a stretched delay skipped the reading near the end.
+        var clock = System.Diagnostics.Stopwatch.StartNew();
+        while (SlotPlays(mock).Length - first < 3 && clock.ElapsedMilliseconds < 8000) { await Task.Delay(20); await bridge.Poll(false); }
         var plays = SlotPlays(mock)[first..];
         Assert.True(plays.Length >= 3, $"only {plays.Length} plays of the slot");
         // The same slot, holding the same slice every time: it is played again, never rewritten or sought.
