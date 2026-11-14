@@ -3804,6 +3804,7 @@ test('per-guest permissions: one guest’s playback is off while another’s sti
 test('example session: plays example sounds in this browser, edits a copy, and leaves', async ({
   page,
   harness,
+  browserName,
 }) => {
   // The example never reaches the companion, Soundpad or a relay: no socket but the dev server's own.
   const sockets: string[] = [];
@@ -3817,6 +3818,23 @@ test('example session: plays example sounds in this browser, edits a copy, and l
     'See every feature with example sounds. Nothing is sent to Soundpad; sounds play in this browser.',
   );
   await page.getByRole('button', { name: 'Try the example' }).click();
+  // Playwright's Windows WebKit has no Web Audio at all (real Safari has it): the example must say it cannot
+  // start, and stay on the start screen, rather than fail silently (2.38.0 CI).
+  if (
+    browserName === 'webkit' &&
+    !(await page.evaluate(() => 'AudioContext' in window || 'webkitAudioContext' in window))
+  ) {
+    await expect(
+      page.getByText(
+        /The example could not start. This browser cannot play audio from a web page./,
+      ),
+    ).toBeVisible();
+    await expect(
+      page.getByRole('heading', { name: 'A soundboard. For the whole party.' }),
+    ).toBeVisible();
+    expect(sockets).toEqual([]);
+    return;
+  }
   await expect(page.getByRole('complementary', { name: 'Example session' })).toContainText(
     'Example session: nothing here reaches Soundpad.',
   );
