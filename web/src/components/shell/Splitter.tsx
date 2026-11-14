@@ -76,6 +76,7 @@ export function Splitter({
     if (next === null) return;
     e.preventDefault();
     if (e.key === 'Enter' && width !== EDITOR_MIN) previous.current = width;
+    latest.current = next;
     onChange(next);
   };
   const keyUp = () => {
@@ -85,20 +86,31 @@ export function Splitter({
   const down = (e: PointerEvent<HTMLDivElement>) => {
     if (e.button !== 0) return;
     e.preventDefault();
-    e.currentTarget.setPointerCapture(e.pointerId);
     drag.current = { x: e.clientX, width };
+    try {
+      e.currentTarget.setPointerCapture(e.pointerId);
+    } catch {
+      // Some engines refuse capture for a synthetic or already-released pointer; the drag still works
+      // while the pointer stays over the bar's 24 px target.
+    }
   };
   const move = (e: PointerEvent<HTMLDivElement>) => {
     if (!drag.current) return;
     // The panel is on the right: moving left widens it.
     const next = drag.current.width + (drag.current.x - e.clientX);
-    onChange(Math.min(max, Math.max(EDITOR_MIN, Math.round(next))));
+    // Kept here as well: the release can come before React has rendered the last move.
+    latest.current = Math.min(max, Math.max(EDITOR_MIN, Math.round(next)));
+    onChange(latest.current);
   };
   const up = (e: PointerEvent<HTMLDivElement>) => {
     if (!drag.current) return;
     drag.current = null;
-    if (e.currentTarget.hasPointerCapture(e.pointerId))
-      e.currentTarget.releasePointerCapture(e.pointerId);
+    try {
+      if (e.currentTarget.hasPointerCapture(e.pointerId))
+        e.currentTarget.releasePointerCapture(e.pointerId);
+    } catch {
+      // Nothing was captured.
+    }
     if (latest.current !== EDITOR_MIN) previous.current = latest.current;
     onCommit(latest.current);
   };

@@ -116,7 +116,7 @@ test('section memory: the board scroll and view come back, and "/" focuses the c
   const before = await board.evaluate((el) => el.scrollTop);
   expect(before).toBeGreaterThan(50);
   await nav(page, 'Voices').click();
-  await expect(section(page, 'Voices')).toBeVisible();
+  await expect(section(page, 'Voices').getByLabel('Search the voice library')).toBeVisible();
   await page.locator('#board').focus();
   await page.keyboard.press('/');
   await expect(section(page, 'Voices').getByLabel('Search the voice library')).toBeFocused();
@@ -345,11 +345,12 @@ test('phone sheet: Stop and Panic stay usable, Show board folds it to a bar and 
   expect(await noSideScroll(page)).toBe(true);
 });
 
-test('notices never cover the panel, Leave example, Stop, Panic or the nav at four sizes, and Tab reaches their Undo', async ({
+test('notices never cover the panel, Stop, Panic, the nav or Settings at four sizes, and Tab reaches their Undo', async ({
   page,
-  browserName,
+  harness,
 }) => {
-  test.skip(browserName === 'webkit', 'Playwright’s Windows WebKit cannot start the example');
+  // On the mock companion, so it runs in WebKit too; the example's own matrix (Leave example) is in
+  // app.spec.ts ("notices never cover Mimic’s close button…").
   test.slow();
   for (const size of [
     { width: 1280, height: 720 },
@@ -358,15 +359,11 @@ test('notices never cover the panel, Leave example, Stop, Panic or the nav at fo
     { width: 412, height: 860 },
   ]) {
     await page.setViewportSize(size);
-    await page.goto('/');
-    await page.getByRole('button', { name: 'Try the example' }).click();
+    await host(page, harness);
     await nav(page, 'Mimic').click();
     const panel = mimicPanel(page);
     await panel.getByRole('button', { name: 'Start listening' }).click();
-    await expect(panel.getByRole('button', { name: 'Last 3 s' })).toBeVisible({ timeout: 15000 });
-    await page.waitForTimeout(3200);
-    await panel.getByRole('button', { name: 'Last 3 s' }).click();
-    await panel.getByRole('button', { name: 'Mimic it' }).click();
+    await expect(panel.getByRole('status').first()).toContainText('Listening to Fixture');
     // Four notices with a button each (distinct words: the same words again replace a notice).
     await page.evaluate(async () => {
       const { controller } = await import(/* @vite-ignore */ '/src/' + 'controller.ts');
@@ -383,23 +380,15 @@ test('notices never cover the panel, Leave example, Stop, Panic or the nav at fo
       ['Stop', page.getByRole('button', { name: 'Stop', exact: true })],
       ['Panic', page.getByRole('button', { name: 'Panic: stop audio and pause guest playback' })],
       ['Mimic', nav(page, 'Mimic')],
+      ['Access settings', page.getByRole('button', { name: /^Access settings/ })],
       ['Increase Kick counter', page.getByRole('button', { name: 'Increase Kick counter' })],
       ['Undo', undo],
     ];
     if (narrow) controls.push(['Show board', panel.getByRole('button', { name: 'Show board' })]);
     else controls.push(['Resize editor', page.getByRole('separator', { name: 'Resize editor' })]);
-    // The phone sheet covers the example banner (it starts under the topbar); Show board uncovers it.
-    if (!narrow) controls.push(['Leave example', page.getByRole('button', { name: 'Leave example' })]);
     for (const [name, control] of controls) {
       await control.scrollIntoViewIfNeeded();
       expect(await onTop(control), `${name} at ${size.width}`).toBe(true);
-    }
-    if (narrow) {
-      await panel.getByRole('button', { name: 'Show board' }).click();
-      const leave = page.getByRole('button', { name: 'Leave example' });
-      await leave.scrollIntoViewIfNeeded();
-      expect(await onTop(leave), `Leave example at ${size.width}`).toBe(true);
-      await panel.getByRole('button', { name: 'Show editor' }).click();
     }
     // Keyboard: no focus trap; Shift+Tab from the panel's close button reaches a notice's Undo (the dock
     // comes just before the splitter and the panel).
@@ -419,9 +408,8 @@ test('notices never cover the panel, Leave example, Stop, Panic or the nav at fo
     await expect(panel).toHaveCount(0);
     await nav(page, 'Mimic').click();
     await expect(panel).toBeVisible();
+    await panel.getByRole('button', { name: 'Stop listening' }).click();
     await closeEditor(page);
-    await page.getByRole('button', { name: 'Leave example' }).click();
-    await expect(page.getByRole('button', { name: 'Try the example' })).toBeVisible();
   }
 });
 
@@ -507,7 +495,10 @@ test('the board starts at least 150 px higher than before Stage G at 1440×900',
 test('keyboard order: skip links, topbar, nav, search, tiles, then the player; Skip to editor lands on the panel', async ({
   page,
   harness,
+  browserName,
 }) => {
+  // Safari's default Tab skips links (Option+Tab reaches them), so there the order starts at the topbar.
+  const linksTab = browserName !== 'webkit';
   await page.setViewportSize({ width: 1440, height: 900 });
   await host(page, harness);
   await page.locator('body').focus();
@@ -530,9 +521,9 @@ test('keyboard order: skip links, topbar, nav, search, tiles, then the player; S
     if (order.at(-1) === 'player') break;
   }
   const first = (kind: string) => order.indexOf(kind);
-  expect(order[0]).toBe('skip');
+  expect(order[0]).toBe(linksTab ? 'skip' : 'topbar');
   for (const [a, b] of [
-    ['skip', 'topbar'],
+    ...(linksTab ? [['skip', 'topbar']] : []),
     ['topbar', 'nav'],
     ['nav', 'search'],
     ['search', 'tile'],
@@ -541,8 +532,10 @@ test('keyboard order: skip links, topbar, nav, search, tiles, then the player; S
     expect(first(a), `${a} before ${b}: ${order.join(' ')}`).toBeLessThan(first(b));
   // With the panel open, the second skip link goes to its heading.
   await nav(page, 'Mimic').click();
-  await page.getByRole('link', { name: 'Skip to sounds' }).focus();
-  await page.keyboard.press('Tab');
+  if (linksTab) {
+    await page.getByRole('link', { name: 'Skip to sounds' }).focus();
+    await page.keyboard.press('Tab');
+  } else await page.getByRole('link', { name: 'Skip to editor' }).focus();
   await expect(page.getByRole('link', { name: 'Skip to editor' })).toBeFocused();
   await page.keyboard.press('Enter');
   await expect(page.locator('#editor-title')).toBeFocused();
