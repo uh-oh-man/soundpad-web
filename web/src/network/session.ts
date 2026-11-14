@@ -102,6 +102,14 @@ export const MAX_GUESTS = MAX_PLACES;
  * produce, or a message that is not this protocol at all, disconnects the guest.
  */
 export const GUEST_RATES = { control: 100, other: 12, abuse: 400 } as const;
+/**
+ * Guest (2.41 CI): queries and other non-playback commands sent to a current host page in any one
+ * second. Joining, then opening Voices and a recording, sends a dozen within a second, and a host
+ * page refuses what goes over `GUEST_RATES.other` (a refused tag was lost, and a refused status
+ * read emptied the window). The guest queues the rest instead, in order, and leaves room for its
+ * hellos and for messages a busy host page handles in a bunch.
+ */
+export const GUEST_PACE = 8;
 /** A guest only listens to the host, whose acks and reports can come in bursts; this is a flood guard. */
 const HOST_FLOOD = 1000;
 /**
@@ -315,6 +323,10 @@ export class Session {
   /** The host page said it relays the 2.41 voice-library commands. */
   private welcomedLibrary = false;
   private olderHostRate = new RateLimit(OLDER_HOST_RATE);
+  /** Guest (2.41 CI): when the last non-playback commands went, and those waiting for their turn. */
+  private paceTimes: number[] = [];
+  private paceQueue: (() => void)[] = [];
+  private paceTimer?: ReturnType<typeof setTimeout>;
   // Guest connection state (2.37).
   private since = Date.now();
   private connectedAt?: number;
@@ -1664,10 +1676,45 @@ export class Session {
       );
       // A repeated id replaces its earlier request, so the count above stays exact.
       this.settle(c.id)?.reject(Error('Command sent again.'));
-      this.pending.set(c.id, { resolve, reject, timer, control });
+      const entry = { resolve, reject, timer, control };
+      this.pending.set(c.id, entry);
       if (!control) this.waiting++;
-      this.send({ v: 1, type: 'command', command }, this.hostPeer);
+      const send = () => {
+        // Answered meanwhile (the host left, or the same id was sent again): nothing to send.
+        if (this.pending.get(c.id) === entry && this.hostPeer)
+          this.send({ v: 1, type: 'command', command }, this.hostPeer);
+      };
+      // Playback never waits; toward a tab from before 2.35, olderHostRate above already applies.
+      if (control || !siteRelaysIntents(this.welcomedSite)) send();
+      else this.paced(send);
     });
+  }
+  /** Guest: sends in order, at most GUEST_PACE in any second, so the host page refuses none. */
+  private paced(send: () => void) {
+    this.paceQueue.push(send);
+    this.drainPaced();
+  }
+  private drainPaced() {
+    if (this.paceTimer) return;
+    for (;;) {
+      const next = this.paceQueue[0];
+      if (!next) return;
+      const now = Date.now();
+      this.paceTimes = this.paceTimes.filter((t) => now - t < 1000);
+      if (this.paceTimes.length >= GUEST_PACE) {
+        this.paceTimer = setTimeout(
+          () => {
+            this.paceTimer = undefined;
+            this.drainPaced();
+          },
+          1000 - (now - this.paceTimes[0]) + 1,
+        );
+        return;
+      }
+      this.paceQueue.shift();
+      this.paceTimes.push(now);
+      next();
+    }
   }
   /** Host: disconnects a guest on every connection they have (2.37: direct and relay). */
   disconnect(peer: string) {
@@ -1695,6 +1742,9 @@ export class Session {
     }
     this.pending.clear();
     this.waiting = 0;
+    this.paceQueue = [];
+    clearTimeout(this.paceTimer);
+    this.paceTimer = undefined;
   }
   async close(revoke = false) {
     if (revoke) for (const peer of this.accepted) this.send({ v: 1, type: 'revoked' }, peer);

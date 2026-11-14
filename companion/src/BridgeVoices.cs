@@ -80,7 +80,14 @@ public sealed partial class Bridge
     /// <summary>Test seam: the library and the category index.</summary>
     public VoiceLibrary VoiceLibraryStore => Voices;
     public SoundWords SoundWordStore => SoundIndex;
-    private void VoicesChanged() { Interlocked.Increment(ref voicesRevision); Publish(); }
+    private void VoicesChanged() => Publish();
+    /// <summary>
+    /// The voice library's revision as the snapshot and libraryStatus give it: the bridge's own changes (notices, index
+    /// progress) plus the library's saved changes, which count at once (2.41 CI). The library tells the bridge of a
+    /// change on the thread pool; counted only there, a page that re-read the status right after its own change could
+    /// get the old revision on a busy runner and keep showing the recording as it was.
+    /// </summary>
+    private long VoicesRevisionNow => Interlocked.Read(ref voicesRevision) + (Volatile.Read(ref voiceLibrary)?.Revision ?? 0);
     /// <summary>
     /// The library's settings for the snapshot and the history's word handlers (2.41 review): never waits for the
     /// library. Its lock is held across a whole rewrite of its file, and its first load reads every library file; the
@@ -353,7 +360,7 @@ public sealed partial class Bridge
         var s = library.Settings;
         return new
         {
-            revision = Interlocked.Read(ref voicesRevision),
+            revision = VoicesRevisionNow,
             blocked = library.Blocked,
             problem = host ? library.Problem : library.Blocked ? "The host's voice library could not be read." : null,
             count = library.Count,

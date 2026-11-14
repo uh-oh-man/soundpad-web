@@ -258,14 +258,19 @@ describe('authoritative sessions over deterministic transport (no public relay)'
     const h = setup(n, a, 'host', true),
       g = setup(n, a, 'guest');
     await vi.waitFor(() => expect(g.status()).toBe('Connected'));
-    const replies = await Promise.allSettled(
-      Array.from({ length: 14 }, () => g.session.sendCommand(command('statistics'))),
-    );
+    // Sent all at once, past the pacing a current guest page does itself (2.41), as an older one does.
+    const seen = tap(n, 'guest');
+    const ids = Array.from({ length: 14 }, () => {
+      const c = command('statistics');
+      inject(n, 'host', 'guest', { v: 1, type: 'command', command: c });
+      return c.id;
+    });
+    const acks = () => seen.filter((m) => m.type === 'ack' && ids.includes(m.id as string));
+    await vi.waitFor(() => expect(acks()).toHaveLength(14));
     // The guest's hello counts toward the same budget, so a little under 12 of the 14 get through.
-    const refused = replies.filter((r) => r.status === 'rejected');
+    const refused = acks().filter((m) => m.ok === false);
     expect(refused.length).toBeGreaterThanOrEqual(14 - GUEST_RATES.other);
-    for (const r of refused)
-      expect(String((r as PromiseRejectedResult).reason)).toContain('Too many requests');
+    for (const r of refused) expect(String(r.error)).toContain('Too many requests');
     expect(h.executed.size).toBe(14 - refused.length);
     expect(h.executed.size).toBeGreaterThan(0);
     expect(h.guests()).toEqual(['guest']);
@@ -273,6 +278,26 @@ describe('authoritative sessions over deterministic transport (no public relay)'
     await expect(g.session.sendCommand(command('stop'))).resolves.toBeUndefined();
     await pause(1050);
     await expect(g.session.sendCommand(command('statistics'))).resolves.toBeUndefined();
+  });
+  it('paces a burst of queries in order so the host page refuses none, and never holds back playback (2.41)', async () => {
+    const n = new MemoryNetwork(),
+      a = await createIdentity();
+    const h = setup(n, a, 'host', true),
+      g = setup(n, a, 'guest');
+    await vi.waitFor(() => expect(g.status()).toBe('Connected'));
+    // Joining, opening Voices and a recording, then adding a tag: about a dozen in a second (2.41.0 CI lost the tag).
+    const queries = Array.from({ length: 14 }, () => command('statistics'));
+    const started = Date.now();
+    const replies = Promise.allSettled(queries.map((c) => g.session.sendCommand(c)));
+    const stop = command('stop');
+    await g.session.sendCommand(stop);
+    const settled = await replies;
+    expect(settled.filter((r) => r.status === 'rejected')).toEqual([]);
+    expect(Date.now() - started).toBeGreaterThanOrEqual(900); // the last six waited for the next second
+    const order = h.commands.map((c) => c.id);
+    expect(order.filter((id) => id !== stop.id)).toEqual(queries.map((c) => c.id));
+    expect(order.indexOf(stop.id)).toBeLessThan(order.indexOf(queries.at(-1)!.id));
+    expect(h.guests()).toEqual(['guest']);
   });
   it('keeps the 2.34 budget of 12 a second per guest when the companion is older than 2.35', async () => {
     const n = new MemoryNetwork(),

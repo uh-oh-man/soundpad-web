@@ -143,8 +143,11 @@ public sealed partial class VoiceLibrary
     public bool Blocked { get; private set; }
     /// <summary>Why it is blocked, or the last write error.</summary>
     public string? Problem { get; private set; }
+    /// <summary>Counts every saved change at once, before <see cref="Changed"/> is heard (a status read right after a change sees it).</summary>
     public long Revision => Interlocked.Read(ref revision);
     public event Action? Changed;
+    /// <summary>How <see cref="Changed"/> is heard: on the thread pool, after the lock is let go. Tests hold it back, as a busy pool does.</summary>
+    internal Action<Action> Notify { get; set; } = work => ThreadPool.QueueUserWorkItem(_ => work());
 
     public VoiceLibrary(string dataDirectory, WordIndex index, Func<long>? clock = null)
     {
@@ -307,13 +310,34 @@ public sealed partial class VoiceLibrary
         if (bytes.Length > SaveLimit) throw new InvalidDataException($"The voice library would be larger than {SaveLimit / (1024 * 1024)} MiB. Shorten or remove some recordings' text first.");
         try
         {
-            using (var stream = new FileStream(temporary, FileMode.Create, FileAccess.Write, FileShare.None))
+            // A virus scanner can hold a file just written for a moment (seen with state.json on GitHub's Windows runners, 2.35.0):
+            // that refuses the replace, or the next write to the same temporary name. As state.json does, retry briefly
+            // (about a second), and a temporary file that is still held gets a fresh name instead of failing the change.
+            for (int attempt = 0; ; attempt++)
             {
-                stream.Write(bytes);
-                stream.Flush(true);
+                try
+                {
+                    using (var stream = new FileStream(temporary, FileMode.Create, FileAccess.Write, FileShare.None))
+                    {
+                        stream.Write(bytes);
+                        stream.Flush(true);
+                    }
+                    break;
+                }
+                catch (IOException) when (attempt < 5) { temporary = MainPath + "." + attempt + ".tmp"; Thread.Sleep(20); }
             }
-            if (File.Exists(MainPath)) File.Replace(temporary, MainPath, BackupPath, true);
-            else File.Move(temporary, MainPath);
+            for (int attempt = 0; ; attempt++)
+            {
+                try
+                {
+                    if (File.Exists(MainPath)) File.Replace(temporary, MainPath, BackupPath, true);
+                    else File.Move(temporary, MainPath);
+                    break;
+                }
+                catch (Exception ex) when (attempt < 40 && ex is IOException or UnauthorizedAccessException) { Thread.Sleep(25); }
+                catch { try { File.Delete(temporary); } catch (Exception) { } throw; }
+            }
+            foreach (var stale in Directory.EnumerateFiles(Folder, "voice-library.v1.json.*.tmp")) { try { File.Delete(stale); } catch (IOException) { } catch (UnauthorizedAccessException) { } }
             if (Problem != null && !Blocked) Problem = null;
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
@@ -339,7 +363,7 @@ public sealed partial class VoiceLibrary
     private void Raise()
     {
         Interlocked.Increment(ref revision);
-        if (Changed is { } changed) ThreadPool.QueueUserWorkItem(_ => changed());
+        if (Changed is { } changed) Notify(changed);
     }
 
     // ---- Recordings -----------------------------------------------------------------------------------------

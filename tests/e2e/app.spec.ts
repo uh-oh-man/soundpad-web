@@ -100,32 +100,65 @@ const test = base.extend<{ harness: Harness; diagnostics: void; harnessOptions: 
   diagnostics: [
     async ({ page, harness }, use, testInfo) => {
       const consoleErrors: string[] = [];
-      page.on('console', (m) => {
-        if (m.type() === 'error') consoleErrors.push(m.text().slice(0, 200));
+      const pages = new Map<Page, string>();
+      const watch = (p: Page) => {
+        const who = pages.size ? `page ${pages.size + 1}: ` : '';
+        pages.set(p, who);
+        p.on('console', (m) => {
+          if (m.type() === 'error') consoleErrors.push(who + m.text().slice(0, 200));
+        });
+        p.on('pageerror', (e) => consoleErrors.push(who + e.message.slice(0, 200)));
+      };
+      watch(page);
+      // Guests are further pages of the same context (joinGuest).
+      page.context().on('page', watch);
+      // Every page keeps the notices it showed (2.41 CI): one leaves after 8 s, so a refusal at the
+      // start of a 10 s wait is gone by the time a failure is reported.
+      await page.context().addInitScript(() => {
+        const shown: string[] = [];
+        (window as unknown as { shownNotices: string[] }).shownNotices = shown;
+        const note = (toast: Element) => {
+          const kind = /notice-(\w+)/.exec(toast.className)?.[1] ?? '?';
+          const text = `${kind}: ${toast.querySelector('span')?.textContent ?? ''}`.slice(0, 200);
+          if (!shown.includes(text)) shown.push(text);
+          if (shown.length > 30) shown.shift();
+        };
+        new MutationObserver((records) => {
+          for (const record of records)
+            for (const node of record.addedNodes) {
+              if (!(node instanceof Element)) continue;
+              if (node.matches('.notification-stack .toast')) note(node);
+              else if (node.matches('.notification-stack, .notification-stack *'))
+                node.querySelectorAll('.toast').forEach(note);
+            }
+        }).observe(document, { childList: true, subtree: true });
       });
-      page.on('pageerror', (e) => consoleErrors.push(e.message.slice(0, 200)));
       await use();
       if (testInfo.status === testInfo.expectedStatus) return;
-      const visible = await page
-        .evaluate(() => {
-          const text = (selector: string) =>
-            (document.querySelector(selector) as HTMLElement | null)?.innerText.trim() ?? '';
-          return {
-            notices: text('.notification-stack'),
-            status: text('header'),
-            url: location.pathname + location.search,
-          };
-        })
-        .catch(() => null);
-      throw Error(
-        [
-          'Diagnostics for the failure above:',
-          `page notices: ${JSON.stringify(visible?.notices ?? '(page closed)')}`,
-          `page header: ${JSON.stringify(visible?.status.slice(0, 300) ?? '')}`,
-          `console errors: ${JSON.stringify(consoleErrors.slice(-5))}`,
-          `companion log: ${harness.log()}`,
-        ].join('\n'),
+      const lines = ['Diagnostics for the failure above:'];
+      for (const [p, who] of pages) {
+        const visible = await p
+          .evaluate(() => {
+            const text = (selector: string) =>
+              (document.querySelector(selector) as HTMLElement | null)?.innerText.trim() ?? '';
+            return {
+              notices: text('.notification-stack'),
+              shown: (window as unknown as { shownNotices?: string[] }).shownNotices ?? [],
+              status: text('header'),
+            };
+          })
+          .catch(() => null);
+        lines.push(
+          `${who}page notices: ${JSON.stringify(visible?.notices ?? '(page closed)')}`,
+          `${who}notices shown: ${JSON.stringify(visible?.shown.slice(-8) ?? [])}`,
+          `${who}page header: ${JSON.stringify(visible?.status.slice(0, 300) ?? '')}`,
+        );
+      }
+      lines.push(
+        `console errors: ${JSON.stringify(consoleErrors.slice(-5))}`,
+        `companion log: ${harness.log()}`,
       );
+      throw Error(lines.join('\n'));
     },
     { auto: true },
   ],
@@ -4655,8 +4688,12 @@ test('voice library: a guest tags a recording and takes it back with Undo; the h
   const detail = voices.getByRole('region', { name: 'Recording Shared line' });
   await detail.getByLabel('Add a tag').fill('funny');
   await detail.getByRole('button', { name: 'Add', exact: true }).click();
+  // The change is confirmed first (2.41 CI): a refusal shows here, and the diagnostics list the
+  // guest's notices. A guest waits 12 s for an answer. Then the recording shows the tag.
+  await expect(guest.locator('.notification-stack').getByText('Tag “funny” added.')).toBeVisible({
+    timeout: 15000,
+  });
   await expect(detail.getByLabel('Tags')).toContainText('funny');
-  await expect(guest.locator('.notification-stack').getByText('Tag “funny” added.')).toBeVisible();
   await guest.locator('.notification-stack').getByRole('button', { name: 'Undo' }).click();
   await expect(detail.getByLabel('Tags')).not.toContainText('funny');
   // The host sees both changes, by name.

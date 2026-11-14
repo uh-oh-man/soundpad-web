@@ -34,6 +34,9 @@ Notable changes to Soundpad Web. Versions follow the website's `package.json`; t
 - **Keep in voice library** that the library cannot take (it is full, or its file cannot be saved) now says so and leaves the draft open, instead of keeping the clip outside the library.
 - Corrected text is changed on one recording at a time.
 - The example: the start page says what you can try, leaving it says what is cleared (favourites and view settings stay), its guests are marked simulated, its Mimic is labelled as the older 30-second Mimic until the example is redesigned, and the hotkey says it only works on the host's PC.
+- **A guest's busy moment is no longer refused.** Joining, then opening Voices and a recording, sends a dozen requests within a second, and the host's page refused those over its limit of 12 a second per guest: a guest's tag could be lost with "Too many requests", a refused status read left Voices showing "Loading the voice library…", and waveforms showed the same error. A guest's page now sends at most 8 such requests a second and queues the rest in order; Play, Stop and other playback never wait. (Found when 2.41.0's first CI run failed.)
+- **Saving the voice library waits out a virus scanner.** A scanner that briefly holds the library file (as one did to `state.json` on GitHub's Windows runners) could make a change fail with "The voice library could not be saved". The save now retries for about a second, as `state.json` has since 2.35.
+- **A change shows at once in the window that made it.** Right after a change, Voices could read the library's old revision on a busy PC and keep showing the recording as it was until the next update.
 - The voice library is saved in `%LOCALAPPDATA%\SoundpadWeb\library\` (where kept sounds go by default): the library, its words, its list of changes (at most two files of 32 MiB) and the category word index. `state.json` and Temp's records are unchanged.
 
 **One-time on update:** guests a 2.40 host page let in, or gave their own **Off** settings, are new to a 2.41 host page. Let them in or set them again.
@@ -46,6 +49,7 @@ A review of the voice library before release found 17 more, all fixed: "possible
 
 ### Tests
 
+- Fixes after the first CI run: 2 new companion tests (a status read right after a change counts it; a change waits out a scanner holding the library file), 1 new website unit test (a guest's burst is paced in order, playback is not), and the browser tests' failure notes now include every page's notices, also those already gone. A history test that compared a guest's start with the live frame after the fact now compares it with the live frame at joining (it failed on a slow runner, where the fixture's audio kept arriving between the two).
 - 30 new companion tests (the voice library, its limits and audit, guest scoping of search, previews and notices, the category index, speaker groups, Discard keeping new capture, commands refused on another recording, Stop and Panic during slow work, unsaved subtitles), 28 new website unit tests (guest keys and proofs, the voice library's rules, scrubbing, word clamping), and 8 new browser tests (four for the voice library, notices never covering controls, scrubbing with Stop and Play prompt, a selection and draft not carrying over to a new recording, and Last N s with a draft open).
 
 ## 2.40.0 — Drafts, and guests who can keep

@@ -701,6 +701,57 @@ public sealed class VoiceLibraryTests : IDisposable
     }
 
     [Fact]
+    public async Task AStatusReadRightAfterAChangeAlreadyCountsIt()
+    {
+        await using var rig = new Rig(folder); var bridge = rig.Bridge;
+        await rig.Host(listen: false);
+        var library = bridge.VoiceLibraryStore;
+        // The library's word of a change waits, as on a busy thread pool (2.41.0 CI): the guest page that made the
+        // change re-reads the status at once and must see a new revision, or it keeps showing the recording as it was.
+        var held = new List<Action>();
+        library.Notify = work => { lock (held) held.Add(work); };
+        var (r, _) = library.Add(Recording(folder, "Shared"), null, "host", "Host");
+        long Revision(Reply reply) => Body(reply).GetProperty("revision").GetInt64();
+        long before = Revision(await Ok(rig.As(Alice, Cmd("libraryStatus"))));
+        long snapshot = bridge.Snapshot.VoiceLibrary;
+        await Ok(rig.As(Alice, Cmd("libraryEdit") with { RecordingId = r.Id, AddTags = ["funny"] }));
+        Assert.True(Revision(await Ok(rig.As(Alice, Cmd("libraryStatus")))) > before);
+        Assert.True(bridge.Snapshot.VoiceLibrary > snapshot);
+        Assert.Contains("funny", Assert.IsType<LibraryRecording>(library.Get(r.Id)).Tags);
+        // When the word does arrive, it publishes; the revision never goes back.
+        long now = bridge.Snapshot.VoiceLibrary;
+        Action[] waiting; lock (held) waiting = [.. held];
+        Assert.NotEmpty(waiting);
+        foreach (var work in waiting) work();
+        Assert.True(bridge.Snapshot.VoiceLibrary >= now);
+    }
+
+    [Fact]
+    public async Task AChangeWaitsOutAVirusScannerHoldingTheLibraryFile()
+    {
+        await using var rig = new Rig(folder); var bridge = rig.Bridge;
+        await rig.Host(listen: false);
+        var library = bridge.VoiceLibraryStore;
+        var (r, _) = library.Add(Recording(folder, "Shared"), null, "host", "Host");
+        var main = Path.Combine(folder, "library", "voice-library.v1.json");
+        Assert.True(File.Exists(main));
+        // A scanner reads the file just written, sharing it for reading and writing but not for replacing (as state.json
+        // met on GitHub's runners in 2.35.0): the guest's tag used to be refused with "The voice library could not be saved".
+        var scanner = new FileStream(main, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+        var done = Task.Run(async () => { await Task.Delay(300); scanner.Dispose(); });
+        try
+        {
+            await Ok(rig.As(Alice, Cmd("libraryEdit") with { RecordingId = r.Id, AddTags = ["funny"] }));
+        }
+        finally { await done; }
+        Assert.Contains("funny", Assert.IsType<LibraryRecording>(library.Get(r.Id)).Tags);
+        Assert.Null(library.Problem);
+        Assert.Empty(Directory.EnumerateFiles(Path.GetDirectoryName(main)!, "*.tmp"));
+        // Saved for real: a new load sees the tag.
+        Assert.Contains("funny", Assert.IsType<LibraryRecording>(new VoiceLibrary(folder, new WordIndex()).Get(r.Id)).Tags);
+    }
+
+    [Fact]
     public void AfterTheBackupIsLoadedNewChangesNeverReuseAnAuditId()
     {
         var library = new VoiceLibrary(folder, new WordIndex());
