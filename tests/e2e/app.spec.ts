@@ -595,7 +595,14 @@ test('V2: 10000-sound library keeps rendering bounded and search responsive', as
     const loadMs = performance.now() - start;
     await expect(page.locator('.sound-entry')).toHaveCount(120);
     const search = performance.now();
-    await page.getByLabel('Search sounds').fill('Benchmark fixture 10000');
+    // Playwright's WebKit sometimes drops the text it types here while the page is still busy with the
+    // 10,000-sound board: the box keeps focus, but no input event ever reaches the page (1 run in 5 on the
+    // owner's PC with a second suite running, 2.41.0). Typed again, it holds.
+    const searchBox = page.getByLabel('Search sounds');
+    await expect(async () => {
+      await searchBox.fill('Benchmark fixture 10000');
+      await expect(searchBox).toHaveValue('Benchmark fixture 10000', { timeout: 1000 });
+    }).toPass({ timeout: 10000 });
     await expect(
       page.getByRole('button', { name: 'Play from start: Benchmark fixture 10000', exact: true }),
     ).toBeVisible();
@@ -3137,11 +3144,14 @@ test('Mimic on a phone: a fresh clip keeps its name readable beside Edit, Keep a
   }
 });
 
-test('on a phone, keyboard focus is never hidden behind the player bar', async ({
+test('on a phone, keyboard focus is never hidden behind the player bar or the notices', async ({
   page,
   harness,
 }) => {
   // 2.27.2: Tab put Edit copy's Save copy and Save & play under the bar at the bottom of a phone screen.
+  // 2.41: notices moved above the player, and Tab put Save copy under them (CI, WebKit). Chromium only
+  // passed because its focus() centres the Name field, which left Save copy in view with nothing to
+  // scroll, while WebKit's scrolls Name only to the bottom edge, so Tab then scrolled Save copy there too.
   await page.setViewportSize({ width: 375, height: 812 });
   await host(page, harness);
   await page
@@ -3156,19 +3166,118 @@ test('on a phone, keyboard focus is never hidden behind the player bar', async (
     .getByRole('button', { name: 'Edit copy' })
     .click();
   const form = editCopyForm(page, 'Focus tone');
-  await page.evaluate(() => window.scrollTo(0, 0));
-  await form.getByLabel('Name').focus();
-  for (const name of ['Save copy', 'Save & play', 'Preview']) {
+  const notices = page.locator('.notification-stack .toast');
+  /** Shows a notice with a button, so it stays 10 s: long enough for a slow runner to tab past it. */
+  const notice = (message: string) =>
+    page.evaluate(async (message) => {
+      const path = '/src/notifications.ts';
+      const { notify } = await import(path);
+      notify(message, 'info', { label: 'Undo', run: () => {} });
+    }, message);
+  /** Where the focused control's centre is: drawn on top, and not under the notices or the player bar. */
+  const focusedShown = () =>
+    page.evaluate(() => {
+      const el = document.activeElement as HTMLElement;
+      const r = el.getBoundingClientRect();
+      const x = r.left + r.width / 2,
+        y = r.top + r.height / 2;
+      const hit = document.elementFromPoint(x, y);
+      // By box as well as by hit test: parts of the notices let the pointer through to what is under them.
+      const under = [...document.querySelectorAll('.notification-stack, .player')]
+        .filter((overlay) => !overlay.contains(el))
+        .map((overlay) => overlay.getBoundingClientRect())
+        .some((b) => b.height > 0 && x >= b.left && x <= b.right && y >= b.top && y <= b.bottom);
+      return { onTop: hit === el || el.contains(hit), under };
+    });
+  for (const [round, count] of [
+    ['one notice', 1],
+    ['two notices', 2],
+  ] as const) {
+    await notice(
+      round === 'one notice'
+        ? 'Fixture notice while tabbing.'
+        : 'A second, longer fixture notice, so the notices stand taller over the bottom of the screen.',
+    );
+    expect(await notices.count(), round).toBeGreaterThanOrEqual(count);
+    // Save copy peeks out above the player bar, as the next control does while someone tabs down the
+    // page. Both engines then scroll it up only as far as the bottom edge they keep clear
+    // (scroll-padding), which is under the notices unless that edge counts them too.
+    await form.getByRole('button', { name: 'Save copy' }).evaluate((el) => {
+      const bar = document.querySelector('.player')!.getBoundingClientRect().top;
+      window.scrollBy(0, el.getBoundingClientRect().top - (bar - 20));
+    });
+    await form
+      .getByLabel('Name')
+      .evaluate((el) => (el as HTMLElement).focus({ preventScroll: true }));
+    for (const name of ['Save copy', 'Save & play', 'Preview']) {
+      await page.keyboard.press('Tab');
+      await expect(form.getByRole('button', { name })).toBeFocused();
+      await expect(notices.first(), `a notice shows while ${name} has focus`).toBeVisible();
+      expect(await focusedShown(), `${name} is visible when focused, ${round}`).toEqual({
+        onTop: true,
+        under: false,
+      });
+    }
+  }
+});
+
+test("on a phone, focus in the player's waveform tools stays clear of the notices and never scrolls the page", async ({
+  page,
+  harness,
+}) => {
+  // 2.41 review: the tools open fixed above the player, where the notices sit too. Tab put their region
+  // controls under the notices, and moving focus clear scrolled the page behind them instead.
+  await page.setViewportSize({ width: 375, height: 812 });
+  await host(page, harness);
+  await page.getByRole('button', { name: 'Play from start: Airhorn', exact: true }).click();
+  const player = page.locator('.player');
+  await page.getByRole('button', { name: 'Expand player waveform' }).click();
+  await player.getByRole('button', { name: 'Edit', exact: true }).click();
+  await expect(player.getByLabel('New cue name')).toBeVisible();
+  await page.evaluate(async () => {
+    const path = '/src/notifications.ts';
+    const { notify } = await import(path);
+    // With a button, so each stays 10 s.
+    notify('A fixture notice, long enough to need a second line on a phone.', 'info', {
+      label: 'Undo',
+      run: () => {},
+    });
+    notify('A second fixture notice.', 'info', { label: 'Undo', run: () => {} });
+  });
+  await expect(page.locator('.notification-stack .toast')).toHaveCount(2);
+  await page.evaluate(() => window.scrollTo(0, 200));
+  await player
+    .getByLabel('New cue name')
+    .evaluate((el) => (el as HTMLElement).focus({ preventScroll: true }));
+  for (let step = 0; step < 8; step++) {
     await page.keyboard.press('Tab');
-    await expect(form.getByRole('button', { name })).toBeFocused();
-    // What is drawn at the focused control's centre is the control itself, not the player bar.
+    // The page checks focus again a frame later, after the browser's own focus scrolling (watchFocusClearance).
+    // WebKit's scrolling inside the tools lands only then: read right after the key, a control could still
+    // be on its way out from under the notices (7 of 8 runs failed so on the owner's PC, 2.41.0).
+    await page.evaluate(
+      () =>
+        new Promise<void>((resolve) =>
+          requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
+        ),
+    );
     const shown = await page.evaluate(() => {
       const el = document.activeElement as HTMLElement;
       const r = el.getBoundingClientRect();
-      const hit = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
-      return hit === el || el.contains(hit);
+      const x = r.left + r.width / 2,
+        y = r.top + r.height / 2;
+      const b = document.querySelector('.notification-stack')!.getBoundingClientRect();
+      return {
+        name: el.getAttribute('aria-label') ?? el.textContent?.trim(),
+        inTools: !!el.closest('.wave-tools'),
+        underNotices: x >= b.left && x <= b.right && y >= b.top && y <= b.bottom,
+        scrollY: window.scrollY,
+      };
     });
-    expect(shown, `${name} is visible when focused`).toBe(true);
+    expect(shown.inTools, `step ${step} is still in the tools`).toBe(true);
+    expect(shown, `${shown.name} is clear of the notices`).toMatchObject({
+      underNotices: false,
+      scrollY: 200,
+    });
   }
 });
 
@@ -4486,8 +4595,12 @@ test('voice library: a guest tags a recording and takes it back with Undo; the h
   const detail = voices.getByRole('region', { name: 'Recording Shared line' });
   await detail.getByLabel('Add a tag').fill('funny');
   await detail.getByRole('button', { name: 'Add', exact: true }).click();
+  // The change is confirmed first (2.41 CI): a refusal shows here, and the diagnostics list the
+  // guest's notices. A guest waits 12 s for an answer. Then the recording shows the tag.
+  await expect(guest.locator('.notification-stack').getByText('Tag “funny” added.')).toBeVisible({
+    timeout: 15000,
+  });
   await expect(detail.getByLabel('Tags')).toContainText('funny');
-  await expect(guest.locator('.notification-stack').getByText('Tag “funny” added.')).toBeVisible();
   await guest.locator('.notification-stack').getByRole('button', { name: 'Undo' }).click();
   await expect(detail.getByLabel('Tags')).not.toContainText('funny');
   // The host sees both changes, by name.
@@ -4800,9 +4913,23 @@ test('sentences (2.42 review): Space selects a lone piece, Escape clears it, nud
   expect((await stored()).versions[0].text).toBe('fixture tone');
   // Removing a pause from the keyboard leaves the focus on the timeline (on a neighbour).
   const pause = timeline.getByRole('button', { name: /^Pause, 4000 ms/ });
+  // A click gives the piece the keyboard, in Safari too (which does not focus a clicked button).
   await pause.click();
+  await expect(pause).toBeFocused();
   await page.keyboard.press('Delete');
   await expect(pause).toHaveCount(0);
   // The pause was last: the piece before it has the focus now.
-  await expect(timeline.getByRole('button', { name: /^“tone”/ })).toBeFocused();
+  const tone = timeline.getByRole('button', { name: /^“tone”/ });
+  await expect(tone).toBeFocused();
+  // After a click, the arrow keys go on from the clicked piece.
+  await word.click();
+  await expect(word).toBeFocused();
+  await page.keyboard.press('ArrowRight');
+  await expect(tone).toBeFocused();
+  await expect(tone).toHaveAttribute('aria-pressed', 'true');
+  // Escape after a click clears the clicked piece's selection; it does not close the window.
+  await tone.click();
+  await page.keyboard.press('Escape');
+  await expect(tone).toHaveAttribute('aria-pressed', 'false');
+  await expect(sentences).toBeVisible();
 });

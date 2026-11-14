@@ -86,7 +86,26 @@ export async function startHarness(origin = ORIGIN, count = 4, options: string[]
     },
   };
 }
-export const test = base.extend<{ harness: Harness; diagnostics: void; harnessOptions: string[] }>({
+export const test = base.extend<{
+  harness: Harness;
+  diagnostics: void;
+  harnessOptions: string[];
+  noPublicRelays: void;
+}>({
+  // A host page reaches out to the public Nostr relays once its session starts (2.37). Tests never
+  // depend on them (the opt-in LIVE_RELAY and DEPLOYED_URL tests excepted), and in Playwright's
+  // Windows WebKit, setting up those internet connections holds up the page's local companion socket
+  // meanwhile: Play was answered after 2.5 s on the owner's PC (the companion took 50 ms) and after
+  // more than the 12 s command timeout on a GitHub runner (2.41.0 CI). So every page of the test's
+  // context has them refused at once.
+  noPublicRelays: [
+    async ({ context }, use) => {
+      if (process.env.LIVE_RELAY !== '1' && !process.env.DEPLOYED_URL)
+        await context.routeWebSocket(/^wss:\/\//, (socket) => socket.close());
+      await use();
+    },
+    { auto: true },
+  ],
   // Extra harness arguments for a group of tests (test.use), e.g. ['--latency-ms', '40'] for a
   // Soundpad that takes 40 ms per request; see the end of companion/harness/Program.cs.
   harnessOptions: [[], { option: true }],
@@ -103,32 +122,65 @@ export const test = base.extend<{ harness: Harness; diagnostics: void; harnessOp
   diagnostics: [
     async ({ page, harness }, use, testInfo) => {
       const consoleErrors: string[] = [];
-      page.on('console', (m) => {
-        if (m.type() === 'error') consoleErrors.push(m.text().slice(0, 200));
+      const pages = new Map<Page, string>();
+      const watch = (p: Page) => {
+        const who = pages.size ? `page ${pages.size + 1}: ` : '';
+        pages.set(p, who);
+        p.on('console', (m) => {
+          if (m.type() === 'error') consoleErrors.push(who + m.text().slice(0, 200));
+        });
+        p.on('pageerror', (e) => consoleErrors.push(who + e.message.slice(0, 200)));
+      };
+      watch(page);
+      // Guests are further pages of the same context (joinGuest).
+      page.context().on('page', watch);
+      // Every page keeps the notices it showed (2.41 CI): one leaves after 8 s, so a refusal at the
+      // start of a 10 s wait is gone by the time a failure is reported.
+      await page.context().addInitScript(() => {
+        const shown: string[] = [];
+        (window as unknown as { shownNotices: string[] }).shownNotices = shown;
+        const note = (toast: Element) => {
+          const kind = /notice-(\w+)/.exec(toast.className)?.[1] ?? '?';
+          const text = `${kind}: ${toast.querySelector('span')?.textContent ?? ''}`.slice(0, 200);
+          if (!shown.includes(text)) shown.push(text);
+          if (shown.length > 30) shown.shift();
+        };
+        new MutationObserver((records) => {
+          for (const record of records)
+            for (const node of record.addedNodes) {
+              if (!(node instanceof Element)) continue;
+              if (node.matches('.notification-stack .toast')) note(node);
+              else if (node.matches('.notification-stack, .notification-stack *'))
+                node.querySelectorAll('.toast').forEach(note);
+            }
+        }).observe(document, { childList: true, subtree: true });
       });
-      page.on('pageerror', (e) => consoleErrors.push(e.message.slice(0, 200)));
       await use();
       if (testInfo.status === testInfo.expectedStatus) return;
-      const visible = await page
-        .evaluate(() => {
-          const text = (selector: string) =>
-            (document.querySelector(selector) as HTMLElement | null)?.innerText.trim() ?? '';
-          return {
-            notices: text('.notification-stack'),
-            status: text('header'),
-            url: location.pathname + location.search,
-          };
-        })
-        .catch(() => null);
-      throw Error(
-        [
-          'Diagnostics for the failure above:',
-          `page notices: ${JSON.stringify(visible?.notices ?? '(page closed)')}`,
-          `page header: ${JSON.stringify(visible?.status.slice(0, 300) ?? '')}`,
-          `console errors: ${JSON.stringify(consoleErrors.slice(-5))}`,
-          `companion log: ${harness.log()}`,
-        ].join('\n'),
+      const lines = ['Diagnostics for the failure above:'];
+      for (const [p, who] of pages) {
+        const visible = await p
+          .evaluate(() => {
+            const text = (selector: string) =>
+              (document.querySelector(selector) as HTMLElement | null)?.innerText.trim() ?? '';
+            return {
+              notices: text('.notification-stack'),
+              shown: (window as unknown as { shownNotices?: string[] }).shownNotices ?? [],
+              status: text('header'),
+            };
+          })
+          .catch(() => null);
+        lines.push(
+          `${who}page notices: ${JSON.stringify(visible?.notices ?? '(page closed)')}`,
+          `${who}notices shown: ${JSON.stringify(visible?.shown.slice(-8) ?? [])}`,
+          `${who}page header: ${JSON.stringify(visible?.status.slice(0, 300) ?? '')}`,
+        );
+      }
+      lines.push(
+        `console errors: ${JSON.stringify(consoleErrors.slice(-5))}`,
+        `companion log: ${harness.log()}`,
       );
+      throw Error(lines.join('\n'));
     },
     { auto: true },
   ],

@@ -625,19 +625,27 @@ public sealed class HistoryWiringTests : IDisposable
         // Windows time sync sets the clock back 50 s: the history's wall times (anchored on the old clock) now run ahead.
         rig.StepClock(-50);
         rig.Advance(5);
+        // The live frame just before she joins: the fixture delivers audio in real time, so the history keeps growing
+        // between the join and the query (by over a second on a slow CI runner, where the writer's waits take long).
+        long liveAtJoin = await LiveNow(bridge);
         Participant alice = new("alice-id", "Alice");
         bridge.NoteGuest(alice, "peer-a", rig.Now);
         var mine = Data<HistoryTimelineReply>(await Ok(bridge.Execute(Cmd("historyTimeline"), "guest", alice, "peer-a")));
-        Assert.True(mine.FromFrame >= mine.LiveFrame - S(1), $"from {mine.FromFrame} live {mine.LiveFrame}");
+        Assert.True(mine.FromFrame >= liveAtJoin && mine.FromFrame <= mine.LiveFrame, $"from {mine.FromFrame} live at join {liveAtJoin} live {mine.LiveFrame}");
         var early = await bridge.Execute(Cmd("mimicClip") with { StartFrame = S(60), EndFrame = S(61), SourceId = mine.SessionId }, "guest", alice, "peer-a");
         Assert.False(early.Ok);
         // Set back past this launch's start: answered, not an exception that ends the owner page's connection.
         rig.StepClock(-3600);
+        liveAtJoin = await LiveNow(bridge);
         Participant bob = new("bob-id", "Bob");
         bridge.NoteGuest(bob, "peer-b", rig.Now);
         var his = Data<HistoryTimelineReply>(await Ok(bridge.Execute(Cmd("historyTimeline"), "guest", bob, "peer-b")));
-        Assert.True(his.FromFrame >= his.LiveFrame - S(1));
+        Assert.True(his.FromFrame >= liveAtJoin && his.FromFrame <= his.LiveFrame, $"from {his.FromFrame} live at join {liveAtJoin} live {his.LiveFrame}");
     }
+
+    /// <summary>The history's live frame as the host sees it now (the query delivers all audio due first).</summary>
+    private static async Task<long> LiveNow(Bridge bridge) =>
+        Data<HistoryTimelineReply>(await Ok(bridge.Execute(Cmd("historyTimeline"), "host"))).LiveFrame;
 
     /// <summary>A capture whose sink the test drives directly, at the real capture rate; opens no device.</summary>
     private sealed class ScriptedCapture : IMimicCapture

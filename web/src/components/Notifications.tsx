@@ -10,6 +10,7 @@ import {
   type Notice,
 } from '../notifications';
 import { requestEditor } from '../shell';
+import { watchFocusClearance } from '../focus-clear';
 import { useNoticeSlot } from './Modal';
 
 const NARROW = '(max-width: 1000px)';
@@ -42,7 +43,8 @@ function useNarrow() {
  * notice once, wherever its card is. Info and success cards keep role status; error cards are a named
  * group, not role alert, because a browser raises an alert event for every alert element it creates, so
  * an error was said by the announcer and the card, and again each time a dialog opened or closed and the
- * cards moved into or out of it.
+ * cards moved into or out of it. Keyboard focus is kept clear of the cards, the player and the sheet's
+ * minimized bar: by the CSS that counts --notice-height, and by focus-clear.ts for what it can't reach.
  */
 export function Notifications() {
   const notices = useNotices();
@@ -70,6 +72,7 @@ export function Notifications() {
       root.style.removeProperty('--notice-height');
     };
   }, [narrow]);
+  useEffect(() => watchFocusClearance([dock.current, slot]), [slot]);
   const stack = (
     <aside className={`notification-stack${slot ? ' in-dialog' : ''}`} aria-label="Notifications">
       {hidden > 0 && !slot && (

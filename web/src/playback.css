@@ -625,6 +625,13 @@ html[data-motion='reduce'] .player.intent-pending .playback-icon {
     margin-left: auto;
   }
 }
+/* The player's waveform tools open above it, where the phone notice dock sits too (2.41): the same room at
+   their end (--notice-height, published while the dock floats) lets their last controls scroll clear of
+   the cards. focus-clear.ts moves focus clear inside the tools without scrolling the page behind them. */
+.player-wave .wave-tools {
+  padding-bottom: calc(15px + var(--notice-height, 0px));
+  scroll-padding-bottom: var(--notice-height, 0px);
+}
 @media (max-width: 700px) {
   .player-v2 .transport {
     gap: 4px;
