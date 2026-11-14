@@ -3152,7 +3152,9 @@ test('on a phone, keyboard focus is never hidden behind the player bar or the no
   // 2.41: notices moved above the player, and Tab put Save copy under them (CI, WebKit). Chromium only
   // passed because its focus() centres the Name field, which left Save copy in view with nothing to
   // scroll, while WebKit's scrolls Name only to the bottom edge, so Tab then scrolled Save copy there too.
-  await page.setViewportSize({ width: 375, height: 812 });
+  // 2.43: 667 px high (an iPhone SE), so the copy editor's sheet is short enough for Save copy to sit
+  // under the notices before Tab reaches it; at 812 the sheet shows the whole form above them.
+  await page.setViewportSize({ width: 375, height: 667 });
   await host(page, harness);
   await page
     .getByLabel('Add session audio', { exact: true })
@@ -3201,11 +3203,27 @@ test('on a phone, keyboard focus is never hidden behind the player bar or the no
     expect(await notices.count(), round).toBeGreaterThanOrEqual(count);
     // Save copy peeks out above the player bar, as the next control does while someone tabs down the
     // page. Both engines then scroll it up only as far as the bottom edge they keep clear
-    // (scroll-padding), which is under the notices unless that edge counts them too.
-    await form.getByRole('button', { name: 'Save copy' }).evaluate((el) => {
+    // (scroll-padding), which is under the notices unless that edge counts them too. Since 2.43 the form
+    // is in the editor sheet, whose body is the scroller (the page before).
+    const peek = await form.getByRole('button', { name: 'Save copy' }).evaluate((el) => {
       const bar = document.querySelector('.player')!.getBoundingClientRect().top;
-      window.scrollBy(0, el.getBoundingClientRect().top - (bar - 20));
+      let scroller: Element | null = el.parentElement;
+      while (
+        scroller &&
+        !(
+          scroller.scrollHeight > scroller.clientHeight &&
+          /auto|scroll/.test(getComputedStyle(scroller).overflowY)
+        )
+      )
+        scroller = scroller.parentElement;
+      (scroller ?? window).scrollBy(0, el.getBoundingClientRect().top - (bar - 20));
+      const notices = document.querySelector('.notification-stack')!.getBoundingClientRect().top;
+      return { bottom: el.getBoundingClientRect().bottom, notices };
     });
+    // It really starts under the notices, so Tab has to move it clear of them.
+    expect(peek.bottom, `Save copy starts under the notices, ${round}`).toBeGreaterThan(
+      peek.notices,
+    );
     await form
       .getByLabel('Name')
       .evaluate((el) => (el as HTMLElement).focus({ preventScroll: true }));
