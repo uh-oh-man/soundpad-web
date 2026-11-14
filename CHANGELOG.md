@@ -93,6 +93,8 @@ A review of sentences and the palette before release found 27 problems, all fixe
 
 ### Tests
 
+- The test that holds the voice library file the way a virus scanner does now lets go from its own thread, so a busy
+  runner can no longer hold it past the save's retry window.
 - 25 new companion tests (matching that keeps the unchanged words when the text changes, Smooth to Chaotic repeatable per setting, missing words never filled in by themselves, gaps and bleeps, overlaps, that sentences are made only from library recordings and the companion contains no speech engine, the sentences file and its backup, Play into game from a slot with Panic and permissions, Keep and versions that stay exact when their recordings change, performances and sets, and the review's fixes), 16 new website unit tests (the builder's selection, keyboard and timeline rules, missing-word markers with reduced motion, guest permissions including per-guest Off and seeking, and the list keeping its place after a failure), and 3 new browser tests (build, swap, bleep, play into the game, keep and pin a sentence; a recorded performance opened as a sentence; and the review's keyboard, focus, player name and typed-just-before-Keep fixes). That last test also checks that a clicked piece takes Delete, the arrow keys and Escape, which failed in Safari's engine (WebKit) before the fix.
 - Not checked yet: nothing was listened to. The tests use the test Soundpad and stand-in recordings, so how joins, balancing, cleanup, bleeps and effects sound on real voices, and sentences played on the real Soundpad, are still to be checked.
 
