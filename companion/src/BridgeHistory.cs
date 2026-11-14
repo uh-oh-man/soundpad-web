@@ -10,7 +10,7 @@ public sealed record MimicSettings(int Format = 1, int HistorySeconds = HistoryS
 /// <param name="Replays">2.40: spans where the companion itself played into the game (its own replay), clipped to what the asker may see.</param>
 public sealed record HistoryTimelineReply(string? SessionId, int Rate, long LiveFrame, long? LiveWallUtcMs, long NowUtcMs, bool Recording, int WindowSeconds, HistoryRange[] Available, HistorySpan[] Spans, HistoryGap[] Gaps, long? FromFrame, HistoryRange[] Shared, bool Transcribing, HistoryRange[]? Replays = null);
 /// <summary>A word as the website receives it (historyTranscript, 2.39). Frames are on the history timeline.</summary>
-public sealed record HistoryWordReply(long Id, long Start, long End, string Text, float Probability, int StretchMs, bool PauseBefore, bool PauseAfter, string Status, long PhraseId, int Revision, bool Corrected);
+public sealed record HistoryWordReply(long Id, long Start, long End, string Text, float Probability, int StretchMs, bool PauseBefore, bool PauseAfter, string Status, long PhraseId, int Revision, bool Corrected, int? Speaker = null);
 
 // Rolling recording history (2.39): Mimic records into a HistoryStore under <data>\history\ for the whole companion
 // launch, instead of a 45-second ring in memory. See reports/OVERHAUL-PLAN.md, "Rolling recording and clip editing".
@@ -155,7 +155,16 @@ public sealed partial class Bridge
             words.CutAt(next.LiveFrame);
         }
         transcriber.Attach(next, words);
+        WireTranscriber();
         lock (peekGate) lastPeek = null;
+    }
+    private MimicTranscriber? wiredTranscriber;
+    /// <summary>New history words reach the wanted-word notices and speaker grouping (2.41), once per transcriber.</summary>
+    private void WireTranscriber()
+    {
+        if (ReferenceEquals(wiredTranscriber, transcriber)) return;
+        transcriber.WordsAdded += OnWordsAdded;
+        wiredTranscriber = transcriber;
     }
     private void CloseHistoryLocked()
     {
@@ -379,7 +388,7 @@ public sealed partial class Bridge
                     var visible = h.Timeline(access).Available;
                     var words = transcriber.WordsBetween(h, access, range.StartFrame, range.EndFrame)
                         // Ids count every word and phrase since the history began; a guest gets ids that do not say how many came before they joined.
-                        .Select(w => new HistoryWordReply(host ? w.Word.Id : GuestId(w.Word.Id, 1), w.Word.Start, w.Word.End, w.Correction?.Text ?? w.Word.Text, w.Word.Probability, w.Word.StretchMs, w.Word.PauseBefore, w.Word.PauseAfter, w.Word.Status, host ? w.Word.PhraseId : GuestId(w.Word.PhraseId, 2), w.Word.Revision, w.Correction != null)).ToArray();
+                        .Select(w => new HistoryWordReply(host ? w.Word.Id : GuestId(w.Word.Id, 1), w.Word.Start, w.Word.End, w.Correction?.Text ?? w.Word.Text, w.Word.Probability, w.Word.StretchMs, w.Word.PauseBefore, w.Word.PauseAfter, w.Word.Status, host ? w.Word.PhraseId : GuestId(w.Word.PhraseId, 2), w.Word.Revision, w.Correction != null, SpeakerOf(h.SessionId, w.Word.PhraseId))).ToArray();
                     var pending = transcriber.PendingBetween(h, visible, range.StartFrame, range.EndFrame);
                     // Viewing an older stretch asks for it to be recognised (only what this person may see).
                     foreach (var p in pending) transcriber.Request(p);

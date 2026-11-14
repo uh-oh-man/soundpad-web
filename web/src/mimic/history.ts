@@ -64,6 +64,8 @@ export const wordSchema = z.object({
   phraseId: z.number().int(),
   revision: z.number().int(),
   corrected: z.boolean(),
+  // 2.41: the speaker group of its phrase ("Group speakers (experimental)"); absent or null when Unassigned.
+  speaker: z.number().int().positive().nullish(),
 });
 export type Word = z.infer<typeof wordSchema>;
 export const transcriptSchema = z.object({

@@ -82,6 +82,15 @@ const permissionToggles: {
     v2: true,
     feature: 'drafts',
   },
+  {
+    key: 'guestLibraryEdit',
+    title: 'Guest voice-library editing',
+    description:
+      'Guests can name voices and tag, rename and organise recordings in the voice library. Every change is recorded with who made it and can be undone; files are never deleted.',
+    label: 'Allow guests to edit the voice library',
+    v2: true,
+    feature: 'voiceLibrary',
+  },
 ];
 
 export function SettingsDialog({

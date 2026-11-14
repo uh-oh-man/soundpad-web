@@ -6,6 +6,7 @@ if (args.FirstOrDefault() == "--real-exact-playback-probe") { Environment.ExitCo
 if (args.FirstOrDefault() == "--real-slot-probe") { Environment.ExitCode = await RealSlotProbe.Run(); return; }
 if (args.FirstOrDefault() == "--word-timing-eval" && args.Length >= 2) { await WordTimingEval.Run(args); return; } // see WordTimingEval.cs
 if (args.FirstOrDefault() == "--word-pipeline-eval" && args.Length >= 2) { Environment.ExitCode = await WordPipelineEval.Run(args); return; } // see WordPipelineEval.cs (2.39)
+if (args.FirstOrDefault() == "--speaker-eval" && args.Length >= 2) { Environment.ExitCode = SpeakerGroupingEval.Run(args); return; } // see SpeakerGroupingEval.cs (2.41)
 if (args.FirstOrDefault() == "--mock-only")
 {
     await using var isolated = new MockSoundpad(); isolated.DurationMs = 600000;

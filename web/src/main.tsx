@@ -20,6 +20,7 @@ import {
   OctagonPause,
   Sparkles,
   LogOut,
+  BookAudio,
 } from 'lucide-react';
 import { controller } from './controller';
 import { flattenCategories, type Sound } from './protocol';
@@ -45,6 +46,8 @@ import { useBudgetSync, useDraftStore, useDraftSync } from './mimic/draft-store'
 import type { ConnectionInfo } from './network/session';
 import { WhatsNew } from './components/WhatsNew';
 import { MimicPanel } from './components/MimicPanel';
+import { VoicesPanel } from './components/VoicesPanel';
+import { useLibrarySync, useOpenRequests } from './library/voice-store';
 import { requestTemp } from './edit-copy';
 import { removeNewTempAudio } from './remove-temp';
 import { guestHeld, HELD_BY_HOST, playback } from './playback';
@@ -375,6 +378,7 @@ function App() {
   const [search, setSearch] = useState('');
   const [settings, setSettings] = useState(false);
   const [mimicOpen, setMimicOpen] = useState(false);
+  const [voicesOpen, setVoicesOpen] = useState(false);
   const [managing, setManaging] = useState(false);
   const [editing, setEditing] = useState<Sound | null>(null);
   const [organizing, setOrganizing] = useState<Sound | null>(null);
@@ -412,6 +416,18 @@ function App() {
   useDraftSync(state, draftsReady && canMimic);
   useBudgetSync(state, host, draftsReady);
   const { budget } = useDraftStore();
+  // The voice library (2.41): a guest also needs a host page that relays its commands.
+  const libraryReady =
+    connected &&
+    supports(state.companionVersion, 'voiceLibrary') &&
+    (host || controller.relaysLibrary());
+  useLibrarySync(state, libraryReady);
+  // A notice's Jump opens Mimic at that moment; Open shows the recording in Voices.
+  useOpenRequests((request) => {
+    // One window at a time: the other closes (what it showed is remembered).
+    setMimicOpen(request.kind === 'history');
+    setVoicesOpen(request.kind === 'recording');
+  });
   // After the host's Panic (2.35): guests cannot start audio until the host resumes; the host can.
   const suspended = mode !== 'landing' && state.playbackSuspended === true;
   const held = guestHeld(state, host);
@@ -693,6 +709,11 @@ function App() {
                   {canMimic && (
                     <button onClick={() => setMimicOpen(true)}>
                       <Mic2 size={17} /> Mimic
+                    </button>
+                  )}
+                  {libraryReady && (
+                    <button onClick={() => setVoicesOpen(true)}>
+                      <BookAudio size={17} /> Voices
                     </button>
                   )}
                   {host && (
@@ -1048,6 +1069,11 @@ function App() {
               requestTemp(kind, assetId);
             }}
           />
+        </Modal>
+      )}
+      {voicesOpen && mode !== 'landing' && libraryReady && (
+        <Modal label="Voices" onClose={() => setVoicesOpen(false)}>
+          <VoicesPanel state={state} host={host} connected={connected} canPlay={canPlay} />
         </Modal>
       )}
       {mode === 'landing' && <ProjectFooter />}
