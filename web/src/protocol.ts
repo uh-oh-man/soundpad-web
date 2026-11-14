@@ -112,7 +112,13 @@ export const commandSchema = z
       'paletteMark',
       'performance',
       'performanceSets',
+      // Host style sync (2.43, gate uiSync): the host's browser and companion window share their style
+      // and active draft through the companion's ui.json. Host only; guests never send these.
+      'uiPrefsGet',
+      'uiPrefsSet',
     ]),
+    // uiPrefsSet (2.43): the style choices to store (any subset).
+    uiPrefs: z.lazy(() => uiPrefsInputSchema).optional(),
     // Sentences (2.42): which sentence, and what is asked of it (see sentenceInputSchema).
     sentenceId: z
       .string()
@@ -194,6 +200,8 @@ export const commandSchema = z
     name: z.string().max(100).optional(),
     speed: z.number().min(0.05).max(20).optional(),
     keepPitch: z.boolean().optional(),
+    // Which sound a command is about. With trimAudio and trimPreview (2.43, gate soundEdit) it can be the
+    // source instead of assetId: a library sound, resolved by the companion from its own index.
     soundId: z.string().max(64).optional(),
     libraryVersion: z.string().max(64).optional(),
     delta: z.union([z.literal(-1), z.literal(1)]).optional(),
@@ -265,6 +273,34 @@ export const commandSchema = z
   })
   .strict();
 export type Command = z.infer<typeof commandSchema>;
+/**
+ * Where an edited copy comes from (trimAudio, trimPreview): a Temp asset, or (2.43, gate soundEdit) a
+ * library sound the companion resolves itself. Exactly one of the two.
+ */
+export type TrimSource =
+  { assetId: string; soundId?: never } | { soundId: string; assetId?: never };
+/**
+ * The companion's ui.json (2.43, gate uiSync): the host's shared style and active draft. Strict on the
+ * known fields; unknown keys are kept, so a newer site's settings survive an older one's write.
+ */
+const uiPrefsFields = {
+  navStyle: z.enum(['sidebar', 'tabs']),
+  theme: z.enum(['red-blue', 'purple', 'ocean']),
+  motion: z.enum(['system', 'reduce']),
+  contrast: z.enum(['standard', 'high']),
+  headerAnimation: z.enum(['on', 'still', 'off']),
+  activeDraft: z
+    .object({
+      sessionId: z.string().max(64),
+      draftId: z.string().regex(/^[a-f0-9]{32}$/),
+    })
+    .strict()
+    .nullable(),
+};
+export const uiPrefsSchema = z.looseObject({ version: z.literal(1), ...uiPrefsFields });
+export type UiPrefs = z.infer<typeof uiPrefsSchema>;
+/** What uiPrefsSet may carry: any of the fields, nothing else. */
+export const uiPrefsInputSchema = z.object(uiPrefsFields).partial().strict();
 const recordingIdSchema = z.string().regex(/^[a-f0-9]{32}$/);
 const pieceIdSchema = z.string().regex(/^[a-f0-9]{12}$/);
 const msSchema = z
@@ -450,6 +486,10 @@ export const snapshotSchema = z.object({
     positionRevision: z.number().int().nonnegative().optional(),
   }),
   counter: z.number().int().nonnegative(),
+  // 2.43 (gate kickSession): Kick presses since the companion started; never stored. Older companions omit it.
+  counterSession: z.number().int().nonnegative().optional(),
+  // 2.43 (gate uiSync): rises when the host's shared style (ui.json) changes, so host pages fetch uiPrefsGet.
+  uiRevision: z.number().int().nonnegative().optional(),
   permissions: z.object({
     remotePlayback: z.boolean(),
     guestCounter: z.boolean(),

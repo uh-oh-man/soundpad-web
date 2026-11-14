@@ -167,6 +167,44 @@ body {
   text-align: center;
 }
 
+/* A labelled row of radio choices, each a pill (Settings → Appearance). */
+.choice-group {
+  display: grid;
+  grid-template-columns: minmax(120px, 1fr) auto;
+  align-items: center;
+  gap: var(--space-2);
+  margin: var(--space-2) 0;
+}
+.choice-group > small {
+  grid-column: 1 / -1;
+  color: var(--text-muted);
+}
+.choice-options {
+  display: inline-flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: var(--space-1);
+}
+.choice-group label {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 6px;
+  min-height: 32px;
+  padding: 2px 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-pill);
+  cursor: pointer;
+}
+.choice-group label:has(input:checked) {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+.choice-group input {
+  margin: 0;
+  accent-color: var(--accent);
+}
+
 /* A floating panel that is not a dialog (Kick details, Speed menu): never role="dialog". */
 .popover {
   z-index: var(--z-popover);

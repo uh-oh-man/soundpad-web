@@ -135,6 +135,9 @@ describe('feature gates for older companions', () => {
       'discarding only the recording history a crash recovered (what was recorded since stays), and edits that always stay with the recording they were made on',
       'the voice library: kept clips with voices, tags and their words, word search that plays a single word, wanted words, a review queue, and word search in Soundpad categories you choose',
       'sentences built from recorded words on a timeline, a speaking palette with recorded performances, performance sets, and kept sentences with versions that you can pin to the board',
+      'a Kick count for this session next to the lifetime total',
+      'effects and speed copies of any Soundpad sound',
+      'your browser and the companion window share style and active draft',
     ]);
     expect(missingFeatures('2.15.9')).toEqual([
       'any speed for edited copies (0.05× to 20×)',
@@ -152,6 +155,9 @@ describe('feature gates for older companions', () => {
       'discarding only the recording history a crash recovered (what was recorded since stays), and edits that always stay with the recording they were made on',
       'the voice library: kept clips with voices, tags and their words, word search that plays a single word, wanted words, a review queue, and word search in Soundpad categories you choose',
       'sentences built from recorded words on a timeline, a speaking palette with recorded performances, performance sets, and kept sentences with versions that you can pin to the board',
+      'a Kick count for this session next to the lifetime total',
+      'effects and speed copies of any Soundpad sound',
+      'your browser and the companion window share style and active draft',
     ]);
     expect(missingFeatures('2.16.2')).toEqual([
       'Keep pitch when changing speed',
@@ -168,6 +174,9 @@ describe('feature gates for older companions', () => {
       'discarding only the recording history a crash recovered (what was recorded since stays), and edits that always stay with the recording they were made on',
       'the voice library: kept clips with voices, tags and their words, word search that plays a single word, wanted words, a review queue, and word search in Soundpad categories you choose',
       'sentences built from recorded words on a timeline, a speaking palette with recorded performances, performance sets, and kept sentences with versions that you can pin to the board',
+      'a Kick count for this session next to the lifetime total',
+      'effects and speed copies of any Soundpad sound',
+      'your browser and the companion window share style and active draft',
     ]);
     expect(missingFeatures('2.17.0')).toEqual([
       'clearing all temporary audio during a session',
@@ -183,6 +192,9 @@ describe('feature gates for older companions', () => {
       'discarding only the recording history a crash recovered (what was recorded since stays), and edits that always stay with the recording they were made on',
       'the voice library: kept clips with voices, tags and their words, word search that plays a single word, wanted words, a review queue, and word search in Soundpad categories you choose',
       'sentences built from recorded words on a timeline, a speaking palette with recorded performances, performance sets, and kept sentences with versions that you can pin to the board',
+      'a Kick count for this session next to the lifetime total',
+      'effects and speed copies of any Soundpad sound',
+      'your browser and the companion window share style and active draft',
     ]);
     expect(missingFeatures('2.19.0')).toEqual([
       'previewing an edited copy before saving it',
@@ -197,6 +209,9 @@ describe('feature gates for older companions', () => {
       'discarding only the recording history a crash recovered (what was recorded since stays), and edits that always stay with the recording they were made on',
       'the voice library: kept clips with voices, tags and their words, word search that plays a single word, wanted words, a review queue, and word search in Soundpad categories you choose',
       'sentences built from recorded words on a timeline, a speaking palette with recorded performances, performance sets, and kept sentences with versions that you can pin to the board',
+      'a Kick count for this session next to the lifetime total',
+      'effects and speed copies of any Soundpad sound',
+      'your browser and the companion window share style and active draft',
     ]);
     expect(supports('2.19.0', 'trimPreview')).toBe(false);
     expect(supports('2.20.0', 'trimPreview')).toBe(true);
@@ -213,6 +228,9 @@ describe('feature gates for older companions', () => {
       'discarding only the recording history a crash recovered (what was recorded since stays), and edits that always stay with the recording they were made on',
       'the voice library: kept clips with voices, tags and their words, word search that plays a single word, wanted words, a review queue, and word search in Soundpad categories you choose',
       'sentences built from recorded words on a timeline, a speaking palette with recorded performances, performance sets, and kept sentences with versions that you can pin to the board',
+      'a Kick count for this session next to the lifetime total',
+      'effects and speed copies of any Soundpad sound',
+      'your browser and the companion window share style and active draft',
     ]);
     expect(missingFeatures('2.20.0')).toEqual([
       'naming trimmed copies after their words',
@@ -226,6 +244,9 @@ describe('feature gates for older companions', () => {
       'discarding only the recording history a crash recovered (what was recorded since stays), and edits that always stay with the recording they were made on',
       'the voice library: kept clips with voices, tags and their words, word search that plays a single word, wanted words, a review queue, and word search in Soundpad categories you choose',
       'sentences built from recorded words on a timeline, a speaking palette with recorded performances, performance sets, and kept sentences with versions that you can pin to the board',
+      'a Kick count for this session next to the lifetime total',
+      'effects and speed copies of any Soundpad sound',
+      'your browser and the companion window share style and active draft',
     ]);
     expect(missingFeatures('2.29.3')).toEqual([
       'Undo that stops only its own clip',
@@ -238,6 +259,9 @@ describe('feature gates for older companions', () => {
       'discarding only the recording history a crash recovered (what was recorded since stays), and edits that always stay with the recording they were made on',
       'the voice library: kept clips with voices, tags and their words, word search that plays a single word, wanted words, a review queue, and word search in Soundpad categories you choose',
       'sentences built from recorded words on a timeline, a speaking palette with recorded performances, performance sets, and kept sentences with versions that you can pin to the board',
+      'a Kick count for this session next to the lifetime total',
+      'effects and speed copies of any Soundpad sound',
+      'your browser and the companion window share style and active draft',
     ]);
     expect(missingFeatures('2.24.0')).toEqual([
       'Undo that stops only its own clip',
@@ -250,6 +274,9 @@ describe('feature gates for older companions', () => {
       'discarding only the recording history a crash recovered (what was recorded since stays), and edits that always stay with the recording they were made on',
       'the voice library: kept clips with voices, tags and their words, word search that plays a single word, wanted words, a review queue, and word search in Soundpad categories you choose',
       'sentences built from recorded words on a timeline, a speaking palette with recorded performances, performance sets, and kept sentences with versions that you can pin to the board',
+      'a Kick count for this session next to the lifetime total',
+      'effects and speed copies of any Soundpad sound',
+      'your browser and the companion window share style and active draft',
     ]);
     expect(missingFeatures('2.30.0')).toEqual([
       'Undo for guests on their own clips and copies',
@@ -261,6 +288,9 @@ describe('feature gates for older companions', () => {
       'discarding only the recording history a crash recovered (what was recorded since stays), and edits that always stay with the recording they were made on',
       'the voice library: kept clips with voices, tags and their words, word search that plays a single word, wanted words, a review queue, and word search in Soundpad categories you choose',
       'sentences built from recorded words on a timeline, a speaking palette with recorded performances, performance sets, and kept sentences with versions that you can pin to the board',
+      'a Kick count for this session next to the lifetime total',
+      'effects and speed copies of any Soundpad sound',
+      'your browser and the companion window share style and active draft',
     ]);
     expect(missingFeatures('2.32.0')).toEqual([
       'playback that follows the newest click, and Panic',
@@ -271,6 +301,9 @@ describe('feature gates for older companions', () => {
       'discarding only the recording history a crash recovered (what was recorded since stays), and edits that always stay with the recording they were made on',
       'the voice library: kept clips with voices, tags and their words, word search that plays a single word, wanted words, a review queue, and word search in Soundpad categories you choose',
       'sentences built from recorded words on a timeline, a speaking palette with recorded performances, performance sets, and kept sentences with versions that you can pin to the board',
+      'a Kick count for this session next to the lifetime total',
+      'effects and speed copies of any Soundpad sound',
+      'your browser and the companion window share style and active draft',
     ]);
     expect(missingFeatures('2.34.2')).toEqual([
       'playback that follows the newest click, and Panic',
@@ -281,6 +314,9 @@ describe('feature gates for older companions', () => {
       'discarding only the recording history a crash recovered (what was recorded since stays), and edits that always stay with the recording they were made on',
       'the voice library: kept clips with voices, tags and their words, word search that plays a single word, wanted words, a review queue, and word search in Soundpad categories you choose',
       'sentences built from recorded words on a timeline, a speaking palette with recorded performances, performance sets, and kept sentences with versions that you can pin to the board',
+      'a Kick count for this session next to the lifetime total',
+      'effects and speed copies of any Soundpad sound',
+      'your browser and the companion window share style and active draft',
     ]);
     expect(missingFeatures('2.35.0')).toEqual([
       'the companion window that keeps your session running when the browser tab closes',
@@ -290,6 +326,9 @@ describe('feature gates for older companions', () => {
       'discarding only the recording history a crash recovered (what was recorded since stays), and edits that always stay with the recording they were made on',
       'the voice library: kept clips with voices, tags and their words, word search that plays a single word, wanted words, a review queue, and word search in Soundpad categories you choose',
       'sentences built from recorded words on a timeline, a speaking palette with recorded performances, performance sets, and kept sentences with versions that you can pin to the board',
+      'a Kick count for this session next to the lifetime total',
+      'effects and speed copies of any Soundpad sound',
+      'your browser and the companion window share style and active draft',
     ]);
     expect(missingFeatures('2.36.0')).toEqual([
       'guest admission, places and permissions that survive a reload of the host page',
@@ -298,6 +337,9 @@ describe('feature gates for older companions', () => {
       'discarding only the recording history a crash recovered (what was recorded since stays), and edits that always stay with the recording they were made on',
       'the voice library: kept clips with voices, tags and their words, word search that plays a single word, wanted words, a review queue, and word search in Soundpad categories you choose',
       'sentences built from recorded words on a timeline, a speaking palette with recorded performances, performance sets, and kept sentences with versions that you can pin to the board',
+      'a Kick count for this session next to the lifetime total',
+      'effects and speed copies of any Soundpad sound',
+      'your browser and the companion window share style and active draft',
     ]);
     expect(missingFeatures('2.37.0')).toEqual([
       'a rolling recording history of up to an hour, with clickable word-by-word subtitles',
@@ -305,6 +347,9 @@ describe('feature gates for older companions', () => {
       'discarding only the recording history a crash recovered (what was recorded since stays), and edits that always stay with the recording they were made on',
       'the voice library: kept clips with voices, tags and their words, word search that plays a single word, wanted words, a review queue, and word search in Soundpad categories you choose',
       'sentences built from recorded words on a timeline, a speaking palette with recorded performances, performance sets, and kept sentences with versions that you can pin to the board',
+      'a Kick count for this session next to the lifetime total',
+      'effects and speed copies of any Soundpad sound',
+      'your browser and the companion window share style and active draft',
     ]);
     // 2.38.0 (Try the example) changed the website only, so its companion lacks the history.
     expect(missingFeatures('2.38.0')).toEqual([
@@ -313,22 +358,39 @@ describe('feature gates for older companions', () => {
       'discarding only the recording history a crash recovered (what was recorded since stays), and edits that always stay with the recording they were made on',
       'the voice library: kept clips with voices, tags and their words, word search that plays a single word, wanted words, a review queue, and word search in Soundpad categories you choose',
       'sentences built from recorded words on a timeline, a speaking palette with recorded performances, performance sets, and kept sentences with versions that you can pin to the board',
+      'a Kick count for this session next to the lifetime total',
+      'effects and speed copies of any Soundpad sound',
+      'your browser and the companion window share style and active draft',
     ]);
     expect(missingFeatures('2.39.0')).toEqual([
       'drafts of Mimic clips you can edit before keeping, Latest phrase, private preview for guests, guest Keep with storage budgets, and Temp that stays until you quit',
       'discarding only the recording history a crash recovered (what was recorded since stays), and edits that always stay with the recording they were made on',
       'the voice library: kept clips with voices, tags and their words, word search that plays a single word, wanted words, a review queue, and word search in Soundpad categories you choose',
       'sentences built from recorded words on a timeline, a speaking palette with recorded performances, performance sets, and kept sentences with versions that you can pin to the board',
+      'a Kick count for this session next to the lifetime total',
+      'effects and speed copies of any Soundpad sound',
+      'your browser and the companion window share style and active draft',
     ]);
     expect(missingFeatures('2.40.0')).toEqual([
       'discarding only the recording history a crash recovered (what was recorded since stays), and edits that always stay with the recording they were made on',
       'the voice library: kept clips with voices, tags and their words, word search that plays a single word, wanted words, a review queue, and word search in Soundpad categories you choose',
       'sentences built from recorded words on a timeline, a speaking palette with recorded performances, performance sets, and kept sentences with versions that you can pin to the board',
+      'a Kick count for this session next to the lifetime total',
+      'effects and speed copies of any Soundpad sound',
+      'your browser and the companion window share style and active draft',
     ]);
     expect(missingFeatures('2.41.0')).toEqual([
       'sentences built from recorded words on a timeline, a speaking palette with recorded performances, performance sets, and kept sentences with versions that you can pin to the board',
+      'a Kick count for this session next to the lifetime total',
+      'effects and speed copies of any Soundpad sound',
+      'your browser and the companion window share style and active draft',
     ]);
-    expect(missingFeatures('2.42.0')).toEqual([]);
+    expect(missingFeatures('2.42.0')).toEqual([
+      'a Kick count for this session next to the lifetime total',
+      'effects and speed copies of any Soundpad sound',
+      'your browser and the companion window share style and active draft',
+    ]);
+    expect(missingFeatures('2.43.0')).toEqual([]);
     expect(supports('2.39.0', 'drafts')).toBe(false);
     expect(supports('2.40.0', 'drafts')).toBe(true);
     expect(supports('2.40.0', 'reviewFixes')).toBe(false);

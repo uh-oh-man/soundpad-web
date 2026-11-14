@@ -62,6 +62,10 @@ export const FEATURES = {
   reviewFixes: [2, 41],
   voiceLibrary: [2, 41],
   sentences: [2, 42],
+  // Stage G (2.43): Kick's session count, effects on Soundpad sounds, host style sync.
+  kickSession: [2, 43],
+  soundEdit: [2, 43],
+  uiSync: [2, 43],
 } as const satisfies Record<string, readonly [number, number]>;
 
 /** True when the website changed version since this browser last used it (and it had used it before). */
@@ -102,6 +106,9 @@ const FEATURE_NAMES: Record<keyof typeof FEATURES, string> = {
     'the voice library: kept clips with voices, tags and their words, word search that plays a single word, wanted words, a review queue, and word search in Soundpad categories you choose',
   sentences:
     'sentences built from recorded words on a timeline, a speaking palette with recorded performances, performance sets, and kept sentences with versions that you can pin to the board',
+  kickSession: 'a Kick count for this session next to the lifetime total',
+  soundEdit: 'effects and speed copies of any Soundpad sound',
+  uiSync: 'your browser and the companion window share style and active draft',
 };
 
 /**

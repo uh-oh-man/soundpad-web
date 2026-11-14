@@ -3,7 +3,10 @@
  * (Mimic is a dialog) or playing a Soundboard tile must not lose an edit in progress, and a page reload
  * comes back to it. Kept in memory and in this tab's sessionStorage, never shared or sent anywhere.
  */
-export type SectionName = 'mimic' | 'temp';
+import type { EditFields, EditorKind, ShellView } from './shell';
+
+export type SectionName =
+  'mimic' | 'temp' | 'shell' | 'board' | 'tempEdit' | 'voices' | 'sentences';
 export type SectionMemory = {
   mimic: {
     /** The draft shown (one at a time), if any. */
@@ -17,6 +20,32 @@ export type SectionMemory = {
   temp: {
     open?: boolean;
     find?: string;
+  };
+  /** Stage G (2.43): the view shown and the editor panel's content (WP-A writes these). */
+  shell: {
+    view?: ShellView;
+    panel?: { kind: EditorKind; soundId?: string; sourceId?: string } | null;
+  };
+  /** The Soundboard's category and scroll position. */
+  board: {
+    category?: string;
+    scrollTop?: number;
+  };
+  /** The copy editor's source and unsaved fields. */
+  tempEdit: {
+    sourceId?: string;
+    fields?: Partial<EditFields>;
+  };
+  /** Voices' tab, open recording and scroll position (WP-C writes these from the panel). */
+  voices: {
+    tab?: string;
+    recordingId?: string;
+    scrollTop?: number;
+  };
+  /** Sentences' open sentence and scroll position (WP-C writes these from the panel). */
+  sentences: {
+    sentenceId?: string;
+    scrollTop?: number;
   };
 };
 

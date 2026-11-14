@@ -6,7 +6,13 @@ Notable changes to Soundpad Web. Versions follow the website's `package.json`; t
 
 Work in progress (Stage G). This entry grows as the stage lands and is finished at release.
 
+### Added
+
+- **Appearance choices** in Settings → Appearance, stored for this browser only: **Navigation** (Sidebar or Top tabs), **Motion** (System or Reduce), **Contrast** (Standard or High), **Header animation** (On, Still or Off) and **Notice sounds** (Off or Subtle). Motion: Reduce and Contrast: High take effect at once; the others prepare the new navigation, header ribbon and notice sounds that follow in this release. Without browser storage a choice still applies to the open tab.
+
 ### Changed
+
+- **Blue studio.** New colour tokens for the whole app: midnight navy surfaces, electric-blue focus, selection and playback, red Stop and amber Panic. The default theme is now called **Blue studio** (it keeps the id browsers already stored), **Original Purple** is retuned to the original design, and **Ocean** follows the same roles. Focus is a 2 px ring with a gap, scrollbars are thin and visible instead of hidden, and no text is smaller than 11 px. The system's More contrast, Reduce transparency and forced colours are honoured.
 
 - **One legacy stylesheet.** `styles.css`, `v2.css` and `polish.css` are now one `studio.css`, and `main.tsx` imports every stylesheet itself, in cascade order: `tokens.css`, `studio.css`, `controls.css`, `mimic.css`, `voices.css`, `sentences.css`, then `shell.css`, `playback.css` and `surfaces.css` for the new look. Inside `studio.css`, rules repeated for the same selector were merged into the last one wherever no rule in between with the same specificity sets the same property; the old centred notice positioning (unused since 2.41) is gone; the four `!important` overrides outside the reduced-motion rules became rules of enough specificity; and layers use `--z-*` tokens. Nothing looked different: a temporary spec compared exact screenshots (`maxDiffPixels: 0`) and a dump of about 45 computed style properties of every element, at rest, under keyboard focus on each control and on hover, across the start page, the example board at five widths in all five views, a paused sound, and the host's board, Mimic, Voices, Sentences, Settings, Temp, Edit copy and the expanded player, after each step. As in 2.9.2, the spec and its images were not kept.
 

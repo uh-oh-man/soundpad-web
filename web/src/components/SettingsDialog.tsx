@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { Link, LogOut, Radio, RotateCcw, Trash2 } from 'lucide-react';
 import { controller } from '../controller';
 import type { Snapshot } from '../protocol';
@@ -7,6 +8,7 @@ import { ConnectionDetails } from './ConnectionDetails';
 import { missingFeatures, supports } from '../version';
 import { DEMO_COPY, hostCopy } from '../hosting';
 import { themes, type Theme, type useAppearance } from '../appearance';
+import { usePref, type Prefs } from '../prefs';
 
 const COMPANION_DOWNLOAD = `${(import.meta.env.VITE_REPOSITORY_URL as string | undefined) || 'https://github.com/uh-oh-man/soundpad-web'}/releases/latest/download/SoundpadWeb.exe`;
 
@@ -93,6 +95,44 @@ const permissionToggles: {
   },
 ];
 
+type ChoicePref = 'nav' | 'motion' | 'contrast' | 'headerAnimation' | 'noticeSounds';
+/**
+ * One appearance choice as a radio group (Stage G, 2.43). It is stored for this browser only; when
+ * storage is unavailable it still applies to this tab, and the note says so.
+ */
+function PrefChoice<K extends ChoicePref>({
+  name,
+  label,
+  options,
+}: {
+  name: K;
+  label: string;
+  options: [Prefs[K], string][];
+}) {
+  const [value, set] = usePref(name);
+  const [unsaved, setUnsaved] = useState(false);
+  const id = `pref-${name}`;
+  return (
+    <div className="choice-group" role="radiogroup" aria-labelledby={id}>
+      <span id={id}>{label}</span>
+      <span className="choice-options">
+        {options.map(([option, text]) => (
+          <label key={option}>
+            <input
+              type="radio"
+              name={id}
+              checked={value === option}
+              onChange={() => setUnsaved(!set(option))}
+            />
+            {text}
+          </label>
+        ))}
+      </span>
+      {unsaved && <small>Applied to this tab only: browser storage is unavailable.</small>}
+    </div>
+  );
+}
+
 export function SettingsDialog({
   view,
   connected,
@@ -132,6 +172,47 @@ export function SettingsDialog({
             ))}
           </select>
         </label>
+        <PrefChoice
+          name="nav"
+          label="Navigation"
+          options={[
+            ['sidebar', 'Sidebar'],
+            ['tabs', 'Top tabs'],
+          ]}
+        />
+        <PrefChoice
+          name="motion"
+          label="Motion"
+          options={[
+            ['system', 'System'],
+            ['reduce', 'Reduce'],
+          ]}
+        />
+        <PrefChoice
+          name="contrast"
+          label="Contrast"
+          options={[
+            ['standard', 'Standard'],
+            ['high', 'High'],
+          ]}
+        />
+        <PrefChoice
+          name="headerAnimation"
+          label="Header animation"
+          options={[
+            ['on', 'On'],
+            ['still', 'Still'],
+            ['off', 'Off'],
+          ]}
+        />
+        <PrefChoice
+          name="noticeSounds"
+          label="Notice sounds"
+          options={[
+            ['off', 'Off'],
+            ['subtle', 'Subtle'],
+          ]}
+        />
         <p>Only your browser's appearance changes.</p>
         {appearance.error && <p className="inline-error">{appearance.error}</p>}
       </section>
