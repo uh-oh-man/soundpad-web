@@ -2,6 +2,10 @@ import { UserPlus } from 'lucide-react';
 import { controller } from '../controller';
 import type { LobbyRequest } from '../network/session';
 
+/** 2.41: what "Unverified" means, on a guest or a request whose page proved no browser key. */
+export const UNVERIFIED_TITLE =
+  'This guest’s page is older and could not prove which browser it is, so the host treats it as a new guest every time it loads. Ask them to reload Soundpad Web.';
+
 /**
  * Guests waiting for the host (2.37): a list that stays until the host decides or the request lapses
  * after two minutes, never a notice that disappears. A view of another page's session shows it too,
@@ -16,6 +20,13 @@ export function LobbyRequests({ requests }: { requests: LobbyRequest[] }) {
           <UserPlus size={16} aria-hidden="true" />
           <span>
             <strong>{request.name}</strong>{' '}
+            {request.unverified && (
+              <>
+                <span className="link-kind unverified" title={UNVERIFIED_TITLE}>
+                  Unverified
+                </span>{' '}
+              </>
+            )}
             {request.kind === 'extra' ? 'asks for an extra place' : 'wants to join'}
           </span>
           <button

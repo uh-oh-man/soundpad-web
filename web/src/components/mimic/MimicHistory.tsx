@@ -22,6 +22,7 @@ import { guestHeld, HELD_BY_HOST, playback } from '../../playback';
 import { ago, lastSeconds, QUICK_KEYS, QUICK_SECONDS, type Selection } from '../../mimic/selection';
 import {
   behindLiveMs,
+  bind,
   clampViewEnd,
   DEFAULT_HISTORY_VIEW,
   formatClock,
@@ -31,9 +32,12 @@ import {
   hiddenParts,
   jump,
   levelsSchema,
+  ofSession,
   oldestFrame,
+  selectionFields,
   selectionFrames,
   selectionMs,
+  selectionOn,
   sentences,
   timelineSchema,
   toPeaks,
@@ -42,8 +46,10 @@ import {
   WINDOW_MS,
   windowStart,
   wordSelected,
+  wordCut,
   wordSelection,
   wordsText,
+  type BoundSelection,
   type FrameRange,
   type Timeline,
   type Word,
@@ -63,6 +69,7 @@ import { refreshDrafts, useDraftStore } from '../../mimic/draft-store';
 import { recall, remember } from '../../sections';
 import { MimicWave } from './MimicWave';
 import { MimicOverview } from './MimicOverview';
+import { historyPoller } from '../../mimic/history-poll';
 
 // Guests refresh half as often: their requests share the host page's and the companion's request budgets.
 const POLL_MS = 500,
@@ -74,6 +81,8 @@ const JUMP_SECONDS = 10;
 const VIEW_KEY = 'soundpad-web:mimic-history-view';
 /** A draft's edges are saved this long after the last change (keyboard nudges come in bursts). */
 const SAVE_EDGES_MS = 250;
+const NO_WORDS: Word[] = [];
+const NO_RANGES: FrameRange[] = [];
 
 /**
  * The Mimic window on a 2.39 companion: the rolling recording history. The main waveform shows the newest 10 s
@@ -107,11 +116,22 @@ export function MimicHistory({
   const [timeline, setTimeline] = useState<Timeline | null>(null);
   const [follow, setFollow] = useState(sameSession ? remembered.current.follow !== false : true);
   const [viewEnd, setViewEnd] = useState(sameSession ? (remembered.current.viewEnd ?? 0) : 0);
-  const [main, setMain] = useState<{ end: number; peaks: number[] } | null>(null);
-  const [overview, setOverview] = useState<{ range: FrameRange; peaks: number[] } | null>(null);
-  const [words, setWords] = useState<Word[]>([]);
-  const [pending, setPending] = useState<FrameRange[]>([]);
-  const [selection, setSelection] = useState<FrameRange | null>(null);
+  // Everything fetched or selected is tagged with the recording (history session) it came from (2.41), and only
+  // shown or used while that recording is the current one; see `ofSession` and `selectionOn`.
+  const [mainData, setMain] = useState<{ end: number; peaks: number[]; sessionId: string } | null>(
+    null,
+  );
+  const [overviewData, setOverview] = useState<{
+    range: FrameRange;
+    peaks: number[];
+    sessionId: string;
+  } | null>(null);
+  const [transcript, setTranscript] = useState<{
+    sessionId: string;
+    words: Word[];
+    pending: FrameRange[];
+  } | null>(null);
+  const [picked, setPicked] = useState<BoundSelection | null>(null);
   const frozenBySelection = useRef(false);
   const [anchor, setAnchor] = useState<number | null>(null);
   const [hover, setHover] = useState<Word | null>(null);
@@ -124,10 +144,21 @@ export function MimicHistory({
   const live = timeline?.liveFrame ?? 0;
   const rate = timeline?.rate ?? 48000;
   const end = follow ? live : viewEnd;
+  const sessionId = timeline?.sessionId ?? null;
+  /** The current recording, also for replies that arrive after this render. */
+  const currentSession = useRef(sessionId);
+  currentSession.current = sessionId;
+  const main = ofSession(mainData, sessionId);
+  const overview = ofSession(overviewData, sessionId);
+  const shownTranscript = ofSession(transcript, sessionId);
+  const words = shownTranscript?.words ?? NO_WORDS;
+  const pending = shownTranscript?.pending ?? NO_RANGES;
+  const selection = selectionOn(picked, sessionId);
+  /** A selection on the recording shown in this render. */
+  const setSelection = (next: FrameRange | null) => setPicked(bind(next, sessionId));
   // The window the waveform on screen was fetched for: selections map to frames through it, so they match what was seen.
   const displayEnd = main?.end ?? end;
   const start = windowStart(displayEnd, rate);
-  const sessionId = timeline?.sessionId ?? null;
 
   // Drafts: this person's (most recent first) and the other people's selections on this history.
   const { drafts: list, budget } = useDraftStore();
@@ -151,7 +182,7 @@ export function MimicHistory({
   // The open draft's range is what is selected; it follows the companion when it changes there.
   useEffect(() => {
     if (!open) return;
-    setSelection({ startFrame: open.startFrame, endFrame: open.endFrame });
+    setPicked(bind(open, open.sessionId));
     // Only when another draft is opened or its range changed elsewhere, never while typing its name.
   }, [open?.id, open?.startFrame, open?.endFrame]);
   useEffect(() => {
@@ -159,92 +190,105 @@ export function MimicHistory({
   }, [open?.id]);
 
   // Poll: the timeline every half second; the main levels with it (when live or the view moved), the transcript
-  // every second and the overview every two. Recording never waits for any of it.
+  // every second and the overview every two. Recording never waits for any of it. One loop does it all (2.41,
+  // history-poll.ts): moving the view nudges it instead of restarting it, so dragging the overview never has
+  // more than one request of a kind on its way, and each pass fetches the newest wanted view.
   const viewRef = useRef({ follow, viewEnd });
   viewRef.current = { follow, viewEnd };
-  const [kick, setKick] = useState(0);
+  const poller = useRef<ReturnType<typeof historyPoller> | null>(null);
   useEffect(() => {
     if (!connected) return;
-    let alive = true;
-    let timer: ReturnType<typeof setTimeout>;
-    let tick = 0;
     let shownEnd = -1;
-    const run = async () => {
-      try {
-        const t = timelineSchema.parse(
-          await controller.run('historyTimeline', {}, { quiet: true }),
-        );
-        if (!alive) return;
-        setTimeline(t);
-        if (t.sessionId) {
-          const v = viewRef.current;
-          const e = v.follow ? t.liveFrame : clampViewEnd(t, v.viewEnd);
-          const s = windowStart(e, t.rate);
-          const from = Math.max(0, s);
-          if (e > from && (e !== shownEnd || tick % 4 === 0)) {
-            const windowFrames = e - s;
-            const lead = Math.round((MAIN_BINS * (from - s)) / windowFrames);
-            const reply = levelsSchema.parse(
-              await controller.run(
-                'historyLevels',
-                {
-                  startFrame: from,
-                  endFrame: e,
-                  bins: Math.max(1, MAIN_BINS - lead),
-                  sourceId: t.sessionId,
-                },
-                { quiet: true },
-              ),
-            );
-            if (!alive) return;
-            setMain({ end: e, peaks: [...new Array(lead).fill(0), ...toPeaks(reply.levels)] });
-            shownEnd = e;
-          }
-          if (tick % 2 === 0 && e > from) {
-            const reply = transcriptSchema.parse(
-              await controller.run(
-                'historyTranscript',
-                { startFrame: from, endFrame: e, sourceId: t.sessionId },
-                { quiet: true },
-              ),
-            );
-            if (!alive) return;
-            setWords(reply.words);
-            setPending(reply.pending);
-          }
-          const oldest = oldestFrame(t);
-          if (tick % 4 === 0 && t.liveFrame > oldest) {
-            const reply = levelsSchema.parse(
-              await controller.run(
-                'historyLevels',
-                {
-                  startFrame: oldest,
-                  endFrame: t.liveFrame,
-                  bins: OVERVIEW_BINS,
-                  sourceId: t.sessionId,
-                },
-                { quiet: true },
-              ),
-            );
-            if (!alive) return;
-            setOverview({
-              range: { startFrame: oldest, endFrame: t.liveFrame },
-              peaks: toPeaks(reply.levels),
-            });
-          }
+    let wordsEnd = -1;
+    let shownSession: string | null = null;
+    let known: Timeline | null = null;
+    let knownAt = -Infinity;
+    const interval = host ? POLL_MS : GUEST_POLL_MS;
+    const loop = historyPoller(
+      async ({ tick, nudged, alive }) => {
+        // A moved view uses the timeline it has, unless that is older than one ordinary pass.
+        let t = known;
+        if (!nudged || !t || Date.now() - knownAt > interval) {
+          t = timelineSchema.parse(await controller.run('historyTimeline', {}, { quiet: true }));
+          if (!alive()) return;
+          known = t;
+          knownAt = Date.now();
+          setTimeline(t);
         }
-      } catch {
-        /* Keep the last view; the next tick retries. */
-      }
-      tick++;
-      if (alive) timer = setTimeout(run, host ? POLL_MS : GUEST_POLL_MS);
-    };
-    void run();
+        if (!t.sessionId) return;
+        const session = t.sessionId;
+        // Another recording (2.41): its waveform is fetched at once, whatever the old one showed.
+        if (session !== shownSession) {
+          shownSession = session;
+          shownEnd = -1;
+          wordsEnd = -1;
+        }
+        // The newest wanted view, read now (not when the pass was asked for).
+        const v = viewRef.current;
+        const e = v.follow ? t.liveFrame : clampViewEnd(t, v.viewEnd);
+        const s = windowStart(e, t.rate);
+        const from = Math.max(0, s);
+        if (e > from && (e !== shownEnd || (!nudged && tick % 4 === 0))) {
+          const windowFrames = e - s;
+          const lead = Math.round((MAIN_BINS * (from - s)) / windowFrames);
+          const reply = levelsSchema.parse(
+            await controller.run(
+              'historyLevels',
+              {
+                startFrame: from,
+                endFrame: e,
+                bins: Math.max(1, MAIN_BINS - lead),
+                sourceId: session,
+              },
+              { quiet: true },
+            ),
+          );
+          if (!alive() || currentSession.current !== session) return;
+          setMain({
+            end: e,
+            peaks: [...new Array(lead).fill(0), ...toPeaks(reply.levels)],
+            sessionId: session,
+          });
+          shownEnd = e;
+        }
+        if (e > from && (nudged ? e !== wordsEnd : tick % 2 === 0)) {
+          const reply = transcriptSchema.parse(
+            await controller.run(
+              'historyTranscript',
+              { startFrame: from, endFrame: e, sourceId: session },
+              { quiet: true },
+            ),
+          );
+          if (!alive() || currentSession.current !== session) return;
+          setTranscript({ sessionId: session, words: reply.words, pending: reply.pending });
+          wordsEnd = e;
+        }
+        const oldest = oldestFrame(t);
+        if (!nudged && tick % 4 === 0 && t.liveFrame > oldest) {
+          const reply = levelsSchema.parse(
+            await controller.run(
+              'historyLevels',
+              { startFrame: oldest, endFrame: t.liveFrame, bins: OVERVIEW_BINS, sourceId: session },
+              { quiet: true },
+            ),
+          );
+          if (!alive() || currentSession.current !== session) return;
+          setOverview({
+            range: { startFrame: oldest, endFrame: t.liveFrame },
+            peaks: toPeaks(reply.levels),
+            sessionId: session,
+          });
+        }
+      },
+      { intervalMs: interval },
+    );
+    poller.current = loop;
+    loop.start();
     return () => {
-      alive = false;
-      clearTimeout(timer);
+      loop.stop();
+      if (poller.current === loop) poller.current = null;
     };
-  }, [connected, kick, host]);
+  }, [connected, host]);
   // The list is fetched by the page when drafts change; opening the window asks once more.
   useEffect(() => {
     if (draftsOn && connected && history?.sessionId) void refreshDrafts();
@@ -260,7 +304,12 @@ export function MimicHistory({
       setFollow(false);
       setViewEnd(clamped);
     }
-    setKick((k) => k + 1);
+    // The next pass reads the view from here, even before React renders it.
+    viewRef.current =
+      clamped >= timeline.liveFrame
+        ? { follow: true, viewEnd }
+        : { follow: false, viewEnd: clamped };
+    poller.current?.nudge();
   }
   function step(seconds: number) {
     if (!timeline) return;
@@ -270,7 +319,7 @@ export function MimicHistory({
   function goLive() {
     frozenBySelection.current = false;
     setFollow(true);
-    setKick((k) => k + 1);
+    poller.current?.nudge();
   }
   /** Brings a range into view (a second of context after it) unless it is already there. */
   function reveal(range: FrameRange) {
@@ -286,7 +335,7 @@ export function MimicHistory({
     setFollow(false);
     setViewEnd(clampViewEnd(timeline, range.endFrame + rate));
     frozenBySelection.current = false;
-    setKick((k) => k + 1);
+    poller.current?.nudge();
   }
 
   // A draft's new edges go to the companion shortly after the last change; a refusal puts the old ones back.
@@ -300,7 +349,8 @@ export function MimicHistory({
           draftId: draft.id,
           startFrame: Math.round(next.startFrame),
           endFrame: Math.round(next.endFrame),
-          ...(sessionId && { sourceId: sessionId }),
+          // The draft's own recording (2.41): the companion refuses it on any other.
+          sourceId: draft.sessionId,
         })
         .then(() => refreshDrafts())
         .catch(() => setSelection({ startFrame: draft.startFrame, endFrame: draft.endFrame }));
@@ -362,13 +412,30 @@ export function MimicHistory({
 
   const selectedMs = selection ? selectionMs(selection, start, rate) : null;
   const suggestion = wordsText(words, selection);
-  const fields = () =>
-    selection && sessionId
-      ? { startFrame: selection.startFrame, endFrame: selection.endFrame, sourceId: sessionId }
-      : null;
+  // The frames and the recording they were selected on (2.41).
+  const fields = () => selectionFields(picked, sessionId);
 
   // Private preview: heard in this browser only, never through Soundpad. Guests have it with a 2.40 companion.
   const { previewing, play: preview, stop: stopPreview } = usePreviewAudio();
+  // Another recording (Mimic restarted, the companion restarted): nothing made on the old one may act on this one
+  // (2.41). Its waveform, words and selection are already hidden (they carry their recording); here the edit being
+  // saved, a preview on its way, the open draft and the held view go too.
+  const lastSession = useRef(sessionId);
+  useEffect(() => {
+    if (!sessionId) return;
+    const was = lastSession.current;
+    lastSession.current = sessionId;
+    if (!was || was === sessionId) return;
+    clearTimeout(saveTimer.current);
+    stopPreview();
+    setPicked(null);
+    setOpenId(null);
+    setAnchor(null);
+    setHover(null);
+    setName('');
+    frozenBySelection.current = false;
+    setFollow(true);
+  }, [sessionId, stopPreview]);
   const canPreview = (host && supports(state.companionVersion, 'preview')) || draftsOn;
   async function clip(play: boolean) {
     const chosen = fields();
@@ -407,7 +474,8 @@ export function MimicHistory({
         }),
       );
       await refreshDrafts();
-      openDraft(draft);
+      // A draft on a recording that is no longer shown is not opened over this one (2.41).
+      if (draft.sessionId === currentSession.current) openDraft(draft);
     } catch {
       /* Controller shows the error. */
     } finally {
@@ -419,7 +487,11 @@ export function MimicHistory({
     const next = name.trim();
     if (next === (draft.name ?? '').trim()) return;
     try {
-      await controller.run('draftUpdate', { draftId: draft.id, name: next });
+      await controller.run('draftUpdate', {
+        draftId: draft.id,
+        name: next,
+        sourceId: draft.sessionId,
+      });
     } catch {
       /* Controller shows the error. */
     }
@@ -431,7 +503,11 @@ export function MimicHistory({
     try {
       await saveName(draft);
       const result = draftClipSchema.parse(
-        await controller.run('draftKeep', { draftId: draft.id, ...(close && { action: 'close' }) }),
+        await controller.run('draftKeep', {
+          draftId: draft.id,
+          sourceId: draft.sessionId,
+          ...(close && { action: 'close' }),
+        }),
       );
       controller.notify(
         `“${name.trim() || draft.name || 'Draft'}” is in Temp${result.closed ? '' : '; the draft stays open'}.`,
@@ -450,7 +526,11 @@ export function MimicHistory({
     setBusy(true);
     try {
       await saveName(draft);
-      await playback.make('draftPlay', { draftId: draft.id }, 'make:mimic');
+      await playback.make(
+        'draftPlay',
+        { draftId: draft.id, sourceId: draft.sessionId },
+        'make:mimic',
+      );
       await refreshDrafts();
     } catch {
       /* Controller shows the error. */
@@ -462,7 +542,7 @@ export function MimicHistory({
     if (busy) return;
     setBusy(true);
     try {
-      await controller.run('draftDiscard', { draftId: draft.id });
+      await controller.run('draftDiscard', { draftId: draft.id, sourceId: draft.sessionId });
       closeDraft();
       await refreshDrafts();
     } catch {
@@ -476,7 +556,10 @@ export function MimicHistory({
     if (busy) return;
     setBusy(true);
     try {
-      await controller.run('draftDiscard', { draftId: id });
+      await controller.run('draftDiscard', {
+        draftId: id,
+        ...(sessionId && { sourceId: sessionId }),
+      });
       await refreshDrafts();
     } catch {
       /* Controller shows the error. */
@@ -488,9 +571,14 @@ export function MimicHistory({
     if (busy) return;
     setBusy(true);
     try {
-      const draft = draftSchema.parse(await controller.run('draftCopy', { draftId: id }));
+      const draft = draftSchema.parse(
+        await controller.run('draftCopy', {
+          draftId: id,
+          ...(sessionId && { sourceId: sessionId }),
+        }),
+      );
       await refreshDrafts();
-      openDraft(draft);
+      if (draft.sessionId === currentSession.current) openDraft(draft);
     } catch {
       /* Controller shows the error. */
     } finally {
@@ -501,12 +589,10 @@ export function MimicHistory({
     const chosen = fields();
     if (!chosen) return;
     try {
-      await controller.run('historyShare', {
-        startFrame: chosen.startFrame,
-        endFrame: chosen.endFrame,
-      });
+      // With its recording (2.41): a 2.41 companion refuses a range from another one.
+      await controller.run('historyShare', chosen);
       controller.notify('Guests can now see that part of the history.', 'success');
-      setKick((k) => k + 1);
+      poller.current?.refresh();
     } catch {
       /* Controller shows the error. */
     }
@@ -514,7 +600,7 @@ export function MimicHistory({
   async function unshare() {
     try {
       await controller.run('historyUnshare');
-      setKick((k) => k + 1);
+      poller.current?.refresh();
     } catch {
       /* Controller shows the error. */
     }
@@ -525,7 +611,7 @@ export function MimicHistory({
       // Edges still being saved: hear what is selected now.
       const chosen = fields();
       if (chosen) void preview('mimicPreview', chosen);
-    } else if (open) void preview('mimicPreview', { draftId: open.id });
+    } else if (open) void preview('mimicPreview', { draftId: open.id, sourceId: open.sessionId });
     else {
       const chosen = fields();
       if (chosen) void preview('mimicPreview', chosen);
@@ -685,7 +771,11 @@ export function MimicHistory({
         <MimicOverview
           range={overview.range}
           peaks={overview.peaks}
-          view={{ startFrame: Math.max(overview.range.startFrame, start), endFrame: end }}
+          // The wanted view, not the one last fetched: the outline follows a drag at once (2.41).
+          view={{
+            startFrame: Math.max(overview.range.startFrame, windowStart(end, rate)),
+            endFrame: end,
+          }}
           rate={rate}
           gaps={timeline.gaps.map((g) => g.atFrame)}
           shared={host ? timeline.shared : []}
@@ -789,7 +879,15 @@ export function MimicHistory({
                       onFocus={() => setHover(w)}
                       onBlur={() => setHover((h) => (h?.id === w.id ? null : h))}
                       onClick={(e) => {
-                        select(wordSelection(words, anchor, w.id, e.shiftKey, rate));
+                        // Clamped to the audio this person may hear around the word (2.41).
+                        const cut = timeline
+                          ? wordCut(words, anchor, w.id, e.shiftKey, timeline)
+                          : { range: wordSelection(words, anchor, w.id, e.shiftKey, rate) };
+                        if ('reason' in cut) {
+                          controller.notify(cut.reason, 'error');
+                          return;
+                        }
+                        select(cut.range);
                         if (!e.shiftKey || anchor === null) setAnchor(w.id);
                       }}
                     >

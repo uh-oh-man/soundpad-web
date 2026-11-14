@@ -1,9 +1,17 @@
 import { Check, Info, TriangleAlert, X } from 'lucide-react';
+import { createPortal } from 'react-dom';
 import { dismissNotice, holdNotice, useNotices } from '../notifications';
+import { useNoticeSlot } from './Modal';
+/**
+ * Notices sit at the bottom right, above the player, clear of the header, the example banner, Stop
+ * and Panic (2.41). While a dialog is open they move into it, at its foot, where they never cover
+ * its close button and Tab reaches their Undo inside the dialog's focus trap.
+ */
 export function Notifications() {
   const notices = useNotices();
-  return (
-    <aside className="notification-stack" aria-label="Notifications">
+  const slot = useNoticeSlot();
+  const stack = (
+    <aside className={`notification-stack${slot ? ' in-dialog' : ''}`} aria-label="Notifications">
       {notices.map((notice) => (
         <div
           className={`toast notice-${notice.kind}`}
@@ -47,4 +55,5 @@ export function Notifications() {
       ))}
     </aside>
   );
+  return slot ? createPortal(stack, slot) : stack;
 }

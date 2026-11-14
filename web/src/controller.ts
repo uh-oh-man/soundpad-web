@@ -77,6 +77,8 @@ type View = {
   policy: SessionPolicy;
   /** Host (2.37): each listed guest connection (by peer id) is direct or through the relay. */
   links: Record<string, Transport>;
+  /** Host (2.41): listed guest connections (peer ids) whose page proved no key; see guest-key.ts. */
+  unverified?: string[];
   /** The example session: a host page that runs entirely in this browser; nothing reaches Soundpad. */
   demo: boolean;
   /** The companion window is closing while Temp holds clips (2.40); this page answers. */
@@ -144,6 +146,8 @@ export class Controller {
   /** The example session, when one runs; then there is no bridge and no guest room. */
   private demo?: DemoModel;
   private demoStarting = false;
+  /** Guest (2.41): the "cannot keep its guest key" notice was shown. */
+  private toldGuestKey = false;
   /** The guest room, or the example standing in for it. */
   private room(): Room | undefined {
     return this.demo ?? this.session;
@@ -254,7 +258,8 @@ export class Controller {
         'layouts' in p ||
         'requests' in p ||
         'policy' in p ||
-        'links' in p)
+        'links' in p ||
+        'unverified' in p)
     )
       this.publishSession();
   }
@@ -267,7 +272,7 @@ export class Controller {
     this.publishTimer = setTimeout(() => {
       this.publishTimer = undefined;
       if (this.role !== 'owner' || !this.session) return;
-      const { invite, guests, people, layouts, requests, policy, links } = this.view;
+      const { invite, guests, people, layouts, requests, policy, links, unverified } = this.view;
       const info = {
         type: 'session' as const,
         invite,
@@ -277,7 +282,13 @@ export class Controller {
         ownerWindow: !!this.ownerKey,
         // What views show about the lobby and each guest (2.37); older views ignore it.
         // At most what the views accept (local.ts), so a crowded lobby never costs them the session info.
-        control: { requests: requests.slice(0, LOBBY_VIEW_MAX), policy, links },
+        control: {
+          requests: requests.slice(0, LOBBY_VIEW_MAX),
+          policy,
+          links,
+          // 2.41: older views ignore it.
+          unverified: (unverified ?? []).filter((peer) => guests.includes(peer)).slice(0, 64),
+        },
       };
       // The companion ends a socket over any message above 200,000 bytes, which would cost this page
       // its ownership (and the views a promotion loop). Many large shared layouts can pass that, so
@@ -390,6 +401,14 @@ export class Controller {
   /** A guest's connection changed (2.37). "Reconnected" means the same session came back. */
   private guestConnection(connection: ConnectionInfo) {
     this.update({ connection });
+    // 2.41: said once, honestly, when this browser cannot keep the key the host knows it by.
+    if (connection.guestKey === 'page' && !this.toldGuestKey) {
+      this.toldGuestKey = true;
+      this.notify(
+        'This browser cannot keep its guest key, so after a reload the host sees you as a new guest. Details are in Settings, Connection details.',
+        'info',
+      );
+    }
     if (connection.reconnected)
       this.notify(
         connection.transport === 'relay'
@@ -597,6 +616,7 @@ export class Controller {
       requests: info.control?.requests ?? [],
       policy: info.control ? readPolicy(info.control.policy) : { ...DEFAULT_POLICY },
       links: info.control?.links ?? {},
+      unverified: info.control?.unverified ?? [],
     });
   }
   /** Shows new settings and, with a 2.37 companion, keeps them there for this launch (2.37). */
@@ -744,7 +764,8 @@ export class Controller {
         (c, peer, person, joinedAt) => this.bridge!.send(c, 'guest', person, peer, joinedAt),
         () => {},
         () => {},
-        (guests, links) => current() && this.update({ guests, links: links ?? {} }),
+        (guests, links, unverified) =>
+          current() && this.update({ guests, links: links ?? {}, unverified: unverified ?? [] }),
         this.transport,
         {
           get: () => this.view.profile,

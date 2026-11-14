@@ -348,10 +348,12 @@ button:hover:not(:disabled) {
   font-size: 11px;
   line-height: 1.5;
 }
+/* Bottom right, above the player (2.41): clear of the header, the example banner and a dialog's close
+   button, which notices at the top used to cover. Inside a dialog they sit at its foot (.in-dialog). */
 .notification-stack {
   position: fixed;
   z-index: 100;
-  top: 90px;
+  bottom: calc(var(--player-height, 0px) + 16px);
   right: 20px;
   width: min(380px, calc(100vw - 32px));
   display: flex;
@@ -558,7 +560,6 @@ button:hover:not(:disabled) {
     min-height: 210px;
   }
   .notification-stack {
-    top: 76px;
     right: 16px;
     left: 16px;
     width: auto;
@@ -862,13 +863,48 @@ body,
   font-size: 13px;
   color: var(--text-muted);
 }
-/* On phones a dialog fills the screen, and notices at the top would cover its title and close button
-   (the only way out without a keyboard). While one is open, show notices at the bottom instead. */
-@media (max-width: 600px) {
-  body:has([role='dialog'][aria-modal='true']) .notification-stack {
-    top: auto;
-    bottom: 16px;
+/* A dialog's title row and close button stay in view while its content scrolls (2.41): after a few
+   clips the Mimic dialog scrolled its only way out off the top. The row covers the dialog's top padding
+   (25 px, 20 px up to 700 px wide; styles.css) so content never shows above it. */
+.dialog-title {
+  position: sticky;
+  top: -25px;
+  z-index: 3;
+  margin: -25px -25px 18px;
+  padding: 25px 25px 8px;
+  background: var(--surface-1);
+}
+@media (max-width: 700px) {
+  .dialog-title {
+    top: -20px;
+    margin: -20px -20px 18px;
+    padding: 20px 20px 8px;
   }
+}
+/* While a dialog is open its notices are part of it (2.41): at its foot, sticking to the bottom of
+   its scroll area, so they never cover its title or close button and Tab reaches their buttons. */
+.dialog-notices {
+  position: sticky;
+  bottom: 0;
+  z-index: 2;
+}
+.notification-stack.in-dialog {
+  position: static;
+  width: auto;
+  margin-top: 14px;
+}
+/* Sticking to the foot, they can lie over the dialog's waveform while someone drags on it: only their
+   buttons (Undo, Dismiss) take the pointer there, and everything else passes through to what is under it. */
+.dialog-notices,
+.notification-stack.in-dialog,
+.notification-stack.in-dialog .toast {
+  pointer-events: none;
+}
+.notification-stack.in-dialog .toast button {
+  pointer-events: auto;
+}
+.notification-stack:empty {
+  display: none;
 }
 /* Host: who is connected, under the board title. */
 .connected-guests {
@@ -1098,6 +1134,15 @@ html {
 .guest-row .link-kind.relay {
   border-color: var(--warning);
   color: var(--warning);
+}
+/* 2.41: a guest whose page proved no browser key. */
+.guest-row .link-kind.unverified,
+.lobby-requests .link-kind.unverified {
+  padding: 1px 6px;
+  border: 1px solid var(--warning);
+  border-radius: 8px;
+  color: var(--warning);
+  font-size: 10px;
 }
 .guest-permissions {
   font-size: 12px;

@@ -18,6 +18,17 @@ import { parseOrganization, type SharedLayout, type Organization } from '../shar
 import { cleanName } from '../protocol';
 import { APP_VERSION, siteRelaysDrafts, siteRelaysIntents, supports } from '../version';
 import { sign, verify, type HostIdentity, type Invite } from './identity';
+import {
+  CHALLENGE_PATTERN,
+  GUEST_KEY_PATTERN,
+  guestIdOf,
+  guestProof,
+  loadGuestKey,
+  newChallenge,
+  signGuest,
+  verifyGuest,
+  type GuestKey,
+} from './guest-key';
 import type { RelayLink, RelayLinkState, SendOptions, SendResult } from './relay';
 import {
   diagnose,
@@ -68,6 +79,12 @@ type Message = {
   again?: boolean;
   /** Welcome (2.40): commands the host's page relays beyond what its version says, e.g. ['drafts']. */
   relays?: string[];
+  /** Hello (2.41): the guest browser's public key (see guest-key.ts). */
+  key?: string;
+  /** Hello (2.41): the host's challenge the proof answers. Challenge message: a new one for this connection. */
+  challenge?: string;
+  /** Hello (2.41): the guest's signature over `guestProof` for this connection. */
+  proof?: string;
 };
 /** Most guests one host session admits at once, unless the host grants extra places (2.37). */
 export const MAX_GUESTS = MAX_PLACES;
@@ -118,6 +135,8 @@ export type LobbyRequest = {
   kind: 'admit' | 'extra';
   at: number;
   expiresAt: number;
+  /** 2.41: from a page that proved no key (older than 2.41): new to the host on every page load. */
+  unverified?: boolean;
 };
 /** Makes a relay link for this session; `createRelayLink` in production, an in-memory hub in tests. */
 export type RelayFactory = (options: {
@@ -158,6 +177,11 @@ export type ConnectionInfo = {
   diagnosis?: Diagnosis;
   /** Host: each guest's connection, by participant id. */
   links?: Record<string, { transport: Transport; rttMs?: number }>;
+  /**
+   * Guest (2.41): whether this browser keeps its guest key ('saved'), so the host knows it again after a reload,
+   * or has one for this page only ('page'). Undefined until the key is ready.
+   */
+  guestKey?: 'saved' | 'page';
 };
 export type SessionOptions = {
   /** The relay link to use (2.37). Without one the session is WebRTC only, as up to 2.36. */
@@ -172,12 +196,22 @@ export type SessionOptions = {
   /** Gathers ICE candidates for the diagnosis; tests pass their own. */
   probe?: () => Promise<IceReport | undefined>;
   fallbackMs?: number;
+  /** Guest (2.41): this browser's key; `loadGuestKey` by default, tests pass their own. */
+  guestKey?: () => Promise<GuestKey>;
 };
 type Request = {
   participant: Participant;
   kind: 'admit' | 'extra';
   at: number;
   peers: Map<string, string>;
+  verified: boolean;
+};
+/** Challenges and unverified identities a host keeps at most (old ones go first). */
+const MAX_CHALLENGES = 512;
+const remember = <K, V>(map: Map<K, V>, key: K, value: V) => {
+  map.delete(key);
+  map.set(key, value);
+  while (map.size > MAX_CHALLENGES) map.delete(map.keys().next().value as K);
 };
 /** The part of a command needed to answer it, whether or not this page knows the rest. */
 const envelopeSchema = z.object({ id: z.uuid(), op: z.string().max(40) });
@@ -233,6 +267,16 @@ export class Session {
   private joined = new Map<string, number>();
   /** Participants for peers whose hello named nobody (pages older than names), stable per peer. */
   private guessed = new Map<string, Participant>();
+  /** Host (2.41): the challenge each connection's guest signs to prove their key. */
+  private challenges = new Map<string, string>();
+  /** Host (2.41): identities given to guests that proved no key, by their page load (profile id and nonce). */
+  private unverifiedIds = new Map<string, string>();
+  /** Host (2.41): participant ids that are not backed by a key. */
+  private unverified = new Set<string>();
+  /** Guest (2.41): this browser's key, once loaded, and each host connection's challenge and proof. */
+  private key?: Promise<GuestKey | undefined>;
+  private keyKind?: 'saved' | 'page';
+  private hostChallenges = new Map<string, { challenge: string; proof?: Promise<string> }>();
   /** Guest: the verified host connection in use, and every verified one (direct and relay). */
   private hostPeer?: string;
   private verified = new Set<string>();
@@ -305,7 +349,8 @@ export class Session {
     ) => Promise<unknown>,
     private receive: (s: Snapshot) => void,
     private status: (s: string) => void,
-    private guests: (ids: string[], links: Record<string, Transport>) => void,
+    /** `unverified` (2.41): the listed peers whose guest proved no key. */
+    private guests: (ids: string[], links: Record<string, Transport>, unverified: string[]) => void,
     transport = { join: joinRoom, id: selfId },
     private profiles?: {
       get: () => Participant;
@@ -331,6 +376,17 @@ export class Session {
     this.policy = { ...DEFAULT_POLICY, ...options.policy };
     this.direct = options.direct !== false || !!host;
     this.fallbackMs = options.fallbackMs ?? FALLBACK_MS;
+    if (!host) {
+      // Every hello waits for the key, so a new host never mistakes this page for one without a key.
+      this.key = (options.guestKey ?? loadGuestKey)().then(
+        (key) => {
+          this.keyKind = key.durable ? 'saved' : 'page';
+          this.report();
+          return key;
+        },
+        () => undefined,
+      );
+    }
     if (this.direct) this.joinDirect(transport);
     this.timer = setInterval(() => this.tick(), 2500);
     // A host always listens on the relay too, so a guest whose network blocks WebRTC still gets in.
@@ -506,6 +562,8 @@ export class Session {
     this.heavy.delete(peer);
     this.welcoming.delete(peer);
     this.waveSubscriptions.delete(peer);
+    this.challenges.delete(peer);
+    this.hostChallenges.delete(peer);
     for (const request of this.requests.values()) request.peers.delete(peer);
     if (this.host && wasAccepted && person && !this.peersOf(person.id).length)
       this.left.set(person.id, Date.now());
@@ -541,6 +599,16 @@ export class Session {
       this.expireRequests(now);
       for (const [id, at] of this.left) if (now - at > HOLD_MS) this.left.delete(id);
       for (const [id, at] of this.lapsed) if (now - at > 10 * REQUEST_MS) this.lapsed.delete(id);
+      // The "unverified" label is only needed while that guest is in, asking or holding a place.
+      const members = this.members();
+      for (const id of this.unverified)
+        if (
+          !members.has(id) &&
+          !this.requests.has(id) &&
+          !this.left.has(id) &&
+          !this.joining.has(id)
+        )
+          this.unverified.delete(id);
       this.broadcast(true);
       return;
     }
@@ -647,6 +715,7 @@ export class Session {
       iceVerdict: this.ice ? judgeIce(this.ice) : undefined,
       diagnosis: this.diagnosis(),
       reconnected: reconnected || undefined,
+      guestKey: this.keyKind,
     };
     if (this.host) {
       const links: NonNullable<ConnectionInfo['links']> = {};
@@ -695,19 +764,42 @@ export class Session {
       })
       .catch(() => undefined);
   }
+  /**
+   * Guest: says hello to a peer that may be the host. Since 2.41 every hello carries this browser's public key and,
+   * once that connection's host has sent its challenge, the proof (see guest-key.ts). A host older than 2.41
+   * ignores both.
+   */
   private sendHello(peer: string) {
-    this.send(
-      {
-        v: 1,
-        type: 'hello',
-        nonce: this.nonce,
-        person: this.profiles?.get(),
-        site: this.site,
-        ...(this.askExtra ? { extra: true } : {}),
-        ...(this.askAgainNext ? { again: true } : {}),
-      },
-      peer,
-    );
+    const ready = this.key ?? Promise.resolve(undefined);
+    void ready
+      .then(async (key) => {
+        const asked = this.hostChallenges.get(peer);
+        let proof: string | undefined;
+        if (key && asked) {
+          const { host, guest } = this.proof(peer);
+          asked.proof ??= signGuest(
+            key,
+            guestProof(this.identity.room, this.nonce, asked.challenge, host, guest),
+          );
+          proof = await asked.proof;
+        }
+        if (this.stopped) return;
+        this.send(
+          {
+            v: 1,
+            type: 'hello',
+            nonce: this.nonce,
+            person: this.profiles?.get(),
+            site: this.site,
+            ...(this.askExtra ? { extra: true } : {}),
+            ...(this.askAgainNext ? { again: true } : {}),
+            ...(key && { key: key.publicKey }),
+            ...(asked && proof && { challenge: asked.challenge, proof }),
+          },
+          peer,
+        );
+      })
+      .catch(() => {});
   }
   /** Guest: hello to every peer that could be the host, over both transports. */
   private helloAll() {
@@ -756,6 +848,7 @@ export class Session {
     this.profiles?.changed(Object.fromEntries(this.people));
     this.rates.delete(peer);
     this.welcoming.delete(peer);
+    this.challenges.delete(peer);
     if (!isRelay(peer)) this.room?.getPeers()[peer]?.close();
     if (person && !this.peersOf(person.id).length) this.left.delete(person.id);
     if (this.host) this.notifyGuests();
@@ -795,14 +888,57 @@ export class Session {
   private notifyGuests() {
     const ids: string[] = [];
     const links: Record<string, Transport> = {};
-    for (const peers of this.members().values()) {
+    const unverified: string[] = [];
+    for (const [id, peers] of this.members()) {
       // One row per guest: their direct connection when they have one.
       const peer = peers.find((p) => !isRelay(p)) ?? peers[0];
       ids.push(peer);
       links[peer] = isRelay(peer) ? 'relay' : 'direct';
+      if (this.unverified.has(id)) unverified.push(peer);
     }
-    this.guests(ids, links);
+    this.guests(ids, links, unverified);
     this.report();
+  }
+  /**
+   * Host (2.41): who a hello from a connection that is not in yet comes from. A key with a valid proof over this
+   * connection's challenge is that key's identity, whatever name or profile id the hello also carries. A key
+   * without a valid proof is answered with the challenge (undefined: nothing to decide yet). No key at all is a
+   * page older than 2.41: an unverified guest, new to the host on every page load, so nothing granted to one
+   * identity is ever reused by another that merely claims it.
+   */
+  private async identify(
+    peer: string,
+    m: Message,
+    person: Participant,
+  ): Promise<{ id: string; verified: boolean } | undefined> {
+    if (m.key !== undefined) {
+      if (typeof m.key !== 'string' || !GUEST_KEY_PATTERN.test(m.key)) throw Error('Invalid key');
+      let challenge = this.challenges.get(peer);
+      if (
+        challenge &&
+        m.challenge === challenge &&
+        typeof m.proof === 'string' &&
+        m.proof.length <= 200
+      ) {
+        const { host, guest } = this.proof(peer);
+        const proof = guestProof(this.identity.room, m.nonce!, challenge, host, guest);
+        if (await verifyGuest(m.key, m.proof, proof))
+          return { id: await guestIdOf(m.key), verified: true };
+      }
+      if (!challenge) {
+        challenge = newChallenge();
+        remember(this.challenges, peer, challenge);
+      }
+      this.send({ v: 1, type: 'challenge', nonce: m.nonce, challenge }, peer);
+      return undefined;
+    }
+    const load = `${person.id}:${m.nonce}`;
+    let id = this.unverifiedIds.get(load);
+    if (!id) {
+      id = crypto.randomUUID();
+      remember(this.unverifiedIds, load, id);
+    }
+    return { id, verified: false };
   }
   /** This guest's permissions: the host's override for them where set, the session's otherwise. */
   private permissionsOf(peer: string) {
@@ -839,7 +975,13 @@ export class Session {
     return guess;
   }
   /** Host: decides about a hello from a peer that is not in yet (2.37). */
-  private admit(peer: string, nonce: string, participant: Participant, m: Message) {
+  private admit(
+    peer: string,
+    nonce: string,
+    participant: Participant,
+    m: Message,
+    verified: boolean,
+  ) {
     const id = participant.id;
     const policy = this.policy;
     if (policy.turnedAway.some((p) => p.id === id)) return 'turnedAway' as const;
@@ -868,7 +1010,13 @@ export class Session {
         this.lobbyChanged();
         return 'full' as const;
       }
-      this.requests.set(id, { participant, kind, at: Date.now(), peers: new Map([[peer, nonce]]) });
+      this.requests.set(id, {
+        participant,
+        kind,
+        at: Date.now(),
+        peers: new Map([[peer, nonce]]),
+        verified,
+      });
       this.lobbyChanged();
       return 'waiting' as const;
     };
@@ -964,6 +1112,7 @@ export class Session {
         kind: r.kind,
         at: r.at,
         expiresAt: r.at + REQUEST_MS,
+        ...(!r.verified && { unverified: true }),
       }))
       .sort((a, b) => a.at - b.at);
   }
@@ -1096,7 +1245,13 @@ export class Session {
         const known = this.accepted.has(peer) ? this.people.get(peer) : undefined;
         if (known && participant.id !== known.id) participant = { ...participant, id: known.id };
         if (!this.accepted.has(peer)) {
-          const verdict = this.admit(peer, m.nonce, participant, m);
+          // 2.41: the id every decision follows is the one the guest's key proves, never the one it declares.
+          const who = await this.identify(peer, m, participant);
+          if (!who || this.stopped || this.denied.has(peer)) return;
+          if (this.accepted.has(peer)) return; // let in meanwhile by another hello on this connection
+          participant = { id: who.id, name: participant.name };
+          if (!who.verified) this.unverified.add(who.id);
+          const verdict = this.admit(peer, m.nonce, participant, m, who.verified);
           if (verdict !== 'in') {
             await this.tellLobby(peer, m.nonce, verdict);
             return;
@@ -1224,6 +1379,20 @@ export class Session {
         }
         this.status(LOBBY_TEXT[lobby]);
         this.report();
+        return;
+      }
+      if (
+        m.type === 'challenge' &&
+        m.nonce === this.nonce &&
+        typeof m.challenge === 'string' &&
+        CHALLENGE_PATTERN.test(m.challenge)
+      ) {
+        // 2.41: the host asks this browser to prove its key for this connection. Answered with a hello carrying
+        // the proof; bounded like a welcome, since anyone in the room could send one.
+        if (this.hostPeer === peer || !rate.other.accept()) return;
+        if (this.hostChallenges.get(peer)?.challenge !== m.challenge)
+          remember(this.hostChallenges, peer, { challenge: m.challenge });
+        this.sendHello(peer);
         return;
       }
       if (!this.verified.has(peer)) return;

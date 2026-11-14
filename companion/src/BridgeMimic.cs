@@ -75,11 +75,16 @@ public sealed partial class Bridge
     private async Task<Reply> SaveMimic(HistoryStore h, HistoryAccess access, long start, long stop, string? name, string by, bool host, string owner, string? audience, string? guest = null)
     {
         if (stop - start < (long)h.Rate * MimicMinimumMs / 1000) throw new InvalidDataException("Mimic had not started listening yet at that moment.");
-        var samples = h.Read(access, start, (int)(stop - start));
-        if (samples.All(s => Math.Abs(s) < 0.0005f)) throw new InvalidDataException("That selection is silent. Nothing was saved.");
+        // Reading the recording and encoding it run on the audio worker (2.41).
+        var (samples, wav) = await Heavy("mimicClip", () =>
+        {
+            var read = h.Read(access, start, (int)(stop - start));
+            if (read.All(s => Math.Abs(s) < 0.0005f)) throw new InvalidDataException("That selection is silent. Nothing was saved.");
+            return (read, MimicRing.Wav(read, h.Rate));
+        });
         name = string.IsNullOrWhiteSpace(name) ? "Mimic " + DateTime.Now.ToString("HH.mm.ss") : name.Trim();
         if (name.Length > 100) name = name[..99].TrimEnd() + "…";
-        var reply = await Upload(MimicRing.Wav(samples, h.Rate), name + ".wav", by, host, owner, audience, mimic: true, guest: guest);
+        var reply = await Upload(wav, name + ".wav", by, host, owner, audience, mimic: true, guest: guest);
         if (reply.Ok && reply.Data?.GetType().GetProperty("assetId")?.GetValue(reply.Data) is string assetId)
         {
             lock (recentClips)
@@ -279,7 +284,7 @@ public sealed partial class Bridge
                 case "mimicPreview":
                     // The audio goes only to the person who asked (the host's tab over loopback; a guest, since 2.40,
                     // scoped to what they may see). It never reaches Soundpad or anyone else.
-                    return Preview(c, actor, participant, requester);
+                    return await Preview(c, actor, participant, requester);
                 case "mimicLibrary":
                     // Host only (checked above): clips saved in Voice Replay Studio on this PC, read without changing them.
                     return new("ack", c.Id, true, Data: new { available = voiceReplay.Exists, clips = voiceReplay.List() });

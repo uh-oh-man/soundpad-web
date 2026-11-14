@@ -9,6 +9,36 @@ const range = z.object({
   endFrame: z.number().int().nonnegative(),
 });
 export type FrameRange = { startFrame: number; endFrame: number };
+/**
+ * A selection together with the recording (history session) whose frames it names (2.41, review of 2026-11-14).
+ * Frame numbers mean nothing on another recording, so a selection never outlives the recording it was made on.
+ */
+export type BoundSelection = FrameRange & { sessionId: string };
+/** `range` bound to `sessionId`; null without either. */
+export const bind = (range: FrameRange | null, sessionId: string | null): BoundSelection | null =>
+  range && sessionId ? { startFrame: range.startFrame, endFrame: range.endFrame, sessionId } : null;
+/** The part of a selection that applies to the recording shown now: null when it was made on another one. */
+export const selectionOn = (
+  picked: BoundSelection | null,
+  sessionId: string | null,
+): FrameRange | null =>
+  picked && sessionId && picked.sessionId === sessionId
+    ? { startFrame: picked.startFrame, endFrame: picked.endFrame }
+    : null;
+/**
+ * What a command about a selection carries: its frames and the recording they are on (`sourceId`), which the
+ * companion checks, so a range can never be applied to another recording's audio at the same frame numbers.
+ * Null when the selection belongs to another recording than the one shown now.
+ */
+export const selectionFields = (picked: BoundSelection | null, sessionId: string | null) =>
+  selectionOn(picked, sessionId) && picked
+    ? { startFrame: picked.startFrame, endFrame: picked.endFrame, sourceId: picked.sessionId }
+    : null;
+/** Data fetched for one recording (waveform, overview, words), shown only while that recording is current. */
+export const ofSession = <T extends { sessionId: string | null }>(
+  data: T | null,
+  sessionId: string | null,
+): T | null => (data && sessionId && data.sessionId === sessionId ? data : null);
 
 export const timelineSchema = z.object({
   sessionId: z.string().max(64).nullable(),
@@ -238,6 +268,79 @@ export function wordSelection(
   if (r.endFrame - r.startFrame < min) r.endFrame = r.startFrame + min;
   if (r.endFrame - r.startFrame > max) r.endFrame = r.startFrame + max;
   return r;
+}
+
+/**
+ * The continuous parts of what this person may hear (2.41): the available ranges, cut at every gap mark (frame
+ * numbers run on across a gap, but the audio on either side was recorded at different times).
+ */
+export function continuousParts(t: Pick<Timeline, 'available' | 'gaps'>): FrameRange[] {
+  const marks = t.gaps.map((g) => g.atFrame).sort((a, b) => a - b);
+  const parts: FrameRange[] = [];
+  for (const r of t.available) {
+    let from = r.startFrame;
+    for (const m of marks) {
+      if (m <= from || m >= r.endFrame) continue;
+      parts.push({ startFrame: from, endFrame: m });
+      from = m;
+    }
+    parts.push({ startFrame: from, endFrame: r.endFrame });
+  }
+  return parts;
+}
+
+/**
+ * A word click (or Shift-click range) as a cut that can actually be played (2.41): the padding and the minimum
+ * length only reach as far as the continuous, authorized audio around the word, so a word right after a guest's
+ * join point, at the expired edge or next to a gap still plays, without audio from the other side of that edge.
+ * When the word's own audio (its unpadded core) is not all there, the reason says why instead.
+ */
+export function wordCut(
+  words: Word[],
+  anchorId: number | null,
+  clickedId: number,
+  shift: boolean,
+  t: Pick<Timeline, 'available' | 'gaps' | 'rate' | 'liveFrame' | 'fromFrame'>,
+): { range: FrameRange } | { reason: string } {
+  const clicked = words.find((w) => w.id === clickedId);
+  if (!clicked) return { reason: 'That word is no longer in the transcript.' };
+  const anchor = shift && anchorId !== null ? words.find((w) => w.id === anchorId) : undefined;
+  const first = anchor && anchor.start < clicked.start ? anchor : clicked;
+  const last = anchor && anchor.start > clicked.start ? anchor : clicked;
+  const core = { startFrame: first.start, endFrame: Math.max(first.start + 1, last.end) };
+  const part = continuousParts(t).find(
+    (p) => core.startFrame >= p.startFrame && core.endFrame <= p.endFrame,
+  );
+  if (!part) {
+    const what = anchor ? 'Those words' : 'That word';
+    if (t.fromFrame !== null && core.startFrame < t.fromFrame)
+      return { reason: `${what} began before you joined. Ask the host to share that part.` };
+    if (core.endFrame > t.liveFrame) return { reason: `${what} has not been fully recorded yet.` };
+    const touches = t.available.some(
+      (a) => a.startFrame < core.endFrame && a.endFrame > core.startFrame,
+    );
+    if (!touches) return { reason: `${what} is no longer in the recording history.` };
+    return {
+      reason: `${what} ${anchor ? 'run' : 'runs'} into a gap or the edge of the recording history, so ${anchor ? 'they' : 'it'} cannot be played whole. Select the audio by dragging instead.`,
+    };
+  }
+  const r = {
+    startFrame: Math.max(part.startFrame, wordRange(first, t.rate).startFrame),
+    endFrame: Math.min(part.endFrame, wordRange(last, t.rate).endFrame),
+  };
+  const min = msToFrames(MIN_MS, t.rate),
+    max = msToFrames(MAX_CLIP_MS, t.rate);
+  if (r.endFrame - r.startFrame < min) {
+    // Longer to the shortest playable cut: later first, then earlier, never past the part's edges.
+    r.endFrame = Math.min(part.endFrame, r.startFrame + min);
+    r.startFrame = Math.max(part.startFrame, r.endFrame - min);
+    if (r.endFrame - r.startFrame < min)
+      return {
+        reason: `Too little audio is left around ${anchor ? 'those words' : 'that word'} to play (at least ${MIN_MS} ms is needed).`,
+      };
+  }
+  if (r.endFrame - r.startFrame > max) r.endFrame = r.startFrame + max;
+  return { range: r };
 }
 
 /** True when the word lies inside the selected frames (by its middle, so padding never decides it). */

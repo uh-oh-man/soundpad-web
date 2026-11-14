@@ -302,6 +302,10 @@ public sealed partial class HistoryStore
         }
         // Capture that was already stopped keeps its own reason: the update or crash lost no audio then.
         if (openGap is null && spans.Count > 0) openGap = new(live, WallOfLiveLocked(), null, reason);
+        // 2.41: audio always lies inside a span, so frames held before the first span (or held with no span at all)
+        // are the silenced start of a segment whose earlier audio was discarded (DiscardBefore): they stay gone.
+        if (segments.Count > 0 && (spans.Count == 0 || spans[0].StartFrame > segments.First().Value.Start))
+            floor = spans.Count == 0 ? live : spans[0].StartFrame;
         ExpireLocked(); PruneTimelineLocked();
         deletes.Clear();
         Recovery = new(recovered, index.Live - recovered, droppedSegments, torn, [.. droppedPins], openGap?.Reason);

@@ -18,6 +18,20 @@ public sealed partial class Bridge(ISoundpad pipe, StateStore store) : IDisposab
     // Stop and Panic do NOT take the gate: DoStopSound carries no index and is harmless between any two requests of
     // the sequences above, so it waits only for the one pipe request already in flight (see StopNow).
     private readonly PriorityGate gate = new();
+    // Decoding, effects and encoding for copies, previews and clips (2.41): never on the caller's thread.
+    private readonly AudioWorker audioWork = new();
+    private Action<string>? heavyWorkHook;
+    /// <summary>Tests: runs at the start of every job on the audio worker, with its name.</summary>
+    internal void UseHeavyWorkHook(Action<string> hook) => heavyWorkHook = hook;
+    private Task<T> Heavy<T>(string what, Func<T> work) => audioWork.Run(() => { heavyWorkHook?.Invoke(what); return work(); });
+    /// <summary>
+    /// Commands whose work may decode, encode, read recorded audio or list devices before its first real wait (2.41).
+    /// They leave the caller's thread at once, after their playback intent (if any) was reserved in arrival order, so
+    /// the socket's receive loop is free for the next Play, Stop or Panic. Everything else keeps running inline up to
+    /// its first wait, as before: its arrival order matters (revocations, session changes) and it is cheap.
+    /// </summary>
+    private static bool Offloaded(string op) => op is "trimAudio" or "trimPreview" or "mimicClip" or "mimicPreview" or "mimicSources" or "mimicLibrary" or "mimicLibraryImport"
+        or "draftKeep" or "draftPlay" or "mimicPeek" or "historyLevels" or "historyTimeline" or "historyTranscript";
     private int waiting;
     private DiskState disk = store.Load();
     private ParsedLibrary parsed = new(new("empty", [], []), [], []);
@@ -34,7 +48,7 @@ public sealed partial class Bridge(ISoundpad pipe, StateStore store) : IDisposab
         // Playback statistics still waiting for their deferred write go to disk now (2.35).
         Interlocked.Exchange(ref disposed, 1);
         if (Volatile.Read(ref stateDirty) != 0) { try { Task.Run(FlushState).Wait(TimeSpan.FromSeconds(2)); } catch (Exception) { /* the last durable save stands */ } }
-        hotkey.Dispose(); waveformService.Dispose(); transcriber.Dispose();
+        hotkey.Dispose(); waveformService.Dispose(); transcriber.Dispose(); audioWork.Dispose();
         // An ordinary quit deletes this launch's recording history and transcript (2.39); after a crash it is recovered instead.
         try { CloseHistory(); } catch (Exception ex) when (ex is not OutOfMemoryException) { /* removed with the next launch's recovery */ }
         mimicCapture.Dispose(); pcm.Dispose();
@@ -81,6 +95,8 @@ public sealed partial class Bridge(ISoundpad pipe, StateStore store) : IDisposab
         try { mimicCapture.Pump(); } catch (Exception ex) when (ex is not OutOfMemoryException) { }
         // Drafts of guests who left a while ago go, so their pins do not hold the recording history (2.40).
         ReleaseAwayGuests();
+        // Transcript words or corrections that could not be saved are written again (2.41).
+        try { RetryTranscriptSaves(); } catch (Exception ex) when (ex is not OutOfMemoryException) { }
         // Soundpad's own statistics files are read before the gate is taken (2.35), so a play never waits for them.
         if (library) await Task.Run(nativeStatistics.Refresh);
         // Skipped while the gate stays busy, as before. It waits a moment first (2.35): the deferred state save
@@ -116,8 +132,9 @@ public sealed partial class Bridge(ISoundpad pipe, StateStore store) : IDisposab
         if (reserved.Quiet != null) return Task.FromResult(reserved.Quiet);
         // A command id seen before gets the first one's answer: it acts, and counts, once.
         if (reserved.Repeated) return reserved.Intent!.Answer.Task;
-        var work = Dispatch(c, actor, participant, requester, audience, reserved.Intent);
-        return reserved.Intent == null ? work : Answered(reserved.Intent, c, work);
+        var intent = reserved.Intent;
+        var work = Offloaded(c.Op) ? Task.Run(() => Dispatch(c, actor, participant, requester, audience, intent)) : Dispatch(c, actor, participant, requester, audience, intent);
+        return intent == null ? work : Answered(intent, c, work);
     }
     private static async Task<Reply> Answered(Intent intent, Command c, Task<Reply> work)
     {

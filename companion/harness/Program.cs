@@ -472,7 +472,17 @@ await using var server = new LocalServer(bridge, args.FirstOrDefault() ?? "http:
 await server.Start();
 Console.WriteLine("TEST_READY " + Json.Write(new { port = server.Port, token = server.Token }));
 using var stop = new CancellationTokenSource();
-_ = Task.Run(() => { Console.ReadLine(); stop.Cancel(); });
+// Any line ends the harness, except "restart-history" (2.41): the recording history is replaced by a new one at once
+// (the same as the companion restarting Mimic), so browser tests can check that nothing of the old one carries over.
+_ = Task.Run(() =>
+{
+    while (Console.ReadLine() == "restart-history")
+    {
+        bridge.CloseHistory();
+        bridge.Execute(new Command(2, Guid.NewGuid().ToString(), DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(), "mimicStart") with { SourceId = MimicFixture.Source.Id }, "host").GetAwaiter().GetResult();
+    }
+    stop.Cancel();
+});
 try { while (!stop.IsCancellationRequested) { await Task.Delay(250, stop.Token); await bridge.Poll(false); } }
 catch (OperationCanceledException) { }
 finally { if (Directory.Exists(directory)) Directory.Delete(directory, true); }

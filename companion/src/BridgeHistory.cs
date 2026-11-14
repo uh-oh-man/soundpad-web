@@ -25,6 +25,11 @@ public sealed partial class Bridge
     private MimicSettings? mimicSettings;
     private volatile bool sourceLost;
     private long recoveredMs;
+    /// <summary>
+    /// 2.41: the history a crash recovered and the frame where it ended (its live frame when it was opened). Capture
+    /// after recovery records from there on, so Discard removes only the frames before it. Guarded by <see cref="historyGate"/>.
+    /// </summary>
+    private (string SessionId, long Frame)? recoveredUntil;
     private readonly long launchedUtcMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
     /// <summary>
     /// When a guest was admitted: the wall time (UTC ms) and, as a floor that clock changes and late run anchors
@@ -84,10 +89,23 @@ public sealed partial class Bridge
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { Log("Mimic settings could not be saved: " + ex.Message); }
     }
 
+    private const string TranscriptUnsavedMessage = "Subtitles or corrections could not be saved to disk. They are kept while the companion runs and saved again automatically; check free space and the companion's data folder.";
+    private long transcriptRetryAt;
+    /// <summary>Called by Poll: writes again, at most every 5 s, transcript data that could not be saved (2.41).</summary>
+    private void RetryTranscriptSaves()
+    {
+        long now = Environment.TickCount64;
+        if (now < Interlocked.Read(ref transcriptRetryAt) || transcriber.Unsaved == null) return;
+        Interlocked.Exchange(ref transcriptRetryAt, now + 5000);
+        if (transcriber.RetrySaves()) { Log("Transcript changes that could not be saved earlier are saved now."); Publish(); }
+    }
+
     private MimicHistoryState HistorySnapshot()
     {
         var h = history; string? problem = null;
         if (h != null) { try { var totals = h.Totals(HistoryAccess.Host); problem = totals.WriteError != null ? "The recording history cannot be written to disk: " + totals.WriteError : totals.Overruns > 0 ? "The disk fell behind and some audio was lost; the gaps are marked." : null; } catch (HistoryException) { } }
+        // 2.41: subtitles or corrections that exist only in memory are a problem the host sees, until they are saved.
+        if (problem == null && h != null && transcriber.Unsaved != null) problem = TranscriptUnsavedMessage;
         return new(h?.SessionId, Settings.HistorySeconds, Settings.Subtitles, sourceLost, Interlocked.Read(ref recoveredMs), problem);
     }
 
@@ -145,6 +163,7 @@ public sealed partial class Bridge
     private void UseStoreLocked(HistoryStore? next)
     {
         history = next;
+        recoveredUntil = null;
         lock (sharedRanges) sharedRanges.Clear();
         TranscriptWords? words = null;
         if (next != null)
@@ -202,6 +221,7 @@ public sealed partial class Bridge
                 var recovered = HistoryStore.Open(HistoryRoot, crashed.SessionId, HistoryGapReason.Crash, historyOptions with { WindowSeconds = Settings.HistorySeconds });
                 try { recovered.SetWindow(Settings.HistorySeconds); } catch (ArgumentOutOfRangeException) { }
                 UseStoreLocked(recovered);
+                recoveredUntil = (recovered.SessionId, recovered.LiveFrame);
                 long frames = recovered.Timeline(HistoryAccess.Host).Available.Sum(r => r.Frames);
                 Interlocked.Exchange(ref recoveredMs, frames * 1000 / recovered.Rate);
                 Log($"Recovered {frames / (double)recovered.Rate / 60:0.#} minutes of recording history from the last session");
@@ -212,6 +232,33 @@ public sealed partial class Bridge
                 Log("The recording history from the last session could not be recovered: " + ex.Message);
                 return 0;
             }
+        }
+    }
+
+    /// <summary>
+    /// Removes the part of the current history that a crash recovered (2.41): its audio, its words, the drafts that use
+    /// any of it, own-replay marks and shared ranges before the recovered boundary. False when nothing recovered is left.
+    /// </summary>
+    private bool DiscardRecovered()
+    {
+        lock (historyGate)
+        {
+            if (history is not { } h || recoveredUntil is not { } until || until.SessionId != h.SessionId) return false;
+            recoveredUntil = null;
+            long boundary = until.Frame;
+            // Drafts made on recovered audio go first, so no pin holds it; drafts wholly on new capture stay.
+            ReleaseDrafts(d => d.SessionId == h.SessionId && d.Start < boundary);
+            try { foreach (var owner in h.DiscardBefore(boundary)) Log($"A selection on the recovered history was let go ({owner})"); }
+            catch (HistoryException) { return false; }
+            transcriber.DropBefore(h, boundary);
+            ownReplays.DropBefore(h.SessionId, boundary);
+            lock (sharedRanges)
+            {
+                var kept = sharedRanges.Where(r => r.EndFrame > boundary).Select(r => new HistoryRange(Math.Max(r.StartFrame, boundary), r.EndFrame)).ToList();
+                sharedRanges.Clear(); sharedRanges.AddRange(kept);
+            }
+            lock (peekGate) lastPeek = null;
+            return true;
         }
     }
 
@@ -393,6 +440,8 @@ public sealed partial class Bridge
                 {
                     if (!host) throw new InvalidDataException("Only the host can share recording history.");
                     var h = CurrentHistory() ?? throw new InvalidDataException("Mimic has not recorded anything yet.");
+                    // 2.41: a range selected on another recording never applies to this one's frames.
+                    if (c.SourceId != null && c.SourceId != h.SessionId) throw new InvalidDataException("Mimic restarted since you selected that. Select it again.");
                     lock (sharedRanges)
                     {
                         if (c.Op == "historyUnshare" && c.StartFrame == null) sharedRanges.Clear();
@@ -448,27 +497,26 @@ public sealed partial class Bridge
                 }
             case "historyDiscard":
                 {
-                    // The host's Discard on the "recovered history" notice: everything recorded so far goes; a running capture continues into a new history.
+                    // The host's Discard on the "recovered history" notice (2.41): only what the crash recovered goes. What was
+                    // captured since stays in the same history (same session id and frames), with its words and drafts.
                     if (!host) throw new InvalidDataException("Only the host can discard recording history.");
-                    lock (historyGate)
-                    {
-                        bool running = mimicCapture.Running;
-                        int rate = history?.Rate ?? mimicCapture.Rate;
-                        CloseHistoryLocked();
-                        if (running) UseStoreLocked(HistoryStore.Create(HistoryRoot, historyOptions with { Rate = rate, WindowSeconds = Settings.HistorySeconds }));
-                    }
+                    bool discarded = DiscardRecovered();
                     Interlocked.Exchange(ref recoveredMs, 0);
-                    Log("Discarded the recording history");
+                    if (discarded) Log("Discarded the recording history recovered from the last session; what was recorded since is kept");
                     Publish();
-                    return new("ack", c.Id, true);
+                    return new("ack", c.Id, true, Data: new { discarded });
                 }
             case "historyCorrect":
                 {
                     if (!host) throw new InvalidDataException("Only the host can correct the transcript.");
                     var h = CurrentHistory() ?? throw new InvalidDataException("Mimic has not recorded anything yet.");
                     if (c.WordId is not long id || c.Text is not { } text || text.Trim().Length is 0 or > 100) throw new InvalidDataException("Type the corrected word (up to 100 characters).");
-                    var fix = transcriber.Correct(h, id, text.Trim(), "Host");
-                    return new("ack", c.Id, true, Data: fix);
+                    var (fix, saved) = transcriber.Correct(h, id, text.Trim(), "Host");
+                    if (saved) return new("ack", c.Id, true, Data: new { fix.WordId, fix.Text, fix.By, fix.At, saved = true });
+                    // 2.41: only in memory is not plain success. It is kept, retried and shown in the Mimic window.
+                    Log("A transcript correction could not be saved to disk; it is kept and saved again automatically.");
+                    Publish();
+                    return new("ack", c.Id, true, Data: new { fix.WordId, fix.Text, fix.By, fix.At, saved = false, warning = TranscriptUnsavedMessage });
                 }
             default: return null;
         }

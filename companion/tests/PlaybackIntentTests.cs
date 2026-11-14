@@ -294,6 +294,60 @@ public sealed class PlaybackIntentTests : IDisposable
     }
 
     [Fact]
+    public async Task SlowAudioWorkNeverHoldsUpTheCallerAndANewerPlayStopOrPanicWinsOverItsAutoplay()
+    {
+        // Review finding (2.41): a keep-pitch copy decoded, stretched and encoded on the thread that called Execute
+        // (the socket's receive loop), so the Stop or Panic behind it waited for the whole render.
+        await using var mock = new MockSoundpad { DurationMs = 60000 }; using var pipe = new SoundpadPipe(mock.Name, true); using var bridge = new Bridge(pipe, new StateStore(folder)); await bridge.Poll(true);
+        Assert.True((await bridge.Execute(Cmd("beginSession"), "host")).Ok);
+        var upload = await bridge.Upload(Tone(samples: 64000), "Source.wav", "Host", true, "host"); Assert.True(upload.Ok, upload.Error);
+        var sounds = bridge.Snapshot.Library.Sounds.Where(s => !s.Temporary).ToArray();
+        using var entered = new ManualResetEventSlim(); using var release = new ManualResetEventSlim();
+        int callerThread = 0, workThread = 0;
+        bridge.UseHeavyWorkHook(what => { if (what != "trimAudio") return; workThread = Environment.CurrentManagedThreadId; entered.Set(); release.Wait(TimeSpan.FromSeconds(30)); });
+        // Called on a thread of its own, so that if Execute did the work inline this test sees it hang instead of hanging.
+        var calling = Task.Factory.StartNew(() => { callerThread = Environment.CurrentManagedThreadId; return bridge.Execute(Cmd("trimAudio") with { AssetId = Text(upload, "assetId"), PositionMs = 0, EndMs = 3900, Action = "speed", Speed = 0.6, KeepPitch = true, Autoplay = true }, "host"); }, TaskCreationOptions.LongRunning);
+        try
+        {
+            Assert.True(entered.Wait(TimeSpan.FromSeconds(10)), "the copy never started");
+            var copy = await calling.WaitAsync(TimeSpan.FromSeconds(2)); // the caller is free while the copy renders
+            Assert.False(copy.IsCompleted); Assert.NotEqual(callerThread, workThread);
+            // While it renders: Stop, a guest's Play, Panic and its release, and the host's Play are all answered promptly.
+            Assert.True((await bridge.Execute(Cmd("stop"), "host").WaitAsync(TimeSpan.FromSeconds(2))).Ok);
+            Assert.True(Played(await bridge.Execute(Cmd("play", sounds[1].Id), "guest").WaitAsync(TimeSpan.FromSeconds(2))));
+            Assert.True((await bridge.Execute(Cmd("panic") with { Action = "enable" }, "host").WaitAsync(TimeSpan.FromSeconds(2))).Ok);
+            Assert.True((await bridge.Execute(Cmd("panic") with { Action = "disable" }, "host").WaitAsync(TimeSpan.FromSeconds(2))).Ok);
+            var newest = await bridge.Execute(Cmd("play", sounds[2].Id), "host").WaitAsync(TimeSpan.FromSeconds(2));
+            Assert.True(Played(newest)); Assert.False(copy.IsCompleted);
+            release.Set();
+            // The old job still finishes saving its copy, but never plays it over the newer intents.
+            var made = await copy.WaitAsync(TimeSpan.FromSeconds(30));
+            Assert.True(made.Ok, made.Error); Assert.NotNull(Text(made, "assetId")); Assert.False(Flag(made, "played"));
+            Assert.Equal(sounds[2].Id, bridge.Snapshot.Playback.SoundId); Assert.Equal(Text(newest, "epoch"), bridge.Snapshot.Playback.Epoch);
+            Assert.Equal(new[] { "DoPlaySound(2)", "DoPlaySound(3)" }, Plays(mock));
+            Assert.Contains(bridge.Snapshot.Library.Sounds, s => s.Temporary && s.Name.Contains("same pitch"));
+        }
+        finally { release.Set(); }
+    }
+
+    [Fact]
+    public async Task AudioWorkerRunsJobsOffTheCallerAtLowPriorityAndAnswersBusyWhenFull()
+    {
+        using var worker = new AudioWorker(threads: 1, capacity: 1);
+        using var hold = new ManualResetEventSlim();
+        var first = worker.Run(() => { hold.Wait(TimeSpan.FromSeconds(10)); return Thread.CurrentThread.Priority; });
+        for (int i = 0; i < 100 && worker.Running == 0; i++) await Task.Delay(10);
+        var second = worker.Run(() => Environment.CurrentManagedThreadId);
+        var third = worker.Run(() => 0);
+        var busy = await Assert.ThrowsAsync<InvalidDataException>(() => third);
+        Assert.Contains("busy", busy.Message);
+        hold.Set();
+        Assert.Equal(ThreadPriority.BelowNormal, await first.WaitAsync(TimeSpan.FromSeconds(5)));
+        Assert.NotEqual(Environment.CurrentManagedThreadId, await second.WaitAsync(TimeSpan.FromSeconds(5)));
+        await Assert.ThrowsAsync<InvalidOperationException>(() => worker.Run<int>(() => throw new InvalidOperationException("kept")));
+    }
+
+    [Fact]
     public async Task MimicAndPlayAndImportAndPlayStartTheNewClipInOneCommand()
     {
         await using var mock = new MockSoundpad { DurationMs = 60000 }; using var pipe = new SoundpadPipe(mock.Name, true); using var bridge = new Bridge(pipe, new StateStore(folder));

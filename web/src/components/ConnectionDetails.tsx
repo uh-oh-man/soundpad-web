@@ -4,6 +4,11 @@ import { candidateSummary } from '../network/diagnostics';
 import type { ConnectionInfo } from '../network/session';
 
 const seconds = (ms: number) => `${(ms / 1000).toFixed(1)} s`;
+/** 2.41: whether the host will know this browser again after a reload (see network/guest-key.ts). */
+export const GUEST_KEY_SAVED =
+  'Keeps its own key, so the host knows it is you after a reload or a reconnect.';
+export const GUEST_KEY_PAGE =
+  'Cannot keep its key (browser storage is blocked or private), so after a reload the host sees you as a new guest and may have to let you in again.';
 const VERDICT: Record<string, string> = {
   ok: 'Direct connections should work from this network.',
   'udp-blocked': 'No STUN server answered: UDP is blocked, or an extension blocks WebRTC.',
@@ -36,6 +41,12 @@ export function ConnectionDetails({ info, host }: { info?: ConnectionInfo; host:
                     ? 'Reconnecting'
                     : 'Not connected'}
             </dd>
+            {info.guestKey && (
+              <>
+                <dt>This browser</dt>
+                <dd>{info.guestKey === 'saved' ? GUEST_KEY_SAVED : GUEST_KEY_PAGE}</dd>
+              </>
+            )}
           </>
         )}
         <dt>WebRTC</dt>

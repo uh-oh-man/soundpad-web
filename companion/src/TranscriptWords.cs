@@ -36,6 +36,14 @@ public sealed class TranscriptWords
     private string CorrectionsPath => Path.Combine(Folder, "corrections.json");
     /// <summary>The last write error, if any; the transcript stays in memory.</summary>
     public string? WriteError { get; private set; }
+    // 2.41: what could not be written is kept in memory, said so (Unsaved), and written again (RetrySaves): the
+    // words file is then rewritten whole (an append that failed may have left nothing or half a line), and
+    // corrections.json written as it is now. Nothing is lost while the companion runs.
+    private bool wordsUnsaved, correctionsUnsaved;
+    /// <summary>The reason, while words or corrections exist only in memory; null once everything is on disk.</summary>
+    public string? Unsaved { get { lock (gate) return wordsUnsaved || correctionsUnsaved ? WriteError ?? "The transcript could not be saved." : null; } }
+    /// <summary>True while a correction exists only in memory.</summary>
+    public bool CorrectionsUnsaved { get { lock (gate) return correctionsUnsaved; } }
 
     private TranscriptWords(string folder) { Folder = folder; }
 
@@ -92,7 +100,9 @@ public sealed class TranscriptWords
             if (stretch.EndFrame > stretch.StartFrame) AddCovered(stretch);
             var lines = added.Select(w => Json.Write(new Line(W: w))).ToList();
             if (stretch.EndFrame > stretch.StartFrame) lines.Add(Json.Write(new Line(C: [stretch.StartFrame, stretch.EndFrame])));
-            Persist(() => { Directory.CreateDirectory(Folder); File.AppendAllLines(WordsPath, lines); });
+            // After a failed write the file is rewritten whole instead (RetrySaves), never appended to.
+            if (wordsUnsaved) RewriteLocked();
+            else if (!Persist(() => { Directory.CreateDirectory(Folder); File.AppendAllLines(WordsPath, lines); })) wordsUnsaved = true;
         }
         return added;
     }
@@ -109,10 +119,29 @@ public sealed class TranscriptWords
             }
     }
 
-    private void Persist(Action write)
+    private bool Persist(Action write)
     {
-        try { write(); WriteError = null; }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { WriteError = "The transcript could not be saved: " + ex.Message; }
+        try { write(); WriteError = null; return true; }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { WriteError = "The transcript could not be saved: " + ex.Message; return false; }
+    }
+
+    private bool WriteCorrectionsLocked()
+    {
+        var all = corrections.Values.ToArray();
+        bool ok = Persist(() => { Directory.CreateDirectory(Folder); var temporary = CorrectionsPath + ".tmp"; File.WriteAllText(temporary, Json.Write(all)); File.Move(temporary, CorrectionsPath, true); });
+        correctionsUnsaved = !ok;
+        return ok;
+    }
+
+    /// <summary>Writes again whatever exists only in memory (2.41). True when nothing is left unsaved.</summary>
+    public bool RetrySaves()
+    {
+        lock (gate)
+        {
+            if (wordsUnsaved) RewriteLocked();
+            else if (correctionsUnsaved) WriteCorrectionsLocked();
+            return !wordsUnsaved && !correctionsUnsaved;
+        }
     }
 
     /// <summary>Words overlapping [start, end), oldest first, with corrections applied to their text.</summary>
@@ -156,8 +185,8 @@ public sealed class TranscriptWords
             if (!words.Any(w => w.Id == wordId)) throw new InvalidDataException("That word is no longer in the transcript.");
             var fix = new WordCorrection(wordId, text, by, DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
             corrections[wordId] = fix;
-            var all = corrections.Values.ToArray();
-            Persist(() => { Directory.CreateDirectory(Folder); var temporary = CorrectionsPath + ".tmp"; File.WriteAllText(temporary, Json.Write(all)); File.Move(temporary, CorrectionsPath, true); });
+            // Not saved: it stays in memory, the caller says so, and RetrySaves writes it later.
+            WriteCorrectionsLocked();
             return fix;
         }
     }
@@ -188,8 +217,7 @@ public sealed class TranscriptWords
             dropped += before - words.Count;
             if (dropped < 200 && !(changed && dropped > 0)) return;
             dropped = 0;
-            var lines = words.Select(w => Json.Write(new Line(W: w))).Concat(covered.Select(c => Json.Write(new Line(C: [c.StartFrame, c.EndFrame])))).ToList();
-            Persist(() => { Directory.CreateDirectory(Folder); var temporary = WordsPath + ".tmp"; File.WriteAllLines(temporary, lines); File.Move(temporary, WordsPath, true); });
+            RewriteLocked();
         }
     }
 
@@ -208,16 +236,43 @@ public sealed class TranscriptWords
             var kept = covered.Where(c => c.StartFrame < end).Select(c => new HistoryRange(c.StartFrame, Math.Min(c.EndFrame, end))).ToList();
             bool changed = words.Count != before || kept.Count != covered.Count || kept.Where((k, i) => k != covered[i]).Any();
             covered.Clear(); covered.AddRange(kept);
-            if (!changed) return;
-            var lines = words.Select(w => Json.Write(new Line(W: w))).Concat(covered.Select(c => Json.Write(new Line(C: [c.StartFrame, c.EndFrame])))).ToList();
-            var fixes = corrections.Values.ToArray();
-            Persist(() =>
-            {
-                Directory.CreateDirectory(Folder);
-                var temporary = WordsPath + ".tmp"; File.WriteAllLines(temporary, lines); File.Move(temporary, WordsPath, true);
-                if (File.Exists(CorrectionsPath)) { var fixesTemporary = CorrectionsPath + ".tmp"; File.WriteAllText(fixesTemporary, Json.Write(fixes)); File.Move(fixesTemporary, CorrectionsPath, true); }
-            });
+            if (changed) RewriteLocked();
         }
+    }
+
+    /// <summary>
+    /// Drops words and recognised stretches before <paramref name="start"/> (2.41: the recovered history was discarded
+    /// and the audio before this frame is gone), with their corrections, and rewrites the files when anything changed.
+    /// A word straddling <paramref name="start"/> goes too: part of its audio is gone.
+    /// </summary>
+    public void DropBefore(long start)
+    {
+        lock (gate)
+        {
+            int before = words.Count;
+            words.RemoveAll(w => w.Start < start);
+            foreach (var id in corrections.Keys.Where(id => !words.Any(w => w.Id == id)).ToArray()) corrections.Remove(id);
+            var kept = covered.Where(c => c.EndFrame > start).Select(c => new HistoryRange(Math.Max(c.StartFrame, start), c.EndFrame)).ToList();
+            bool changed = words.Count != before || kept.Count != covered.Count || kept.Where((k, i) => k != covered[i]).Any();
+            covered.Clear(); covered.AddRange(kept);
+            if (changed) RewriteLocked();
+        }
+    }
+
+    /// <summary>Writes the words, recognised stretches and corrections as they are now (replacing the files).</summary>
+    private void RewriteLocked()
+    {
+        var lines = words.Select(w => Json.Write(new Line(W: w))).Concat(covered.Select(c => Json.Write(new Line(C: [c.StartFrame, c.EndFrame])))).ToList();
+        var fixes = corrections.Values.ToArray();
+        bool writeFixes = correctionsUnsaved || File.Exists(CorrectionsPath);
+        bool ok = Persist(() =>
+        {
+            Directory.CreateDirectory(Folder);
+            var temporary = WordsPath + ".tmp"; File.WriteAllLines(temporary, lines); File.Move(temporary, WordsPath, true);
+            if (writeFixes) { var fixesTemporary = CorrectionsPath + ".tmp"; File.WriteAllText(fixesTemporary, Json.Write(fixes)); File.Move(fixesTemporary, CorrectionsPath, true); }
+        });
+        wordsUnsaved = !ok;
+        if (ok && writeFixes) correctionsUnsaved = false;
     }
 
     public int Count { get { lock (gate) return words.Count; } }

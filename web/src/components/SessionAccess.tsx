@@ -2,7 +2,7 @@ import { Users } from 'lucide-react';
 import { controller } from '../controller';
 import { MAX_PLACES, places, type PermissionKey } from '../network/policy';
 import { supports } from '../version';
-import { LobbyRequests } from './LobbyRequests';
+import { LobbyRequests, UNVERIFIED_TITLE } from './LobbyRequests';
 import { GuestUsage } from './StoragePanel';
 
 type View = ReturnType<typeof controller.getSnapshot>;
@@ -95,6 +95,13 @@ export function SessionAccess({ view }: { view: View }) {
                 <span className={`link-kind ${view.links[id] ?? 'direct'}`}>
                   {view.links[id] === 'relay' ? 'Relayed' : 'Direct'}
                 </span>{' '}
+                {view.unverified?.includes(id) && (
+                  <>
+                    <span className="link-kind unverified" title={UNVERIFIED_TITLE}>
+                      Unverified
+                    </span>{' '}
+                  </>
+                )}
                 <GuestUsage participantId={person?.id} />
               </span>
               <details className="guest-permissions">

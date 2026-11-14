@@ -85,6 +85,17 @@ public sealed class OwnReplayLog
     }
 
     public void Clear(string? sessionId = null) { lock (entries) entries.RemoveAll(e => sessionId == null || e.SessionId == sessionId); }
+
+    /// <summary>2.41: forgets what was played before <paramref name="frame"/> of one history (that audio was discarded).</summary>
+    public void DropBefore(string sessionId, long frame)
+    {
+        lock (entries)
+        {
+            entries.RemoveAll(e => e.SessionId == sessionId && e.End <= frame);
+            for (int i = 0; i < entries.Count; i++)
+                if (entries[i].SessionId == sessionId && entries[i].Start < frame) entries[i] = entries[i] with { Start = frame };
+        }
+    }
 }
 
 /// <summary>Quick Mimic (2.40): "Latest phrase" and "Last 10 seconds", as pure functions over the transcript.</summary>

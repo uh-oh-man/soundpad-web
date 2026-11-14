@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import {
   Captions,
   Download,
@@ -90,6 +90,8 @@ export function MimicHostControls({ state, connected }: { state: Snapshot; conne
   const [transcribing, setWantTranscript] = useOptimistic(!!mimic?.transcribing);
   const [hotkey, setWantHotkey] = useOptimistic(!!mimic?.hotkey);
   const hotkeyKey = mimic?.hotkeyKey ?? 'F6';
+  /** The example session (2.41): its hotkey copy says it needs the host's PC. */
+  const demo = useSyncExternalStore(controller.subscribe, () => controller.getSnapshot().demo);
 
   /**
    * Once the hotkey is on, put back the key and length this browser last chose. Moving a hotkey that is
@@ -213,7 +215,10 @@ export function MimicHostControls({ state, connected }: { state: Snapshot; conne
               if (running.current) return;
               if (
                 !window.confirm(
-                  'Discard the recovered recording history? It is deleted from this PC and cannot be brought back.',
+                  // 2.41: only what the crash recovered goes; an older companion discards everything recorded so far.
+                  supports(state.companionVersion, 'reviewFixes')
+                    ? 'Discard the recovered recording history? It is deleted from this PC and cannot be brought back. What was recorded since the companion started again stays.'
+                    : 'Discard the recovered recording history? Everything recorded so far is deleted from this PC, also what was recorded since the companion started again, and cannot be brought back.',
                 )
               )
                 return;
@@ -383,9 +388,12 @@ export function MimicHostControls({ state, connected }: { state: Snapshot; conne
             </label>
           )}
           <small>
-            {mimic?.hotkeyStatus && mimic.hotkeyStatus !== 'Off'
-              ? mimic.hotkeyStatus
-              : `Press ${hotkeyKey} in any app on this PC to save the last ${mimic?.hotkeySeconds ?? 10} seconds, like Voice Replay Studio.`}
+            {demo
+              ? // 2.41: a web page cannot listen for keys in other apps; the example must not promise it.
+                `Host's PC only: there, pressing ${hotkeyKey} in any app saves the last ${mimic?.hotkeySeconds ?? 10} seconds. It does nothing in the example.`
+              : mimic?.hotkeyStatus && mimic.hotkeyStatus !== 'Off'
+                ? mimic.hotkeyStatus
+                : `Press ${hotkeyKey} in any app on this PC to save the last ${mimic?.hotkeySeconds ?? 10} seconds, like Voice Replay Studio.`}
           </small>
         </div>
       )}

@@ -215,7 +215,9 @@ public sealed class LocalServer(Bridge bridge, string origin, string? ownerKey =
                             slot = queries;
                         }
                         // Execute is CALLED here, in arrival order, and runs up to its first real wait: that is where
-                        // playback intents get their order. Its answer is sent whenever it is ready.
+                        // playback intents get their order. Its answer is sent whenever it is ready. Commands that decode,
+                        // render or encode audio leave this thread right after that (2.41, Bridge.Offloaded), and their
+                        // CPU work runs on the bounded, below-normal AudioWorker, so a Stop or Panic is read at once.
                         if (host != null && actor == "host" && command.Op is "endSession" or "beginSession") Hosting(host, command.Op == "endSession");
                         var operation = bridge.Execute(command, actor, person, requester, audience);
                         running.Add(Answer(command.Id, operation, slot));

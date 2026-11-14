@@ -363,7 +363,7 @@ public sealed partial class Bridge
     /// guest through the host page's reply to them). It never reaches Soundpad or anyone else, and the website offers
     /// no download of it. Guests are limited per minute and to one at a time.
     /// </summary>
-    private Reply Preview(Command c, string actor, Participant? participant, string? requester)
+    private async Task<Reply> Preview(Command c, string actor, Participant? participant, string? requester)
     {
         bool host = actor == "host";
         string key = PersonKey(actor, participant, requester);
@@ -371,20 +371,28 @@ public sealed partial class Bridge
         if (c.DraftId != null)
         {
             h = CurrentHistory() ?? throw new InvalidDataException("Mimic has not recorded anything yet.");
+            // 2.41: like a selection, a draft is heard only on the recording it was made on.
+            if (c.SourceId != null && c.SourceId != h.SessionId) throw new InvalidDataException("Mimic restarted since you looked. Look again.");
             var draft = OwnDraft(c, key);
+            if (draft.SessionId != h.SessionId) throw new InvalidDataException("That draft is from a recording that is gone.");
             (start, stop) = (draft.Start, draft.End);
         }
         else (h, start, stop) = Selection(c);
         if (stop - start < (long)h.Rate * MimicMinimumMs / 1000) throw new InvalidDataException("Mimic had not started listening yet at that moment.");
         var access = AccessFor(actor, participant, requester, h);
-        if (host) return new("ack", c.Id, true, Data: new { wav = Convert.ToBase64String(MimicRing.Wav(h.Read(access, start, (int)(stop - start)), h.Rate)) });
+        // Reading and encoding run on the audio worker (2.41).
+        if (host) return new("ack", c.Id, true, Data: new { wav = Convert.ToBase64String(await Heavy("mimicPreview", () => MimicRing.Wav(h.Read(access, start, (int)(stop - start)), h.Rate))) });
         if (!previewing.TryAdd(key, 0)) throw new InvalidDataException("Your last preview is still being made.");
         try
         {
             if (!previewRate.TryTake(key)) throw new InvalidDataException("Too many previews. Wait a minute and try again.");
-            var samples = h.Read(access, start, (int)(stop - start));
-            var small = h.Rate > GuestPreviewRate ? MimicTranscriber.Resample(samples, h.Rate, GuestPreviewRate) : samples;
-            return new("ack", c.Id, true, Data: new { wav = Convert.ToBase64String(MimicRing.Wav(small, Math.Min(h.Rate, GuestPreviewRate))) });
+            var wav = await Heavy("mimicPreview", () =>
+            {
+                var samples = h.Read(access, start, (int)(stop - start));
+                var small = h.Rate > GuestPreviewRate ? MimicTranscriber.Resample(samples, h.Rate, GuestPreviewRate) : samples;
+                return MimicRing.Wav(small, Math.Min(h.Rate, GuestPreviewRate));
+            });
+            return new("ack", c.Id, true, Data: new { wav = Convert.ToBase64String(wav) });
         }
         finally { previewing.TryRemove(key, out _); }
     }

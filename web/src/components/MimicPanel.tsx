@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { Headphones, Play, Scissors, X } from 'lucide-react';
 import { z } from 'zod';
 import { controller } from '../controller';
@@ -60,6 +60,8 @@ export function MimicPanel({
   const mimic = state.mimic;
   const active = !!mimic?.active;
   const allowed = host || state.permissions.guestMimic === true;
+  /** The example session (2.41) shows the older Mimic and says so. */
+  const demo = useSyncExternalStore(controller.subscribe, () => controller.getSnapshot().demo);
   // A 2.39 companion keeps a rolling recording history: its own view replaces the live 30 s buffer below.
   const historyMode = supports(state.companionVersion, 'history');
   const recorded = !!mimic?.history?.sessionId;
@@ -195,6 +197,13 @@ export function MimicPanel({
           {Math.round((mimic?.history?.seconds ?? 600) / 60)} minutes there until the companion
           closes. Go back to anything said in that time and turn it into a sound. It never records a
           microphone, and everyone in the session can see when it is listening.
+        </p>
+      ) : demo ? (
+        // 2.41: the example still shows the older 30-second Mimic; say so instead of passing it off as current.
+        <p className="mimic-intro">
+          The example shows the older Mimic: the last 30 seconds of a loop of example clips, with
+          subtitles placed by hand. With the companion on the host's PC, Mimic keeps minutes of
+          history with words to click, drafts and private preview. It never records a microphone.
         </p>
       ) : (
         <p className="mimic-intro">

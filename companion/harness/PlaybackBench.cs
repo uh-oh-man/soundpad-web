@@ -24,6 +24,26 @@ public static class PlaybackBench
             finally { if (command.StartsWith("DoPlaySound(") || command == "DoStopSound()") lock (Calls) Calls.Add((issued, Stopwatch.GetTimestamp(), command)); }
         }
     }
+    /// <summary>
+    /// "--slow-work" (2.41): the fixture's phrases, after keeping a core busy as long as Whisper would for the same
+    /// audio (default 300 ms per second of speech), so recognition competes for the CPU like the real engine.
+    /// </summary>
+    private sealed class BusyTranscripts(int burnMsPerSecond) : ITranscriptEngine
+    {
+        private readonly TranscriptFixture inner = new();
+        public int Calls => inner.Calls;
+        public bool Available => inner.Available;
+        public string Status => inner.Status;
+        public void UseMode(SubtitleMode mode) => inner.UseMode(mode);
+        public Task Prepare(CancellationToken cancel) => inner.Prepare(cancel);
+        public Task<IReadOnlyList<TranscribedSpan>> Transcribe(float[] samples16k, CancellationToken cancel)
+        {
+            long until = Stopwatch.GetTimestamp() + Stopwatch.Frequency * burnMsPerSecond * samples16k.Length / MimicTranscriber.SpeechRate / 1000;
+            double sink = 0; while (Stopwatch.GetTimestamp() < until && !cancel.IsCancellationRequested) sink += Math.Sqrt(sink + 1);
+            return inner.Transcribe(samples16k, cancel);
+        }
+        public void Dispose() => inner.Dispose();
+    }
     private sealed class Sent
     {
         public int Seq; public string Client = "", Op = "", Kind = ""; public string? SoundId; public int? Index; public bool Intent;
@@ -62,6 +82,11 @@ public static class PlaybackBench
         // a play counts as obsolete only when the newer intent had arrived at least this long before it reached Soundpad.
         double grace = double.TryParse(Arg("--grace-ms"), System.Globalization.CultureInfo.InvariantCulture, out var g) && g >= 0 ? g : 3;
         var output = Arg("--out");
+        // 2.41: slow audio work next to the clicking. A keep-pitch copy of a 40 s Temp sound "and play" and a keep-pitch
+        // preview take turns every ~1.2 s, Mimic records the fixture with recognition keeping a core busy, and the host
+        // presses Panic (and lifts it) every ~2.5 s. Measures whether Play, Stop and Panic stay prompt meanwhile.
+        bool slowWork = args.Contains("--slow-work");
+        int burn = int.TryParse(Arg("--transcribe-burn-ms"), out var b) && b is >= 0 and <= 1000 ? b : 300;
         var directory = Path.Combine(Path.GetTempPath(), "soundpad-web-playback-bench-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(directory);
         var console = Console.Out;
@@ -77,7 +102,8 @@ public static class PlaybackBench
             using var inner = new SoundpadPipe(mock.Name, true);
             var pipe = new TimedPipe(inner);
             using var bridge = new Bridge(pipe, new StateStore(directory));
-            bridge.UseMimicCapture(new MimicFixture()); bridge.UseTranscriptEngine(new TranscriptFixture());
+            var busy = new BusyTranscripts(burn);
+            bridge.UseMimicCapture(new MimicFixture()); bridge.UseTranscriptEngine(slowWork ? busy : new TranscriptFixture());
             bridge.UseHotkeys(key => new HotkeyFixture(key)); bridge.UseVoiceReplayLibrary(VoiceReplayFixture.Create(Path.Combine(directory, "voice-replay")));
             Console.SetOut(TextWriter.Null); // the mock prints a TEST_PLAY line for every play
             await bridge.Poll(true);
@@ -93,6 +119,18 @@ public static class PlaybackBench
             var uploaded = await bridge.Upload(File.ReadAllBytes(tempWave), "Bench temp.wav", "Bench Host", true, "host", audience);
             if (!uploaded.Ok) throw new InvalidOperationException("upload: " + uploaded.Error);
             var tempAsset = AssetId(uploaded);
+            string? slowAsset = null;
+            if (slowWork)
+            {
+                var longWave = Path.Combine(directory, "bench-long-source.wav"); AudioFixtures.Wave(longWave, 40000);
+                var source = await bridge.Upload(File.ReadAllBytes(longWave), "Bench long.wav", "Bench Host", true, "host", audience);
+                if (!source.Ok) throw new InvalidOperationException("upload: " + source.Error);
+                slowAsset = AssetId(source);
+                var listening = await bridge.Execute(Cmd("mimicStart") with { SourceId = MimicFixture.Source.Id }, "host");
+                if (!listening.Ok) throw new InvalidOperationException("mimicStart: " + listening.Error);
+                var words = await bridge.Execute(Cmd("mimicTranscribe") with { Action = "enable" }, "host");
+                if (!words.Ok) throw new InvalidOperationException("mimicTranscribe: " + words.Error);
+            }
             await bridge.Poll(true);
             var tempSound = bridge.Snapshot.Library.Sounds.First(x => x.AssetId == tempAsset && !x.InternalVariant);
             var natives = bridge.Snapshot.Library.Sounds.Where(x => x.AssetId == null).ToArray();
@@ -200,8 +238,32 @@ public static class PlaybackBench
                     try { await Task.Delay(3000, stop.Token); } catch (OperationCanceledException) { }
                 }
             }
+            async Task SlowWork()
+            {
+                if (!slowWork) return;
+                for (int round = 0; clock.Elapsed.TotalSeconds < seconds - 2; round++)
+                {
+                    // Keep-pitch copies of the whole 40 s source "and play" (an intent that a later click overtakes),
+                    // alternating with keep-pitch previews of its first 20 s.
+                    var copy = Cmd(round % 2 == 0 ? "trimAudio" : "trimPreview") with { AssetId = slowAsset, PositionMs = 0, EndMs = 40000, Action = "speed", Speed = round % 2 == 0 ? 0.6 : 1.4, KeepPitch = true, Autoplay = round % 2 == 0 };
+                    Send("slow", copy, copy.Op == "trimAudio" ? "slow-copy" : "slow-preview", copy.Autoplay, "host", hostPerson, null);
+                    try { await Task.Delay(1200, stop.Token); } catch (OperationCanceledException) { }
+                }
+            }
+            async Task Panics()
+            {
+                if (!slowWork) return;
+                var random = new Random(seed + 200);
+                while (clock.Elapsed.TotalSeconds < seconds - 1)
+                {
+                    await Task.Delay(random.Next(2000, 3000));
+                    Send("host", Cmd("panic") with { Action = "enable" }, "panic", true, "host", hostPerson, null);
+                    await Task.Delay(100);
+                    Send("host", Cmd("panic") with { Action = "disable" }, "panic-lift", false, "host", hostPerson, null);
+                }
+            }
             var poller = PollLoop();
-            await Task.WhenAll(Client("host", "host", hostPerson, null, seed), Client("guest", "guest", guestPerson, guestPeer, seed + 1), Queries(), ManagedWork());
+            await Task.WhenAll(Client("host", "host", hostPerson, null, seed), Client("guest", "guest", guestPerson, guestPeer, seed + 1), Queries(), ManagedWork(), SlowWork(), Panics());
             double ranFor = clock.Elapsed.TotalSeconds;
             // Let every command answer (a backlog on older code can take a while), then stop polling.
             Task[] pending; lock (order) pending = sent.Select(x => x.Task!).ToArray();
@@ -225,8 +287,8 @@ public static class PlaybackBench
                 var call = calls.Where(c => c.Command == arrival.Command && c.Issued <= arrival.At && c.Returned >= arrival.At).OrderByDescending(c => c.Issued).FirstOrDefault();
                 if (call.Command == null) { unattributed++; continue; }
                 bool slot = slots.Contains(index);
-                var owner = intents.Where(x => !claimed.Contains(x) && x.Op != "stop" && x.Intended <= call.Issued && (x.Acked == 0 || x.Acked >= call.Returned) && (slot ? x.Op is "startAt" or "region" : x.Index == index)).OrderBy(x => x.Acked == 0 ? long.MaxValue : x.Acked).FirstOrDefault()
-                    ?? intents.Where(x => !claimed.Contains(x) && x.Op == "reverse" && x.Intended <= call.Issued && (x.Acked == 0 || x.Acked >= call.Returned)).OrderBy(x => x.Acked == 0 ? long.MaxValue : x.Acked).FirstOrDefault();
+                var owner = intents.Where(x => !claimed.Contains(x) && x.Op is not ("stop" or "panic") && x.Intended <= call.Issued && (x.Acked == 0 || x.Acked >= call.Returned) && (slot ? x.Op is "startAt" or "region" : x.Index == index)).OrderBy(x => x.Acked == 0 ? long.MaxValue : x.Acked).FirstOrDefault()
+                    ?? intents.Where(x => !claimed.Contains(x) && x.Op is "reverse" or "trimAudio" && x.Intended <= call.Issued && (x.Acked == 0 || x.Acked >= call.Returned)).OrderBy(x => x.Acked == 0 ? long.MaxValue : x.Acked).FirstOrDefault();
                 if (owner == null) { unattributed++; continue; }
                 claimed.Add(owner); owner.Reached = arrival.At; if (slot) exactPlays.Add(owner);
             }
@@ -259,16 +321,21 @@ public static class PlaybackBench
             var acked = intents.Where(x => x.Reply != null).ToArray();
             var errors = intents.Where(x => x.Reply is { Ok: false } || x.Failure != null).GroupBy(x => x.Failure ?? x.Reply!.Error ?? "(no message)").ToDictionary(group => group.Key, group => group.Count());
             var stops = intents.Where(x => x.Op == "stop" && x.Acked != 0).ToArray();
+            var panics = intents.Where(x => x.Op == "panic" && x.Acked != 0).ToArray();
+            // Not the slow copies themselves: how long the single caller (the socket's receive loop) was held before each
+            // command was even taken (2.41), and how long the slow work took to answer.
+            var urgent = commands.Where(x => x.Kind is not ("slow-copy" or "slow-preview")).ToArray();
+            var slow = commands.Where(x => x.Kind is "slow-copy" or "slow-preview").ToArray();
             var load = commands.Where(x => !x.Intent).ToArray();
             var loadErrors = load.Where(x => x.Reply is { Ok: false } || x.Failure != null).GroupBy(x => x.Kind + ": " + (x.Failure ?? x.Reply!.Error ?? "(no message)")).ToDictionary(group => group.Key, group => group.Count());
 
             // Is what Soundpad ended up doing what the last intent asked for?
             var last = intents.LastOrDefault();
             var lastPlay = timeline.LastOrDefault(e => e.Command.StartsWith("DoPlaySound("));
-            string expected = last == null ? "nothing" : last.Op == "stop" ? "stopped" : exactPlays.Contains(last) ? "an exact slice of the sound at index " + last.Index + " (played from a slot)" : last.Index is int wanted ? $"DoPlaySound({wanted})" : "the reversed clip";
+            string expected = last == null ? "nothing" : last.Op is "stop" or "panic" ? "stopped" : exactPlays.Contains(last) ? "an exact slice of the sound at index " + last.Index + " (played from a slot)" : last.Index is int wanted ? $"DoPlaySound({wanted})" : "the reversed clip";
             string actual; bool matches;
             if (last == null) { actual = "nothing"; matches = true; }
-            else if (last.Op == "stop")
+            else if (last.Op is "stop" or "panic")
             {
                 // Nothing may start after the final Stop arrived (a play already on the wire within the grace aside).
                 bool later = lastPlay.Command != null && Ms(last.Arrived, lastPlay.At) >= grace;
@@ -304,8 +371,13 @@ public static class PlaybackBench
                 latencyMs = new
                 {
                     sendToSoundpadForPlaysThatStarted = Distribution(started.Select(x => Ms(x.Intended, x.Reached!.Value))),
-                    sendToAckForAllPlaybackCommands = Distribution(intents.Where(x => x.Acked != 0).Select(x => Ms(x.Intended, x.Acked))),
+                    sendToAckForAllPlaybackCommands = Distribution(intents.Where(x => x.Acked != 0 && x.Kind != "slow-copy").Select(x => Ms(x.Intended, x.Acked))),
                     sendToAckForStop = Distribution(stops.Select(x => Ms(x.Intended, x.Acked))),
+                    sendToAckForPanic = Distribution(panics.Select(x => Ms(x.Intended, x.Acked))),
+                    sendToTakenForStop = Distribution(stops.Select(x => Ms(x.Intended, x.Arrived))),
+                    sendToTakenForPanic = Distribution(panics.Select(x => Ms(x.Intended, x.Arrived))),
+                    sendToTakenForPlays = Distribution(intents.Where(x => x.Op is "play" or "startAt" or "region").Select(x => Ms(x.Intended, x.Arrived))),
+                    sendToTakenForEverythingElse = Distribution(urgent.Select(x => Ms(x.Intended, x.Arrived))),
                     // 2.37: cue starts and regions on their own, and when their wanted audio was really playing.
                     sendToSoundpadForCueStartsAndRegions = Distribution(cues.Select(x => Ms(x.Intended, x.Reached!.Value))),
                     sendToWantedAudioForCueStartsAndRegions = Distribution(cueReady.Where(c => c.Ms != null).Select(c => c.Ms!.Value))
@@ -338,6 +410,14 @@ public static class PlaybackBench
                     sendToAckMs = Distribution(load.Where(x => x.Acked != 0).Select(x => Ms(x.Intended, x.Acked))),
                     uploads, uploadFailures, polls, pollFailures, pollFailure
                 },
+                slowWork = !slowWork ? null : new
+                {
+                    sent = slow.GroupBy(x => x.Kind).ToDictionary(group => group.Key, group => group.Count()),
+                    answers = slow.GroupBy(x => x.Failure ?? (x.Reply == null ? "unanswered" : !x.Reply.Ok ? "error: " + x.Reply.Error : x.Superseded || x.Played == false ? "made, not played (superseded)" : x.Played == true ? "made and played" : "made")).ToDictionary(group => group.Key, group => group.Count()),
+                    callerHeldMs = Distribution(slow.Select(x => Ms(x.Intended, x.Arrived))),
+                    sendToAckMs = Distribution(slow.Where(x => x.Acked != 0).Select(x => Ms(x.Intended, x.Acked))),
+                    transcribeCalls = busy.Calls, burnMsPerSecondOfSpeech = burn
+                },
                 commands = commands.Select(x => new
                 {
                     seq = x.Seq, client = x.Client, op = x.Op, target = x.Kind, index = x.Index,
@@ -360,6 +440,11 @@ public static class PlaybackBench
             Console.WriteLine(Line("Send -> reached Soundpad (plays that started)", result.latencyMs.sendToSoundpadForPlaysThatStarted));
             Console.WriteLine(Line("Send -> answer (all playback commands)", result.latencyMs.sendToAckForAllPlaybackCommands));
             Console.WriteLine(Line("Send -> answer (Stop)", result.latencyMs.sendToAckForStop));
+            Console.WriteLine(Line("Send -> answer (Panic)", result.latencyMs.sendToAckForPanic));
+            Console.WriteLine(Line("Send -> taken by the caller (Stop)", result.latencyMs.sendToTakenForStop));
+            Console.WriteLine(Line("Send -> taken by the caller (Panic)", result.latencyMs.sendToTakenForPanic));
+            Console.WriteLine(Line("Send -> taken by the caller (plays, cue starts, regions)", result.latencyMs.sendToTakenForPlays));
+            Console.WriteLine(Line("Send -> taken by the caller (all but the slow work)", result.latencyMs.sendToTakenForEverythingElse));
             Console.WriteLine($"Plays that reached Soundpad: {result.plays.reachedSoundpad}; obsolete (a newer intent had arrived {grace:0.#}+ ms earlier): {obsolete.Length}{(obsolete.Length > 0 ? $", worst {result.plays.obsoleteWorstMsAfterNewerIntent} ms late" : "")}; overtaken while on the wire (< {grace:0.#} ms): {overtaken.Length}; unmatched: {unattributed}");
             Console.WriteLine(Line("Send -> reached Soundpad (cue starts and regions)", result.latencyMs.sendToSoundpadForCueStartsAndRegions));
             Console.WriteLine(Line("Send -> wanted audio playing (cue starts and regions)", result.latencyMs.sendToWantedAudioForCueStartsAndRegions));
@@ -369,6 +454,12 @@ public static class PlaybackBench
             Console.WriteLine($"Background: {string.Join(", ", result.background.queries.Select(p => p.Value + " " + p.Key))}; {uploads} uploads ({uploadFailures} failed); {polls} polls ({pollFailures} failed{(pollFailure != null ? ": " + pollFailure : "")}); {result.background.errors} error answers");
             foreach (var (message, count) in loadErrors.OrderByDescending(p => p.Value)) Console.WriteLine($"  background error x{count}: {message}");
             Console.WriteLine(Line("Background send -> answer", result.background.sendToAckMs));
+            if (result.slowWork is { } work)
+            {
+                Console.WriteLine($"Slow work: {string.Join(", ", work.sent.Select(p => p.Value + " " + p.Key))}; {string.Join(", ", work.answers.Select(p => p.Value + " " + p.Key))}; {work.transcribeCalls} recognitions at {burn} ms per s of speech");
+                Console.WriteLine(Line("Slow work: caller held by each", work.callerHeldMs));
+                Console.WriteLine(Line("Slow work: send -> answer", work.sendToAckMs));
+            }
             if (output != null) Console.WriteLine("Details: " + Path.GetFullPath(output));
         }
         finally

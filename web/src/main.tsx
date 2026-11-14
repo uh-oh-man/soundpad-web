@@ -327,7 +327,9 @@ function Landing({ view }: { view: ReturnType<typeof controller.getSnapshot> }) 
 
 /**
  * "Try the example": a host session with example sounds that runs entirely in this page, so a
- * visitor can see every feature before installing anything. Its code loads only when pressed.
+ * visitor can try the app before installing anything. Its code loads only when pressed. It says
+ * what can be tried (2.41): not "every feature", since the Windows hotkey, Keep, Spotify and the
+ * newer Mimic history need the host's PC.
  */
 function TryExample({ loading }: { loading: boolean }) {
   return (
@@ -343,8 +345,8 @@ function TryExample({ loading }: { loading: boolean }) {
         {loading ? 'Loading the example…' : 'Try the example'}
       </button>
       <p id="try-example-note">
-        See every feature with example sounds. Nothing is sent to Soundpad; sounds play in this
-        browser.
+        Try the soundboard, edited copies, Mimic and simulated guests with example sounds. Nothing
+        is sent to Soundpad; sounds play in this browser.
       </p>
     </div>
   );
@@ -356,8 +358,9 @@ function DemoBanner() {
     <aside className="demo-banner" aria-label="Example session">
       <Sparkles size={18} aria-hidden="true" />
       <span>
-        <strong>Example session: nothing here reaches Soundpad.</strong> Sounds play in this
-        browser, the guests are simulated, and leaving forgets everything.
+        <strong>Example session: nothing here reaches Soundpad.</strong> Sounds play in this browser
+        and the guests are simulated. Leaving clears the example’s audio, copies and Mimic clips;
+        your favourites and view settings stay.
       </span>
       <button onClick={() => void controller.leave()}>
         <LogOut size={15} aria-hidden="true" /> Leave example
@@ -681,6 +684,7 @@ function App() {
                             .map((id, i) => view.people[id]?.name ?? `Guest ${i + 1}`)
                             .join(', ')}
                           {view.guests.length > 4 && ` +${view.guests.length - 4} more`}
+                          {view.demo && ' (simulated)'}
                         </span>
                       )}
                     </p>

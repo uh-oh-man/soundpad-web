@@ -1,18 +1,24 @@
 import { describe, expect, it } from 'vitest';
 import {
   behindLiveMs,
+  bind,
   clampViewEnd,
   formatSpan,
   gapMarks,
   hiddenParts,
   jump,
+  ofSession,
+  selectionFields,
   selectionFrames,
+  selectionOn,
   selectionMs,
   sentences,
   timelineSchema,
   toPeaks,
   wallOf,
   windowStart,
+  wordCut,
+  continuousParts,
   wordRange,
   wordSelected,
   wordSelection,
@@ -282,5 +288,122 @@ describe('history protocol', () => {
     expect(parseSnapshot({ ...raw, mimic: older }).mimic?.history).toBeUndefined();
     expect(supports('2.38.0', 'history')).toBe(false);
     expect(supports('2.39.0', 'history')).toBe(true);
+  });
+});
+
+describe('a selection stays with its recording (2.41)', () => {
+  it('a session change mid-selection drops the selection, its command fields and the old data', () => {
+    // A drag on recording A's waveform, from 2 s to 2.5 s.
+    const picked = bind(selectionFrames({ from: 2000, to: 2500 }, 0, RATE), 'A');
+    expect(selectionOn(picked, 'A')).toEqual({ startFrame: s(2), endFrame: s(2.5) });
+    expect(selectionFields(picked, 'A')).toEqual({
+      startFrame: s(2),
+      endFrame: s(2.5),
+      sourceId: 'A',
+    });
+    // Mimic restarts: recording B has audio at the same frame numbers. Nothing of A may act on it.
+    expect(selectionOn(picked, 'B')).toBeNull();
+    expect(selectionFields(picked, 'B')).toBeNull();
+    expect(selectionFields(picked, null)).toBeNull();
+    // A delayed waveform or transcript reply for A is not shown on B; B's own is.
+    const main = { end: s(10), peaks: [1, 2], sessionId: 'A' };
+    expect(ofSession(main, 'A')).toBe(main);
+    expect(ofSession(main, 'B')).toBeNull();
+    expect(ofSession({ ...main, sessionId: 'B' }, 'B')).not.toBeNull();
+    // Nothing is bound without a recording.
+    expect(bind({ startFrame: 1, endFrame: 2 }, null)).toBeNull();
+  });
+  it('the guest page relays a selection’s recording with every command that names frames', () => {
+    for (const op of [
+      'historyShare',
+      'mimicPreview',
+      'mimicClip',
+      'draftKeep',
+      'draftPlay',
+    ] as const)
+      expect(
+        commandSchema.safeParse({
+          v: 2,
+          id: crypto.randomUUID(),
+          at: Date.now(),
+          op,
+          startFrame: 1,
+          endFrame: 2,
+          sourceId: 'A',
+        }).success,
+      ).toBe(true);
+  });
+});
+
+describe('word playback stays inside the audio this person may hear (2.41)', () => {
+  const range = (cut: ReturnType<typeof wordCut>) => ('range' in cut ? cut.range : null);
+  const reason = (cut: ReturnType<typeof wordCut>) => ('reason' in cut ? cut.reason : '');
+
+  it('splits what is available at every gap', () => {
+    expect(continuousParts(timeline())).toEqual([
+      { startFrame: 0, endFrame: s(40) },
+      { startFrame: s(40), endFrame: s(60) },
+    ]);
+  });
+
+  it('a word just after a guest joined plays from the join point instead of being refused', () => {
+    // The guest joined at 20 s; the word starts 5 ms later. Padding (20 ms before) used to reach before the
+    // join point, which the companion refuses ("before you joined").
+    const t = timeline({ fromFrame: s(20), available: [{ startFrame: s(20), endFrame: s(60) }] });
+    const w = word('hello', 20.005, 20.4);
+    expect(wordSelection([w], null, w.id, false, RATE)!.startFrame).toBeLessThan(s(20));
+    const cut = range(wordCut([w], null, w.id, false, t))!;
+    expect(cut.startFrame).toBe(s(20));
+    expect(cut.endFrame).toBe(wordRange(w, RATE).endFrame);
+    expect(visible(t, cut)).toBe(true);
+  });
+
+  it('padding never reaches across a gap into audio recorded at another time', () => {
+    const t = timeline();
+    const after = word('after', 40.004, 40.5);
+    const before = word('before', 39.5, 39.997);
+    expect(range(wordCut([after], null, after.id, false, t))!.startFrame).toBe(s(40));
+    expect(range(wordCut([before], null, before.id, false, t))!.endFrame).toBe(s(40));
+  });
+
+  it('the shortest cut grows within the part only, earlier when the word ends at the edge', () => {
+    // A 50 ms word that ends 2 ms before the oldest-held edge of a part: 150 ms are found before it.
+    const t = timeline({
+      available: [{ startFrame: 0, endFrame: s(10) }],
+      gaps: [],
+      liveFrame: s(10),
+    });
+    const w = word('hm', 9.948, 9.998);
+    const cut = range(wordCut([w], null, w.id, false, t))!;
+    expect(cut.endFrame).toBe(s(10));
+    expect(cut.endFrame - cut.startFrame).toBe(s(0.15));
+  });
+
+  it('says why when the word itself is not all there', () => {
+    const joined = timeline({
+      fromFrame: s(20),
+      available: [{ startFrame: s(20), endFrame: s(60) }],
+    });
+    const early = word('early', 19.9, 20.3);
+    expect(reason(wordCut([early], null, early.id, false, joined))).toMatch(/before you joined/);
+    const t = timeline();
+    const across = word('across', 39.8, 40.2);
+    expect(reason(wordCut([across], null, across.id, false, t))).toMatch(/gap or the edge/);
+    const expired = timeline({ available: [{ startFrame: s(30), endFrame: s(60) }] });
+    const old = word('old', 5, 5.4);
+    expect(reason(wordCut([old], null, old.id, false, expired))).toMatch(
+      /no longer in the recording history/,
+    );
+    const tiny = timeline({ available: [{ startFrame: s(50), endFrame: s(50.1) }], gaps: [] });
+    const short = word('uh', 50.02, 50.08);
+    expect(reason(wordCut([short], null, short.id, false, tiny))).toMatch(/Too little audio/);
+  });
+
+  it('a Shift-click range keeps its words and is clamped the same way', () => {
+    const t = timeline({ fromFrame: s(20), available: [{ startFrame: s(20), endFrame: s(60) }] });
+    const a = word('one', 20.001, 20.3),
+      b = word('two', 20.4, 20.8);
+    const cut = range(wordCut([a, b], a.id, b.id, true, t))!;
+    expect(cut).toEqual({ startFrame: s(20), endFrame: wordRange(b, RATE).endFrame });
   });
 });

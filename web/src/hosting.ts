@@ -55,5 +55,5 @@ export const DEMO_COPY = {
   note: undefined as string | undefined,
   sidebar: 'Example session: it runs in this tab and nothing reaches Soundpad.',
   status: 'An example running in this browser. No companion or Soundpad is involved.',
-  foot: 'Leaving the example forgets everything done in it.',
+  foot: 'Leaving the example clears its audio, copies and Mimic clips. Favourites and view settings stay in this browser.',
 };

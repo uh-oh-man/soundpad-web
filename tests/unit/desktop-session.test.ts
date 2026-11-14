@@ -7,7 +7,7 @@ const startReport = vi.hoisted(() => ({ info: undefined as unknown }));
 type FakeRoom = {
   invite: { room: string };
   host: { room: string } | undefined;
-  guests: (ids: string[]) => void;
+  guests: (ids: string[], links?: Record<string, string>, unverified?: string[]) => void;
   profiles: { changed: (people: Record<string, { id: string; name: string }>) => void };
   extras: { layouts: (layouts: unknown[]) => void };
   options: {
@@ -211,7 +211,8 @@ describe('session owner (2.36)', () => {
     const person = { id: crypto.randomUUID(), name: 'Ann' };
     rooms[0].guests(['peer-a']);
     rooms[0].profiles.changed({ 'peer-a': person });
-    rooms[0].guests(['peer-a', 'peer-b']);
+    // 2.41: peer-b's page proved no browser key; views label it too.
+    rooms[0].guests(['peer-a', 'peer-b'], {}, ['peer-b']);
     await vi.advanceTimersByTimeAsync(249);
     expect(socket.posted('session')).toHaveLength(before);
     await vi.advanceTimersByTimeAsync(1);
@@ -223,7 +224,7 @@ describe('session owner (2.36)', () => {
         people: { 'peer-a': person },
         layouts: [],
         ownerWindow: true,
-        control: { requests: [], policy: DEFAULT_POLICY, links: {} },
+        control: { requests: [], policy: DEFAULT_POLICY, links: {}, unverified: ['peer-b'] },
       },
     ]);
   });
@@ -353,8 +354,10 @@ describe('session view (2.36)', () => {
       people: { 'peer-a': person },
       layouts: [],
       ownerWindow: true,
+      control: { requests: [], policy: DEFAULT_POLICY, links: {}, unverified: ['peer-a'] },
     });
     expect(page.getSnapshot()).toMatchObject({
+      unverified: ['peer-a'],
       mode: 'host',
       status: 'Host ready',
       hosting: 'view',

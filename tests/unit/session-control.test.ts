@@ -14,6 +14,13 @@ import {
 import { createRelayLink } from '../../web/src/network/relay';
 import { createIdentity, type HostIdentity } from '../../web/src/network/identity';
 import {
+  createGuestKey,
+  guestIdOf,
+  guestProof,
+  signGuest,
+  type GuestKey,
+} from '../../web/src/network/guest-key';
+import {
   DEFAULT_POLICY,
   effectivePermissions,
   LIST,
@@ -64,7 +71,17 @@ type PageOptions = {
   sounds?: number;
   /** Host: more of the companion state (2.39: the recording history's snapshot). */
   state?: Partial<Snapshot>;
+  /** Guest (2.41): this browser's key; by default the one of `person` (or of the first profile). */
+  key?: Promise<GuestKey>;
 };
+/** One key per person, as one browser keeps it across reloads (2.41). */
+const keys = new Map<string, Promise<GuestKey>>();
+const keyOf = (who: { id: string }) => {
+  if (!keys.has(who.id)) keys.set(who.id, createGuestKey(true));
+  return keys.get(who.id)!;
+};
+/** The id a host knows a person's browser by (2.41). */
+const idOf = async (who: { id: string }) => guestIdOf((await keyOf(who)).publicKey);
 function page(net: MemoryNetwork, invite: HostIdentity, id: string, options: PageOptions = {}) {
   let state: Snapshot = {
     ...EMPTY,
@@ -89,6 +106,7 @@ function page(net: MemoryNetwork, invite: HostIdentity, id: string, options: Pag
   let status = 'Connecting';
   let guests: string[] = [];
   let links: Record<string, string> = {};
+  let unverified: string[] = [];
   let requests: LobbyRequest[] = [];
   let policy: SessionPolicy = { ...DEFAULT_POLICY, ...options.policy };
   const connections: ConnectionInfo[] = [];
@@ -107,9 +125,10 @@ function page(net: MemoryNetwork, invite: HostIdentity, id: string, options: Pag
     },
     (s) => (state = s),
     (s) => (status = s),
-    (ids, kinds) => {
+    (ids, kinds, plain) => {
       guests = ids;
       links = kinds;
+      unverified = plain;
     },
     net.transport(id),
     (options.profile || options.person) && {
@@ -127,6 +146,10 @@ function page(net: MemoryNetwork, invite: HostIdentity, id: string, options: Pag
       connection: (c) => connections.push(c),
       probe: async () => undefined,
       fallbackMs: 3000,
+      guestKey: () => {
+        const who = options.person ?? options.profile?.();
+        return options.key ?? (who ? keyOf(who) : createGuestKey(true));
+      },
     },
   );
   sessions.push(session);
@@ -136,6 +159,7 @@ function page(net: MemoryNetwork, invite: HostIdentity, id: string, options: Pag
     status: () => status,
     guests: () => guests,
     links: () => links,
+    unverified: () => unverified,
     requests: () => requests,
     policy: () => policy,
     connection: () => connections.at(-1),
@@ -265,21 +289,29 @@ describe('reconnect (2.37)', () => {
 });
 
 describe('lobby and capacity (2.37)', () => {
-  it('holds a guest until the host lets them in, keyed by their participant id', async () => {
+  it('holds a guest until the host lets them in, keyed by their browser key', async () => {
     const net = new MemoryNetwork(),
       a = await createIdentity(),
-      ann = person('Ann');
+      ann = person('Ann'),
+      annId = await idOf(ann);
     const h = page(net, a, 'host', { host: true, policy: { admission: 'ask' } }),
       g = page(net, a, 'guest', { person: ann });
     await until(() => g.status() === LOBBY_TEXT.waiting);
     expect(g.connection()?.lobby).toBe('waiting');
-    expect(h.requests()).toMatchObject([{ id: ann.id, name: 'Ann', kind: 'admit' }]);
+    expect(g.connection()?.guestKey).toBe('saved');
+    // 2.41: the id is the one her key proves, not the profile id her page declares.
+    expect(annId).not.toBe(ann.id);
+    expect(h.requests()).toEqual([
+      expect.objectContaining({ id: annId, name: 'Ann', kind: 'admit' }),
+    ]);
+    expect(h.requests()[0].unverified).toBeUndefined();
     expect(h.guests()).toEqual([]);
-    await h.session.letIn(ann.id);
+    await h.session.letIn(annId);
     await until(() => g.status() === 'Connected');
     expect(h.requests()).toEqual([]);
-    expect(h.policy().admitted).toEqual([ann.id]);
-    // A reload is a new peer id with the same participant id: in at once, no new request.
+    expect(h.policy().admitted).toEqual([annId]);
+    expect(h.unverified()).toEqual([]);
+    // A reload is a new peer id with the same browser key: in at once, no new request.
     await g.session.close();
     const again = page(net, a, 'guest-reloaded', { person: ann });
     await until(() => again.status() === 'Connected');
@@ -288,20 +320,21 @@ describe('lobby and capacity (2.37)', () => {
   it('turns a guest away calmly and remembers it', async () => {
     const net = new MemoryNetwork(),
       a = await createIdentity(),
-      bob = person('Bob');
+      bob = person('Bob'),
+      bobId = await idOf(bob);
     const h = page(net, a, 'host', { host: true, policy: { admission: 'ask' } }),
       g = page(net, a, 'guest', { person: bob });
     await until(() => h.requests().length === 1);
-    h.session.turnAway(bob.id);
+    h.session.turnAway(bobId);
     await until(() => g.status() === LOBBY_TEXT.turnedAway);
-    expect(h.policy().turnedAway).toEqual([bob]);
+    expect(h.policy().turnedAway).toEqual([{ id: bobId, name: 'Bob' }]);
     expect(h.requests()).toEqual([]);
     // Opening the invitation again does not ask the host again.
     const again = page(net, a, 'guest-2', { person: bob });
     await until(() => again.status() === LOBBY_TEXT.turnedAway);
     expect(h.requests()).toEqual([]);
     // Allow again: the next visit is in.
-    await h.session.letIn(bob.id);
+    await h.session.letIn(bobId);
     expect(h.policy().turnedAway).toEqual([]);
     const third = page(net, a, 'guest-3', { person: bob });
     await until(() => third.status() === 'Connected');
@@ -338,8 +371,9 @@ describe('lobby and capacity (2.37)', () => {
     expect(h.requests()).toEqual([]);
     second.session.askForPlace();
     await until(() => h.requests().length === 1);
-    expect(h.requests()[0]).toMatchObject({ id: bob.id, kind: 'extra' });
-    await h.session.letIn(bob.id);
+    const bobId = await idOf(bob);
+    expect(h.requests()[0]).toMatchObject({ id: bobId, kind: 'extra' });
+    await h.session.letIn(bobId);
     await until(() => second.status() === 'Connected');
     expect(h.policy().extra).toBe(1);
     expect(h.guests()).toHaveLength(2);
@@ -372,7 +406,10 @@ describe('per-guest permissions (2.37)', () => {
     await until(() => ga.status() === 'Connected' && gb.status() === 'Connected');
     h.session.setPolicy({
       ...h.policy(),
-      overrides: { [ann.id]: { remotePlayback: false }, [bob.id]: { guestUploads: false } },
+      overrides: {
+        [await idOf(ann)]: { remotePlayback: false },
+        [await idOf(bob)]: { guestUploads: false },
+      },
     });
     await until(() => ga.state().permissions.remotePlayback === false);
     expect(gb.state().permissions.remotePlayback).toBe(true);
@@ -482,7 +519,8 @@ describe('review fixes (2.37)', () => {
     const h = page(net, a, 'host', { host: true });
     const g = page(net, a, 'guest', { profile: () => profile });
     await until(() => g.status() === 'Connected');
-    h.session.setPolicy({ ...h.policy(), overrides: { [ann.id]: { remotePlayback: false } } });
+    const annId = await idOf(ann);
+    h.session.setPolicy({ ...h.policy(), overrides: { [annId]: { remotePlayback: false } } });
     await until(() => g.state().permissions.remotePlayback === false);
     // The same connection says hello again as somebody new (a modified page), with a new name too.
     profile = { id: crypto.randomUUID(), name: 'Zed' };
@@ -490,7 +528,7 @@ describe('review fixes (2.37)', () => {
     await advance(1000);
     await expect(g.session.sendCommand(command('play'))).rejects.toThrow('disabled');
     expect(h.commands).toEqual([]);
-    expect(h.policy().admitted).toEqual([ann.id]);
+    expect(h.policy().admitted).toEqual([annId]);
     expect(g.state().permissions.remotePlayback).toBe(false);
   });
 
@@ -508,6 +546,188 @@ describe('review fixes (2.37)', () => {
     await advance(1000);
     expect(h.requests()).toHaveLength(LIST);
     expect(peers.at(-1)!.received.map((m) => m.lobby)).toContain('full');
+  });
+});
+
+describe('guest identity (2.41)', () => {
+  /** A page that speaks the protocol by hand: an older page (no key) or someone trying to pass for another. */
+  function rawPeer(net: MemoryNetwork, invite: HostIdentity, id: string) {
+    const room = net
+      .transport(id)
+      .join(
+        { appId: 'org.soundpad-web.v1', password: invite.secret } as never,
+        invite.room,
+      ) as unknown as {
+      makeAction: () => {
+        send: (data: unknown, options: { target: string }) => Promise<void>;
+        onMessage: ((data: unknown) => void) | null;
+      };
+    };
+    const action = room.makeAction();
+    const received: { type: string; lobby?: string; challenge?: string }[] = [];
+    action.onMessage = (data) => received.push(data as { type: string });
+    const nonce = crypto.randomUUID();
+    return {
+      nonce,
+      types: () => received.map((m) => m.lobby ?? m.type),
+      challenge: () => received.find((m) => m.type === 'challenge')?.challenge,
+      hello: (fields: Record<string, unknown>) =>
+        action.send({ v: 1, type: 'hello', nonce, site: '2.41.0', ...fields }, { target: 'host' }),
+    };
+  }
+
+  it('a guest who copies another guest’s profile id gets none of their decisions', async () => {
+    const net = new MemoryNetwork(),
+      a = await createIdentity(),
+      ann = person('Ann');
+    const h = page(net, a, 'host', { host: true, policy: { admission: 'ask' } }),
+      g = page(net, a, 'guest-ann', { person: ann });
+    await until(() => h.requests().length === 1);
+    const annId = await idOf(ann);
+    await h.session.letIn(annId);
+    await until(() => g.status() === 'Connected');
+    h.session.setPolicy({ ...h.policy(), overrides: { [annId]: { remotePlayback: false } } });
+    // Another browser declares Ann's profile id and name: it is somebody new and has to ask.
+    const copy = page(net, a, 'guest-copy', { profile: () => ann, key: createGuestKey(true) });
+    await until(() => copy.status() === LOBBY_TEXT.waiting);
+    expect(h.requests()).toHaveLength(1);
+    expect(h.requests()[0].id).not.toBe(annId);
+    expect(h.policy().admitted).toEqual([annId]);
+    expect(h.guests()).toHaveLength(1);
+    // Ann herself keeps her own decisions through a reload.
+    await g.session.close();
+    const back = page(net, a, 'guest-ann-2', { person: ann });
+    await until(() => back.status() === 'Connected');
+    await until(() => back.state().permissions.remotePlayback === false);
+    // The host disconnects her (revocation): with "Ask me first" the same browser has to ask again.
+    h.session.disconnect('guest-ann-2');
+    await until(() => back.status().includes('Access revoked'));
+    await advance(1000);
+    const again = page(net, a, 'guest-ann-3', { person: ann });
+    await until(() => again.status() === LOBBY_TEXT.waiting);
+    expect(h.requests().map((r) => r.id)).toContain(annId);
+  });
+
+  it('a public key without its private key proves nothing, and a proof only counts on its own connection', async () => {
+    const net = new MemoryNetwork(),
+      a = await createIdentity(),
+      ann = person('Ann'),
+      annKey = await keyOf(ann),
+      annId = await idOf(ann);
+    const h = page(net, a, 'host', { host: true, policy: { admission: 'ask' } });
+    // Ann was let in before: her identity is admitted.
+    const g = page(net, a, 'guest-ann', { person: ann });
+    await until(() => h.requests().length === 1);
+    await h.session.letIn(annId);
+    await until(() => g.status() === 'Connected');
+    await g.session.close();
+    await advance(500);
+    const mallory = rawPeer(net, a, 'mallory'),
+      own = await createGuestKey(true);
+    await advance(100);
+    // Her public key alone: the host asks for the proof and lets nobody in.
+    await mallory.hello({ person: ann, key: annKey.publicKey });
+    await advance(200);
+    const challenge = mallory.challenge()!;
+    expect(challenge).toMatch(/^[-\w]{43}$/);
+    const proof = (key: GuestKey, over: string, guest: string) =>
+      signGuest(key, guestProof(a.room, mallory.nonce, over, 'host', guest));
+    // A proof signed with another key.
+    await mallory.hello({
+      person: ann,
+      key: annKey.publicKey,
+      challenge,
+      proof: await proof(own, challenge, 'mallory'),
+    });
+    // Ann's own signature, made for another connection (her old one), as a captured proof would be.
+    await mallory.hello({
+      person: ann,
+      key: annKey.publicKey,
+      challenge,
+      proof: await proof(annKey, challenge, 'guest-ann'),
+    });
+    // A proof over a challenge the host never gave this connection.
+    const stale = 'x'.repeat(43);
+    await mallory.hello({
+      person: ann,
+      key: annKey.publicKey,
+      challenge: stale,
+      proof: await proof(annKey, stale, 'mallory'),
+    });
+    await advance(500);
+    expect(mallory.types()).not.toContain('welcome');
+    expect(h.guests()).toEqual([]);
+    expect(h.requests()).toEqual([]);
+    // Only the holder of the private key, signing for this very connection, is Ann.
+    await mallory.hello({
+      person: ann,
+      key: annKey.publicKey,
+      challenge,
+      proof: await proof(annKey, challenge, 'mallory'),
+    });
+    await until(() => mallory.types().includes('welcome'));
+    expect(h.guests()).toEqual(['mallory']);
+    expect(h.unverified()).toEqual([]);
+  });
+
+  it('a page that proves no key is unverified, labelled, and new on every page load', async () => {
+    const net = new MemoryNetwork(),
+      a = await createIdentity(),
+      old = person('Old');
+    const h = page(net, a, 'host', { host: true, policy: { admission: 'ask' } });
+    await advance(100);
+    const first = rawPeer(net, a, 'old-1');
+    await advance(100);
+    await first.hello({ person: old });
+    await until(() => h.requests().length === 1);
+    // Its declared profile id is not what the host keys it by, and the host sees it is unverified.
+    expect(h.requests()[0]).toMatchObject({ name: 'Old', unverified: true });
+    const firstId = h.requests()[0].id;
+    expect(firstId).not.toBe(old.id);
+    // The same page load saying hello again is the same request.
+    await first.hello({ person: old });
+    await advance(200);
+    expect(h.requests()).toHaveLength(1);
+    await h.session.letIn(firstId);
+    await until(() => first.types().includes('welcome'));
+    expect(h.unverified()).toEqual(['old-1']);
+    // A reload (a new page load with the same profile) gets fresh decisions: it asks again.
+    const second = rawPeer(net, a, 'old-2');
+    await advance(100);
+    await second.hello({ person: old });
+    await until(() => h.requests().length === 1);
+    expect(h.requests()[0].id).not.toBe(firstId);
+    expect(h.requests()[0].unverified).toBe(true);
+    expect(second.types()).not.toContain('welcome');
+  });
+
+  it('a guest let in over the relay keeps her place and her own permissions when direct starts working', async () => {
+    const hub = goodHub(),
+      net = new MemoryNetwork(true),
+      a = await createIdentity(),
+      ann = person('Ann'),
+      annId = await idOf(ann);
+    const h = page(net, a, 'host', { host: true, hub, policy: { admission: 'ask' } }),
+      g = page(net, a, 'guest', { hub, person: ann });
+    // Direct is blocked: she asks over the relay and is let in there.
+    await until(() => h.requests().length === 1, 30000);
+    expect(h.requests()[0].id).toBe(annId);
+    await h.session.letIn(annId);
+    await until(() => g.status() === 'Connected' && g.session.transport === 'relay', 30000);
+    h.session.setPolicy({ ...h.policy(), overrides: { [annId]: { remotePlayback: false } } });
+    await until(() => g.state().permissions.remotePlayback === false);
+    // Direct starts working: the new connection proves the same key and is in at once, with no new request.
+    net.heal();
+    await until(() => g.session.transport === 'direct', 30000);
+    await until(() => h.links()['guest'] === 'direct' && h.guests().length === 1, 30000);
+    expect(h.requests()).toEqual([]);
+    expect(h.policy().admitted).toEqual([annId]);
+    expect(h.unverified()).toEqual([]);
+    expect(g.status()).toBe('Connected');
+    expect(g.state().permissions.remotePlayback).toBe(false);
+    // Her playback stays off on the new connection.
+    await expect(g.session.sendCommand(command('play'))).rejects.toThrow('disabled');
+    expect(h.commands.filter((c) => c.op === 'play')).toHaveLength(0);
   });
 });
 

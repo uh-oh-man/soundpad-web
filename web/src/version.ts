@@ -54,6 +54,7 @@ export const FEATURES = {
   sessionControl: [2, 37],
   history: [2, 39],
   drafts: [2, 40],
+  reviewFixes: [2, 41],
 } as const satisfies Record<string, readonly [number, number]>;
 
 /** True when the website changed version since this browser last used it (and it had used it before). */
@@ -88,6 +89,8 @@ const FEATURE_NAMES: Record<keyof typeof FEATURES, string> = {
   history: 'a rolling recording history of up to an hour, with clickable word-by-word subtitles',
   drafts:
     'drafts of Mimic clips you can edit before keeping, Latest phrase, private preview for guests, guest Keep with storage budgets, and Temp that stays until you quit',
+  reviewFixes:
+    'discarding only the recording history a crash recovered (what was recorded since stays), and edits that always stay with the recording they were made on',
 };
 
 /**

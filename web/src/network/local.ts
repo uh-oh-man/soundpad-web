@@ -41,6 +41,8 @@ export type SessionInfo = {
     /** Read with `readPolicy`. */
     policy: unknown;
     links: Record<string, 'direct' | 'relay'>;
+    /** 2.41: listed guest connections whose page proved no key. */
+    unverified?: string[];
   };
 };
 export type OwnerAction = { action: 'rotate' } | { action: 'disconnect'; peer: string };
@@ -119,11 +121,13 @@ const sessionInfoSchema = z.object({
             kind: z.enum(['admit', 'extra']),
             at: z.number(),
             expiresAt: z.number(),
+            unverified: z.boolean().optional(),
           }),
         )
         .max(LOBBY_VIEW_MAX),
       policy: z.unknown(),
       links: z.record(peerId, z.enum(['direct', 'relay'])),
+      unverified: z.array(peerId).max(64).optional(),
     })
     .optional(),
 });

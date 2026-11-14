@@ -81,55 +81,16 @@ public sealed partial class Bridge
             catch (Exception ex) when (ex is KeyNotFoundException or InvalidOperationException) { throw new InvalidDataException("Unknown source."); }
             finally { audioGate.Release(); }
             if (path == null || !File.Exists(path)) throw new InvalidDataException("The original audio for that source is no longer available.");
+            string sourcePath = path;
             var effect = c.Action ?? "none";
             if (!AudioEffects.Names.ContainsKey(effect)) throw new InvalidDataException("Unknown effect.");
             // "speed" takes any factor in range (2.16): 0.05 is 20 times slower, 20 is 20 times faster.
             double speed = effect == "speed" ? c.Speed is double s && double.IsFinite(s) && s >= AudioEffects.MinSpeed && s <= AudioEffects.MaxSpeed ? s : throw new InvalidDataException($"Choose a speed from {AudioEffects.MinSpeed}x to {AudioEffects.MaxSpeed}x.") : 1;
-            float[] cut; int rate, channels;
-            using (var audio = new DecodedAudio(path))
-            {
-                if (from >= audio.Duration.TotalMilliseconds) throw new InvalidDataException("The start is past the end of the sound.");
-                rate = audio.Rate; channels = audio.Channels;
-                double stretch = AudioEffects.Stretch(effect, speed);
-                long end = Math.Min(to, (long)audio.Duration.TotalMilliseconds);
-                // A preview needs only the source that makes its first seconds (plus a second for the effect's edges).
-                if (preview) end = Math.Min(end, from + (long)Math.Ceiling((TrimPreviewSeconds / stretch + 1) * 1000));
-                long skip = from * rate / 1000 * channels, keep = (end - from) * rate / 1000 * channels;
-                // Even mono at the lowest quality must fit Temp's 16 MiB per-sound limit; say so before decoding.
-                double seconds = keep / (double)channels / rate * stretch + (effect == "echo" ? 0.5 : 0);
-                if (!preview && seconds * MinimumCopyRate * 2 + 44 > UploadLimit)
-                    throw new InvalidDataException($"That copy is too long for Temp. Choose at most {Math.Floor((UploadLimit - 44) / (2.0 * MinimumCopyRate) / stretch)} s of this sound{(effect == "speed" ? " at this speed, or a faster speed" : "")}.");
-                var samples = new List<float>((int)keep);
-                var buffer = new float[channels * 4096];
-                int read;
-                while (keep > 0 && (read = audio.Read(buffer)) > 0)
-                {
-                    int offset = (int)Math.Min(skip, read);
-                    skip -= offset;
-                    int count = (int)Math.Min(read - offset, keep);
-                    samples.AddRange(buffer.AsSpan(offset, count));
-                    keep -= count;
-                }
-                cut = samples.ToArray();
-            }
+            // Decoding, the effect and the WAV run on the audio worker (2.41), never on the thread that took this command.
             bool keepPitch = effect == "speed" && c.KeepPitch;
-            var processed = AudioEffects.Apply(cut, channels, rate, effect, speed, keepPitch);
-            if (preview)
-            {
-                // At most 20 s, and at most about 5.5 MB of WAV so the reply stays as small as Mimic's preview
-                // (a 96 kHz stereo source previews about 14 s).
-                long most = Math.Min((long)TrimPreviewSeconds * rate * channels, 2_750_000 / channels * channels); // whole frames
-                if (processed.Length > most) processed = processed[..(int)most];
-            }
-            else (processed, rate, channels) = FitForTemp(processed, rate, channels);
-            byte[] wav;
-            using (var output = new MemoryStream())
-            {
-                using (var writer = new WaveFileWriter(output, new WaveFormat(rate, 16, channels)))
-                    foreach (var sample in processed) writer.WriteSample(Math.Clamp(sample, -1f, 1f));
-                wav = output.ToArray();
-            }
-            if (preview) return new("ack", c.Id, true, Data: new { wav = Convert.ToBase64String(wav), seconds = processed.Length / (double)channels / rate });
+            var made = await Heavy(preview ? "trimPreview" : "trimAudio", () => MakeCopy(sourcePath, from, to, effect, speed, keepPitch, preview));
+            var (cut, rate, channels, wav) = (made.Cut, made.Rate, made.Channels, made.Wav);
+            if (preview) return new("ack", c.Id, true, Data: new { wav = Convert.ToBase64String(wav), seconds = made.Seconds });
             var label = effect switch { "none" => "trimmed", "speed" => $"{speed.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture)}x speed{(keepPitch ? ", same pitch" : "")}", _ => AudioEffects.Names[effect] };
             string? words = null;
             // A plain trim, unnamed, while transcripts are on: name it after what it says. Effects garble speech
@@ -154,6 +115,53 @@ public sealed partial class Bridge
             finally { Interlocked.Decrement(ref editing); }
         }
         catch (InvalidDataException ex) { return new("ack", c.Id, false, ex.Message); }
+    }
+    private sealed record MadeCopy(float[] Cut, int Rate, int Channels, byte[] Wav, double Seconds);
+    /// <summary>The CPU-bound part of <see cref="TrimAudio"/>: decode [from, to), apply the effect, fit or cut, encode.</summary>
+    private static MadeCopy MakeCopy(string path, long from, long to, string effect, double speed, bool keepPitch, bool preview)
+    {
+        float[] cut; int rate, channels;
+        using (var audio = new DecodedAudio(path))
+        {
+            if (from >= audio.Duration.TotalMilliseconds) throw new InvalidDataException("The start is past the end of the sound.");
+            rate = audio.Rate; channels = audio.Channels;
+            double stretch = AudioEffects.Stretch(effect, speed);
+            long end = Math.Min(to, (long)audio.Duration.TotalMilliseconds);
+            // A preview needs only the source that makes its first seconds (plus a second for the effect's edges).
+            if (preview) end = Math.Min(end, from + (long)Math.Ceiling((TrimPreviewSeconds / stretch + 1) * 1000));
+            long skip = from * rate / 1000 * channels, keep = (end - from) * rate / 1000 * channels;
+            // Even mono at the lowest quality must fit Temp's 16 MiB per-sound limit; say so before decoding.
+            double seconds = keep / (double)channels / rate * stretch + (effect == "echo" ? 0.5 : 0);
+            if (!preview && seconds * MinimumCopyRate * 2 + 44 > UploadLimit)
+                throw new InvalidDataException($"That copy is too long for Temp. Choose at most {Math.Floor((UploadLimit - 44) / (2.0 * MinimumCopyRate) / stretch)} s of this sound{(effect == "speed" ? " at this speed, or a faster speed" : "")}.");
+            var samples = new List<float>((int)keep);
+            var buffer = new float[channels * 4096];
+            int read;
+            while (keep > 0 && (read = audio.Read(buffer)) > 0)
+            {
+                int offset = (int)Math.Min(skip, read);
+                skip -= offset;
+                int count = (int)Math.Min(read - offset, keep);
+                samples.AddRange(buffer.AsSpan(offset, count));
+                keep -= count;
+            }
+            cut = samples.ToArray();
+        }
+        var processed = AudioEffects.Apply(cut, channels, rate, effect, speed, keepPitch);
+        int outRate = rate, outChannels = channels;
+        if (preview)
+        {
+            // At most 20 s, and at most about 5.5 MB of WAV so the reply stays as small as Mimic's preview
+            // (a 96 kHz stereo source previews about 14 s).
+            long most = Math.Min((long)TrimPreviewSeconds * rate * channels, 2_750_000 / channels * channels); // whole frames
+            if (processed.Length > most) processed = processed[..(int)most];
+        }
+        else (processed, outRate, outChannels) = FitForTemp(processed, rate, channels);
+        using var output = new MemoryStream();
+        using (var writer = new WaveFileWriter(output, new WaveFormat(outRate, 16, outChannels)))
+            foreach (var sample in processed) writer.WriteSample(Math.Clamp(sample, -1f, 1f));
+        // Cut, Rate and Channels describe the source part (for naming it after its words); the WAV is the copy.
+        return new(cut, rate, channels, output.ToArray(), processed.Length / (double)outChannels / outRate);
     }
 }
 

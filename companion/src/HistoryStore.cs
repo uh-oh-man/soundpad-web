@@ -24,7 +24,8 @@ public sealed partial class HistoryStore : IDisposable
     private sealed class Segment(long index, long start, int frames)
     {
         public readonly long Index = index, Start = start;
-        public readonly HistoryPeakPyramid Peaks = new(frames);
+        /// <summary>Rebuilt (2.41) when a discard zeroes the start of this segment, so no peak describes removed audio.</summary>
+        public HistoryPeakPyramid Peaks = new(frames);
         /// <summary>In memory until the whole segment is on disk; the partial newest segment always is.</summary>
         public short[]? Samples;
         public int Filled, Flushed, PinCount;
@@ -36,6 +37,8 @@ public sealed partial class HistoryStore : IDisposable
     {
         public readonly List<(Segment Segment, int From, int To, short[] Data)> Writes = [];
         public long[] Deletes = [];
+        /// <summary>2.41: the first frames of these segments' files are overwritten with silence (a discard).</summary>
+        public (long Index, int Frames)[] Zeroes = [];
         public byte[] Index = [];
         public long FlushTarget;
         public bool Final, Written;
@@ -51,12 +54,19 @@ public sealed partial class HistoryStore : IDisposable
     private readonly List<HistoryGap> gaps = [];
     private readonly Dictionary<string, HistoryRange> pins = new(StringComparer.Ordinal);
     private readonly List<long> deletes = [];
+    private readonly List<(long Index, int Frames)> zeroes = [];
     private readonly Thread writer;
     private readonly AutoResetEvent wake = new(false);
     /// <summary>The gap at the live frame while no run is open; it closes when audio arrives again.</summary>
     private HistoryGap? openGap;
     private bool running, indexDirty, closed, closing, abandoned, finalWritten;
     private long live, windowStart, windowFrames, unflushed, overruns, droppedFrames, flushRequested, flushCompleted;
+    /// <summary>
+    /// 2.41: nothing before this frame exists any more (<see cref="DiscardBefore"/>). On disk it is where the first
+    /// span starts; the frames of its segment before it are silence, so even a companion that does not know this
+    /// field (an older one after a rollback) can only find silence there.
+    /// </summary>
+    private long floor;
     private int windowSeconds;
     private string? writeError;
     /// <summary>The next segment's buffer, allocated ahead by the writer so the capture thread rarely allocates a megabyte itself.</summary>
@@ -194,6 +204,56 @@ public sealed partial class HistoryStore : IDisposable
         wake.Set();
     }
 
+    /// <summary>
+    /// Removes everything recorded before <paramref name="frame"/> (2.41: Discard of the history a crash recovered,
+    /// while what was captured since stays). Whole segments before it are deleted; the frames of the segment holding
+    /// it that lie before it are overwritten with silence, in memory and on disk, and are never readable again. Pins
+    /// that reach before it go (their owner keys are returned). Frame numbers, the session id, guests' join frames and
+    /// everything from <paramref name="frame"/> on are unchanged. Clamped to the live frame.
+    /// </summary>
+    public string[] DiscardBefore(long frame)
+    {
+        var released = new List<string>();
+        lock (gate)
+        {
+            ThrowIfClosedLocked();
+            frame = Math.Clamp(frame, 0, live);
+            if (frame <= floor) return [];
+            floor = frame;
+            foreach (var (owner, range) in pins.Where(p => p.Value.StartFrame < frame).ToArray())
+            {
+                pins.Remove(owner); ReleaseLocked(range); released.Add(owner);
+            }
+            foreach (var s in segments.Values.ToArray())
+            {
+                if (s.Start + segmentFrames <= frame) { DropLocked(s); continue; }
+                if (s.Start >= frame) continue;
+                int cut = (int)Math.Min(frame - s.Start, s.Filled);
+                if (s.Samples is { } samples)
+                {
+                    Array.Clear(samples, 0, cut);
+                    s.Peaks = new HistoryPeakPyramid(segmentFrames);
+                    s.Peaks.Add(0, samples.AsSpan(0, s.Filled));
+                }
+                // What is already on disk is overwritten by the writer; the rest is written from the cleared memory.
+                if (Math.Min(cut, s.Flushed) is > 0 and int onDisk) zeroes.Add((s.Index, onDisk));
+            }
+            windowStart = Math.Max(windowStart, frame / segmentFrames * segmentFrames);
+            // The timeline starts at the floor: the span holding it begins there (that is what the index records).
+            while (spans.Count > 1 && spans[1].StartFrame <= frame) spans.RemoveAt(0);
+            if (spans.Count > 0 && spans[0].StartFrame < frame)
+            {
+                if (frame < live || running) spans[0] = new(frame, spans[0].WallStartUtcMs + (frame - spans[0].StartFrame) * 1000 / Rate);
+                else { spans.Clear(); openGap = null; }
+            }
+            gaps.RemoveAll(g => g.AtFrame <= frame);
+            if (openGap is { } open && open.AtFrame < frame) openGap = null;
+            indexDirty = true; flushRequested++;
+        }
+        wake.Set();
+        return [.. released];
+    }
+
     // ---- Reading -----------------------------------------------------------------------------------------
 
     /// <summary>
@@ -238,14 +298,16 @@ public sealed partial class HistoryStore : IDisposable
         if (frames < (long)bins * PeakBlockFrames) { LevelsFromSamples(access, startFrame, (int)frames, result); return result; }
 
         var held = new Dictionary<long, (Segment Segment, int Filled)>();
+        long from0;
         lock (gate)
         {
             ThrowIfClosedLocked();
+            from0 = floor;
             long first = startFrame / segmentFrames, last = (endFrame - 1) / segmentFrames;
             foreach (var s in segments.Values) if (s.Index >= first && s.Index <= last && s.Filled > 0) held[s.Index] = (s, s.Filled);
         }
         if (held.Count == 0) return result;
-        var allowed = PeakRanges(access);
+        var allowed = PeakRanges(access, from0);
         for (int b = 0; b < bins; b++)
         {
             long from = startFrame + frames * b / bins, to = startFrame + frames * (b + 1) / bins;
@@ -312,7 +374,7 @@ public sealed partial class HistoryStore : IDisposable
         lock (gate)
         {
             ThrowIfClosedLocked();
-            bool Visible(long f) => f >= 0 && f < live && access.Allowed.Any(r => f >= r.StartFrame && f < r.EndFrame);
+            bool Visible(long f) => f >= floor && f < live && access.Allowed.Any(r => f >= r.StartFrame && f < r.EndFrame);
             long probe = Visible(frame) ? frame : Visible(frame - 1) ? frame - 1 : -1;
             if (probe < 0) throw Unavailable(access, access.Allowed.Any(r => frame >= r.StartFrame && frame < r.EndFrame) && frame >= live ? HistoryUnavailableException.NotRecorded : HistoryUnavailableException.NotShared);
             for (int i = spans.Count - 1; i >= 0; i--)
@@ -486,9 +548,9 @@ public sealed partial class HistoryStore : IDisposable
         var result = new List<HistoryRange>();
         foreach (var s in segments.Values)
         {
-            if (s.Filled == 0) continue;
+            if (s.Filled == 0 || s.Start + s.Filled <= floor) continue;
             if (result.Count > 0 && result[^1].EndFrame == s.Start) result[^1] = result[^1] with { EndFrame = s.Start + s.Filled };
-            else result.Add(new(s.Start, s.Start + s.Filled));
+            else result.Add(new(Math.Max(s.Start, floor), s.Start + s.Filled));
         }
         return result;
     }
@@ -535,6 +597,7 @@ public sealed partial class HistoryStore : IDisposable
         // Access first: a guest asking about hidden history gets the same answer whether or not it still exists.
         if (!access.Allows(start, end)) throw Unavailable(access, HistoryUnavailableException.NotShared);
         if (end > live) throw Unavailable(access, HistoryUnavailableException.NotRecorded);
+        if (start < floor) throw Unavailable(access, HistoryUnavailableException.Expired);
         var pieces = new List<Piece>();
         for (long frame = start; frame < end;)
         {
@@ -575,12 +638,19 @@ public sealed partial class HistoryStore : IDisposable
     }
 
     /// <summary>What a guest may see, shrunk to whole peak blocks so a block never mixes in hidden frames.</summary>
-    private HistoryRange[] PeakRanges(HistoryAccess access)
+    /// <summary>
+    /// Also shrunk to start at <paramref name="floor"/> rounded up to a whole peak block (2.41), for everyone: a segment
+    /// on disk whose start was discarded keeps its old peaks until the next launch rebuilds them from the silence.
+    /// </summary>
+    private HistoryRange[] PeakRanges(HistoryAccess access, long floor)
     {
-        if (access.IsHost) return access.Allowed;
+        long safe = floor == 0 ? 0 : floor / segmentFrames * segmentFrames + Math.Min(segmentFrames, (floor % segmentFrames + PeakBlockFrames - 1) / PeakBlockFrames * PeakBlockFrames);
+        if (access.IsHost) return safe == 0 ? access.Allowed : [.. access.Allowed.Where(r => r.EndFrame > safe).Select(r => new HistoryRange(Math.Max(r.StartFrame, safe), r.EndFrame))];
         var result = new List<HistoryRange>();
-        foreach (var r in access.Allowed)
+        foreach (var r0 in access.Allowed)
         {
+            if (r0.EndFrame <= safe) continue;
+            var r = r0 with { StartFrame = Math.Max(r0.StartFrame, safe) };
             long segment = r.StartFrame / segmentFrames * segmentFrames, local = r.StartFrame - segment;
             long start = segment + Math.Min(segmentFrames, (local + PeakBlockFrames - 1) / PeakBlockFrames * PeakBlockFrames), end = r.EndFrame;
             if (end != long.MaxValue) { segment = end / segmentFrames * segmentFrames; end = segment + (end - segment) / PeakBlockFrames * PeakBlockFrames; }
@@ -637,6 +707,7 @@ public sealed partial class HistoryStore : IDisposable
             if (!had && pins.Count >= MaxPins) throw new InvalidDataException("Too many drafts are protecting recording history.");
             if (!access.Allows(start, end)) throw Unavailable(access, HistoryUnavailableException.NotShared);
             if (end > live) throw Unavailable(access, HistoryUnavailableException.NotRecorded);
+            if (start < floor) throw Unavailable(access, HistoryUnavailableException.Expired);
             long first = start / segmentFrames, last = (end - 1) / segmentFrames;
             for (long i = first; i <= last; i++) if (!segments.ContainsKey(i)) throw Unavailable(access, HistoryUnavailableException.Expired);
             // The budget counts every pinned segment, also those still inside the window: they will all be
@@ -706,8 +777,10 @@ public sealed partial class HistoryStore : IDisposable
         // (Stop, Pin, Flush, Close), then topped up in place as it fills.
         foreach (var s in segments.Values)
             if (s.Samples is { } data && s.Filled > s.Flushed && (force || s.Filled == segmentFrames)) work.Writes.Add((s, s.Flushed, s.Filled, data));
-        if (work.Writes.Count == 0 && deletes.Count == 0 && !indexDirty && !force) return null;
+        if (work.Writes.Count == 0 && deletes.Count == 0 && zeroes.Count == 0 && !indexDirty && !force) return null;
         work.Deletes = [.. deletes]; deletes.Clear();
+        // A segment dropped meanwhile has no file left to clear (and writing would make one again).
+        work.Zeroes = [.. zeroes.Where(z => segments.ContainsKey(z.Index))]; zeroes.Clear();
         long durable = live;
         if (!force && segments.TryGetValue(live / segmentFrames, out var tail) && tail.Filled < segmentFrames) durable = tail.Start + tail.Flushed;
         work.Index = Serialize(SnapshotIndexLocked(durable, final));
@@ -720,6 +793,7 @@ public sealed partial class HistoryStore : IDisposable
     {
         foreach (var (segment, from, to, data) in work.Writes)
             files.Write(SegmentPath(segment.Index), from * 2L, MemoryMarshal.AsBytes(data.AsSpan(from, to - from)));
+        foreach (var (index, frames) in work.Zeroes) files.Write(SegmentPath(index), 0, new byte[frames * 2L]);
         files.ReplaceAtomically(IndexPath, work.Index);
         work.Written = true;
         foreach (var index in work.Deletes) files.Delete(SegmentPath(index));
@@ -739,7 +813,7 @@ public sealed partial class HistoryStore : IDisposable
             if (work.Final) finalWritten = true;
         }
         else indexDirty = true;
-        if (error != null) deletes.AddRange(work.Deletes);
+        if (error != null) { deletes.AddRange(work.Deletes); zeroes.AddRange(work.Zeroes); }
         writeError = error;
     }
 }

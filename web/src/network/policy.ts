@@ -2,10 +2,11 @@
  * Who may be in a hosted session and what each guest may do (2.37): admission (at once, or ask the
  * host first), the number of guest places, extra places granted for this session, per-guest
  * permission overrides and the guests the host turned away. Everything is keyed by the guest's
- * persistent participant id (the profile id their browser keeps), not the transport's peer id, which
- * changes on every reload. A participant id is self-declared: like the invitation itself it is a
- * convenience between friends, not an authentication. Someone who clears their browser storage just
- * becomes a new guest and, with "Ask me first", has to ask again.
+ * participant id, not the transport's peer id, which changes on every reload. Since 2.41 that id is the
+ * one the guest's browser key proves (network/guest-key.ts), not a profile id the page declares, so
+ * nobody can take over another guest's admission, permissions or place by copying their profile. A
+ * guest whose page proves no key (older than 2.41) is unverified and new on every page load. Someone who
+ * clears their browser storage just becomes a new guest and, with "Ask me first", has to ask again.
  */
 import { z } from 'zod';
 import { participantSchema, type Participant, type Snapshot } from '../protocol';

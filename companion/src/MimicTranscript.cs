@@ -294,13 +294,31 @@ public sealed class MimicTranscriber(ITranscriptEngine engine) : IDisposable
         PruneIfDue(source, transcript);
     }
 
-    /// <summary>Stores corrected text for a word; its boundaries are never touched.</summary>
-    public WordCorrection Correct(HistoryStore source, long wordId, string text, string by)
+    /// <summary>2.41: the words of <paramref name="source"/> before <paramref name="start"/> go (their audio was discarded).</summary>
+    public void DropBefore(HistoryStore source, long start)
+    {
+        TranscriptWords? transcript;
+        lock (gate) { if (!ReferenceEquals(source, store)) return; transcript = words; }
+        transcript?.DropBefore(start);
+    }
+
+    /// <summary>
+    /// Stores corrected text for a word; its boundaries are never touched. Saved is false (2.41) when it could not be
+    /// written to disk: it is kept in memory and written again by <see cref="RetrySaves"/>.
+    /// </summary>
+    public (WordCorrection Fix, bool Saved) Correct(HistoryStore source, long wordId, string text, string by)
     {
         TranscriptWords? transcript;
         lock (gate) { if (!ReferenceEquals(source, store) || words == null) throw new InvalidDataException("That word is no longer in the transcript."); transcript = words; }
-        return transcript.Correct(wordId, text, by);
+        var fix = transcript.Correct(wordId, text, by);
+        return (fix, !transcript.CorrectionsUnsaved);
     }
+
+    /// <summary>Why words or corrections of the current transcript exist only in memory (2.41); null when all is saved.</summary>
+    public string? Unsaved { get { TranscriptWords? transcript; lock (gate) transcript = words; return transcript?.Unsaved; } }
+
+    /// <summary>Writes again what could not be saved (2.41). True when nothing is left unsaved.</summary>
+    public bool RetrySaves() { TranscriptWords? transcript; lock (gate) transcript = words; return transcript?.RetrySaves() ?? true; }
 
     /// <summary>Parts of [start, end) the asker may see that are not recognised yet ("pending").</summary>
     public List<HistoryRange> PendingBetween(HistoryStore? source, IReadOnlyList<HistoryRange> visible, long start, long end)

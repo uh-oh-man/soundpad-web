@@ -178,20 +178,148 @@ public sealed class HistoryWiringTests : IDisposable
         rig.Advance(2);
         var resumed = Data<HistoryTimelineReply>(await Ok(bridge.Execute(Cmd("historyTimeline"), "host")));
         Assert.Equal(crashed, resumed.SessionId); Assert.True(resumed.LiveFrame > timeline.LiveFrame);
-        // Discard (host only): the recovered audio goes; recording carries on into a fresh history.
+        // Discard (host only): the recovered audio goes (2.41: only it); recording carries on in the same history.
         Assert.False((await bridge.Execute(Cmd("historyDiscard"), "guest")).Ok);
         await Ok(bridge.Execute(Cmd("historyDiscard"), "host"));
         Assert.Equal(0, bridge.Snapshot.Mimic!.History!.RecoveredMs);
-        Assert.NotEqual(crashed, bridge.Snapshot.Mimic.History.SessionId);
-        Assert.False(Directory.Exists(Path.Combine(folder, "history", crashed)));
-        Assert.False(Directory.Exists(Path.Combine(folder, "transcripts", crashed)));
+        Assert.Equal(crashed, bridge.Snapshot.Mimic.History.SessionId);
         rig.Advance(2);
-        Assert.InRange(Data<HistoryTimelineReply>(await Ok(bridge.Execute(Cmd("historyTimeline"), "host"))).LiveFrame, S(1), S(4));
+        var after = Data<HistoryTimelineReply>(await Ok(bridge.Execute(Cmd("historyTimeline"), "host")));
+        Assert.Equal(timeline.LiveFrame, after.Available[0].StartFrame);
+        Assert.True(after.LiveFrame > resumed.LiveFrame);
         // An ordinary quit deletes everything; the next launch has nothing to recover.
         bridge.Dispose();
         Assert.Empty(Directory.GetDirectories(Path.Combine(folder, "history")));
         await using var next = new Rig(folder);
         Assert.Equal(0, next.Bridge.RecoverHistory());
+    }
+
+    /// <summary>
+    /// Review of 2026-11-14 (2.41): a range (or draft) is only ever applied to the recording it was made on. After the
+    /// history changes, every command that names the old recording is refused, also at the same frame numbers.
+    /// </summary>
+    [Fact]
+    public async Task CommandsMadeOnAnotherRecordingAreRefused()
+    {
+        await using var rig = new Rig(folder); var bridge = rig.Bridge; await bridge.Poll(true);
+        await Ok(bridge.Execute(Cmd("beginSession"), "host"));
+        await rig.Start();
+        rig.Advance(6);
+        string old = bridge.Snapshot.Mimic!.History!.SessionId!;
+        // The recording changes under an open selection (here: the history closes and listening starts again).
+        bridge.CloseHistory();
+        await rig.Start();
+        rig.Advance(6);
+        string current = bridge.Snapshot.Mimic!.History!.SessionId!;
+        Assert.NotEqual(old, current);
+        Command Range(string op, string session) => Cmd(op) with { StartFrame = S(2), EndFrame = S(2.5), SourceId = session };
+        foreach (var op in new[] { "historyShare", "mimicPreview", "mimicClip", "draftCreate", "historyLevels", "historyTranscript" })
+        {
+            var refused = await bridge.Execute(op == "historyLevels" ? Range(op, old) with { Bins = 10 } : Range(op, old), "host");
+            Assert.False(refused.Ok, op);
+            Assert.Contains("Mimic restarted", refused.Error);
+        }
+        Assert.Empty(Data<HistoryTimelineReply>(await Ok(bridge.Execute(Cmd("historyTimeline"), "host"))).Shared);
+        // A draft on the current recording is heard only when the command names that recording.
+        string draft = Body(await Ok(bridge.Execute(Range("draftCreate", current), "host"))).GetProperty("id").GetString()!;
+        Assert.False((await bridge.Execute(Cmd("mimicPreview") with { DraftId = draft, SourceId = old }, "host")).Ok);
+        Assert.False((await bridge.Execute(Cmd("draftUpdate") with { DraftId = draft, StartFrame = S(1), EndFrame = S(2), SourceId = old }, "host")).Ok);
+        await Ok(bridge.Execute(Cmd("mimicPreview") with { DraftId = draft, SourceId = current }, "host"));
+        await Ok(bridge.Execute(Range("historyShare", current), "host"));
+    }
+
+    /// <summary>
+    /// Review of 2026-11-14 (2.41): Discard on the "recovered history" notice used to close the whole history, so audio
+    /// captured after the restart went with the recovered audio. Now only the recovered part goes.
+    /// </summary>
+    [Fact]
+    public async Task DiscardRemovesOnlyTheRecoveredHistoryAndKeepsWhatWasCapturedSince()
+    {
+        // A launch that died after 25.5 s of a steady 0.25 signal (the fixture tone never holds one): the recovered end
+        // lies inside the third 10 s segment. One recovered word, and a selection pinned on the recovered audio.
+        string crashed;
+        {
+            var store = HistoryStore.Create(folder, new HistoryOptions { Rate = Rate, TailSeconds = 600 });
+            crashed = store.SessionId;
+            store.Append(Enumerable.Repeat(0.25f, (int)S(25.5)).ToArray());
+            store.Pin(HistoryAccess.Host, "old", S(1), S(3));
+            Assert.True(store.Flush(30000));
+            TranscriptWords.Open(folder, crashed).Add([new(0, S(2), S(2.5), "Recovered", 0.9f, 0, true, true, WordStatus.Done, 1)], new(0, S(25)));
+            store.Abandon();
+        }
+        await using var rig = new Rig(folder); var bridge = rig.Bridge; await bridge.Poll(true);
+        await Ok(bridge.Execute(Cmd("beginSession"), "host"));
+        Assert.True(bridge.RecoverHistory() > 0);
+        long boundary = bridge.History!.LiveFrame;
+        Assert.Equal(S(25.5), boundary);
+        // Fresh capture after the restart, with its words, and drafts on fresh, recovered and mixed audio.
+        await rig.Start();
+        await Ok(bridge.Execute(Cmd("mimicTranscribe") with { Action = "enable" }, "host"));
+        rig.Advance(6);
+        for (int i = 0; i < 100 && !WordStarts(Body(await Ok(bridge.Execute(Cmd("historyTranscript") with { StartFrame = boundary, EndFrame = boundary + S(6) }, "host")))).Any(); i++) await Task.Delay(100);
+        Command Draft(long start, long end) => Cmd("draftCreate") with { StartFrame = start, EndFrame = end, SourceId = crashed };
+        string fresh = Body(await Ok(bridge.Execute(Draft(boundary + S(2), boundary + S(2.5)), "host"))).GetProperty("id").GetString()!;
+        await Ok(bridge.Execute(Draft(S(2), S(2.5)), "host"));
+        await Ok(bridge.Execute(Draft(S(25), boundary + S(0.4)), "host"));
+        int freshWords = WordStarts(Body(await Ok(bridge.Execute(Cmd("historyTranscript") with { StartFrame = boundary, EndFrame = boundary + S(6) }, "host")))).Length;
+        Assert.True(freshWords > 0);
+
+        var reply = Body(await Ok(bridge.Execute(Cmd("historyDiscard"), "host")));
+        Assert.True(reply.GetProperty("discarded").GetBoolean());
+        Assert.Equal(0, bridge.Snapshot.Mimic!.History!.RecoveredMs);
+        // The same history: session id, frame numbers and the recovered boundary stay; nothing before it is left.
+        var t = Data<HistoryTimelineReply>(await Ok(bridge.Execute(Cmd("historyTimeline"), "host")));
+        Assert.Equal(crashed, t.SessionId);
+        Assert.Equal(boundary, t.Available[0].StartFrame);
+        Assert.Equal(t.LiveFrame, t.Available[^1].EndFrame);
+        Assert.True(t.Spans[0].StartFrame >= boundary);
+        Assert.False((await bridge.Execute(Cmd("mimicPreview") with { StartFrame = S(2), EndFrame = S(2.5), SourceId = crashed }, "host")).Ok);
+        Assert.False((await bridge.Execute(Cmd("mimicPreview") with { StartFrame = boundary - S(0.5), EndFrame = boundary + S(0.5), SourceId = crashed }, "host")).Ok);
+        var oldLevels = Body(await Ok(bridge.Execute(Cmd("historyLevels") with { StartFrame = 0, EndFrame = boundary, Bins = 100, SourceId = crashed }, "host")));
+        Assert.All(oldLevels.GetProperty("levels").EnumerateArray(), v => Assert.Equal(0, v.GetInt32()));
+        // The fresh audio, its words and the draft made on it are all still usable.
+        await Ok(bridge.Execute(Cmd("mimicPreview") with { StartFrame = boundary, EndFrame = boundary + S(2.5), SourceId = crashed }, "host"));
+        var freshLevels = Body(await Ok(bridge.Execute(Cmd("historyLevels") with { StartFrame = boundary, EndFrame = boundary + S(4), Bins = 100, SourceId = crashed }, "host")));
+        Assert.Contains(freshLevels.GetProperty("levels").EnumerateArray(), v => v.GetInt32() != 0);
+        var words = Body(await Ok(bridge.Execute(Cmd("historyTranscript") with { StartFrame = 0, EndFrame = t.LiveFrame }, "host")));
+        Assert.All(WordStarts(words), s => Assert.True(s >= boundary));
+        Assert.Equal(freshWords, WordStarts(words).Count(s => s < boundary + S(6)));
+        Assert.DoesNotContain("Recovered", File.ReadAllText(Path.Combine(folder, "transcripts", crashed, "words.jsonl")));
+        var drafts = Body(await Ok(bridge.Execute(Cmd("draftList"), "host"))).GetProperty("drafts");
+        Assert.Equal([fresh], drafts.EnumerateArray().Select(d => d.GetProperty("id").GetString()!));
+        Assert.Equal(["draft:" + fresh], bridge.History!.Pins(HistoryAccess.Host).Keys);
+        await Ok(bridge.Execute(Cmd("draftKeep") with { DraftId = fresh }, "host"));
+        // On disk: the recovered segments are gone and the recovered start of the shared segment is silence.
+        Assert.True(bridge.History!.Flush(30000));
+        var dir = Path.Combine(folder, "history", crashed);
+        Assert.False(File.Exists(Path.Combine(dir, "seg-00000000.pcm")));
+        Assert.False(File.Exists(Path.Combine(dir, "seg-00000001.pcm")));
+        var segment = File.ReadAllBytes(Path.Combine(dir, "seg-00000002.pcm"));
+        Assert.All(segment.Take((int)(boundary - S(20)) * 2), b => Assert.Equal(0, b));
+        Assert.Contains(segment.Skip((int)(boundary - S(20)) * 2), b => b != 0);
+        // A second crash keeps it that way: the next launch recovers only what was captured after the boundary.
+        bridge.History!.Abandon();
+        await using var next = new Rig(folder);
+        Assert.True(next.Bridge.RecoverHistory() > 0);
+        var again = Data<HistoryTimelineReply>(await Ok(next.Bridge.Execute(Cmd("historyTimeline"), "host")));
+        Assert.Equal(crashed, again.SessionId);
+        Assert.Equal(boundary, again.Available[0].StartFrame);
+        Assert.InRange(next.Bridge.Snapshot.Mimic!.History!.RecoveredMs, 1, (again.LiveFrame - boundary) * 1000 / Rate);
+    }
+
+    /// <summary>Discard with nothing recovered (2.41) changes nothing: the history and its session stay.</summary>
+    [Fact]
+    public async Task DiscardWithoutRecoveredHistoryKeepsTheHistory()
+    {
+        await using var rig = new Rig(folder); var bridge = rig.Bridge; await bridge.Poll(true);
+        await rig.Start();
+        rig.Advance(3);
+        string session = bridge.Snapshot.Mimic!.History!.SessionId!;
+        var reply = Body(await Ok(bridge.Execute(Cmd("historyDiscard"), "host")));
+        Assert.False(reply.GetProperty("discarded").GetBoolean());
+        var t = Data<HistoryTimelineReply>(await Ok(bridge.Execute(Cmd("historyTimeline"), "host")));
+        Assert.Equal(session, t.SessionId);
+        Assert.Equal(0, t.Available[0].StartFrame);
     }
 
     [Fact]
@@ -346,6 +474,64 @@ public sealed class HistoryWiringTests : IDisposable
     }
 
     // ---- Review fixes (2.39) ---------------------------------------------------------------------------------
+
+    [Fact]
+    public async Task ACorrectionThatCouldNotBeSavedSaysSoStaysVisibleAndIsSavedOnceTheDiskWorks()
+    {
+        // Review finding (2.41): a correction whose write failed was answered as plain success, and nobody knew it
+        // existed only in memory.
+        string session;
+        {
+            var store = HistoryStore.Create(folder, new HistoryOptions { Rate = Rate, TailSeconds = 600 });
+            session = store.SessionId;
+            store.Append(Enumerable.Repeat(0.25f, (int)S(5)).ToArray());
+            Assert.True(store.Flush(30000));
+            TranscriptWords.Open(folder, session).Add([new(0, S(2), S(2.5), "Helo", 0.9f, 0, true, true, WordStatus.Done, 1)], new(0, S(5)));
+            store.Abandon();
+        }
+        await using var rig = new Rig(folder); var bridge = rig.Bridge; await bridge.Poll(true);
+        Assert.True(bridge.RecoverHistory() > 0);
+        var transcriptFolder = Path.Combine(folder, "transcripts", session);
+        // The failed-write fixture: a folder where the corrections file's temporary copy has to go.
+        var blocker = Directory.CreateDirectory(Path.Combine(transcriptFolder, "corrections.json.tmp"));
+        long id = Body(await Ok(bridge.Execute(Cmd("historyTranscript") with { StartFrame = 0, EndFrame = S(5) }, "host"))).GetProperty("words")[0].GetProperty("id").GetInt64();
+        var reply = Body(await Ok(bridge.Execute(Cmd("historyCorrect") with { WordId = id, Text = "Hello" }, "host")));
+        Assert.False(reply.GetProperty("saved").GetBoolean());
+        Assert.Contains("could not be saved", reply.GetProperty("warning").GetString());
+        Assert.Contains("could not be saved", bridge.Snapshot.Mimic!.History!.Problem);
+        Assert.False(File.Exists(Path.Combine(transcriptFolder, "corrections.json")));
+        // A reload of the page reads the transcript again: the correction is there (in memory), and the problem stays shown.
+        var reread = Body(await Ok(bridge.Execute(Cmd("historyTranscript") with { StartFrame = 0, EndFrame = S(5) }, "host"))).GetProperty("words")[0];
+        Assert.Equal("Hello", reread.GetProperty("text").GetString()); Assert.True(reread.GetProperty("corrected").GetBoolean());
+        await bridge.Poll(false);
+        Assert.Contains("could not be saved", bridge.Snapshot.Mimic!.History!.Problem);
+        // The disk works again: the next retry writes it, the problem goes, and a restart finds the correction.
+        blocker.Delete();
+        await bridge.Poll(false); // retries at most every 5 s; the first one after the failure is due at once
+        for (int i = 0; i < 60 && bridge.Snapshot.Mimic!.History!.Problem != null; i++) { await Task.Delay(100); await bridge.Poll(false); }
+        Assert.Null(bridge.Snapshot.Mimic!.History!.Problem);
+        Assert.Contains("Hello", File.ReadAllText(Path.Combine(transcriptFolder, "corrections.json")));
+        var reopened = TranscriptWords.Open(folder, session);
+        Assert.Equal("Hello", Assert.Single(reopened.Between(0, S(5))).Correction!.Text);
+        // A correction that is saved says so.
+        var saved = Body(await Ok(bridge.Execute(Cmd("historyCorrect") with { WordId = id, Text = "Hello there" }, "host")));
+        Assert.True(saved.GetProperty("saved").GetBoolean());
+    }
+
+    [Fact]
+    public void WordsThatCouldNotBeAppendedAreRewrittenWholeOnRetry()
+    {
+        var transcript = TranscriptWords.Open(folder, "words-retry");
+        var blocker = Directory.CreateDirectory(Path.Combine(TranscriptWords.FolderFor(folder, "words-retry"), "words.jsonl"));
+        transcript.Add([new(0, S(1), S(1.5), "One", 0.9f, 0, true, true, WordStatus.Done, 1)], new(0, S(2)));
+        Assert.NotNull(transcript.Unsaved);
+        Assert.False(transcript.RetrySaves());
+        blocker.Delete();
+        transcript.Add([new(0, S(3), S(3.5), "Two", 0.9f, 0, true, true, WordStatus.Done, 2)], new(S(2), S(4)));
+        Assert.Null(transcript.Unsaved);
+        var again = TranscriptWords.Open(folder, "words-retry");
+        Assert.Equal(["One", "Two"], again.Between(0, S(5)).Select(w => w.Word.Text));
+    }
 
     private static long[] WordStarts(JsonElement reply) => [.. reply.GetProperty("words").EnumerateArray().Select(w => w.GetProperty("start").GetInt64())];
 

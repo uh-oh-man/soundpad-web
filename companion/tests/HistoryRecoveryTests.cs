@@ -245,4 +245,64 @@ public sealed class HistoryRecoveryTests : IDisposable
             Assert.Throws<ArgumentException>(() => HistoryStore.Create(root, Options, id));
         }
     }
+
+    // ---- 2.41: discarding only what a crash recovered ----------------------------------------------------------
+
+    [Fact]
+    public void DiscardBeforeKeepsNewAudioPinsAndFramesAndAnOlderReaderOnlyFindsSilence()
+    {
+        var store = Create("discard-1");
+        HistoryFixture.Feed(store, clock, 23);
+        store.Pin(Host, "old", S(1), S(3));
+        Assert.True(store.Flush(30000));
+        store.Abandon();
+        var reopened = Open("discard-1", HistoryGapReason.Crash);
+        long boundary = reopened.LiveFrame;
+        HistoryFixture.Feed(reopened, clock, 4);
+        reopened.Pin(Host, "new", boundary + S(1), boundary + S(2));
+        reopened.Pin(Host, "across", S(22), boundary + S(1.5)); // reaches from the recovered part into the new audio
+        Assert.Equal(["across", "old"], reopened.DiscardBefore(boundary).Order());
+        Assert.Empty(reopened.DiscardBefore(boundary - 5)); // never moves back
+        Assert.Equal(["new"], reopened.Pins(Host).Keys);
+        var t = reopened.Timeline(Host);
+        Assert.Equal([new HistoryRange(boundary, boundary + S(4))], t.Available);
+        Assert.Equal(boundary, t.Spans[0].StartFrame);
+        Assert.Empty(t.Gaps);
+        Assert.Throws<HistoryUnavailableException>(() => reopened.ReadPcm16(Host, boundary - 1, 2));
+        Assert.Throws<HistoryUnavailableException>(() => reopened.Pin(Host, "late", boundary - 1, boundary + 1));
+        Assert.Equal(HistoryFixture.Expected((int)S(23), (int)S(4)), reopened.ReadPcm16(Host, boundary, (int)S(4)));
+        var levels = reopened.Levels(Host, S(20), boundary, 50);
+        Assert.All(levels, v => Assert.Equal(0, v));
+        Assert.True(reopened.Flush(30000));
+        Assert.False(File.Exists(Segment("discard-1", 0)));
+        Assert.False(File.Exists(Segment("discard-1", 1)));
+        var bytes = File.ReadAllBytes(Segment("discard-1", 2));
+        Assert.All(bytes.Take((int)(boundary - S(20)) * 2), b => Assert.Equal(0, b));
+        // A crash now: the next launch (or an older companion reading the same index) starts at the boundary.
+        reopened.Abandon();
+        var again = Open("discard-1", HistoryGapReason.Crash);
+        Assert.Equal(boundary, again.Timeline(Host).Available[0].StartFrame);
+        Assert.Equal(["new"], again.Pins(Host).Keys);
+        Assert.Throws<HistoryUnavailableException>(() => again.ReadPcm16(Host, S(20), 1));
+    }
+
+    [Fact]
+    public void DiscardingEverythingWhileStoppedLeavesAnEmptyHistoryThatRecordsAgain()
+    {
+        var store = Create("discard-2");
+        HistoryFixture.Feed(store, clock, 15);
+        Assert.True(store.Flush(30000));
+        store.Abandon();
+        var reopened = Open("discard-2", HistoryGapReason.Crash);
+        long boundary = reopened.LiveFrame;
+        reopened.DiscardBefore(boundary);
+        var t = reopened.Timeline(Host);
+        Assert.Empty(t.Available); Assert.Empty(t.Spans); Assert.Empty(t.Gaps);
+        HistoryFixture.Feed(reopened, clock, 3);
+        Assert.Equal([new HistoryRange(boundary, boundary + S(3))], reopened.Timeline(Host).Available);
+        Assert.True(reopened.Flush(30000));
+        reopened.Abandon();
+        var again = Open("discard-2", HistoryGapReason.Crash);
+        Assert.Equal([new HistoryRange(boundary, boundary + S(3))], again.Timeline(Host).Available);
+    }
 }
