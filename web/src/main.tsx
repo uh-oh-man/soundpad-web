@@ -1,25 +1,15 @@
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { createRoot } from 'react-dom/client';
 import {
-  AudioLines,
   Search,
   Link,
-  Settings2,
   Music2,
-  Plus,
-  Minus,
   RefreshCw,
   Users,
   X,
-  ArrowUpRight,
-  ShieldCheck,
-  Headphones,
-  ChevronRight,
   Radio,
   Mic2,
   OctagonPause,
-  Sparkles,
-  LogOut,
   BookAudio,
   MessageSquare,
 } from 'lucide-react';
@@ -28,7 +18,7 @@ import { flattenCategories, type Sound } from './protocol';
 import { z } from 'zod';
 import { useWorkspace, viewModes, type Workspace } from './workspace';
 import { arrangeSounds, boardTitle, type Totals } from './arrange';
-import { APP_VERSION_LABEL, REQUIRED_COMPANION, companionAtLeast, supports } from './version';
+import { REQUIRED_COMPANION, companionAtLeast, supports } from './version';
 import { DEMO_COPY, hostCopy } from './hosting';
 import { SoundCollection } from './components/SoundCollection';
 import { Player } from './components/Player';
@@ -58,6 +48,12 @@ import { useAppearance } from './appearance';
 import { GuestName } from './components/GuestName';
 import { organization } from './shared-layout';
 import { clearWaveforms } from './waveform-cache';
+import { useAccessibilityPrefs } from './motion';
+import { KickCounter } from './components/KickCounter';
+import { Landing, PROJECT_URL, ProjectFooter } from './components/shell/Landing';
+import { DemoBanner } from './components/shell/DemoBanner';
+import { TopBar } from './components/shell/TopBar';
+import { SectionHeader } from './components/shell/SectionHeader';
 // Stylesheets in their cascade order (Stage G spec 3.1). Each later file overrides earlier ones at equal
 // specificity; see the ownership note at the top of each file. The DM Sans font goes after tokens.css.
 import './tokens.css';
@@ -70,7 +66,6 @@ import './shell.css';
 import './playback.css';
 import './surfaces.css';
 
-const PROJECT_URL = 'https://github.com/uh-oh-man/soundpad-web';
 const viewLabels: Record<(typeof viewModes)[number], string> = {
   icons: 'Icons',
   large: 'Large Icons',
@@ -92,18 +87,6 @@ const totalsSchema = z.object({
     z.object({ total: z.number(), lastPlayedAt: z.number().nullable() }),
   ),
 });
-
-function ProjectFooter() {
-  return (
-    <footer className="project-footer">
-      Soundpad Web · v{APP_VERSION_LABEL} ·{' '}
-      <a href={PROJECT_URL} target="_blank" rel="noreferrer">
-        GitHub
-      </a>{' '}
-      · <span>made by AI</span>
-    </footer>
-  );
-}
 
 /** Space pauses/resumes known playback (or stops it) unless focus is in something that uses Space. */
 function useSpaceToggle() {
@@ -206,23 +189,6 @@ function useSearchShortcut() {
   }, []);
 }
 
-function statusLabel(
-  mode: string,
-  connected: boolean,
-  host: boolean,
-  available: boolean,
-  status: string,
-  relayed = false,
-  demo = false,
-) {
-  if (mode === 'landing') return 'Not connected';
-  if (demo) return 'Example session';
-  if (!connected) return status.split('.')[0];
-  if (!available) return 'Soundpad unavailable';
-  // Through the relay (2.37) everything works, only slower; the header says so.
-  return host ? 'Hosting' : relayed ? 'Connected (relayed, slower)' : 'Connected';
-}
-
 /** "35 s" or "2 min 5 s": how long a guest has been reconnecting (2.37). */
 function elapsed(ms: number) {
   const s = Math.max(0, Math.floor(ms / 1000));
@@ -272,117 +238,9 @@ function GuestConnection({ status, info }: { status: string; info?: ConnectionIn
   );
 }
 
-function Landing({ view }: { view: ReturnType<typeof controller.getSnapshot> }) {
-  const repositoryUrl = import.meta.env.VITE_REPOSITORY_URL as string | undefined;
-  return (
-    <main className="welcome">
-      <div className="eyebrow">
-        <Radio size={15} /> YOUR SOUNDPAD, A LINK AWAY
-      </div>
-      <h1>
-        A soundboard.
-        <br />
-        <span>For the whole party.</span>
-      </h1>
-      <p>
-        Share your Soundpad library with friends. They tap a sound, your Soundpad plays it. No
-        accounts. Session audio goes directly to your host.
-      </p>
-      {view.resumeAvailable && (
-        <button className="primary resume-host" onClick={() => controller.resume()}>
-          Resume hosting
-        </button>
-      )}
-      <div className="setup-card">
-        <div className="setup-icon">
-          <Headphones size={29} />
-        </div>
-        <div>
-          <h2>Hosting? Start on your PC.</h2>
-          <p>
-            Open Soundpad, then launch the portable companion. Your library appears here
-            automatically.
-          </p>
-        </div>
-      </div>
-      <div className="steps">
-        <span>
-          <b>1</b> Launch the companion
-        </span>
-        <ChevronRight size={16} />
-        <span>
-          <b>2</b> Copy Invite
-        </span>
-        <ChevronRight size={16} />
-        <span>
-          <b>3</b> Let friends play
-        </span>
-      </div>
-      <p className="join-note">Joining a friend? Open their invitation link to connect.</p>
-      <TryExample loading={view.status === 'Loading the example'} />
-      {repositoryUrl && /^https:\/\/github\.com\/[\w.-]+\/[\w.-]+\/?$/.test(repositoryUrl) && (
-        <a className="text-link" href={repositoryUrl} target="_blank" rel="noreferrer">
-          Source & downloads <ArrowUpRight size={15} />
-        </a>
-      )}
-      {view.status === 'Connection failed' && (
-        <p role="alert" className="warning">
-          {view.notice}
-        </p>
-      )}
-      <div className="privacy">
-        <ShieldCheck size={16} /> Audio stays on the host. Only commands travel between browsers.
-      </div>
-    </main>
-  );
-}
-
-/**
- * "Try the example": a host session with example sounds that runs entirely in this page, so a
- * visitor can try the app before installing anything. Its code loads only when pressed. It says
- * what can be tried (2.41): not "every feature", since the Windows hotkey, Keep, Spotify and the
- * newer Mimic history need the host's PC.
- */
-function TryExample({ loading }: { loading: boolean }) {
-  return (
-    <div className="try-example">
-      <button
-        aria-describedby="try-example-note"
-        // Busy stays focusable (aria-disabled); presses are ignored until the example has loaded.
-        aria-disabled={loading || undefined}
-        aria-busy={loading || undefined}
-        onClick={() => !loading && void controller.startDemo()}
-      >
-        <Sparkles size={17} aria-hidden="true" />
-        {loading ? 'Loading the example…' : 'Try the example'}
-      </button>
-      <p id="try-example-note">
-        Try the soundboard, edited copies, Mimic and simulated guests with example sounds. Nothing
-        is sent to Soundpad; sounds play in this browser.
-      </p>
-    </div>
-  );
-}
-
-/** Stays at the top of the board for the whole example, with the way back to the start. */
-function DemoBanner() {
-  return (
-    <aside className="demo-banner" aria-label="Example session">
-      <Sparkles size={18} aria-hidden="true" />
-      <span>
-        <strong>Example session: nothing here reaches Soundpad.</strong> Sounds play in this browser
-        and the guests are simulated. Leaving clears the example’s audio, copies and Mimic clips;
-        your favourites and view settings stay.
-      </span>
-      <button onClick={() => void controller.leave()}>
-        <LogOut size={15} aria-hidden="true" /> Leave example
-      </button>
-    </aside>
-  );
-}
-
 function App() {
   const appearance = useAppearance();
+  useAccessibilityPrefs();
   const view = useSyncExternalStore(controller.subscribe, controller.getSnapshot);
   const { state, mode, status } = view;
   const [category, setCategory] = useState('all');
@@ -581,74 +439,16 @@ function App() {
     <div
       className={`app-shell ${mode === 'landing' ? 'is-landing' : 'is-connected'} ${held ? 'playback-held' : ''}`}
     >
-      <header className="topbar">
-        <a href={location.pathname} className="brand">
-          <span className="brand-icon">
-            <AudioLines size={23} />
-          </span>
-          <span>
-            soundpad<span className="brand-light"> web</span>
-          </span>{' '}
-          {/* The space keeps "web" and the version apart in the link's text; flex layout ignores it. */}
-          <span className="release-version">v{APP_VERSION_LABEL}</span>
-          {/* Named by its visible text (which changes with screen width) so voice control always matches. */}
-          <span className="sr-only">, home</span>
-        </a>
-        <span className="edition">BROWSER REMOTE</span>
-        <div className="top-actions">
-          <span className={`status ${connected && state.available ? 'online' : ''}`} title={status}>
-            <i />
-            {statusLabel(
-              mode,
-              connected,
-              host,
-              state.available,
-              status,
-              view.connection?.transport === 'relay',
-              view.demo,
-            )}
-          </span>
-          {mimicListening && (
-            <button
-              className="mimic-badge"
-              title={`Mimic is keeping ${kept} of ${state.mimic?.source ?? 'a source'} on the host's PC`}
-              disabled={!canMimic}
-              onClick={() => setMimicOpen(true)}
-            >
-              <i /> Mimic on
-            </button>
-          )}
-          {mode !== 'landing' && (
-            <input
-              className="profile-name"
-              key={view.profile.name}
-              aria-label="Your display name"
-              title="Display names are not authenticated identities"
-              maxLength={40}
-              defaultValue={view.profile.name}
-              onBlur={(e) => controller.rename(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') e.currentTarget.blur();
-              }}
-            />
-          )}
-          {mode !== 'landing' && (
-            <button
-              className="icon-button"
-              // Waiting guests show as a badge until the host decides (2.37).
-              aria-label={`Access settings${host && view.requests.length ? `, ${view.requests.length} waiting` : ''}`}
-              onClick={() => setSettings(true)}
-            >
-              <Settings2 size={20} />
-              {host && view.requests.length > 0 && (
-                <span className="badge" aria-hidden="true">
-                  {view.requests.length}
-                </span>
-              )}
-            </button>
-          )}
-        </div>
-      </header>
+      <TopBar
+        view={view}
+        connected={connected}
+        host={host}
+        mimicListening={mimicListening}
+        kept={kept}
+        canMimic={canMimic}
+        openMimic={() => setMimicOpen(true)}
+        openSettings={() => setSettings(true)}
+      />
       {mode === 'landing' ? (
         <Landing view={view} />
       ) : (
@@ -696,79 +496,87 @@ function App() {
                   )}
                 </aside>
               )}
-              <div className="board-heading">
-                <div>
-                  <div className="eyebrow">{host ? 'YOUR SOUNDBOARD' : 'SHARED SOUNDBOARD'}</div>
-                  <h1>{title}</h1>
-                  <p>
-                    {search
-                      ? `${sounds.length} matching sound${sounds.length === 1 ? '' : 's'}`
-                      : `${sounds.length} sound${sounds.length === 1 ? '' : 's'} · ${host ? 'Ready when your friends are' : 'Tap a sound to play on the host'}`}
+              <SectionHeader
+                className="board-heading"
+                eyebrow={host ? 'YOUR SOUNDBOARD' : 'SHARED SOUNDBOARD'}
+                title={title}
+                ribbon={{
+                  playback: state.playback,
+                  hostId: state.hostId,
+                  held: held || suspended,
+                  active: true,
+                }}
+                actions={
+                  <>
+                    {canMimic && (
+                      <button onClick={() => setMimicOpen(true)}>
+                        <Mic2 size={17} /> Mimic
+                      </button>
+                    )}
+                    {libraryReady && (
+                      <button onClick={() => setVoicesOpen(true)}>
+                        <BookAudio size={17} /> Voices
+                      </button>
+                    )}
+                    {sentencesReady && (
+                      <button onClick={() => setSentencesOpen(true)}>
+                        <MessageSquare size={17} /> Sentences
+                      </button>
+                    )}
+                    {host && (
+                      <>
+                        <button
+                          className="icon-button"
+                          title="Refresh library"
+                          aria-label="Refresh library"
+                          disabled={!connected}
+                          aria-disabled={pending > 0 || undefined}
+                          onClick={() => {
+                            if (pending > 0) return;
+                            clearWaveforms();
+                            void run('refresh');
+                          }}
+                        >
+                          <RefreshCw size={19} />
+                        </button>
+                        <button
+                          className="primary"
+                          disabled={!view.invite}
+                          onClick={() => void controller.copyInvite()}
+                        >
+                          <Link size={17} /> Copy Invite
+                        </button>
+                      </>
+                    )}
+                  </>
+                }
+              >
+                <p>
+                  {search
+                    ? `${sounds.length} matching sound${sounds.length === 1 ? '' : 's'}`
+                    : `${sounds.length} sound${sounds.length === 1 ? '' : 's'} · ${host ? 'Ready when your friends are' : 'Tap a sound to play on the host'}`}
+                </p>
+                {host && (
+                  // Who is connected, at the top where the host looks (it used to sit in the footer).
+                  <p className="connected-guests" role="status" aria-live="polite">
+                    <Users size={15} aria-hidden="true" />
+                    <span>{`${view.guests.length} connected guest${view.guests.length === 1 ? '' : 's'}`}</span>
+                    {view.guests.length > 0 && (
+                      <span className="guest-names">
+                        {view.guests
+                          .slice(0, 4)
+                          .map((id, i) => view.people[id]?.name ?? `Guest ${i + 1}`)
+                          .join(', ')}
+                        {view.guests.length > 4 && ` +${view.guests.length - 4} more`}
+                        {view.demo && ' (simulated)'}
+                      </span>
+                    )}
                   </p>
-                  {host && (
-                    // Who is connected, at the top where the host looks (it used to sit in the footer).
-                    <p className="connected-guests" role="status" aria-live="polite">
-                      <Users size={15} aria-hidden="true" />
-                      <span>{`${view.guests.length} connected guest${view.guests.length === 1 ? '' : 's'}`}</span>
-                      {view.guests.length > 0 && (
-                        <span className="guest-names">
-                          {view.guests
-                            .slice(0, 4)
-                            .map((id, i) => view.people[id]?.name ?? `Guest ${i + 1}`)
-                            .join(', ')}
-                          {view.guests.length > 4 && ` +${view.guests.length - 4} more`}
-                          {view.demo && ' (simulated)'}
-                        </span>
-                      )}
-                    </p>
-                  )}
-                  {host && <LobbyRequests requests={view.requests} />}
-                  {host && budget?.host && <BudgetRequests requests={budget.host.requests} />}
-                  {host && !!state.tempRecovery && <TempRecovery clips={state.tempRecovery} />}
-                </div>
-                <div className="board-actions">
-                  {canMimic && (
-                    <button onClick={() => setMimicOpen(true)}>
-                      <Mic2 size={17} /> Mimic
-                    </button>
-                  )}
-                  {libraryReady && (
-                    <button onClick={() => setVoicesOpen(true)}>
-                      <BookAudio size={17} /> Voices
-                    </button>
-                  )}
-                  {sentencesReady && (
-                    <button onClick={() => setSentencesOpen(true)}>
-                      <MessageSquare size={17} /> Sentences
-                    </button>
-                  )}
-                  {host && (
-                    <>
-                      <button
-                        className="icon-button"
-                        title="Refresh library"
-                        aria-label="Refresh library"
-                        disabled={!connected}
-                        aria-disabled={pending > 0 || undefined}
-                        onClick={() => {
-                          if (pending > 0) return;
-                          clearWaveforms();
-                          void run('refresh');
-                        }}
-                      >
-                        <RefreshCw size={19} />
-                      </button>
-                      <button
-                        className="primary"
-                        disabled={!view.invite}
-                        onClick={() => void controller.copyInvite()}
-                      >
-                        <Link size={17} /> Copy Invite
-                      </button>
-                    </>
-                  )}
-                </div>
-              </div>
+                )}
+                {host && <LobbyRequests requests={view.requests} />}
+                {host && budget?.host && <BudgetRequests requests={budget.host.requests} />}
+                {host && !!state.tempRecovery && <TempRecovery clips={state.tempRecovery} />}
+              </SectionHeader>
               {(!connected || state.error) && (
                 <div className="connection-banner" role="status">
                   <Radio size={18} />
@@ -1045,29 +853,7 @@ function App() {
             workspace={w}
             update={personal.update}
           >
-            <div className="counter">
-              <div className="counter-label">
-                KICK COUNTER<small>It happens.</small>
-              </div>
-              <button
-                aria-label="Decrease Kick counter"
-                // Busy is aria-disabled so keyboard focus stays on the button while the count updates.
-                disabled={!canCount || state.counter === 0}
-                aria-disabled={pending > 0 || undefined}
-                onClick={() => pending === 0 && void run('counter', { delta: -1 })}
-              >
-                <Minus size={16} />
-              </button>
-              <output aria-label="Kick count">{state.counter}</output>
-              <button
-                aria-label="Increase Kick counter"
-                disabled={!canCount}
-                aria-disabled={pending > 0 || undefined}
-                onClick={() => pending === 0 && void run('counter', { delta: 1 })}
-              >
-                <Plus size={16} />
-              </button>
-            </div>
+            <KickCounter state={state} send={run} pending={pending} canEdit={canCount} />
           </Player>
         </>
       )}
