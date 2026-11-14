@@ -36,9 +36,6 @@
     animation: none;
   }
 }
-.dialog:has(.mimic-panel) {
-  max-width: 760px;
-}
 .mimic-panel {
   display: grid;
   /* One column that never grows past the dialog, however long a clip name or line is. */

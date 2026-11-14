@@ -88,21 +88,11 @@
   --sidebar-w: 234px;
   --ribbon-h: 120px;
   --font-ui: 'DM Sans Variable', 'Segoe UI Variable Text', 'Segoe UI', system-ui, sans-serif;
-  /* Same-value names for the colours voices.css and sentences.css used to write out (2.42 values). */
+  /* Dark text on a voice's colour (voices.css). */
   --voice-fallback-ink: #0b0f17;
-  --voice-fallback-amber: #e2a03f;
-  --voice-fallback-dark: #111;
-  --voice-fallback-secondary: #9aa;
-  --voice-fallback-surface: #1b2230;
-  --voice-fallback-clash: #d9634c;
-  /* Old names, kept as aliases until Phase 3 folds the legacy CSS. */
-  --play: var(--accent);
-  --accent-strong: var(--accent-fill);
+  /* The shade under a tile's label (per theme) and the legacy drop shadow. */
   --overlay-bottom: #070b14ed;
   --shadow: #0006;
-  --amber: var(--warning);
-  --muted: var(--text-muted);
-  --text-secondary: var(--text-muted);
 }
 @media (max-width: 700px) {
   :root {

@@ -5,9 +5,6 @@
  * carry their colour and name, pauses are hatched with their length, overlaps are striped and say
  * "overlap", missing words are dashed in --warning and say "missing", the selection is a solid outline.
  */
-.dialog:has(.sentences-panel) {
-  max-width: 980px;
-}
 .sentence-rows {
   display: grid;
   gap: 6px;

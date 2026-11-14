@@ -398,12 +398,6 @@ p {
   margin-top: 7px;
   accent-color: var(--accent);
 }
-.stop {
-  border-color: var(--danger);
-  color: var(--danger);
-  background: color-mix(in srgb, var(--danger) 7%, transparent);
-  padding: 10px 20px;
-}
 .counter {
   display: flex;
   align-items: center;
@@ -769,9 +763,6 @@ p {
   .soundboard {
     padding: 40px 50px;
   }
-  .sound-grid {
-    grid-template-columns: repeat(auto-fill, minmax(175px, 1fr));
-  }
 }
 @media (max-width: 1050px) {
   .workspace {
@@ -782,9 +773,6 @@ p {
   }
   .topbar {
     padding: 0 24px;
-  }
-  .sound-grid {
-    grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
   }
   .grid-caption {
     display: none;
@@ -866,10 +854,6 @@ p {
     color: var(--text-muted);
     border-radius: 7px;
     padding: 11px;
-  }
-  .sound-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 11px;
   }
   .sound-name {
     font-size: 12px;
@@ -1098,9 +1082,6 @@ p {
 }
 .now-playing .sound-hint {
   color: var(--accent);
-}
-.view-large.sound-grid {
-  grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
 }
 .view-large .sound-name {
   font-size: 14px;
@@ -1384,17 +1365,6 @@ p {
   align-items: center;
   gap: 7px;
 }
-.player-v2 .counter {
-  padding-left: 18px;
-  gap: 10px;
-}
-.player-v2 .counter-label {
-  font-size: 11px;
-  margin: 0;
-}
-.player-v2 .counter-label small {
-  display: none;
-}
 .unknown-progress {
   font-size: 12px;
   color: var(--text-muted);
@@ -1550,16 +1520,6 @@ p {
   padding-bottom: 32px;
 }
 @media (max-width: 1150px) {
-  .player-v2 .counter {
-    grid-column: 1/-1;
-    justify-content: flex-end;
-    padding: 8px 0 0;
-    border-left: 0;
-    border-top: 1px solid color-mix(in srgb, var(--accent) 12%, var(--surface-1));
-  }
-  .player-v2 .counter-label {
-    margin-right: auto;
-  }
   .player-v2 {
     grid-template-columns: minmax(150px, 1fr) minmax(160px, 1.2fr) auto;
     gap: 12px;
@@ -1601,12 +1561,6 @@ p {
     width: 29px;
     height: 29px;
   }
-  .player-v2 {
-    grid-template-columns: minmax(0, 1fr) auto;
-    padding: 12px 14px;
-    gap: 10px;
-    min-height: 158px;
-  }
   .player-track {
     gap: 8px;
   }
@@ -1639,20 +1593,10 @@ p {
     font-size: 12px;
     gap: 5px;
   }
-  .player-v2 .counter {
-    grid-column: 1/-1;
-  }
   .mobile-expand {
     display: flex;
     margin-left: auto;
     padding: 6px;
-  }
-  .player-v2 .counter button {
-    width: 34px;
-    height: 32px;
-  }
-  .player-v2 .counter output {
-    font-size: 22px;
   }
   .view-toolbar {
     gap: 10px;
@@ -1676,9 +1620,6 @@ p {
   .view-toolbar > button {
     font-size: 12px;
     padding: 8px;
-  }
-  .view-large.sound-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
   .sound-entry .sound-actions button {
     padding: 8px;
@@ -1842,30 +1783,6 @@ p {
   min-width: 0;
   color: var(--text-primary);
 }
-.spotify-heading {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: 13px;
-  font-size: 12px;
-  font-weight: 650;
-  color: var(--success);
-}
-.spotify-heading span {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-.spotify-heading input {
-  accent-color: var(--success);
-}
-.spotify-track {
-  display: flex;
-  gap: 10px;
-  align-items: center;
-  min-width: 0;
-}
-.spotify-track img,
 .spotify-art-placeholder {
   width: 54px;
   height: 54px;
@@ -1878,44 +1795,11 @@ p {
   place-items: center;
   background: color-mix(in srgb, var(--text-primary) 3%, transparent);
 }
-.spotify-track > div {
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-.spotify-track strong {
-  font-size: 12px;
-  line-height: 1.35;
-  overflow-wrap: anywhere;
-}
-.spotify-track span {
-  font-size: 12px;
-  color: var(--text-muted);
-  overflow-wrap: anywhere;
-}
-.spotify-track small {
-  font-size: 12px;
-  color: var(--text-muted);
-}
 .spotify-player progress {
   width: 100%;
   height: 3px;
   accent-color: var(--success);
   margin-top: 12px;
-}
-.spotify-transport {
-  display: flex;
-  gap: 8px;
-  justify-content: center;
-  margin: 12px 0 8px;
-}
-.spotify-transport button {
-  width: 34px;
-  height: 32px;
-  padding: 5px;
-  background: color-mix(in srgb, var(--text-primary) 3%, transparent);
-  border-color: color-mix(in srgb, var(--text-muted) 8%, transparent);
 }
 .spotify-player p {
   font-size: 12px;
@@ -1961,13 +1845,9 @@ p {
   .spotify-player {
     margin: 0;
   }
-  .spotify-track img,
   .spotify-art-placeholder {
     width: 46px;
     height: 46px;
-  }
-  .spotify-transport {
-    margin: 8px 0;
   }
 }
 .app-shell:has(.player-v2) {
@@ -1999,7 +1879,7 @@ p {
 }
 .session-upload small,
 .shared-layouts small {
-  color: var(--muted, var(--text-muted));
+  color: var(--text-muted);
 }
 .shared-layouts button {
   font-size: 12px;
@@ -2070,10 +1950,10 @@ button:hover:not(:disabled) {
   background: color-mix(in srgb, var(--accent) 85%, white);
 }
 .sound-tile.sound-entry.now-playing {
-  border-color: var(--play);
+  border-color: var(--accent);
 }
 .now-playing {
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--play) 20%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 20%, transparent);
 }
 .tile-wave-surface,
 .tile-art-button {
@@ -2093,11 +1973,6 @@ button:hover:not(:disabled) {
   touch-action: none;
   cursor: crosshair;
   user-select: none;
-}
-.view-large .tile-wave-surface,
-.view-large .tile-art-button {
-  height: 224px;
-  min-height: 224px;
 }
 .tile-art-button {
   cursor: pointer;
@@ -2190,7 +2065,7 @@ button:hover:not(:disabled) {
   border-color: var(--accent);
 }
 .tile-play-strip:hover:not(:disabled) svg {
-  color: var(--play);
+  color: var(--accent);
   opacity: 1;
 }
 .tile-play-strip:active:not(:disabled) {
@@ -2203,16 +2078,9 @@ button:hover:not(:disabled) {
   opacity: 0.55;
 }
 .is-playing .tile-play-strip {
-  color: var(--play);
-  border-top-color: color-mix(in srgb, var(--play) 55%, var(--line));
-  background: color-mix(in srgb, var(--play) 7%, var(--surface-1));
-}
-.playing-dot {
-  margin-left: auto;
-  width: 5px;
-  height: 5px;
-  border-radius: 50%;
-  background: var(--play);
+  color: var(--accent);
+  border-top-color: color-mix(in srgb, var(--accent) 55%, var(--line));
+  background: color-mix(in srgb, var(--accent) 7%, var(--surface-1));
 }
 .tile-playhead,
 .tile-cue {
@@ -2221,7 +2089,7 @@ button:hover:not(:disabled) {
   top: 0;
   bottom: 0;
   width: 1px;
-  background: var(--play);
+  background: var(--accent);
   pointer-events: none;
 }
 .tile-cue {
@@ -2291,7 +2159,7 @@ button:hover:not(:disabled) {
   stroke: var(--wave);
 }
 .wave-playhead {
-  background: var(--play);
+  background: var(--accent);
 }
 .wave-selection {
   box-shadow: none;
@@ -2588,16 +2456,6 @@ button:hover:not(:disabled) {
     min-height: 42px;
     font-size: 11px;
     letter-spacing: 0.6px;
-  }
-  .tile-wave-surface,
-  .tile-art-button {
-    height: 140px;
-    min-height: 140px;
-  }
-  .view-large .tile-wave-surface,
-  .view-large .tile-art-button {
-    height: 210px;
-    min-height: 210px;
   }
   .notification-stack {
     right: 16px;
@@ -3089,23 +2947,12 @@ html {
   }
 }
 /* Panic (2.35) sits next to Stop but must not be mistaken for it: its own colour and a gap. */
-.panic {
-  margin-left: 8px;
-  padding: 10px 14px;
-  color: var(--warning);
-  border-color: color-mix(in srgb, var(--warning) 55%, var(--line));
-  background: color-mix(in srgb, var(--warning) 8%, transparent);
-}
 .panic:hover:not(:disabled) {
   background: color-mix(in srgb, var(--warning) 18%, transparent);
   border-color: var(--warning);
 }
 @media (max-width: 700px) {
   /* The phone's transport row has no room for a second word; the name stays on the button. */
-  .player-v2 .panic {
-    margin-left: 4px;
-    padding: 9px;
-  }
   .player-v2 .panic span {
     display: none;
   }

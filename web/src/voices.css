@@ -2,11 +2,8 @@
  * The Voices window (2.41): the voice library, its search, review queue, words and word index. Owned by WP-C
  * (Stage G). On the tokens: cards on --surface-2, voices in their own colour with a name and initials, and
  * text in --text-* only. The panel is its own size container named `board` (Stage G spec 4.3/C5), so its
- * narrow layout follows the room it has: in the dialog today, in the main view when it moves there.
+ * narrow layout follows the room it has in the Voices view.
  */
-.dialog:has(.voices-panel) {
-  max-width: 820px;
-}
 .voices-panel {
   container: board / inline-size;
   display: grid;
