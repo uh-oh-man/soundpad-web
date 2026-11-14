@@ -4989,9 +4989,23 @@ test('sentences (2.42 review): Space selects a lone piece, Escape closes, nudges
   expect((await stored()).versions[0].text).toBe('fixture tone');
   // Removing a pause from the keyboard leaves the focus on the timeline (on a neighbour).
   const pause = timeline.getByRole('button', { name: /^Pause, 4000 ms/ });
+  // A click gives the piece the keyboard, in Safari too (which does not focus a clicked button).
   await pause.click();
+  await expect(pause).toBeFocused();
   await page.keyboard.press('Delete');
   await expect(pause).toHaveCount(0);
   // The pause was last: the piece before it has the focus now.
-  await expect(timeline.getByRole('button', { name: /^“tone”/ })).toBeFocused();
+  const tone = timeline.getByRole('button', { name: /^“tone”/ });
+  await expect(tone).toBeFocused();
+  // After a click, the arrow keys go on from the clicked piece.
+  await word.click();
+  await expect(word).toBeFocused();
+  await page.keyboard.press('ArrowRight');
+  await expect(tone).toBeFocused();
+  await expect(tone).toHaveAttribute('aria-pressed', 'true');
+  // Escape after a click clears the clicked piece's selection; it does not close the window.
+  await tone.click();
+  await page.keyboard.press('Escape');
+  await expect(tone).toHaveAttribute('aria-pressed', 'false');
+  await expect(sentences).toBeVisible();
 });

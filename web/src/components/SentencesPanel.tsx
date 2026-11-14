@@ -866,6 +866,10 @@ function Timeline({
     const current = drag;
     setDrag(null);
     if (!current) return;
+    // The pressed piece takes the keyboard (Delete, arrows, Space, Escape). Safari does not focus a
+    // clicked button: it focuses the timeline around it, so keys missed the piece (2.42 review).
+    // This runs on release because Safari moves the focus itself after pointerdown.
+    if (document.activeElement !== e.currentTarget) e.currentTarget.focus({ preventScroll: true });
     // Releasing never plays: a drag moves the piece, a click selects it.
     if (current.moved && editable)
       void apply({ do: 'move', pieces: [p.id], offsetMs: current.at }, true);
