@@ -23,9 +23,8 @@ const removeDir = (dir: string) => {
   }
 };
 /**
- * Until the release raises the companion's version to 2.44 (the integrator's step), the harness reports
- * 2.43.0 and the Stage H gates would hide what these tests check: snapshots below 2.44 are raised to it.
- * A newer harness is left as it is.
+ * The Stage H gates are 2.44, which the harness reports since the release bump. Snapshots below 2.44 are
+ * still raised to it, so these tests don't depend on the harness's version; a newer one is left as it is.
  */
 const raised = new WeakSet<Page>();
 async function stageHCompanion(page: Page) {
@@ -153,11 +152,19 @@ test('an install with kept data gets the Check your setup card, not the dialog, 
     const card = page.getByRole('complementary', { name: 'Check your setup' });
     await expect(card).toBeVisible();
     await expect(guide(page)).toHaveCount(0);
-    // Open setup shows the guide; closing it brings the card back.
-    await card.getByRole('button', { name: 'Open setup' }).click();
+    // Open setup shows the guide; closing it brings the card back, and focus with it (its opener had gone).
+    await card.getByRole('button', { name: 'Open setup' }).focus();
+    await card.getByRole('button', { name: 'Open setup' }).press('Enter');
     await expect(guide(page)).toBeVisible();
-    await guide(page).getByRole('button', { name: 'Close dialog' }).click();
+    // Back on the first step does nothing, and keeps focus.
+    const back = guide(page).getByRole('button', { name: 'Back' });
+    await expect(back).toHaveAttribute('aria-disabled', 'true');
+    await back.focus();
+    await back.press('Enter');
+    await expect(back).toBeFocused();
+    await page.keyboard.press('Escape');
     await expect(card).toBeVisible();
+    await expect(card.getByRole('button', { name: 'Open setup' })).toBeFocused();
     await card.getByRole('button', { name: 'Dismiss Check your setup' }).click();
     await expect(card).toHaveCount(0);
     await expect.poll(async () => (await snapshot(page)).setupDone).toBe(true);
@@ -227,8 +234,18 @@ test('Panic on another key: Shift+Escape no longer panics, the new key does, a c
   dialog = await openSettings(page);
   const after = dialog.getByRole('region', { name: 'Keyboard' });
   await expect(after.locator('[data-shortcut="panic"] .shortcut-key')).toHaveText('Ctrl+F8');
-  await after.getByRole('button', { name: 'Reset Panic' }).click();
+  // Reset (and Turn off) are aria-disabled when they have nothing to do, so pressing one keeps focus.
+  const reset = after.getByRole('button', { name: 'Reset Panic' });
+  await reset.focus();
+  await reset.press('Enter');
   await expect(after.locator('[data-shortcut="panic"] .shortcut-key')).toHaveText('Shift+Escape');
+  await expect(reset).toHaveAttribute('aria-disabled', 'true');
+  await expect(reset).toBeFocused();
+  const off = after.getByRole('button', { name: 'Turn off Stop' });
+  await expect(off).toHaveAttribute('aria-disabled', 'true');
+  await off.focus();
+  await off.press('Enter');
+  await expect(off).toBeFocused();
   await dialog.getByRole('button', { name: 'Close dialog' }).click();
   await page.locator('#board').focus();
   await page.keyboard.press('Shift+Escape');
@@ -266,6 +283,13 @@ test('a host-wide key another app owns is reported and the previous key keeps wo
   await expect(keyboard.locator('[data-shortcut="stop"]')).toContainText(
     'the companion takes this key on this PC; this page never receives it.',
   );
+  // Off from the keyboard turns it off and keeps focus (the button is aria-disabled now, never disabled).
+  const off = setup.getByRole('button', { name: 'Turn off the host-wide Panic key' });
+  await off.focus();
+  await off.press('Enter');
+  await expect(panic.locator('.shortcut-key')).toHaveText('Off');
+  await expect(off).toHaveAttribute('aria-disabled', 'true');
+  await expect(off).toBeFocused();
 });
 
 test('host-wide Panic and Capture keys act from anywhere on the PC', async ({ page, harness }) => {

@@ -7,6 +7,7 @@ import {
   addToNewFolder,
   isAppCategory,
   nameProblem,
+  planUnavailable,
   removeFromFolder,
   stepsForAdd,
   stepsForRemove,
@@ -299,9 +300,7 @@ export function OrganizeBar({
         </>
       ) : (
         <span className="organize-note">
-          {host
-            ? 'Changing Soundpad categories needs companion 2.44. My Layout works now.'
-            : 'The host has not allowed organization proposals. My Layout is yours to organize.'}
+          {planUnavailable(host, controller.getSnapshot().demo, state.companionVersion, 'bar')}
         </span>
       )}
       <button type="button" onClick={() => setOrganizeMode(false)} aria-label="Done organizing">

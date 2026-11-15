@@ -81,7 +81,16 @@ function Guide({ info, connected }: { info: SetupInfo; connected: boolean }) {
     }
   }
   return (
-    <Modal label="Set up Soundpad Web" onClose={closeGuide}>
+    <Modal
+      label="Set up Soundpad Web"
+      onClose={closeGuide}
+      // Opened from the setup card (which hides meanwhile) or by itself at first run: focus goes back to
+      // the card if it is shown again, else to the sounds, never to the page.
+      returnTo={() =>
+        document.querySelector<HTMLElement>('.setup-card .primary') ??
+        document.getElementById('board')
+      }
+    >
       <div className="setup-guide">
         <ol className="setup-steps" aria-label="Setup steps">
           {STEPS.map((s, i) => (
@@ -200,8 +209,8 @@ function Guide({ info, connected }: { info: SetupInfo; connected: boolean }) {
         <div className="setup-nav">
           <button
             type="button"
-            disabled={guide.step === 0}
-            onClick={() => dispatch({ type: 'back' })}
+            aria-disabled={guide.step === 0 || undefined}
+            onClick={() => guide.step > 0 && dispatch({ type: 'back' })}
           >
             Back
           </button>

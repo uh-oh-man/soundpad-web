@@ -1,6 +1,15 @@
-import { useState } from 'react';
+import { useState, useSyncExternalStore } from 'react';
+import { controller } from '../../controller';
+import { followFocus } from '../../focus-follow';
 import { flattenCategories, type Snapshot } from '../../protocol';
-import { classify, groupByTarget, isAppCategory, type StepView } from '../../organize';
+import {
+  classify,
+  groupByTarget,
+  isAppCategory,
+  parentsOf,
+  planUnavailable,
+  type StepView,
+} from '../../organize';
 import {
   acceptProposal,
   applyPlan,
@@ -56,6 +65,12 @@ function describe(step: StepView) {
   }
 }
 
+/** The panel's heading: where focus goes when the control that had it goes away (never the page). */
+const heading = () => document.getElementById('editor-title');
+/** After `e`'s control takes itself away, focus goes to `next` (or the heading). */
+const refocus = (e: { currentTarget: Element }, next?: () => HTMLElement | null) =>
+  followFocus(e.currentTarget, () => next?.() ?? heading());
+
 /**
  * Review changes (2.44), in the editor panel. The host sees the plan grouped by category, each step marked
  * "Soundpad can do this" or "Do this in Soundpad" with why, guests' proposals to accept, and Apply or
@@ -72,6 +87,7 @@ export function ReviewChanges({
   canPlan: boolean;
 }) {
   const { view, draft, busy } = useOrganize();
+  const demo = useSyncExternalStore(controller.subscribe, controller.getSnapshot).demo;
   const plan = view?.plan ?? null;
   const categories = flattenCategories(state.library.categories).filter(
     ({ category }) => !isAppCategory(category.name),
@@ -80,12 +96,20 @@ export function ReviewChanges({
   if (!canPlan)
     return (
       <p className="organize-note">
-        {host
-          ? 'Review changes needs companion 2.44 or later. My Layout organizing works without it.'
-          : 'The host has not allowed organization proposals.'}
+        {planUnavailable(host, demo, state.companionVersion, 'review')}
       </p>
     );
   const steps = plan?.steps ?? [];
+  // The plan's steps in the order they are shown, so a removed step's neighbour can take focus.
+  const shownOrder = groupByTarget(steps).flatMap((g) => g.steps.map((s) => s.id));
+  const neighbour = (id: string) => {
+    const at = shownOrder.indexOf(id);
+    const ids = [...shownOrder.slice(at + 1), ...shownOrder.slice(0, at).reverse()];
+    return () =>
+      ids
+        .map((x) => document.querySelector<HTMLElement>(`[data-step-remove="${x}"]`))
+        .find((b) => b?.isConnected) ?? null;
+  };
   const open = steps.filter((s) => !['verified', 'skipped', 'done'].includes(s.state));
   const applying = plan?.state === 'applying';
   const paused = plan?.state === 'paused';
@@ -151,7 +175,17 @@ export function ReviewChanges({
                     <button
                       type="button"
                       aria-label={`Remove ${d.label} from your proposal`}
-                      onClick={() => dropFromDraft(i)}
+                      data-draft-remove={i}
+                      onClick={(e) => {
+                        refocus(
+                          e,
+                          () =>
+                            document.querySelector<HTMLElement>(
+                              `[data-draft-remove="${Math.max(0, Math.min(i, draft.length - 2))}"]`,
+                            ) ?? null,
+                        );
+                        dropFromDraft(i);
+                      }}
                     >
                       Remove
                     </button>
@@ -174,7 +208,13 @@ export function ReviewChanges({
               Propose to the host
             </button>
             {!!draft.length && (
-              <button type="button" onClick={clearDraft}>
+              <button
+                type="button"
+                onClick={(e) => {
+                  refocus(e);
+                  clearDraft();
+                }}
+              >
                 Clear
               </button>
             )}
@@ -209,14 +249,22 @@ export function ReviewChanges({
                       type="button"
                       className="primary"
                       aria-disabled={busy || applying || undefined}
-                      onClick={() => !busy && !applying && void acceptProposal(p.id)}
+                      onClick={(e) => {
+                        if (busy || applying) return;
+                        refocus(e);
+                        void acceptProposal(p.id);
+                      }}
                     >
                       Accept
                     </button>
                     <button
                       type="button"
                       aria-disabled={busy || undefined}
-                      onClick={() => !busy && void rejectProposal(p.id)}
+                      onClick={(e) => {
+                        if (busy) return;
+                        refocus(e);
+                        void rejectProposal(p.id);
+                      }}
                     >
                       Decline
                     </button>
@@ -226,7 +274,11 @@ export function ReviewChanges({
                     <button
                       type="button"
                       aria-disabled={busy || undefined}
-                      onClick={() => !busy && void withdrawProposal(p.id)}
+                      onClick={(e) => {
+                        if (busy) return;
+                        refocus(e);
+                        void withdrawProposal(p.id);
+                      }}
                     >
                       Withdraw
                     </button>
@@ -310,6 +362,10 @@ export function ReviewChanges({
                                         stepId: s.id,
                                         targetCategoryId: c.id,
                                         targetCategoryName: c.name,
+                                        targetCategoryParents: parentsOf(
+                                          state.library.categories,
+                                          c.id,
+                                        ),
                                       });
                                   }}
                                 >
@@ -336,7 +392,12 @@ export function ReviewChanges({
                               type="button"
                               aria-label={`Remove ${describe(s)} from the plan`}
                               aria-disabled={busy || undefined}
-                              onClick={() => !busy && void removeSteps([s.id])}
+                              data-step-remove={s.id}
+                              onClick={(e) => {
+                                if (busy) return;
+                                refocus(e, neighbour(s.id));
+                                void removeSteps([s.id]);
+                              }}
                             >
                               Remove
                             </button>
@@ -378,8 +439,13 @@ export function ReviewChanges({
           )}
           {view.checkpoint && (
             <p className="muted">
-              A copy of Soundpad&rsquo;s sound list from before this plan is kept. Restore it only
-              with Soundpad closed: copy <code>{view.checkpoint.copy}</code> over{' '}
+              A copy of Soundpad&rsquo;s sound list file is kept, as Soundpad last saved it before
+              this plan was first applied
+              {view.checkpoint.takenAtUtcMs
+                ? ` (${new Date(view.checkpoint.takenAtUtcMs).toLocaleString()})`
+                : ''}
+              . Changes made in Soundpad after it last saved are not in it. Restore it only with
+              Soundpad closed: copy <code>{view.checkpoint.copy}</code> over{' '}
               <code>%APPDATA%\Leppsoft\soundlist.spl</code>.
             </p>
           )}
@@ -408,7 +474,11 @@ export function ReviewChanges({
             <button
               type="button"
               aria-disabled={busy || undefined}
-              onClick={() => !busy && void discardPlan()}
+              onClick={(e) => {
+                if (busy) return;
+                refocus(e);
+                void discardPlan();
+              }}
             >
               {plan.state === 'done' ? 'Clear' : 'Discard'}
             </button>

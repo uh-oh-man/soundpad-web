@@ -10,6 +10,10 @@
  * under the board and covers nothing. This is the safety net for what scroll-padding can't reach: a
  * control that takes focus where it already is (no scrolling), a scroll area without that padding, a
  * dialog's own notices at its foot, and a notice that appears over the control that has focus.
+ *
+ * Organize mode (2.44 review) adds two sticky bars: Review changes' footer (Apply, Discard) at the
+ * foot of the editor panel, counted for the steps above it, and the Organize bar, counted at the top
+ * of the scroll area it sticks in (the board, or the page below the phone's header) while it is stuck.
  */
 export type Box = { top: number; bottom: number; left: number; right: number };
 
@@ -82,7 +86,38 @@ function overlaysFor(el: HTMLElement) {
     : document.querySelectorAll(
         ".notification-stack:not(.in-dialog), .player, .editor-panel[data-panel-mode='minimized']",
       );
-  return [...candidates].filter((o) => !o.contains(el)).map(box);
+  // Review changes' sticky footer covers the steps of its own panel.
+  const footers = [...document.querySelectorAll('.review-footer')].filter((f) =>
+    f.parentElement?.contains(el),
+  );
+  return [...candidates, ...footers].filter((o) => !o.contains(el)).map(box);
+}
+
+/**
+ * Where the visible part starts below the Organize bar, when it is stuck at the top of `scroller` (the
+ * scroll area it sticks in) and `el` is not in it; `top` otherwise.
+ */
+function belowOrganizeBar(
+  scroller: HTMLElement,
+  isRoot: boolean,
+  root: Element,
+  el: HTMLElement,
+  top: number,
+) {
+  const bar = document.querySelector<HTMLElement>('.organize-bar');
+  if (!bar || bar.contains(el)) return top;
+  const style = getComputedStyle(bar);
+  if (style.position !== 'sticky') return top;
+  let owner = bar.parentElement;
+  while (owner && owner !== root && !scrollsVertically(owner)) owner = owner.parentElement;
+  if ((owner ?? root) !== scroller) return top;
+  // Stuck: at its sticky offset inside the scroll area's padding (the board has some), not further down.
+  const edge =
+    (isRoot ? 0 : box(scroller).top + scroller.clientTop) +
+    (parseFloat(getComputedStyle(scroller).paddingTop) || 0) +
+    (parseFloat(style.top) || 0);
+  const r = bar.getBoundingClientRect();
+  return r.top <= edge + 1 ? Math.max(top, r.bottom) : top;
 }
 
 /**
@@ -123,7 +158,13 @@ export function keepClear(el: Element | null) {
     const isRoot = scroller === root;
     if (isRoot || scrollsVertically(scroller)) {
       const overlays = overlaysFor(el);
-      const visibleTop = visibleTopOf(scroller, isRoot, el);
+      const visibleTop = belowOrganizeBar(
+        scroller,
+        isRoot,
+        root,
+        el,
+        visibleTopOf(scroller, isRoot, el),
+      );
       const target = box(el);
       const shift =
         clearShift(target, overlays, visibleTop) || revealShift(target, overlays, visibleTop);

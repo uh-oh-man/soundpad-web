@@ -10,6 +10,8 @@ import {
   groupByTarget,
   nameProblem,
   needsAttention,
+  parentsOf,
+  planUnavailable,
   rangeSelect,
   rebindCategory,
   removeFromFolder,
@@ -17,6 +19,7 @@ import {
   stepsForAdd,
   stepsForRemove,
   toggleSelected,
+  withParents,
 } from '../../web/src/organize';
 import type { Category, Sound } from '../../web/src/protocol';
 import { blankWorkspace, type Workspace } from '../../web/src/workspace';
@@ -263,5 +266,35 @@ describe('Copy into My Layout', () => {
     expect(
       copyShared(mine, shared, { ...copyAll(shared), folders: [], mode: 'replace' }).folders,
     ).toEqual(mine.folders);
+  });
+});
+
+describe('2.44 review', () => {
+  it('sends each category with its parents, so a renumbered id is refused', () => {
+    expect(parentsOf(categories, '2')).toEqual([]);
+    expect(parentsOf(categories, '3')).toEqual(['Reactions']);
+    expect(parentsOf(categories, '99')).toBeUndefined();
+    const steps = withParents(
+      [
+        { kind: 'addSound', soundId: id(1), categoryId: '3', categoryName: 'Deep cuts' },
+        { kind: 'createCategory', name: 'New', key: 'new' },
+        { kind: 'removeCategory', categoryId: '4', categoryName: 'Empty' },
+      ],
+      categories,
+    );
+    expect(steps.map((s) => s.categoryParents)).toEqual([['Reactions'], undefined, []]);
+    for (const s of steps) expect(stepInputSchema.parse(s)).toEqual(s);
+  });
+  it('says why Host Layout changes cannot be planned, truthfully', () => {
+    expect(planUnavailable(true, true, '2.43.0', 'bar')).toBe(
+      "The example doesn't change Soundpad categories. My Layout works here.",
+    );
+    expect(planUnavailable(true, false, '2.43.0', 'bar')).toContain('needs companion 2.44');
+    expect(planUnavailable(false, false, '2.43.0', 'bar')).toContain(
+      "The host's companion can't take organization proposals yet.",
+    );
+    expect(planUnavailable(false, false, '2.44.0', 'review')).toBe(
+      'The host has not allowed organization proposals.',
+    );
   });
 });

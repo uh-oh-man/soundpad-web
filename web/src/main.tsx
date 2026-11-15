@@ -89,7 +89,7 @@ import { ariaChord, matchesShortcut, useShortcut } from './shortcuts';
 import { SetupCard } from './components/setup/SetupCard';
 import { SoundpadFix } from './components/setup/SoundpadFix';
 import { SetupGuide } from './components/setup/SetupGuide';
-import { rebindCategory } from './organize';
+import { needsAttention, rebindCategory } from './organize';
 import type { SharedLayout } from './shared-layout';
 import { OrganizeBar } from './components/organize/OrganizeBar';
 import { ReviewChanges } from './components/organize/ReviewChanges';
@@ -655,6 +655,12 @@ function App() {
     [state.library, w, category, myCategory, search, totals],
   );
   const title = boardTitle(state, w, selection);
+  // The sounds that have tiles: those whose file is missing are listed apart, without a checkbox, so
+  // Select all and Ctrl+A leave them out (2.44 review).
+  const tiled = useMemo(
+    () => (supports(state.companionVersion, 'missingFiles') ? needsAttention(sounds).ok : sounds),
+    [sounds, state.companionVersion],
+  );
   // Organize mode's keys: Ctrl+A selects every sound shown, Escape leaves Organize mode (not while typing,
   // in a menu or in a dialog, which take them for themselves).
   useEffect(() => {
@@ -670,7 +676,7 @@ function App() {
         return;
       if ((e.ctrlKey || e.metaKey) && !e.altKey && e.key.toLowerCase() === 'a') {
         e.preventDefault();
-        selectAll(sounds.map((s) => s.id));
+        selectAll(tiled.map((s) => s.id));
       } else if (e.key === 'Escape' && !e.shiftKey && !e.defaultPrevented && !dialogOpen()) {
         e.preventDefault();
         setOrganizeMode(false);
@@ -678,7 +684,7 @@ function App() {
     }
     document.addEventListener('keydown', key);
     return () => document.removeEventListener('keydown', key);
-  }, [organize.on, sounds]);
+  }, [organize.on, tiled]);
 
   function selectHost(id: string) {
     setCategory(id);
@@ -1153,7 +1159,7 @@ function App() {
                     host={host}
                     workspace={w}
                     update={personal.update}
-                    visible={sounds}
+                    visible={tiled}
                     category={category}
                     folder={
                       w?.layout === 'mine' && myCategory !== 'all' && myCategory !== 'favorites'

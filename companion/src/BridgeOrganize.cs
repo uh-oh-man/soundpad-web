@@ -67,12 +67,15 @@ public sealed partial class Bridge
             LoadPlan();
             // The companion stopped while applying: the step it was on is checked against Soundpad before anything else.
             if (orgPlan is { State: "applying" } plan) { plan.State = "paused"; plan.Paused = "restart"; plan.PausedText = "The companion stopped while applying. Each step is checked against Soundpad again; then Apply continues."; SavePlanLocked(); }
+            // A step Soundpad went away during, in a plan that was paused or edited since: checked the same way.
+            else if (Interrupted(orgPlan)) { orgPlan!.State = "paused"; orgPlan.Paused = "restart"; SavePlanLocked(); }
         }
         missingTimer = new Timer(_ => { try { RescanMissingFiles(); } catch (Exception ex) when (ex is not OutOfMemoryException) { } }, null, MissingFiles.RescanMs, MissingFiles.RescanMs);
     }
     private void OrganizeDispose()
     {
         try { applyCancel?.Cancel(); } catch (ObjectDisposedException) { }
+        try { organizeStop.Cancel(); } catch (ObjectDisposedException) { }
         missingTimer?.Dispose(); missingFiles?.Dispose();
     }
 
@@ -81,7 +84,14 @@ public sealed partial class Bridge
     private void OrganizeLibraryRefreshed()
     {
         var current = parsed;
-        if (current.Public.Version == organizeSeenVersion) return;
+        if (current.Public.Version == organizeSeenVersion)
+        {
+            // Soundpad answered again with the same library: a step it went away during is still checked now.
+            bool interrupted;
+            lock (organizeSync) interrupted = orgLoaded && Interrupted(orgPlan);
+            if (interrupted) _ = Task.Run(OrganizeLibraryChanged);
+            return;
+        }
         organizeSeenVersion = current.Public.Version;
         if (ScansFiles) Missing.Request(current.Public.Version, current.Paths);
         _ = Task.Run(OrganizeLibraryChanged);
@@ -116,8 +126,10 @@ public sealed partial class Bridge
     private void SavePlanLocked()
     {
         if (orgPlan == null) return;
+        // The revision moves only with a plan that was saved: a refused save leaves it as it was.
         orgPlan.Revision++;
-        OrgFiles.SavePlan(orgPlan);
+        try { OrgFiles.SavePlan(orgPlan); }
+        catch { orgPlan.Revision--; throw; }
         Interlocked.Increment(ref organizeRevision);
     }
     private void OrganizeChanged() { Interlocked.Increment(ref organizeRevision); Publish(); }
@@ -153,7 +165,7 @@ public sealed partial class Bridge
                 foreach (var step in orgPlan.Steps) changed |= OrganizeRules.Watch(step, tree);
                 // A removal the host did in Soundpad themselves.
                 foreach (var step in orgPlan.Steps.Where(s => s.Kind == "removeCategory" && s.State == "pending" && s.Target != null && !tree.Categories.Any(s.Target.SamePlace))) { step.State = "done"; step.Note = "Seen done in Soundpad."; changed = true; }
-                if (orgPlan.Paused == "restart") changed |= Reclassify(orgPlan, tree);
+                if (orgPlan.Paused == "restart" || Interrupted(orgPlan)) { orgPlan.State = "paused"; changed |= Reclassify(orgPlan, tree); }
                 if (changed) { SavePlanLocked(); Publish(); }
             }
         }
@@ -235,11 +247,13 @@ public sealed partial class Bridge
             return new("ack", c.Id, false, ex is IOException or OperationCanceledException or TimeoutException ? "Soundpad or the organization plan was unavailable. Check Soundpad, then try again." : "The organization plan could not be saved.");
         }
     }
-    private void RequireWritablePlan()
+    private void RequireWritablePlan(bool ignoreBusy = false)
     {
         if (orgBlocked) throw new InvalidDataException(orgProblem ?? "The organization plan can't be changed.");
-        if (orgPlan is { State: "applying" }) throw new InvalidDataException("Wait until Apply finishes or pauses.");
+        if (orgPlan is { State: "applying" } || !ignoreBusy && Volatile.Read(ref organizeBusy) != 0) throw new InvalidDataException("Wait until Apply finishes or pauses.");
     }
+    /// <summary>A deep copy, so a change that is refused (limits, validation, a failed save) never stays in memory.</summary>
+    private static OrganizePlan ClonePlan(OrganizePlan plan) => System.Text.Json.JsonSerializer.Deserialize<OrganizePlan>(System.Text.Json.JsonSerializer.SerializeToUtf8Bytes(plan, Json.Options), Json.Options)!;
     private Reply Get(Command c, bool host, Participant? p)
     {
         if (c.Body != null) OrganizeRules.Body<OrganizeEmptyBody>(c);
@@ -265,7 +279,7 @@ public sealed partial class Bridge
                 var created = plan.Steps.Count(s => s.Kind == "createCategory" && s.State == "verified" && s.Created != null);
                 var added = plan.Steps.Where(s => s.Kind == "addSound" && s.State == "verified" && s.AddedToAllSounds != null).Select(s => new { soundName = s.SoundTitle, category = s.TargetStepId != null ? plan.Steps.FirstOrDefault(x => x.Id == s.TargetStepId)?.Name : s.Target?.Name }).ToArray();
                 if (plan.Steps.Any(s => s.State is "verified") && plan.Steps.Any(s => s.State is "conflict" or "failed" or "pending" && OrganizeRules.IsNative(s.Kind))) recovery = new { created, added };
-                if (OrgFiles.CheckpointCopy(plan.Id) is { } copy) checkpoint = new { copy };
+                if (OrgFiles.CheckpointCopy(plan.Id) is { } copy) checkpoint = new { copy, takenAtUtcMs = OrgFiles.CheckpointTaken(plan.Id) };
             }
             return new
             {
@@ -304,7 +318,7 @@ public sealed partial class Bridge
         NativeNode Category(OrganizeStepInput input)
         {
             if (input.CategoryId is not { Length: > 0 and <= 16 } id || !int.TryParse(id, out int index) || tree.ByIndex(index) is not { } node || node.Builtin) throw new InvalidDataException("That category is no longer in Soundpad. Refresh and choose it again.");
-            if (input.CategoryName != null && input.CategoryName != node.Name) throw new InvalidDataException("Soundpad's categories changed. Refresh and choose the category again.");
+            if (input.CategoryName != null && input.CategoryName != node.Name || !OrganizeRules.SameParents(input.CategoryParents, node)) throw new InvalidDataException("Soundpad's categories changed. Refresh and choose the category again.");
             if (owned.Contains(node.Name)) throw new InvalidDataException("That category belongs to Soundpad Web (Temp or Saved). Choose another one.");
             return node;
         }
@@ -373,28 +387,37 @@ public sealed partial class Bridge
         {
             LoadPlan();
             if (body.PlanRevision != (orgPlan?.Revision ?? 0)) throw new InvalidDataException("The plan changed meanwhile. Review it again.");
-            var plan = PlanForEdit();
-            if (body.Remove is { } remove)
-            {
-                plan.Steps.RemoveAll(s => remove.Contains(s.Id) && s.State is not ("verified" or "applying"));
-                plan.Steps.RemoveAll(s => s.TargetStepId != null && !plan.Steps.Any(x => x.Id == s.TargetStepId));
-            }
-            if (body.Add is { Length: > 0 } add) plan.Steps.AddRange(BuildSteps(add, tree!, "Host", "host", plan.Steps));
-            if (body.AcceptProposal is { } accept)
-            {
-                var proposal = plan.Proposals.FirstOrDefault(x => x.Id == accept) ?? throw new InvalidDataException("That proposal was withdrawn.");
-                foreach (var step in proposal.Steps) { step.ProposalId = proposal.Id; if (step.State is not ("pending" or "manual")) step.State = OrganizeRules.IsNative(step.Kind) ? "pending" : "manual"; }
-                plan.Steps.AddRange(proposal.Steps.Where(s => !plan.Steps.Any(x => x.Id == s.Id)));
-                plan.Proposals.Remove(proposal);
-            }
-            if (body.RejectProposal is { } reject) plan.Proposals.RemoveAll(x => x.Id == reject);
-            if (plan.Steps.Count > OrganizeFiles.MaxSteps) throw new InvalidDataException($"A plan holds at most {OrganizeFiles.MaxSteps} changes. Apply or discard some first.");
-            if (plan.State == "paused" && !plan.Steps.Any(s => s.State is "conflict" or "failed")) { plan.State = "draft"; plan.Paused = null; plan.PausedText = null; }
-            if (plan.Steps.Count == 0 && plan.Proposals.Count == 0) { OrgFiles.DeletePlan(); orgPlan = null; Interlocked.Increment(ref organizeRevision); }
-            else { plan.BaseFingerprint = tree?.Fingerprint ?? plan.BaseFingerprint; SavePlanLocked(); }
+            // The edit is made on a copy; the plan in memory changes only once the copy is checked and saved.
+            var original = orgPlan;
+            if (original != null) orgPlan = ClonePlan(original);
+            try { EditLocked(body, tree); }
+            catch { orgPlan = original; throw; }
         }
         Publish();
         return new("ack", c.Id, true, Data: PlanView(true, "host"));
+    }
+    private void EditLocked(OrganizeEditBody body, NativeTree? tree)
+    {
+        var plan = PlanForEdit();
+        if (body.Remove is { } remove)
+        {
+            plan.Steps.RemoveAll(s => remove.Contains(s.Id) && s.State is not ("verified" or "applying"));
+            plan.Steps.RemoveAll(s => s.TargetStepId != null && !plan.Steps.Any(x => x.Id == s.TargetStepId));
+        }
+        if (body.Add is { Length: > 0 } add) plan.Steps.AddRange(BuildSteps(add, tree!, "Host", "host", plan.Steps));
+        if (body.AcceptProposal is { } accept)
+        {
+            var proposal = plan.Proposals.FirstOrDefault(x => x.Id == accept) ?? throw new InvalidDataException("That proposal was withdrawn.");
+            foreach (var step in proposal.Steps) { step.ProposalId = proposal.Id; if (step.State is not ("pending" or "manual")) step.State = OrganizeRules.IsNative(step.Kind) ? "pending" : "manual"; }
+            plan.Steps.AddRange(proposal.Steps.Where(s => !plan.Steps.Any(x => x.Id == s.Id)));
+            plan.Proposals.Remove(proposal);
+        }
+        if (body.RejectProposal is { } reject) plan.Proposals.RemoveAll(x => x.Id == reject);
+        if (plan.Steps.Count > OrganizeFiles.MaxSteps) throw new InvalidDataException($"A plan holds at most {OrganizeFiles.MaxSteps} changes. Apply or discard some first.");
+        // An edit never answers a question for the host: the duplicates question and an interrupted step stay.
+        if (plan.State == "paused" && plan.Paused is not ("duplicates" or "restart") && !plan.Steps.Any(s => s.State is "conflict" or "failed" or "applying")) { plan.State = "draft"; plan.Paused = null; plan.PausedText = null; }
+        if (plan.Steps.Count == 0 && plan.Proposals.Count == 0) { OrgFiles.DeletePlan(); orgPlan = null; Interlocked.Increment(ref organizeRevision); }
+        else { plan.BaseFingerprint = tree?.Fingerprint ?? plan.BaseFingerprint; SavePlanLocked(); }
     }
     private async Task<Reply> Propose(Command c, Participant p)
     {
@@ -406,15 +429,19 @@ public sealed partial class Bridge
         {
             LoadPlan();
             if (orgBlocked) throw new InvalidDataException("The host's organization plan can't take proposals now.");
-            var plan = orgPlan ??= new OrganizePlan();
+            var plan = orgPlan ?? new OrganizePlan();
             if (plan.Proposals.Count(x => x.ByActor == p.Id) >= OrganizeFiles.MaxProposalsPerGuest) throw new InvalidDataException($"You have {OrganizeFiles.MaxProposalsPerGuest} proposals waiting. Withdraw one first.");
+            if (plan.Proposals.Count >= OrganizeFiles.MaxProposals) throw new InvalidDataException("The host has too many proposals waiting. Try again once the host has answered some.");
             var name = p.Name.Length is > 0 and <= 40 ? p.Name : "Guest";
             var steps = BuildSteps(body.Steps, tree, name, p.Id, []);
             if (steps.Count == 0) throw new InvalidDataException("Nothing to propose: those changes are already in Soundpad.");
             var proposal = new OrganizeProposal { By = name, ByActor = p.Id, CreatedAt = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(), Steps = steps };
             foreach (var step in steps) step.ProposalId = proposal.Id;
-            plan.Proposals.Add(proposal); id = proposal.Id;
-            SavePlanLocked();
+            var before = orgPlan;
+            orgPlan = plan; plan.Proposals.Add(proposal); id = proposal.Id;
+            // A refused save takes the proposal out again, so it never reaches the host's plan later.
+            try { SavePlanLocked(); }
+            catch { plan.Proposals.Remove(proposal); orgPlan = before; throw; }
         }
         Publish();
         return new("ack", c.Id, true, Data: new { proposalId = id });
@@ -442,7 +469,12 @@ public sealed partial class Bridge
             if (orgPlan == null) return new("ack", c.Id, true);
             // Guests' proposals stay: only the host's plan goes.
             if (orgPlan.Proposals.Count == 0) { OrgFiles.DeletePlan(); orgPlan = null; Interlocked.Increment(ref organizeRevision); }
-            else { orgPlan = new OrganizePlan { Proposals = orgPlan.Proposals, Revision = orgPlan.Revision }; SavePlanLocked(); }
+            else
+            {
+                var original = orgPlan;
+                orgPlan = new OrganizePlan { Proposals = original.Proposals, Revision = original.Revision };
+                try { SavePlanLocked(); } catch { orgPlan = original; throw; }
+            }
         }
         Publish();
         return new("ack", c.Id, true, Data: PlanView(true, "host"));

@@ -109,7 +109,7 @@ const STAGE_H = [
   "Organize mode: select sounds without playing them, guests' proposals, and category changes applied to Soundpad where it can",
   'a Needs attention group for sounds whose file is missing',
   'a guided setup: Soundpad check with fixes, capture output, invitations',
-  'host-wide hotkeys for Capture and Panic, with conflicts reported',
+  'host-wide hotkeys for Capture, Panic and (optionally) Stop, with conflicts reported',
 ];
 describe('feature gates for older companions', () => {
   it('hides each feature until the companion that added it', () => {

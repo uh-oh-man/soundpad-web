@@ -74,7 +74,7 @@ public sealed class OrganizePlan
 /// </summary>
 public sealed partial class OrganizeFiles(string dataDirectory)
 {
-    public const int MaxSteps = 200, MaxProposalSteps = 50, MaxProposalsPerGuest = 20, MaxNameLength = 80, MaxPlanBytes = 4 * 1024 * 1024, MaxSettingsBytes = 4096, KeptCheckpoints = 10;
+    public const int MaxSteps = 200, MaxProposalSteps = 50, MaxProposalsPerGuest = 20, MaxProposals = 200, MaxNameLength = 80, MaxPlanBytes = 4 * 1024 * 1024, MaxSettingsBytes = 4096, KeptCheckpoints = 10;
     public static readonly string[] NativeKinds = ["createCategory", "addSound", "removeCategory"];
     public static readonly string[] ManualKinds = ["removeFromCategory", "renameCategory", "createNested", "reorder"];
     public static readonly string[] StepStates = ["pending", "applying", "verified", "conflict", "failed", "skipped", "manual", "done", "flagged"];
@@ -133,7 +133,7 @@ public sealed partial class OrganizeFiles(string dataDirectory)
         if (plan.V != 1 || !IdPattern().IsMatch(plan.Id) || plan.Revision < 0 || plan.State is not ("draft" or "applying" or "paused" or "done")) throw new InvalidDataException("Invalid plan.");
         if (plan.Paused is not (null or "conflict" or "failed" or "duplicates" or "soundpad" or "restart") || plan.PausedText?.Length > 600 || plan.BaseFingerprint is { } f && !HashPattern().IsMatch(f)) throw new InvalidDataException("Invalid plan state.");
         if (plan.Measured.AddBehaviour is not ("unknown" or "noDuplicate" or "duplicates")) throw new InvalidDataException("Invalid measurement.");
-        if (plan.Steps.Count > MaxSteps || plan.Proposals.Count > 200) throw new InvalidDataException("Too many steps.");
+        if (plan.Steps.Count > MaxSteps || plan.Proposals.Count > MaxProposals) throw new InvalidDataException("Too many steps.");
         var ids = new HashSet<string>();
         foreach (var step in plan.Steps) { ValidateStep(step); if (!ids.Add(step.Id)) throw new InvalidDataException("Duplicate step."); }
         foreach (var step in plan.Steps) if (step.TargetStepId != null && !plan.Steps.Any(s => s.Id == step.TargetStepId && s.Kind == "createCategory")) throw new InvalidDataException("A step targets an unknown step.");
@@ -219,11 +219,13 @@ public sealed partial class OrganizeFiles(string dataDirectory)
     /// <summary>
     /// Before Apply changes Soundpad: the whole tree (paths, titles, order) and a read-only copy of Soundpad's own
     /// soundlist.spl, written here (never into Soundpad's folder) under a name that is not .spl, so nothing reads it as
-    /// a Soundpad file. Restoring it is the host's manual step, with Soundpad closed. Keeps the newest 10.
+    /// a Soundpad file. Restoring it is the host's manual step, with Soundpad closed. Keeps the newest 10. Written once
+    /// per plan, before its first Apply: a later Apply of the same plan (Continue, after a conflict) keeps the first one.
     /// </summary>
     public string? WriteCheckpoint(string planId, string soundlistXml, string categoriesXml, string? leppsoftFolder)
     {
         Directory.CreateDirectory(Checkpoints);
+        if (HasCheckpoint(planId)) return CheckpointCopy(planId);
         var record = JsonSerializer.SerializeToUtf8Bytes(new { format = 1, planId, createdUtcMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(), soundlist = soundlistXml, categories = categoriesXml }, Json.Options);
         var path = Path.Combine(Checkpoints, planId + ".v1.json");
         var temporary = path + ".tmp";
@@ -252,4 +254,11 @@ public sealed partial class OrganizeFiles(string dataDirectory)
         return copy;
     }
     public string? CheckpointCopy(string planId) { var p = Path.Combine(Checkpoints, planId + ".spl.bak"); return File.Exists(p) ? p : null; }
+    public bool HasCheckpoint(string planId) => File.Exists(Path.Combine(Checkpoints, planId + ".v1.json"));
+    /// <summary>When the plan's checkpoint was taken (UTC ms), or null.</summary>
+    public long? CheckpointTaken(string planId)
+    {
+        try { var p = Path.Combine(Checkpoints, planId + ".v1.json"); return File.Exists(p) ? new DateTimeOffset(File.GetLastWriteTimeUtc(p)).ToUnixTimeMilliseconds() : null; }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { return null; }
+    }
 }

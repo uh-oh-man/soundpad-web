@@ -16,6 +16,7 @@ import {
 } from '../../backups';
 import { refreshLibrary } from '../../library/voice-store';
 import { refreshSentences } from '../../library/sentence-store';
+import { focusedControl, followFocus } from '../../focus-follow';
 
 type Tab = 'clips' | 'recordings' | 'voices' | 'sentences' | 'layouts' | 'library';
 const TABS: [Tab, string][] = [
@@ -73,6 +74,19 @@ export function BackupDetailView({ id, close }: { id: string; close: () => void 
       restoreSchema,
     )
       .then(async (r) => {
+        // The control pressed may go (the confirmation closes, a restored item's button leaves): focus
+        // goes to the whole-library button or the next item's Restore, never to the page.
+        followFocus(
+          focusedControl(),
+          () =>
+            document.querySelector<HTMLElement>(`#backup-${id}-${tab} [data-restore-trigger]`) ??
+            document.querySelector<HTMLElement>(`#backup-${id}-${tab} .backup-items button`) ??
+            document
+              .querySelector<HTMLElement>(`#backup-${id}-${tab}`)
+              ?.closest('.backup-detail')
+              ?.querySelector<HTMLElement>('[role="tab"][aria-selected="true"]') ??
+            null,
+        );
         setResult(r);
         setConfirming(false);
         const message = restoreMessage(kind, r);
@@ -285,7 +299,17 @@ function WholeLibrary({
         {l.counter !== null && `, Kick ${l.counter}`}.
       </p>
       {!confirming ? (
-        <button onClick={ask}>Restore the whole library…</button>
+        <button
+          data-restore-trigger
+          onClick={(e) => {
+            followFocus(e.currentTarget, () =>
+              document.querySelector<HTMLElement>('.backup-confirm-actions .primary'),
+            );
+            ask();
+          }}
+        >
+          Restore the whole library…
+        </button>
       ) : (
         <div className="backup-confirm" role="alertdialog" aria-label="Restore the whole library">
           <p>
@@ -305,7 +329,16 @@ function WholeLibrary({
             <button className="primary" aria-disabled={busy || undefined} onClick={restore}>
               {busy ? 'Restoring…' : 'Restore the whole library'}
             </button>
-            <button onClick={cancel}>Cancel</button>
+            <button
+              onClick={(e) => {
+                followFocus(e.currentTarget, () =>
+                  document.querySelector<HTMLElement>('.backup-whole [data-restore-trigger]'),
+                );
+                cancel();
+              }}
+            >
+              Cancel
+            </button>
           </div>
         </div>
       )}

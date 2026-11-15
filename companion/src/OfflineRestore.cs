@@ -84,7 +84,7 @@ public static class OfflineRestore
 /// </summary>
 public static class BackupLocator
 {
-    /// <summary>The snapshot folder of the newest backup with a valid state.json, or null.</summary>
+    /// <summary>The snapshot folder of this install's newest backup with a valid state.json, or null.</summary>
     public static string? NewestState(string dataDirectory)
     {
         try
@@ -102,9 +102,11 @@ public static class BackupLocator
                 if (File.Exists(journal) && new FileInfo(journal).Length <= 4 * 1024 * 1024 && JsonNode.Parse(File.ReadAllText(journal))?["appId"]?.GetValue<string>() is { Length: >= 6 } id) appId = id[..6];
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException or InvalidOperationException) { }
-            var candidates = new DirectoryInfo(root).EnumerateDirectories()
-                .Where(d => System.Text.RegularExpressions.Regex.IsMatch(d.Name, "^[a-f0-9]{6}-[a-f0-9]{8}$") && !d.Attributes.HasFlag(FileAttributes.ReparsePoint))
-                .OrderByDescending(d => appId != null && d.Name.StartsWith(appId, StringComparison.Ordinal));
+            var installs = new DirectoryInfo(root).EnumerateDirectories()
+                .Where(d => System.Text.RegularExpressions.Regex.IsMatch(d.Name, "^[a-f0-9]{6}-[a-f0-9]{8}$") && !d.Attributes.HasFlag(FileAttributes.ReparsePoint)).ToArray();
+            // Only this install's own backups: another install's state carries another identity, which --restore-state
+            // would bring in without a word. Without a readable app id, only a folder that holds a single install.
+            var candidates = appId != null ? installs.Where(d => d.Name.StartsWith(appId + "-", StringComparison.Ordinal)).ToArray() : installs.Length == 1 ? installs : [];
             foreach (var install in candidates)
             {
                 var repo = new BackupRepository(install.FullName, new BackupFiles());

@@ -357,7 +357,8 @@ public sealed class BackupRepository(string root, BackupFiles files)
     /// to. When any snapshot folder's manifest cannot be read (damaged, or written by a newer companion), no blob is
     /// removed at all, since that snapshot may need them. Returns how many snapshots remain and their size.
     /// </summary>
-    public (int Snapshots, long Bytes, string? Warning) Retain(BackupSettings settings, DateTimeOffset now)
+    /// <param name="protect">Snapshots that stay whatever retention says (a restore is reading them).</param>
+    public (int Snapshots, long Bytes, string? Warning) Retain(BackupSettings settings, DateTimeOffset now, IReadOnlySet<string>? protect = null)
     {
         var valid = new List<BackupManifest>(); bool unreadable = false;
         foreach (var name in SnapshotFolders())
@@ -365,10 +366,22 @@ public sealed class BackupRepository(string root, BackupFiles files)
             if (Read(name, out _) is { } m) valid.Add(m); else unreadable = true;
         }
         var keep = Keep(valid, settings, now);
+        if (protect != null) keep.UnionWith(protect);
         foreach (var m in valid.Where(m => !keep.Contains(m.Id)).ToList())
         {
-            DeleteTree(new DirectoryInfo(SnapshotPath(m.Id)));
+            // Renamed to a partial name first, so a crash part-way leaves a folder the next run sweeps, never a
+            // snapshot without its manifest (which would stop blobs from ever being removed again). When the rename
+            // fails (a file is open), the snapshot stays whole and is tried again next time.
+            var partial = Path.Combine(Snapshots, ".partial-" + m.Id[^8..]);
+            try
+            {
+                if (Directory.Exists(partial)) DeleteTree(new DirectoryInfo(partial));
+                if (Directory.Exists(partial)) continue;
+                files.MoveDirectory(SnapshotPath(m.Id), partial);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { continue; }
             valid.Remove(m);
+            DeleteTree(new DirectoryInfo(partial));
         }
         string? warning = null;
         var referenced = valid.SelectMany(m => m.Blobs).Select(b => b.Sha256 + "." + b.Ext).ToHashSet(StringComparer.Ordinal);

@@ -17,6 +17,11 @@ public sealed partial class Bridge
 
     private int stageHStarted;
     /// <summary>
+    /// Held while an update install, a whole-library restore or an Organize apply checks that neither of the others
+    /// runs and marks itself busy, so two of them can never both start (each refuses while another is busy).
+    /// </summary>
+    private readonly object stageHExclusive = new();
+    /// <summary>
     /// Once per process: when the companion has started (the top of StartupCleanup, so the crash-recovery return
     /// can't skip it), after an update resume (ResumeFromHandoff), or from the harness, which has no startup cleanup.
     /// </summary>

@@ -26,8 +26,8 @@ test.afterEach(() => {
 });
 
 /**
- * Reports this companion version to the page. Until the release bump (the integrator's), the harness
- * still reports 2.43.0, which the backups gate hides; after it, 2.44.0 is what it reports anyway.
+ * Reports this companion version to the page: 2.44.0 is what the harness reports since the release bump,
+ * and an older one stands for a companion without backups.
  */
 async function asCompanion(page: Page, version: string) {
   await page.routeWebSocket(/ws:\/\/127\.0\.0\.1:\d+\/bridge/, (socket) => {
@@ -128,11 +128,16 @@ test('a removed recording is restored from the backup, and Undo takes it back ou
   const detail = section.getByRole('region', { name: /^Manual backup/ });
   const item = detail.getByRole('listitem').filter({ hasText: 'Backed up line' });
   await expect(item).toContainText('missing now');
-  await item.getByRole('button', { name: 'Restore Backed up line' }).click();
+  // From the keyboard: the item's Restore goes once it is back, and focus stays in the backup.
+  await item.getByRole('button', { name: 'Restore Backed up line' }).focus();
+  await item.getByRole('button', { name: 'Restore Backed up line' }).press('Enter');
   const dialog = page.getByRole('dialog', { name: 'Session & access' });
   await expect(dialog.getByText('Restored 1 recording.')).toBeVisible({ timeout: TEMP_READY });
   await expect.poll(async () => (await recordings(page)).map((r) => r.id)).toContain(id);
   await expect(item).toContainText('same');
+  await expect
+    .poll(() => page.evaluate(() => !!document.activeElement?.closest('.backup-detail')))
+    .toBe(true);
   await dialog
     .locator('.toast')
     .filter({ hasText: 'Restored 1 recording.' })
@@ -140,6 +145,16 @@ test('a removed recording is restored from the backup, and Undo takes it back ou
     .click();
   await expect.poll(async () => (await recordings(page)).map((r) => r.id)).not.toContain(id);
   await expect(item).toContainText('missing now');
+  // The whole-library confirmation takes focus when it opens, and gives it back on Cancel.
+  await detail.getByRole('tab', { name: 'Whole library' }).click();
+  const whole = detail.getByRole('button', { name: 'Restore the whole library…' });
+  await whole.focus();
+  await whole.press('Enter');
+  const confirm = detail.getByRole('button', { name: 'Restore the whole library', exact: true });
+  await expect(confirm).toBeFocused();
+  await detail.getByRole('button', { name: 'Cancel' }).focus();
+  await detail.getByRole('button', { name: 'Cancel' }).press('Enter');
+  await expect(whole).toBeFocused();
 });
 
 test('an older companion: no Backups section', async ({ page, harness }) => {

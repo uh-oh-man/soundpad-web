@@ -124,7 +124,10 @@ All in `<data>\organize\`; older companions ignore the folder.
   `state.json`.
 - `checkpoints\<planId>.v1.json` (the tree before Apply: sound list and categories as Soundpad gave them) and
   `checkpoints\<planId>.spl.bak` (a read-only copy of Soundpad's `soundlist.spl`, opened with
-  `FileShare.ReadWrite`). The newest 10 are kept. The copy is never restored by the app and never written into
+  `FileShare.ReadWrite`). Both are written once per plan, before its first Apply; a later Apply of the same plan
+  (Continue, after a conflict, a removal that had to wait) keeps them. The `.spl.bak` is the list as Soundpad last
+  saved it, which can be older than what Soundpad holds in memory; Review changes says so and when it was taken
+  (`checkpoint.takenAtUtcMs`). The newest 10 are kept. The copy is never restored by the app and never written into
   Soundpad's folder; its name is not `.spl`, so nothing reads it as a Soundpad file. To restore it, with
   Soundpad closed, copy it over `%APPDATA%\Leppsoft\soundlist.spl`.
 

@@ -11,10 +11,12 @@ import {
   resolveBodySchema,
   toggleSelected,
   UndoStack,
+  withParents,
   type OrganizeView,
   type StepInput,
 } from '../../organize';
 import type { Workspace } from '../../workspace';
+import { focusedControl, followFocus } from '../../focus-follow';
 
 /**
  * Organize mode's page state (2.44): whether the board is in Organize mode and what is selected, the
@@ -53,7 +55,11 @@ export const useOrganize = () => useSyncExternalStore(subscribe, () => store);
 export const organizeState = () => store;
 
 export function setOrganizeMode(on: boolean) {
+  const from = focusedControl();
+  const leaving = !on && store.on && !!from?.closest('#board, .organize-bar');
   set({ on, ...(on ? {} : { selected: new Set<string>(), anchor: null }) });
+  // Leaving takes away the control that had focus (a tile's checkbox, Done): the Organize toggle takes it.
+  if (leaving) followFocus(from, () => document.querySelector<HTMLElement>('.organize-toggle'));
 }
 export function toggleSound(id: string) {
   set({ selected: toggleSelected(store.selected, id), anchor: id });
@@ -145,7 +151,11 @@ async function send(
 export async function addSteps(steps: StepInput[]) {
   if (!steps.length) return null;
   const revision = store.view?.revision ?? 0;
-  return send('organizeEdit', editBodySchema.parse({ planRevision: revision, add: steps }));
+  const categories = controller.getSnapshot().state.library.categories;
+  return send(
+    'organizeEdit',
+    editBodySchema.parse({ planRevision: revision, add: withParents(steps, categories) }),
+  );
 }
 export const removeSteps = (ids: string[]) =>
   send(
@@ -179,7 +189,9 @@ export const setGuestOrganize = (guestOrganize: boolean) =>
 // ---- A guest's draft ----
 export function addToDraft(steps: StepInput[], label: (step: StepInput) => string) {
   const known = new Set(store.draft.map((d) => JSON.stringify(d.input)));
-  const fresh = steps.filter((s) => !known.has(JSON.stringify(s)));
+  // Each category with its parents as shown now, so a proposal sent later can't land on a renumbered one.
+  const categories = controller.getSnapshot().state.library.categories;
+  const fresh = withParents(steps, categories).filter((s) => !known.has(JSON.stringify(s)));
   // A new category's key must stay unique across the draft.
   const keyed = fresh.map((s) => ({ ...s }));
   const suffix = String(store.draft.length);

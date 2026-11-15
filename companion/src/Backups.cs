@@ -77,6 +77,8 @@ public sealed partial class Bridge
     internal Func<CancellationToken, Task>? BackupHold { get; set; }
     /// <summary>The first scheduled run waits this long after the companion starts (launch stays light).</summary>
     internal int BackupStartDelayMs { get; set; } = 60000;
+    /// <summary>How soon a scheduled backup is tried again after one failed (an hour).</summary>
+    internal const long BackupRetryMs = 3600000L;
     /// <summary>The repository the last run used (tests read its copy counter).</summary>
     internal BackupRepository? LastBackupRepository { get; private set; }
 
@@ -275,7 +277,8 @@ public sealed partial class Bridge
                 Bytes = capture.Docs.Sum(d => (long)d.Bytes.Length) + refs.DistinctBy(r => r.Sha256 + r.Ext).Sum(r => r.Bytes), NewBytes = copied,
             };
             var path = await backupWorker.Run(() => repo.Write(manifest, capture.Docs), token);
-            var (count, total, retainWarning) = await backupWorker.Run(() => repo.Retain(settings, backupClock()), token);
+            var protect = ProtectedSnapshots;
+            var (count, total, retainWarning) = await backupWorker.Run(() => repo.Retain(settings, backupClock(), protect), token);
             if (retainWarning != null) warnings.Add(retainWarning);
             backedUpRevisions = capture.Revisions;
             var message = fuzzy ? "Backed up while the library kept changing; some files may be from slightly different moments." : warnings.Count > 0 ? warnings[0] : "Backed up.";
@@ -350,7 +353,10 @@ public sealed partial class Bridge
         long now = backupClock().ToUnixTimeMilliseconds();
         var revisions = DataRevisions();
         if (seenRevisions != revisions) { seenRevisions = revisions; changedAtMs = now; }
-        bool interval = settings.LastResult == null || now - settings.LastResult.AtUtcMs >= settings.IntervalHours * 3600000L;
+        // Every intervalHours after a backup that worked; after one that failed (the drive was missing, say), again
+        // every BackupRetryMs, so one bad start doesn't leave the rest of the launch without a backup.
+        var last = settings.LastResult;
+        bool interval = last == null || now - last.AtUtcMs >= (last.Ok ? settings.IntervalHours * 3600000L : Math.Min(BackupRetryMs, settings.IntervalHours * 3600000L));
         bool changed = settings.AfterChangeMinutes > 0 && backedUpRevisions != null && backedUpRevisions != revisions && now - changedAtMs >= settings.AfterChangeMinutes * 60000L;
         if (!startup && !interval && !changed) return false;
         var result = await RunBackup("scheduled", true);

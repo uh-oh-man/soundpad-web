@@ -16,6 +16,7 @@ import {
   type UpdateOp,
 } from '../../updates';
 import { Modal } from '../Modal';
+import { followFocus } from '../../focus-follow';
 import { PROJECT_URL } from '../shell/Landing';
 
 const projectUrl = () => (import.meta.env.VITE_REPOSITORY_URL as string | undefined) || PROJECT_URL;
@@ -43,7 +44,9 @@ export function UpdateOffer() {
   const { view, host, update } = useUpdate();
   const [dismissed, setDismissed] = useState(dismissedVersion);
   if (!update || !shouldOffer(update, host, view.demo, dismissed)) return null;
-  const later = () => {
+  const later = (e: { currentTarget: Element }) => {
+    // The offer goes; the header chip that carries it from now on takes focus (never the page).
+    followFocus(e.currentTarget, () => document.querySelector<HTMLElement>('.update-chip'));
     rememberDismissed(update.latest);
     setDismissed(update.latest ?? null);
     void runUpdate('updateLater', {}).catch(() => {});

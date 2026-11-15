@@ -86,9 +86,11 @@ export function HostHotkeyPickers({ connected }: { connected: boolean }) {
                   <button
                     type="button"
                     aria-label={`Turn off the host-wide ${LABELS[action].title} key`}
-                    disabled={!connected || !bound}
-                    aria-disabled={busy !== null || undefined}
-                    onClick={() => void change(action, null)}
+                    aria-disabled={!connected || !bound || busy !== null || undefined}
+                    onClick={() => {
+                      // aria-disabled, not disabled: a pressed button that disables itself drops focus.
+                      if (connected && bound && busy === null) void change(action, null);
+                    }}
                   >
                     Off
                   </button>

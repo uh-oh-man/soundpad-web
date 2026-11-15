@@ -22,6 +22,13 @@
   top: 0;
   z-index: var(--z-sticky);
 }
+/* On a phone the page scrolls under the sticky header: the bar sticks just below it, never under it
+   (2.44 review). focus-clear.ts keeps a focused tile clear of the stuck bar. */
+@media (max-width: 1000px) {
+  .organize-bar {
+    top: var(--topbar-bottom, 0px);
+  }
+}
 .organize-bar > button,
 .organize-menu > button {
   display: inline-flex;

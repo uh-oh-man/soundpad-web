@@ -107,7 +107,7 @@ Every release stays on GitHub permanently, so any earlier version can be restore
 2. Download `SoundpadWeb.exe` from the release you want in the table above.
 3. Run it as usual.
 
-Since 2.44 the companion can update itself, and the version it replaced stays beside it as `SoundpadWeb.previous.exe`. To go back one version, quit the companion, rename `SoundpadWeb.exe` to something else and `SoundpadWeb.previous.exe` to `SoundpadWeb.exe`, and start it. If a new version doesn't start after an update, the companion puts the previous one back by itself; that automatic return only ever goes to 2.44 or later, since older versions can't update.
+Since 2.44 the companion can update itself, and the version it replaced stays beside it as `SoundpadWeb.previous.exe` (named after the EXE: a copy renamed `SoundpadWeb (1).exe` keeps `SoundpadWeb (1).previous.exe`). To go back one version, quit the companion, rename `SoundpadWeb.exe` to something else and `SoundpadWeb.previous.exe` to `SoundpadWeb.exe`, and start it. If a new version doesn't start after an update, the companion puts the previous one back by itself; that automatic return only ever goes to 2.44 or later, since older versions can't update.
 
 Your data in `%LOCALAPPDATA%\SoundpadWeb` keeps working (Temp's 16 MiB per-sound limit is never raised for this reason, see 2.10.1):
 

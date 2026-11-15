@@ -87,8 +87,10 @@ export function ShortcutList({
                 <button
                   type="button"
                   aria-label={`Turn off ${s.label}`}
-                  disabled={!bound}
+                  aria-disabled={!bound || undefined}
                   onClick={() => {
+                    // aria-disabled, not disabled: a pressed button that disables itself drops focus.
+                    if (!bound) return;
                     writeShortcut(s.id, null);
                     note(s.id, `${s.label} is off.`, false);
                   }}
@@ -98,8 +100,9 @@ export function ShortcutList({
                 <button
                   type="button"
                   aria-label={`Reset ${s.label}`}
-                  disabled={!changed}
+                  aria-disabled={!changed || undefined}
                   onClick={() => {
+                    if (!changed) return;
                     resetShortcut(s.id);
                     note(
                       s.id,

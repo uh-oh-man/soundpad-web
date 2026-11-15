@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { flattenCategories, soundKeys, type Category, type Sound } from './protocol';
 import type { Workspace } from './workspace';
 import type { Organization } from './shared-layout';
+import { supports } from './version';
 
 /**
  * Organize mode (2.44): the pure rules behind it, unit-tested like arrange.ts. Selecting sounds without
@@ -76,6 +77,8 @@ export const stepInputSchema = z
       .optional(),
     categoryId: z.string().max(16).optional(),
     categoryName: z.string().max(4096).optional(),
+    /** The category's parents' names as the page shows them, top first (the companion refuses a stale id that moved). */
+    categoryParents: z.array(z.string().max(4096)).max(16).optional(),
     targetStepId: z
       .string()
       .regex(/^[a-f0-9]{32}$/)
@@ -126,6 +129,7 @@ export const resolveBodySchema = z
       .optional(),
     targetCategoryId: z.string().max(16).optional(),
     targetCategoryName: z.string().max(4096).optional(),
+    targetCategoryParents: z.array(z.string().max(4096)).max(16).optional(),
   })
   .strict();
 export const applyBodySchema = z
@@ -206,7 +210,7 @@ export const organizeViewSchema = z.object({
     .nullable()
     .optional(),
   checkpoint: z
-    .object({ copy: z.string().max(1024) })
+    .object({ copy: z.string().max(1024), takenAtUtcMs: z.number().nullable().optional() })
     .nullable()
     .optional(),
 });
@@ -371,6 +375,54 @@ export function groupByTarget<
     groups.set(key, group);
   }
   return [...groups.values()];
+}
+
+/**
+ * Why Host Layout changes can't be planned here, in words (the bar's note, or Review changes'). The
+ * example never changes Soundpad; an older companion can't take a plan or proposals; otherwise a guest's
+ * host has not allowed proposals (or the host page is not connected).
+ */
+export function planUnavailable(
+  host: boolean,
+  demo: boolean,
+  companionVersion: string | null | undefined,
+  where: 'bar' | 'review',
+) {
+  const mine = where === 'bar' ? ' My Layout works here.' : ' My Layout organizing works here.';
+  if (demo) return "The example doesn't change Soundpad categories." + mine;
+  if (!supports(companionVersion, 'organize'))
+    return host
+      ? where === 'bar'
+        ? 'Changing Soundpad categories needs companion 2.44. My Layout works now.'
+        : 'Review changes needs companion 2.44 or later. My Layout organizing works without it.'
+      : "The host's companion can't take organization proposals yet." +
+          (where === 'bar' ? ' My Layout is yours to organize.' : '');
+  if (host) return 'Connect to the companion to change Soundpad categories.' + mine;
+  return (
+    'The host has not allowed organization proposals.' +
+    (where === 'bar' ? ' My Layout is yours to organize.' : '')
+  );
+}
+
+/** The names of a category's parents, top first; undefined when it is not in `categories`. */
+export function parentsOf(categories: Category[], id: string): string[] | undefined {
+  const walk = (list: Category[], chain: string[]): string[] | undefined => {
+    for (const c of list) {
+      if (c.id === id) return chain;
+      const found = walk(c.children, [...chain, c.name]);
+      if (found) return found;
+    }
+    return undefined;
+  };
+  return walk(categories, []);
+}
+/** Steps with each category's parents added (for the companion's check that an id still names that category). */
+export function withParents(steps: StepInput[], categories: Category[]): StepInput[] {
+  return steps.map((s) => {
+    if (s.categoryId === undefined || s.categoryParents) return s;
+    const parents = parentsOf(categories, s.categoryId);
+    return parents ? { ...s, categoryParents: parents } : s;
+  });
 }
 
 // ---- Needs attention ----

@@ -14,8 +14,43 @@ public sealed partial class Bridge
     /// <summary>Tests: the quiet second Apply waits for (default <see cref="QuietRule.QuietMs"/>).</summary>
     internal int OrganizeQuietMs { get; set; } = QuietRule.QuietMs;
     internal Task OrganizeApplyIdle() => applyTask ?? Task.CompletedTask;
-    /// <summary>True while a plan is being applied to Soundpad (an update waits for it: BridgeStageH.cs).</summary>
-    private bool OrganizeApplying { get { lock (organizeSync) return orgPlan?.State == "applying"; } }
+    /// <summary>
+    /// 1 while Apply is starting (its Soundpad reads, checkpoint and backup, before the plan says "applying") or the
+    /// categories a plan created are being removed again. Set under <see cref="stageHExclusive"/>, so an update or a
+    /// whole-library restore can't start meanwhile, and the host's plan can't be edited.
+    /// </summary>
+    private int organizeBusy;
+    /// <summary>Stops a waiting "remove the categories this plan created" when the companion closes.</summary>
+    private readonly CancellationTokenSource organizeStop = new();
+    /// <summary>How long removing created categories waits for Soundpad to be quiet before it keeps the rest (tests shorten it).</summary>
+    internal int OrganizeRemoveWaitMs { get; set; } = 120000;
+    /// <summary>True while a plan is being applied to Soundpad or Apply is starting (an update or a restore is refused then: BridgeStageH.cs).</summary>
+    private bool OrganizeApplying { get { if (Volatile.Read(ref organizeBusy) != 0) return true; lock (organizeSync) return orgPlan?.State == "applying"; } }
+    /// <summary>Marks Organize busy, unless an update installs, a whole-library restore runs or Organize is busy already.</summary>
+    private void EnterOrganizeBusy()
+    {
+        lock (stageHExclusive)
+        {
+            if (UpdateBusy is { } updating) throw new InvalidDataException(updating);
+            if (restoringLibrary) throw new InvalidDataException("The host is restoring the library from a backup. Apply when it has finished.");
+            if (Interlocked.CompareExchange(ref organizeBusy, 1, 0) != 0) throw new InvalidDataException("Soundpad Web is already working on this plan. Wait until it finishes or pauses.");
+        }
+    }
+    /// <summary>A step left "applying" while the plan is not being applied: Soundpad went away mid-step, and it was not checked since.</summary>
+    private static bool Interrupted(OrganizePlan? plan) => plan is { State: not "applying" } && plan.Steps.Any(s => s.State == "applying");
+    /// <summary>Checks an interrupted step against Soundpad now (as after a restart), so nothing is sent over a step whose result is unknown.</summary>
+    private async Task RecheckInterrupted()
+    {
+        var tree = await LiveTree();
+        lock (organizeSync)
+        {
+            if (!Interrupted(orgPlan)) return;
+            orgPlan!.State = "paused"; orgPlan.Paused = "restart";
+            Reclassify(orgPlan, tree);
+            SavePlanLocked();
+        }
+        OrganizeChanged();
+    }
     /// <summary>Runs one batch under the native gate in the background lane, so a ready play goes first.</summary>
     private async Task GateBatch(Func<Task> work)
     {
@@ -28,48 +63,65 @@ public sealed partial class Bridge
     {
         var body = OrganizeRules.Body<OrganizeApplyBody>(c);
         if (!available) throw new InvalidDataException("Soundpad is unavailable. Open it, then Apply.");
-        // Not while an update installs or a whole-library restore runs (Stage H cross-checks, BridgeStageH.cs).
-        if (UpdateBusy is { } updating) throw new InvalidDataException(updating);
-        if (restoringLibrary) throw new InvalidDataException("The host is restoring the library from a backup. Apply when it has finished.");
-        string planId;
-        lock (organizeSync)
+        // A step Soundpad went away during is checked first: nothing is sent while its result is unknown.
+        bool interrupted;
+        lock (organizeSync) { LoadPlan(); interrupted = Interrupted(orgPlan); }
+        if (interrupted)
         {
-            LoadPlan();
-            RequireWritablePlan();
-            if (orgPlan == null || orgPlan.Id != body.PlanId || orgPlan.Revision != body.PlanRevision) throw new InvalidDataException("The plan changed meanwhile. Review it again.");
-            if (orgPlan.Steps.Any(s => s.State is "conflict" or "failed")) throw new InvalidDataException("Resolve the paused steps first: Skip, Retry or Rebind.");
-            if (!orgPlan.Steps.Any(s => s.State == "pending" && OrganizeRules.IsNative(s.Kind))) throw new InvalidDataException("Nothing for Soundpad Web to apply: the remaining steps are done in Soundpad.");
-            planId = orgPlan.Id;
+            await RecheckInterrupted();
+            throw new InvalidDataException("A change that was interrupted was checked against Soundpad again. Review the plan, then Apply.");
         }
-        // A checkpoint before Soundpad changes: the tree and a copy of soundlist.spl (never written back by the app).
-        string? copy = null;
+        // Not while an update installs or a whole-library restore runs, and neither of those can start from here
+        // until the plan says "applying" (Stage H cross-checks, BridgeStageH.cs). Edits of the plan wait meanwhile.
+        EnterOrganizeBusy();
         try
         {
-            string soundlist = "", categories = "";
-            await GateBatch(async () => { soundlist = await pipe.Request("GetSoundlist()"); categories = await pipe.Request("GetCategories(true, false)"); });
-            copy = OrgFiles.WriteCheckpoint(planId, soundlist, categories, LeppsoftFolder);
+            string planId;
+            lock (organizeSync)
+            {
+                LoadPlan();
+                RequireWritablePlan(ignoreBusy: true);
+                if (orgPlan == null || orgPlan.Id != body.PlanId || orgPlan.Revision != body.PlanRevision) throw new InvalidDataException("The plan changed meanwhile. Review it again.");
+                if (orgPlan.Steps.Any(s => s.State is "conflict" or "failed")) throw new InvalidDataException("Resolve the paused steps first: Skip, Retry or Rebind.");
+                if (!orgPlan.Steps.Any(s => s.State == "pending" && OrganizeRules.IsNative(s.Kind))) throw new InvalidDataException("Nothing for Soundpad Web to apply: the remaining steps are done in Soundpad.");
+                planId = orgPlan.Id;
+            }
+            // A checkpoint before Soundpad first changes for this plan: the tree and a copy of soundlist.spl (never
+            // written back by the app). A later Apply of the same plan keeps the first one.
+            string? copy = null;
+            try
+            {
+                copy = OrgFiles.CheckpointCopy(planId);
+                if (!OrgFiles.HasCheckpoint(planId))
+                {
+                    string soundlist = "", categories = "";
+                    await GateBatch(async () => { soundlist = await pipe.Request("GetSoundlist()"); categories = await pipe.Request("GetCategories(true, false)"); });
+                    copy = OrgFiles.WriteCheckpoint(planId, soundlist, categories, LeppsoftFolder);
+                }
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { Log("The organize checkpoint could not be written: " + ex.Message); }
+            // And a backup first when a backup folder is set (WP1); without one Apply goes on and says so.
+            string backupNote;
+            try
+            {
+                var backup = await CheckpointH("pre-organize", CancellationToken.None);
+                backupNote = backup is { Skipped: false } ? "A backup was made first." : "No backup was made: " + (backup?.Reason ?? "Backups are not set up.");
+            }
+            catch (Exception ex) when (ex is not OutOfMemoryException) { backupNote = "No backup was made: " + ex.Message; }
+            Log("Organize: " + backupNote);
+            lock (organizeSync)
+            {
+                if (orgPlan?.Id != planId || orgPlan.State is "applying" or "done") throw new InvalidDataException("The plan changed meanwhile. Review it again.");
+                orgPlan.State = "applying"; orgPlan.Paused = null; orgPlan.PausedText = null;
+                SavePlanLocked();
+                applyCancel?.Dispose(); applyCancel = new CancellationTokenSource();
+                var token = applyCancel.Token;
+                applyTask = Task.Run(() => RunApply(planId, token));
+            }
+            Publish();
+            return new("ack", c.Id, true, Data: new { started = true, checkpoint = copy != null, backup = backupNote });
         }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { Log("The organize checkpoint could not be written: " + ex.Message); }
-        // And a backup first when a backup folder is set (WP1); without one Apply goes on and says so.
-        string backupNote;
-        try
-        {
-            var backup = await CheckpointH("pre-organize", CancellationToken.None);
-            backupNote = backup is { Skipped: false } ? "A backup was made first." : "No backup was made: " + (backup?.Reason ?? "Backups are not set up.");
-        }
-        catch (Exception ex) when (ex is not OutOfMemoryException) { backupNote = "No backup was made: " + ex.Message; }
-        Log("Organize: " + backupNote);
-        lock (organizeSync)
-        {
-            if (orgPlan?.Id != planId || orgPlan.State == "applying") throw new InvalidDataException("The plan changed meanwhile. Review it again.");
-            orgPlan.State = "applying"; orgPlan.Paused = null; orgPlan.PausedText = null;
-            SavePlanLocked();
-            applyCancel?.Dispose(); applyCancel = new CancellationTokenSource();
-            var token = applyCancel.Token;
-            applyTask = Task.Run(() => RunApply(planId, token));
-        }
-        Publish();
-        return new("ack", c.Id, true, Data: new { started = true, checkpoint = copy != null, backup = backupNote });
+        finally { Volatile.Write(ref organizeBusy, 0); }
     }
 
     private async Task RunApply(string planId, CancellationToken cancel)
@@ -109,7 +161,9 @@ public sealed partial class Bridge
             {
                 if (orgPlan?.Id == planId && orgPlan.State == "applying")
                 {
-                    orgPlan.State = orgPlan.Steps.Any(s => s.State == "pending" && OrganizeRules.IsNative(s.Kind)) ? "draft" : "done";
+                    // Never "done" over a step whose result is unknown: it is checked against Soundpad again first.
+                    if (orgPlan.Steps.Any(s => s.State == "applying")) { orgPlan.State = "paused"; orgPlan.Paused = "restart"; orgPlan.PausedText = "A change was interrupted. It is checked against Soundpad again; then Apply continues."; }
+                    else orgPlan.State = orgPlan.Steps.Any(s => s.State == "pending" && OrganizeRules.IsNative(s.Kind)) ? "draft" : "done";
                     SavePlanLocked();
                 }
             }
@@ -224,7 +278,8 @@ public sealed partial class Bridge
         }
         lock (organizeSync)
         {
-            if (orgPlan?.Id != planId) return StepOutcome.NotNow;
+            if (orgPlan?.Id != planId || orgPlan.Steps.FirstOrDefault(s => s.Id == stepId) is not { } current) return StepOutcome.NotNow;
+            step = current;
             if (!ok)
             {
                 step.State = "failed";
@@ -317,7 +372,7 @@ public sealed partial class Bridge
                         step.State = "done"; step.Note = "Marked done."; break;
                     case "rebind":
                         if (step.Kind == "createCategory" || step.TargetStepId != null) throw new InvalidDataException("That step has no category to rebind.");
-                        if (body.TargetCategoryId is not { Length: > 0 and <= 16 } id || !int.TryParse(id, out int index) || tree!.ByIndex(index) is not { Builtin: false } node || body.TargetCategoryName != null && body.TargetCategoryName != node.Name) throw new InvalidDataException("That category is no longer in Soundpad. Refresh and choose it again.");
+                        if (body.TargetCategoryId is not { Length: > 0 and <= 16 } id || !int.TryParse(id, out int index) || tree!.ByIndex(index) is not { Builtin: false } node || body.TargetCategoryName != null && body.TargetCategoryName != node.Name || !OrganizeRules.SameParents(body.TargetCategoryParents, node)) throw new InvalidDataException("That category is no longer in Soundpad. Refresh and choose it again.");
                         if ((managed?.OwnedCategoryNames() ?? []).Contains(node.Name)) throw new InvalidDataException("That category belongs to Soundpad Web (Temp or Saved). Choose another one.");
                         step.Target = node.Ref; step.Candidate = null; step.Note = "Rebound to “" + node.Name + "”.";
                         step.State = OrganizeRules.IsNative(step.Kind) ? "pending" : "manual"; break;
@@ -344,44 +399,60 @@ public sealed partial class Bridge
     /// </summary>
     private async Task<Reply> RemoveCreated(Command c)
     {
-        List<OrganizeStep> made;
-        lock (organizeSync)
+        if (!available) throw new InvalidDataException("Soundpad is unavailable. Open it, then try again.");
+        // The same refusals as Apply, and Apply can't start while this runs.
+        EnterOrganizeBusy();
+        try
         {
-            LoadPlan();
-            RequireWritablePlan();
-            made = orgPlan?.Steps.Where(s => s.Kind == "createCategory" && s.State == "verified" && s.Created != null).ToList() ?? [];
-        }
-        int removed = 0, kept = 0;
-        foreach (var step in made)
-        {
-            while (true)
+            List<(string Id, CategoryRef Created)> made;
+            lock (organizeSync)
             {
-                var (quiet, result) = await QuietRule.TryOnce(GateBatch, pipe, () => Interlocked.Read(ref lastAudio), async () =>
-                {
-                    var before = await NativeTree.Read(pipe);
-                    var node = before.Categories.Where(n => n.Root && step.Created!.SamePlace(n)).ToArray();
-                    if (node.Length != 1 || node[0].Paths.Length > 0 || node[0].Children.Length > 0) return false;
-                    var remaining = before.Signatures(); remaining.Remove(NativeTree.Signature(node[0])); var sounds = before.SoundPaths();
-                    if (!(await pipe.Request($"DoRemoveCategory({node[0].Index})")).StartsWith("R-200", StringComparison.Ordinal)) return false;
-                    for (int attempt = 0; attempt < 20; attempt++)
-                    {
-                        if (attempt > 0) await Task.Delay(150);
-                        var after = await NativeTree.Read(pipe);
-                        if (after.Signatures().SequenceEqual(remaining) && after.SoundPaths().SequenceEqual(sounds)) return true;
-                    }
-                    return false;
-                }, OrganizeQuietMs);
-                if (quiet == QuietRule.Outcome.Ran)
-                {
-                    if (result) removed++; else kept++;
-                    lock (organizeSync) { if (result) { step.State = "skipped"; step.Note = "Removed again."; } SavePlanLocked(); }
-                    break;
-                }
-                await Task.Delay(300);
+                LoadPlan();
+                RequireWritablePlan(ignoreBusy: true);
+                made = orgPlan?.Steps.Where(s => s.Kind == "createCategory" && s.State == "verified" && s.Created != null).Select(s => (s.Id, s.Created!)).ToList() ?? [];
             }
+            int removed = 0, kept = 0;
+            // While Soundpad keeps playing this waits, but not for ever: what is left then is kept (and said).
+            using var stop = CancellationTokenSource.CreateLinkedTokenSource(organizeStop.Token);
+            stop.CancelAfter(OrganizeRemoveWaitMs);
+            foreach (var (stepId, created) in made)
+            {
+                bool? result = null;
+                while (result == null && !stop.IsCancellationRequested)
+                {
+                    try
+                    {
+                        var (quiet, ran) = await QuietRule.TryOnce(GateBatch, pipe, () => Interlocked.Read(ref lastAudio), async () =>
+                        {
+                            var before = await NativeTree.Read(pipe);
+                            var node = before.Categories.Where(n => n.Root && created.SamePlace(n)).ToArray();
+                            if (node.Length != 1 || node[0].Paths.Length > 0 || node[0].Children.Length > 0) return false;
+                            var remaining = before.Signatures(); remaining.Remove(NativeTree.Signature(node[0])); var sounds = before.SoundPaths();
+                            if (!(await pipe.Request($"DoRemoveCategory({node[0].Index})")).StartsWith("R-200", StringComparison.Ordinal)) return false;
+                            for (int attempt = 0; attempt < 20; attempt++)
+                            {
+                                if (attempt > 0) await Task.Delay(150);
+                                var after = await NativeTree.Read(pipe);
+                                if (after.Signatures().SequenceEqual(remaining) && after.SoundPaths().SequenceEqual(sounds)) return true;
+                            }
+                            return false;
+                        }, OrganizeQuietMs, stop.Token);
+                        if (quiet == QuietRule.Outcome.Ran) result = ran;
+                        else await Task.Delay(300, stop.Token);
+                    }
+                    catch (OperationCanceledException) when (stop.IsCancellationRequested) { }
+                }
+                if (result == true)
+                {
+                    removed++;
+                    lock (organizeSync) if (orgPlan?.Steps.FirstOrDefault(s => s.Id == stepId) is { } step) { step.State = "skipped"; step.Note = "Removed again."; SavePlanLocked(); }
+                }
+                else kept++;
+            }
+            if (removed > 0) { await RebindOwned(); await RefreshAfterOrganize(); }
+            OrganizeChanged();
+            return new("ack", c.Id, true, Data: new { removed, kept });
         }
-        if (removed > 0) { await RebindOwned(); await RefreshAfterOrganize(); }
-        OrganizeChanged();
-        return new("ack", c.Id, true, Data: new { removed, kept });
+        finally { Volatile.Write(ref organizeBusy, 0); }
     }
 }

@@ -87,10 +87,14 @@ public sealed partial class Bridge
                 case "updateInstall":
                     {
                         var version = Version(body, true);
-                        if (UpdateBusy is { } running) throw new InvalidDataException(running);
-                        if (Blocked() is { } blocked) throw new InvalidDataException(blocked);
-                        if (u.Status.Latest != version || u.Status.State is not ("available" or "ready" or "failed")) throw new InvalidDataException("That update is not available any more. Check again.");
-                        if (Interlocked.Exchange(ref installing, 1) != 0) throw new InvalidDataException("The update is already being installed.");
+                        // Checked and marked under one lock with a restore and an Organize apply (BridgeStageH.cs).
+                        lock (stageHExclusive)
+                        {
+                            if (UpdateBusy is { } running) throw new InvalidDataException(running);
+                            if (Blocked() is { } blocked) throw new InvalidDataException(blocked);
+                            if (u.Status.Latest != version || u.Status.State is not ("available" or "ready" or "failed")) throw new InvalidDataException("That update is not available any more. Check again.");
+                            if (Interlocked.Exchange(ref installing, 1) != 0) throw new InvalidDataException("The update is already being installed.");
+                        }
                         _ = Task.Run(() => Install(version));
                         return new("ack", c.Id, true, Data: new { started = true });
                     }
@@ -145,6 +149,10 @@ public sealed partial class Bridge
             }
             catch (Exception ex) when (ex is not OutOfMemoryException) { note = "No backup was made: " + ex.Message; }
             Log(note);
+            // Once more just before leaving: nothing else may have started, and the downloaded file is still the one
+            // that was checked (it may have waited in the EXE folder for hours after Later).
+            lock (stageHExclusive) if (Blocked() is { } busy) { u.Refused(UpdateReasons.Busy, busy); return; }
+            if (!u.StillVerified()) { u.Refused(UpdateReasons.HashMismatch, "The downloaded update changed since it was checked. Download it again."); return; }
             u.Installing(note);
             var exit = UpdateExitRequested;
             if (exit == null) { Log("Nothing here can install updates (a test build)."); return; }

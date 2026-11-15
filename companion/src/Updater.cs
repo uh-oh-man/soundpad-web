@@ -52,6 +52,8 @@ public sealed class Updater : IDisposable
     public event Action<string>? Log;
     /// <summary>The verified download, once <see cref="UpdateStatus.State"/> is "ready".</summary>
     public string? DownloadPath { get; private set; }
+    /// <summary>The published SHA-256 the download matched when it was checked.</summary>
+    private string? verifiedHash;
     /// <summary>Test seam (harness verb update-state): the state was set by hand, so installing skips the files.</summary>
     public bool Forced { get; private set; }
     public UpdateSettingsFile? Settings { get; }
@@ -162,7 +164,7 @@ public sealed class Updater : IDisposable
             var (exit, output) = await options.Probe(path, stop.Token);
             if (exit != 0 || !output.Contains(UpdateVerifier.NoticesMarker, StringComparison.Ordinal))
                 throw new UpdateRefusedException(UpdateReasons.Blocked, "The new version would not start on this PC (Windows or an antivirus blocked it).");
-            DownloadPath = path;
+            DownloadPath = path; verifiedHash = Sha256Text.Parse(shaText);
             Set(new("ready", options.Current, found.Version, found.NotesUrl, bytes, bytes));
             Log?.Invoke($"Version {found.Version} is downloaded and checked against the hash published with the release.");
             return true;
@@ -179,6 +181,21 @@ public sealed class Updater : IDisposable
             return false;
         }
         finally { busy.Release(); }
+    }
+
+    /// <summary>
+    /// Right before the swap: the downloaded EXE still has the hash published with the release (it may have waited
+    /// since it was checked). A forced (test) state has no file and passes. False removes the download.
+    /// </summary>
+    public bool StillVerified()
+    {
+        if (Forced) return true;
+        var path = DownloadPath; var hash = verifiedHash;
+        try { if (path != null && hash != null && File.Exists(path) && UpdateVerifier.Hash(path) == hash) return true; }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
+        if (path != null) { try { File.Delete(path); } catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { } }
+        DownloadPath = null;
+        return false;
     }
 
     /// <summary>The swap is starting (Bridge): pages show "installing". <paramref name="note"/> says how the backup went.</summary>

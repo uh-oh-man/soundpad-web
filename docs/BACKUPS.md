@@ -72,7 +72,8 @@ owner's PC (xUnit `BackupNeverDelaysPlayOrStop`, mock Soundpad, a 200 MB library
 median 93 ms with nothing else running and a median 70 ms while the copy ran, and a copy thread that waited for a play
 to finish never deadlocked. These are fixture numbers, not real-Soundpad ones.
 
-When: 60 s after the companion starts, every `intervalHours` (default 24), `afterChangeMinutes` (default 10; 0 is off)
+When: 60 s after the companion starts, every `intervalHours` (default 24; an hour after a run that failed),
+`afterChangeMinutes` (default 10; 0 is off)
 after the library, sentences or kept audio last changed, on Back up now, and before a restore, an update or an
 organization change (`CheckpointH(kind)`, which says "Backups are not set up." when there is no folder, so callers
 carry on).
@@ -80,8 +81,10 @@ carry on).
 ## Retention and clean-up
 
 Kept: the newest `keepCount` (default 14), everything newer than `keepDays` (default 30), the newest of every ISO week,
-and every "Before restore" backup for at least 7 days. Snapshots outside that are removed, then every blob no remaining
-manifest refers to. Only names the app makes are ever deleted (`^[a-f0-9]{64}\.(ext)$` under `blobs\<aa>\`, snapshot
+and every "Before restore" backup for at least 7 days, and every backup a restore is reading from until it has
+finished (so its own "Before restore" backup never removes it). Snapshots outside that are removed (each is renamed to
+`.partial-<id8>` first, so a run cut short leaves a folder the next run sweeps, never a snapshot without its manifest),
+then every blob no remaining manifest refers to. Only names the app makes are ever deleted (`^[a-f0-9]{64}\.(ext)$` under `blobs\<aa>\`, snapshot
 and partial folder names, `.tmp-<guid>` copies); links and junctions are never followed; and while any snapshot folder
 has a manifest this companion cannot read (damaged, or from a newer version), no blob is removed at all.
 
@@ -119,7 +122,10 @@ without it.
   recording files, sentence audio and icons back, merges kept sources the journal lost (never session or Temp records,
   and the session stays as it is), replaces the state's counter, statistics, activity, icons, permissions and Spotify
   setting (never its receipts) through the normal durable save, and writes `keep-settings.json`, `mimic-settings.json`
-  and `ui.json`. Earlier voice-library changes can no longer be undone afterwards.
+  and `ui.json` when each is a JSON object its loader takes (a damaged copy is left out with a warning). Earlier
+  voice-library changes can no longer be undone afterwards. It marks itself busy before its "Before restore" backup:
+  from then on an update and an Organize apply are refused, and it is refused while either runs.
+- **Files** go back only as audio (wav, mp3, ogg, flac, m4a, aac, wma, opus) of the type the backup's copy is.
 - **Identity**: equal, nothing special. Different and this install keeps nothing yet: the backup's identity is adopted
   only when the host ticks "Use this backup's identity (guests' saved layouts move with it)". Different with data: the
   library, sentences, counter and settings are restored, statistics and icons (kept per sound id) are not, and the

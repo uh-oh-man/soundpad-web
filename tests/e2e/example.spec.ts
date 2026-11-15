@@ -61,6 +61,12 @@ test('example copy: the start page says what can be tried, and the banner what l
   expect(await axe(page)).toEqual([]);
   await settings.getByRole('button', { name: 'Close dialog' }).click();
   expect(await axe(page)).toEqual([]);
+  // Organize mode in the Host Layout: the example says why categories don't change (it has no companion).
+  await page.getByRole('button', { name: 'Organize', exact: true }).click();
+  await expect(page.locator('.organize-bar')).toContainText(
+    "The example doesn't change Soundpad categories. My Layout works here.",
+  );
+  await page.getByRole('button', { name: 'Done organizing' }).click();
   await page.getByRole('button', { name: 'Leave example' }).click();
   await expect(page.getByRole('button', { name: 'Try the example' })).toBeVisible();
 });

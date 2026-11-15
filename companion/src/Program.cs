@@ -79,7 +79,7 @@ internal static class Program
         {
             try { return new FileStream(path, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None); }
             catch (IOException) when (Environment.TickCount64 < until) { }
-            catch (IOException) { throw new InvalidOperationException("Soundpad Web is already running. Use its window or tray, or quit it first."); }
+            catch (IOException) { throw new InvalidOperationException("Soundpad Web is already running. Switch to its window, or quit it first."); }
         }
     }
 

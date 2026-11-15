@@ -12,6 +12,10 @@ public sealed partial class Bridge
 {
     private readonly SemaphoreSlim restoreGate = new(1, 1);
     private volatile bool restoringLibrary;
+    /// <summary>The backups being restored from: retention keeps them (and their files) until the restore has finished.</summary>
+    private readonly ConcurrentDictionary<string, int> restoringSnapshots = new(StringComparer.Ordinal);
+    private IReadOnlySet<string> ProtectedSnapshots => restoringSnapshots.Keys.ToHashSet(StringComparer.Ordinal);
+    private static readonly string[] AudioExts = ["wav", "mp3", "ogg", "flac", "m4a", "aac", "wma", "opus"];
     /// <summary>Undo of sentence restores (sentences have no audit trail): what each restored sentence was before. In memory only.</summary>
     private readonly ConcurrentDictionary<string, List<(string Id, SentenceProject? Before, long Updated)>> sentenceUndo = new(StringComparer.Ordinal);
     private static readonly Regex HexId = new("^[a-f0-9]{32}$", RegexOptions.CultureInvariant);
@@ -140,39 +144,46 @@ public sealed partial class Bridge
         try
         {
             var b = FindBackup(id);
-            var outcome = new RestoreOutcome();
-            if (kind == "library") { await RestoreLibrary(b, body.Bool("adoptIdentity") == true, outcome); }
-            else
+            // The "before restore" backup below must never retire the backup being restored, nor the only copy of
+            // a file it holds.
+            restoringSnapshots.AddOrUpdate(b.Manifest.Id, 1, (_, n) => n + 1);
+            try
             {
-                var parts = Parts(b);
-                // Checked before anything is changed.
-                if (kind is "recording" or "voice" && parts.Library == null) throw new InvalidDataException("That backup has no voice library.");
-                if (kind == "sentence" && parts.Sentences == null) throw new InvalidDataException("That backup has no sentences.");
-                if (kind == "clip" && !ids!.All(v => parts.Kept.Any(k => k.VariantId == v))) throw new InvalidDataException("That kept clip is not in the backup.");
-                if (kind == "recording" && !ids!.All(r => parts.Library!.Recordings.Any(x => x.Id == r))) throw new InvalidDataException("That recording is not in the backup.");
-                if (kind == "voice" && !ids!.All(v => parts.Library!.Voices.Any(x => x.Id == v))) throw new InvalidDataException("That voice is not in the backup.");
-                if (kind == "sentence" && !ids!.All(s => parts.Sentences!.Sentences.Any(x => x.Id == s))) throw new InvalidDataException("That sentence is not in the backup.");
-                var checkpoint = await BackupCheckpoint("pre-restore", default);
-                if (checkpoint is { Skipped: true }) outcome.Warnings.Add("No backup was made first: " + checkpoint.Reason);
-                bool sameIdentity = DocBytes(b, "state") is not { } sb || ParseBackupState(sb).IdentityKey == disk.IdentityKey;
-                switch (kind)
+                var outcome = new RestoreOutcome();
+                if (kind == "library") { await RestoreLibrary(b, body.Bool("adoptIdentity") == true, outcome); }
+                else
                 {
-                    case "clip": await RestoreClips(b, parts, ids!, sameIdentity, outcome); break;
-                    case "recording": await RestoreRecordingItems(b, parts, ids!, replace, sameIdentity, outcome); break;
-                    case "voice":
-                        {
-                            var chosen = parts.Library!.Voices.Where(v => ids!.Contains(v.Id)).ToList();
-                            var (restored, skipped, group, conflicts) = Voices.RestoreVoices(chosen, parts.Library.Wanted, replace, "host", "Host");
-                            outcome.Restored = restored; outcome.Skipped = skipped; outcome.AuditGroup = group > 0 ? group : null;
-                            outcome.Conflicts.AddRange(conflicts.Select(n => $"Another voice is called {n} now; that voice was left out."));
-                            break;
-                        }
-                    case "sentence": RestoreSentenceItems(b, parts, ids!, replace, outcome); break;
+                    var parts = Parts(b);
+                    // Checked before anything is changed.
+                    if (kind is "recording" or "voice" && parts.Library == null) throw new InvalidDataException("That backup has no voice library.");
+                    if (kind == "sentence" && parts.Sentences == null) throw new InvalidDataException("That backup has no sentences.");
+                    if (kind == "clip" && !ids!.All(v => parts.Kept.Any(k => k.VariantId == v))) throw new InvalidDataException("That kept clip is not in the backup.");
+                    if (kind == "recording" && !ids!.All(r => parts.Library!.Recordings.Any(x => x.Id == r))) throw new InvalidDataException("That recording is not in the backup.");
+                    if (kind == "voice" && !ids!.All(v => parts.Library!.Voices.Any(x => x.Id == v))) throw new InvalidDataException("That voice is not in the backup.");
+                    if (kind == "sentence" && !ids!.All(s => parts.Sentences!.Sentences.Any(x => x.Id == s))) throw new InvalidDataException("That sentence is not in the backup.");
+                    var checkpoint = await BackupCheckpoint("pre-restore", default);
+                    if (checkpoint is { Skipped: true }) outcome.Warnings.Add("No backup was made first: " + checkpoint.Reason);
+                    bool sameIdentity = DocBytes(b, "state") is not { } sb || ParseBackupState(sb).IdentityKey == disk.IdentityKey;
+                    switch (kind)
+                    {
+                        case "clip": await RestoreClips(b, parts, ids!, sameIdentity, outcome); break;
+                        case "recording": await RestoreRecordingItems(b, parts, ids!, replace, sameIdentity, outcome); break;
+                        case "voice":
+                            {
+                                var chosen = parts.Library!.Voices.Where(v => ids!.Contains(v.Id)).ToList();
+                                var (restored, skipped, group, conflicts) = Voices.RestoreVoices(chosen, parts.Library.Wanted, replace, "host", "Host");
+                                outcome.Restored = restored; outcome.Skipped = skipped; outcome.AuditGroup = group > 0 ? group : null;
+                                outcome.Conflicts.AddRange(conflicts.Select(n => $"Another voice is called {n} now; that voice was left out."));
+                                break;
+                            }
+                        case "sentence": RestoreSentenceItems(b, parts, ids!, replace, outcome); break;
+                    }
                 }
+                Log($"Restored from a backup ({kind}): {outcome.Restored} restored, {outcome.Skipped} skipped, {outcome.Conflicts.Count} conflict(s)");
+                BackupsChanged();
+                return outcome.Reply();
             }
-            Log($"Restored from a backup ({kind}): {outcome.Restored} restored, {outcome.Skipped} skipped, {outcome.Conflicts.Count} conflict(s)");
-            BackupsChanged();
-            return outcome.Reply();
+            finally { if (restoringSnapshots.AddOrUpdate(b.Manifest.Id, 0, (_, n) => n - 1) <= 0) restoringSnapshots.TryRemove(b.Manifest.Id, out _); }
         }
         finally { restoringLibrary = false; restoreGate.Release(); }
     }
@@ -195,6 +206,9 @@ public sealed partial class Bridge
         var name = Path.GetFileName(path);
         if (blob == null) { if (!File.Exists(path)) outcome.Warnings.Add($"{name} is not in the backup."); return File.Exists(path); }
         if (!RestorablePath(path)) { outcome.Conflicts.Add($"{name}: its folder is not one a restore writes to; it was left out."); return false; }
+        // Only audio, and only as the type the backup's copy is: a backup never places another kind of file.
+        var ext = Path.GetExtension(path).TrimStart('.');
+        if (!AudioExts.Contains(ext, StringComparer.OrdinalIgnoreCase) || !string.Equals(ext, blob.Ext, StringComparison.OrdinalIgnoreCase)) { outcome.Conflicts.Add($"{name}: it is not an audio file of the backup's type; it was left out."); return false; }
         if (File.Exists(path))
         {
             if (ManagedFiles.Verified(path, blob.Sha256, blob.Bytes)) return true;
@@ -308,9 +322,15 @@ public sealed partial class Bridge
     private async Task RestoreLibrary(OpenBackup b, bool adoptIdentity, RestoreOutcome outcome)
     {
         if (playback.Status is "PLAYING" or "PAUSED" or "SEEKING") throw new InvalidDataException("Stop playback first. Nothing was restored.");
-        // Not during an update or an Organize apply (Stage H cross-checks, BridgeStageH.cs).
-        if (UpdateBusy is { } updating) throw new InvalidDataException(updating + " Nothing was restored.");
-        if (OrganizeApplying) throw new InvalidDataException("An organization plan is being applied to Soundpad. Try again when it has finished or paused; nothing was restored.");
+        // Not during an update or an Organize apply, and neither can start from here on: the flag is set now, before
+        // the "before restore" backup, under the same lock they use (Stage H cross-checks, BridgeStageH.cs). Guests'
+        // library and sentence changes are refused from here on too. BackupRestore clears it at the end.
+        lock (stageHExclusive)
+        {
+            if (UpdateBusy is { } updating) throw new InvalidDataException(updating + " Nothing was restored.");
+            if (OrganizeApplying) throw new InvalidDataException("An organization plan is being applied to Soundpad. Try again when it has finished or paused; nothing was restored.");
+            restoringLibrary = true;
+        }
         if (Audio.Public.Assets.Any(a => a.State is "promoting" or "promotion-pending")) throw new InvalidDataException("A Keep is still being finished. Try again when it is done; nothing was restored.");
         if (!audioGate.TryEnter()) throw new InvalidDataException("A Keep or a change in Temp is in progress. Try again in a moment; nothing was restored.");
         audioGate.Release();
@@ -323,7 +343,6 @@ public sealed partial class Bridge
         var checkpoint = await BackupCheckpoint("pre-restore", default);
         if (checkpoint is null or { Skipped: true }) throw new InvalidDataException("A backup of the library as it is now could not be made first (" + (checkpoint?.Reason ?? "unknown").TrimEnd('.') + "). Nothing was restored.");
         if (playback.Status is "PLAYING" or "PAUSED" or "SEEKING") throw new InvalidDataException("Stop playback first. Nothing was restored.");
-        restoringLibrary = true;
         bool idKeyed = sameIdentity || adopt;
         if (!idKeyed) outcome.Warnings.Add("This backup belongs to another identity: the library, sentences and counter were restored, but statistics and icons (kept by sound) were left as they are.");
         await audioGate.EnterAsync(PriorityGate.Lane.Normal);
@@ -375,6 +394,8 @@ public sealed partial class Bridge
             {
                 if (DocBytes(b, role) is not { } bytes) continue;
                 if (bytes.Length > 1024 * 1024) { outcome.Warnings.Add($"The backup's {BackupManifest.DocPaths[role]} is too large; it was left out."); continue; }
+                // Checked first: a copy the companion's own loader would not take is never written over a good file.
+                if (!SettingsDocUsable(role, bytes)) { outcome.Warnings.Add($"The backup's {BackupManifest.DocPaths[role]} is damaged; the current one was kept."); continue; }
                 DurableFile.Write(Path.Combine(store.DirectoryPath, BackupManifest.DocPaths[role]), bytes);
                 if (role == "keep") lock (keepGate) keepSettings = null;
                 if (role == "mimic") mimicSettings = null;
@@ -386,6 +407,28 @@ public sealed partial class Bridge
         finally { audioGate.Release(); restoringLibrary = false; }
         await gate.EnterAsync(PriorityGate.Lane.Normal); try { await RefreshInner(); } finally { gate.Release(); }
         Publish();
+    }
+
+    /// <summary>
+    /// Whether a backup's settings file (keep-settings.json, mimic-settings.json or ui.json) is one its loader takes:
+    /// within the loader's size limit, a JSON object, and (Keep and Mimic) of its type.
+    /// </summary>
+    internal static bool SettingsDocUsable(string role, byte[] bytes)
+    {
+        try
+        {
+            if (bytes.Length > (role == "ui" ? UiPrefsStore.MaxBytes : 64 * 1024)) return false;
+            using var document = JsonDocument.Parse(bytes);
+            if (document.RootElement.ValueKind != JsonValueKind.Object) return false;
+            return role switch
+            {
+                "keep" => JsonSerializer.Deserialize<KeepSettings>(bytes, Json.Options) != null,
+                "mimic" => JsonSerializer.Deserialize<MimicSettings>(bytes, Json.Options) != null,
+                "ui" => true,
+                _ => false,
+            };
+        }
+        catch (Exception ex) when (ex is JsonException or NotSupportedException or ArgumentException or InvalidOperationException) { return false; }
     }
 
     /// <summary>An icon back into the icons folder under its exact name, which carries the start of its hash.</summary>

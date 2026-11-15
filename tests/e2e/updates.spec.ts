@@ -157,7 +157,7 @@ test('Update now and Later: the launch offer, the header chip and Settings, and 
   page,
   harness,
 }) => {
-  // The gate is 2.44; until the release bump this checkout's companion still reports 2.43.0.
+  // The gate is 2.44, which the harness reports since the release bump; shown as 2.44 whatever comes next.
   await rewriteSnapshots(page, (state) => {
     if (state.companionVersion) state.companionVersion = '2.44.0';
   });
@@ -172,8 +172,11 @@ test('Update now and Later: the launch offer, the header chip and Settings, and 
   const offer = page.getByRole('region', { name: 'Update available' });
   await expect(offer).toContainText('Soundpad Web 2.44.1 is available.');
   await expect(page.locator('.update-chip')).toHaveCount(0);
-  await offer.getByRole('button', { name: 'Later' }).click();
+  // From the keyboard: the offer goes, and the header chip that carries it takes focus (not the page).
+  await offer.getByRole('button', { name: 'Later' }).focus();
+  await offer.getByRole('button', { name: 'Later' }).press('Enter');
   await expect(offer).toHaveCount(0);
+  await expect(page.locator('.update-chip')).toBeFocused();
   // Later reached the companion: a reload does not bring the offer back, the chip stays.
   await page.reload();
   await expect(playButton(page, 'Airhorn')).toBeEnabled();

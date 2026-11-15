@@ -15,10 +15,13 @@ public sealed record OrganizeStepInput(
     string? TargetStepId = null, string? TargetKey = null,
     string? Name = null,
     // The page's own name for a createCategory in this request, so later inputs can add into it.
-    string? Key = null);
+    string? Key = null,
+    // The names of the category's parents as the page shows them (top first), so a stale id that now points at a
+    // same-named category elsewhere is refused too.
+    string[]? CategoryParents = null);
 public sealed record OrganizeEditBody(long PlanRevision, OrganizeStepInput[]? Add = null, string[]? Remove = null, string? AcceptProposal = null, string? RejectProposal = null);
 public sealed record OrganizeApplyBody(string PlanId, long PlanRevision);
-public sealed record OrganizeResolveBody(string Resolution, string? StepId = null, string? TargetCategoryId = null, string? TargetCategoryName = null);
+public sealed record OrganizeResolveBody(string Resolution, string? StepId = null, string? TargetCategoryId = null, string? TargetCategoryName = null, string[]? TargetCategoryParents = null);
 public sealed record OrganizeProposeBody(OrganizeStepInput[] Steps);
 public sealed record OrganizeWithdrawBody(string ProposalId);
 public sealed record OrganizeSettingsBody(bool GuestOrganize);
@@ -31,6 +34,8 @@ public sealed record OrganizeStepView(string Id, string Kind, string Support, st
 
 internal static class OrganizeRules
 {
+    /// <summary>True when the page sent no parents (an older page) or the same parents the category has in Soundpad now.</summary>
+    public static bool SameParents(string[]? parents, NativeNode node) => parents == null || parents.Length <= 16 && parents.SequenceEqual(node.Chain, StringComparer.Ordinal);
     private static readonly JsonSerializerOptions Strict = new(JsonSerializerDefaults.Web) { UnmappedMemberHandling = JsonUnmappedMemberHandling.Disallow, MaxDepth = 8 };
     /// <summary>The op's body, strictly: unknown fields, wrong types and a missing body are refused.</summary>
     public static T Body<T>(Command c) where T : class

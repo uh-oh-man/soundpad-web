@@ -1,11 +1,20 @@
 /**
  * Organize mode (2.44, Stage H WP3): selecting sounds without playing them, Review changes, guests'
  * proposals, Apply against the mock Soundpad, conflicts and recovery, Needs attention, the gate for older
- * companions, and the shared-layout copy preview. The harness reports companion 2.43 until the release
- * bump, so these tests show it as 2.44 (and as 2.43 for the gate test).
+ * companions, and the shared-layout copy preview. The harness reports 2.44 since the release bump; the
+ * tests still name the version they show (2.44, and 2.43 for the gate test), so a later bump changes nothing.
  */
 import type { Page } from '@playwright/test';
-import { test, expect, host, joinGuest, playButton, useLocalGuests } from './helpers/harness';
+import {
+  test,
+  expect,
+  host,
+  joinGuest,
+  ORIGIN,
+  playButton,
+  startHarness,
+  useLocalGuests,
+} from './helpers/harness';
 
 async function companionVersion(page: Page, version: string) {
   await page.routeWebSocket(/ws:\/\/127\.0\.0\.1:\d+\/bridge/, (socket) => {
@@ -39,6 +48,42 @@ async function addTo(page: Page, menu: string, item: string) {
 async function openReview(page: Page) {
   await page.getByRole('button', { name: /^Review changes \(\d+\)$/ }).click();
   await expect(review(page)).toBeVisible();
+}
+/** What the focused control is: its accessible name (or id), or "body" when focus fell to the page. */
+const focusedName = (page: Page) =>
+  page.evaluate(() => {
+    const a = document.activeElement;
+    if (!a || a === document.body) return 'body';
+    return a.getAttribute('aria-label') ?? a.id ?? a.textContent ?? a.tagName;
+  });
+/**
+ * Presses `key` `times` times; after each press (and a frame for focus-clear.ts), records the focused
+ * control when `covered` finds something else at its centre. Returns those, so none is expected.
+ */
+async function coveredWhileTabbing(page: Page, key: string, times: number, covering: string) {
+  const found: string[] = [];
+  for (let i = 0; i < times; i++) {
+    await page.keyboard.press(key);
+    const hit = await page.evaluate(
+      (selector) =>
+        new Promise<string | null>((done) =>
+          requestAnimationFrame(() =>
+            requestAnimationFrame(() => {
+              const a = document.activeElement as HTMLElement | null;
+              if (!a || a === document.body) return done(null);
+              const r = a.getBoundingClientRect();
+              if (r.bottom <= 0 || r.top >= innerHeight) return done(null);
+              const at = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+              const by = at && !a.contains(at) ? at.closest(selector) : null;
+              done(by ? (a.getAttribute('aria-label') ?? a.textContent ?? a.tagName) : null);
+            }),
+          ),
+        ),
+      covering,
+    );
+    if (hit) found.push(hit);
+  }
+  return found;
 }
 
 test.describe('Organize mode on a 2.44 companion', () => {
@@ -95,6 +140,105 @@ test.describe('Organize mode on a 2.44 companion', () => {
     await page.keyboard.press('Escape');
     await expect(organizeToggle(page)).toHaveAttribute('aria-pressed', 'false');
     await expect(page.getByRole('checkbox', { name: /^Select / })).toHaveCount(0);
+  });
+
+  test('leaving Organize mode gives focus to the Organize toggle, never the page', async ({
+    page,
+    harness,
+  }) => {
+    await host(page, harness);
+    await organizeToggle(page).click();
+    await select(page, 'Airhorn').focus();
+    await page.keyboard.press('Escape');
+    await expect(organizeToggle(page)).toHaveAttribute('aria-pressed', 'false');
+    await expect(organizeToggle(page)).toBeFocused();
+    await organizeToggle(page).press('Enter');
+    const done = page.getByRole('button', { name: 'Done organizing' });
+    await done.focus();
+    await done.press('Enter');
+    await expect(organizeToggle(page)).toBeFocused();
+  });
+
+  test('Review changes: removing a step or discarding keeps focus in the panel, and the footer never covers a focused step', async ({
+    page,
+    harness,
+  }) => {
+    await page.setViewportSize({ width: 1280, height: 640 });
+    await host(page, harness);
+    await organizeToggle(page).click();
+    await page.getByRole('button', { name: 'Select all' }).click();
+    // A nested category too: its parents go with its id, and the companion takes it.
+    for (const target of ['Empty category', 'Deep cuts', 'Favorites'])
+      await addTo(page, 'Add selected to…', target);
+    await openReview(page);
+    const removes = review(page).getByRole('button', { name: /from the plan$/ });
+    await expect.poll(() => removes.count()).toBeGreaterThanOrEqual(8);
+    await expect(
+      review(page)
+        .getByText(/^Add “.+” to “Deep cuts”$/)
+        .first(),
+    ).toBeVisible();
+    // Tab down the steps: Apply and Discard (sticky at the foot) never sit over the focused one.
+    await removes.first().focus();
+    expect(await coveredWhileTabbing(page, 'Tab', 14, '.review-footer')).toEqual([]);
+    expect(await coveredWhileTabbing(page, 'Shift+Tab', 14, '.review-footer')).toEqual([]);
+    // Removing a step: the next step's Remove takes focus.
+    const count = await removes.count();
+    await removes.nth(1).focus();
+    await removes.nth(1).press('Enter');
+    await expect(removes).toHaveCount(count - 1);
+    await expect.poll(() => focusedName(page)).toMatch(/from the plan$/);
+    // Discard: the panel's heading takes focus.
+    const discard = review(page).getByRole('button', { name: 'Discard', exact: true });
+    await discard.focus();
+    await discard.press('Enter');
+    await expect(removes).toHaveCount(0);
+    await expect(page.locator('#editor-title')).toBeFocused();
+  });
+
+  test('the Organize bar never covers a focused tile, on a desktop or under a phone header', async ({
+    page,
+  }) => {
+    // Each press waits two frames, which WebKit gives slowly on a busy PC.
+    test.setTimeout(120000);
+    const big = await startHarness(ORIGIN, 60);
+    try {
+      await host(page, big);
+      await organizeToggle(page).click();
+      const last = page.getByRole('checkbox', { name: /^Select / }).last();
+      await last.focus();
+      expect(await coveredWhileTabbing(page, 'Shift+Tab', 30, '.organize-bar')).toEqual([]);
+      // A phone: the page scrolls under the sticky header, and the bar sticks just below it.
+      await page.setViewportSize({ width: 412, height: 860 });
+      await last.focus();
+      await page.mouse.wheel(0, 400);
+      await expect
+        .poll(() =>
+          page.evaluate(() => {
+            const bar = document.querySelector('.organize-bar')!.getBoundingClientRect();
+            const header = document.querySelector('.app-shell > .topbar')!.getBoundingClientRect();
+            return bar.top >= header.bottom - 1;
+          }),
+        )
+        .toBe(true);
+      await last.focus();
+      expect(await coveredWhileTabbing(page, 'Shift+Tab', 20, '.organize-bar, .topbar')).toEqual(
+        [],
+      );
+      const done = page.getByRole('button', { name: 'Done organizing' });
+      await done.focus();
+      await expect
+        .poll(() =>
+          done.evaluate((button) => {
+            const r = button.getBoundingClientRect();
+            const at = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+            return !!at && button.contains(at);
+          }),
+        )
+        .toBe(true);
+    } finally {
+      await big.stop();
+    }
   });
 
   test('a drop and the Add selected to… menu add steps to Review changes', async ({
@@ -238,6 +382,24 @@ test.describe('Organize mode on a 2.44 companion', () => {
       expect(harness.plays.slice(before)).toEqual([]);
       // The other sounds of the category still play.
       await expect(playButton(page, 'Laugh')).toBeEnabled();
+    });
+    test('Select all and Ctrl+A take only the sounds that have tiles, not Needs attention', async ({
+      page,
+      harness,
+    }) => {
+      await host(page, harness);
+      await category(page, 'Reactions').click();
+      await expect(page.getByRole('region', { name: 'Needs attention (1)' })).toBeVisible();
+      await organizeToggle(page).click();
+      const tiles = page.getByRole('checkbox', { name: /^Select / });
+      await expect.poll(() => tiles.count()).toBeGreaterThan(0);
+      const shown = await tiles.count();
+      await page.getByRole('button', { name: 'Select all' }).click();
+      await expect(selectedCount(page)).toHaveText(`${shown} selected`);
+      await page.getByRole('button', { name: 'Clear', exact: true }).click();
+      await tiles.first().focus();
+      await page.keyboard.press('ControlOrMeta+a');
+      await expect(selectedCount(page)).toHaveText(`${shown} selected`);
     });
   });
 

@@ -2,6 +2,7 @@ import { useEffect, useRef, useSyncExternalStore, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { X } from 'lucide-react';
 import { FOCUSABLE as focusable, currentOpener, returnFocus } from '../focus-return';
+import { followFocus } from '../focus-follow';
 
 /**
  * While any dialog is open (2.43) the page behind it is `inert`: the board, the sidebar and the
@@ -59,14 +60,18 @@ export function Modal({
   label,
   onClose,
   children,
+  returnTo,
 }: {
   label: string;
   onClose: () => void;
   children: ReactNode;
+  /** Where focus goes when the dialog closes and what opened it has gone (or nothing did). */
+  returnTo?: () => HTMLElement | null;
 }) {
   const dialog = useRef<HTMLElement>(null);
   const noticeSlot = useRef<HTMLDivElement>(null);
   const close = useRef(onClose);
+  const fallback = useRef(returnTo);
   const pressedScrim = useRef(false);
   useEffect(() => {
     close.current = onClose;
@@ -122,7 +127,12 @@ export function Modal({
       const active = document.activeElement;
       // Another dialog is still open and has the keyboard: leave it there.
       if (top && active && active !== document.body && top.contains(active)) return;
-      returnFocus(opener, () => top?.querySelector<HTMLElement>(focusable));
+      if (
+        !returnFocus(opener, () => top?.querySelector<HTMLElement>(focusable)) &&
+        !top &&
+        fallback.current
+      )
+        followFocus(null, fallback.current);
     };
   }, []);
   return createPortal(
