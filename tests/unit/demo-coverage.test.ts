@@ -171,6 +171,17 @@ const FEATURE_OPS: Record<Feature, Op[]> = {
   kickSession: ['counter'],
   soundEdit: ['trimAudio', 'trimPreview'],
   uiSync: ['uiPrefsGet', 'uiPrefsSet'],
+  organize: [
+    'organizeGet',
+    'organizeEdit',
+    'organizeApply',
+    'organizeResolve',
+    'organizeDiscard',
+    'organizePropose',
+    'organizeWithdraw',
+    'organizeSettings',
+  ],
+  missingFiles: [],
 };
 
 /** What the example honestly cannot do, and the reason it gives. Each must be refused with exactly that. */

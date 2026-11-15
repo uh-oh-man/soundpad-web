@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   ImagePlus,
   Star,
@@ -17,6 +17,10 @@ import { guestHeld, HELD_BY_HOST, intentKey, playback, usePendingIntent } from '
 import type { Totals } from '../arrange';
 import { SpeedMenu, canQuickSpeed } from './SpeedMenu';
 import { requestEditor } from '../shell';
+import { supports } from '../version';
+import { DRAG_TYPE, dragIds, dragged, needsAttention } from '../organize';
+import { selectRange, toggleSound, useOrganize } from './organize/organize-store';
+import { NeedsAttention } from './organize/NeedsAttention';
 type Props = {
   sounds: Sound[];
   state: Snapshot;
@@ -52,13 +56,27 @@ export function SoundCollection({
   // a tile never stays "preparing" for a start that lost.
   const pending = usePendingIntent();
   const held = guestHeld(state, host);
-  const dragging = useRef(false);
+  // Organize mode (2.44): tiles select instead of playing, and drag (the selection) onto a category or folder.
+  const { on: organizing, selected } = useOrganize();
   const mode = w?.view ?? 'icons';
   const personal = w?.layout === 'mine';
+  // Sounds whose file is missing go to their own group at the end (gate missingFiles).
+  const { ok: shown, missing } = useMemo(
+    () =>
+      supports(state.companionVersion, 'missingFiles')
+        ? needsAttention(sounds)
+        : { ok: sounds, missing: [] },
+    [sounds, state.companionVersion],
+  );
+  const order = useMemo(() => shown.map((s) => s.id), [shown]);
   useEffect(() => setLimit(mode === 'waveforms' ? 24 : 120), [mode, sounds.length, folderId]);
   async function play(sound: Sound) {
-    if (dragging.current) return;
+    if (organizing) return;
     await playback.play(sound.id);
+  }
+  function pick(id: string, range: boolean) {
+    if (range) selectRange(order, id);
+    else toggleSound(id);
   }
   function drop(id: string, before?: string) {
     if (!w || !state.library.sounds.some((s) => s.id === id)) return;
@@ -138,7 +156,7 @@ export function SoundCollection({
             <span role="columnheader">Actions</span>
           </div>
         )}
-        {sounds.slice(0, limit).map((sound, i) => {
+        {shown.slice(0, limit).map((sound, i) => {
           const active =
             state.playback.soundId === sound.id &&
             state.playback.identitySource === 'web' &&
@@ -152,29 +170,63 @@ export function SoundCollection({
             <Entry
               key={sound.id}
               role={mode === 'details' ? 'row' : undefined}
-              className={`sound-tile sound-entry ${active ? 'now-playing' : ''} ${starting || reversing ? 'pressed intent-pending' : ''}`}
+              className={`sound-tile sound-entry ${active ? 'now-playing' : ''} ${starting || reversing ? 'pressed intent-pending' : ''} ${organizing && selected.has(sound.id) ? 'is-selected' : ''}`}
               data-intent={starting || reversing ? 'pending' : undefined}
-              draggable={personal}
+              // Dragging is part of Organize mode (2.44), so a drag never ends in a play.
+              draggable={organizing}
               onDragStart={(e) => {
-                dragging.current = true;
+                if (!organizing) return;
+                const ids = dragged(selected, sound.id, order);
                 e.dataTransfer.setData('application/x-soundpad-id', sound.id);
+                e.dataTransfer.setData(DRAG_TYPE, JSON.stringify(ids));
                 e.dataTransfer.effectAllowed = 'copyMove';
               }}
-              onDragEnd={() =>
-                setTimeout(() => {
-                  dragging.current = false;
-                }, 100)
-              }
               onDragOver={(e) => {
-                if (personal) e.preventDefault();
+                if (personal && organizing) e.preventDefault();
               }}
               onDrop={(e) => {
-                if (!personal) return;
+                if (!personal || !organizing) return;
                 e.preventDefault();
-                drop(e.dataTransfer.getData('application/x-soundpad-id'), sound.id);
+                const ids = dragIds(e.dataTransfer.getData(DRAG_TYPE));
+                for (const id of ids.length
+                  ? ids
+                  : [e.dataTransfer.getData('application/x-soundpad-id')])
+                  if (id !== sound.id) drop(id, sound.id);
               }}
             >
-              <div className="sound-play-cell" role={mode === 'details' ? 'cell' : undefined}>
+              {organizing && (
+                // The whole tile is the checkbox in Organize mode: click, Space or Enter toggles, Shift-click a range.
+                <label
+                  className="tile-select"
+                  role={mode === 'details' ? 'cell' : undefined}
+                  onClick={(e) => {
+                    if (e.target !== e.currentTarget) return;
+                    e.preventDefault();
+                    pick(sound.id, e.shiftKey);
+                  }}
+                >
+                  <input
+                    type="checkbox"
+                    aria-label={`Select ${sound.name}`}
+                    checked={selected.has(sound.id)}
+                    onChange={() => {}}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      pick(sound.id, e.shiftKey);
+                    }}
+                    onKeyDown={(e) => {
+                      if (e.key !== 'Enter') return;
+                      e.preventDefault();
+                      pick(sound.id, e.shiftKey);
+                    }}
+                  />
+                </label>
+              )}
+              <div
+                className="sound-play-cell"
+                role={mode === 'details' ? 'cell' : undefined}
+                inert={organizing || undefined}
+              >
                 <SoundButton
                   sound={sound}
                   state={state}
@@ -215,7 +267,11 @@ export function SoundCollection({
                   </span>
                 </>
               )}
-              <div className="sound-actions" role={mode === 'details' ? 'cell' : undefined}>
+              <div
+                className="sound-actions"
+                role={mode === 'details' ? 'cell' : undefined}
+                inert={organizing || undefined}
+              >
                 {/*
                  * Quick actions (Stage G spec 5.3): over the artwork's top right corner on the grid views,
                  * shown on hover or focus (opacity only, so they stay focusable); in the row elsewhere.
@@ -313,7 +369,7 @@ export function SoundCollection({
                     <button
                       className="icon-button"
                       aria-label={`Move ${sound.name} down`}
-                      disabled={i === sounds.length - 1}
+                      disabled={i === shown.length - 1}
                       onClick={() => nudge(sound.id, 1)}
                     >
                       <ArrowDown size={13} />
@@ -342,14 +398,15 @@ export function SoundCollection({
           );
         })}
       </div>
-      {sounds.length > limit && (
+      {shown.length > limit && (
         <button
           className="load-more"
           onClick={() => setLimit((n) => n + (mode === 'waveforms' ? 24 : 120))}
         >
-          Show more sounds ({sounds.length - limit} remaining)
+          Show more sounds ({shown.length - limit} remaining)
         </button>
       )}
+      <NeedsAttention sounds={missing} host={host} />
     </>
   );
 }

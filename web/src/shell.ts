@@ -12,7 +12,7 @@ import { useEffect, useRef } from 'react';
 /** The main views. Mimic is not a view: it is an editor, in the panel. */
 export type ShellView = 'board' | 'voices' | 'sentences';
 export type NavStyle = 'sidebar' | 'tabs';
-export type EditorKind = 'mimic' | 'temp-edit' | 'sound-edit' | 'activity';
+export type EditorKind = 'mimic' | 'temp-edit' | 'sound-edit' | 'activity' | 'organize';
 /** How the open panel is shown: a grid column, a sheet over the board, or a bar above the player. */
 export type PanelMode = 'docked' | 'sheet' | 'minimized';
 
@@ -30,14 +30,16 @@ export type EditorRequest =
   | { kind: 'mimic'; draftId?: string; sessionId?: string }
   | { kind: 'temp-edit'; sourceId: string; fields?: Partial<EditFields> }
   | { kind: 'sound-edit'; soundId: string; focus?: 'effects' | 'statistics' }
-  | { kind: 'activity' };
+  | { kind: 'activity' }
+  // Organize mode's Review changes (2.44).
+  | { kind: 'organize' };
 
 export type ViewRequest = { view: ShellView; focus?: string };
 
 export const OPEN_EDITOR_EVENT = 'soundpad-web:open-editor';
 export const SHOW_VIEW_EVENT = 'soundpad-web:show-view';
 
-const kinds: readonly EditorKind[] = ['mimic', 'temp-edit', 'sound-edit', 'activity'];
+const kinds: readonly EditorKind[] = ['mimic', 'temp-edit', 'sound-edit', 'activity', 'organize'];
 const views: readonly ShellView[] = ['board', 'voices', 'sentences'];
 
 /** True for a well-formed request (events can come from anywhere on the page). */
