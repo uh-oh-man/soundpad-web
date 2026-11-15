@@ -476,19 +476,19 @@ bridge.UseVoiceReplayLibrary(VoiceReplayFixture.Create(Path.Combine(directory, "
 // Exact cue starts and regions (2.37) only with --exact-slices: the browser tests check the play-then-seek commands
 // Soundpad receives for a cue start (DoPlaySound(n), DoSeekMs(t)), which slices replace with DoPlaySound(slot).
 bridge.UseExactSlices(args.Contains("--exact-slices"));
+// 2.44: --resume-update continues the session a harness with --handoff-out left (HarnessUpdates.cs).
+var resumeServer = await HarnessStageH.BeforeServer(args, bridge);
 await bridge.Poll(true);
 // --owner-key <64 hex> (2.36) stands in for the Soundpad Web window's key, so e2e tests can open a page that takes
 // hosting over. Without it there is no window: the first protocol-3 page becomes the session owner, as in --no-window.
 int ownerAt = Array.IndexOf(args, "--owner-key");
 var ownerKey = ownerAt >= 0 && ownerAt + 1 < args.Length && System.Text.RegularExpressions.Regex.IsMatch(args[ownerAt + 1], "^[a-f0-9]{64}$") ? args[ownerAt + 1] : null;
-await using var server = new LocalServer(bridge, args.FirstOrDefault() ?? "http://127.0.0.1:5173", ownerKey) { Log = line => Console.WriteLine("TEST_LOG " + line) };
+await using var server = new LocalServer(bridge, args.FirstOrDefault() ?? "http://127.0.0.1:5173", ownerKey, resumeServer) { Log = line => Console.WriteLine("TEST_LOG " + line) };
 await server.Start();
 HarnessStageH.AfterBridge(args, bridge, server);
 Console.WriteLine("TEST_READY " + Json.Write(new { port = server.Port, token = server.Token }));
 using var stop = new CancellationTokenSource();
-// Any line ends the harness, except a verb (HarnessStageH.cs): "restart-history" (2.41) replaces the recording history
-// with a new one at once (the same as the companion restarting Mimic), so browser tests can check that nothing of the
-// old one carries over; Stage H's work packages register more.
+// Any line ends the harness, except the verbs of HarnessStageH.cs (restart-history since 2.41, Stage H's since 2.44).
 _ = Task.Run(() =>
 {
     while (Console.ReadLine() is { } line && HarnessVerbs.Run(line, bridge)) { }

@@ -74,6 +74,7 @@ import { currentOpener, returnFocus } from './focus-return';
 import { useUnreadNotices } from './notifications';
 import { useNoticeSounds } from './notice-sound';
 import { useTempAssetsSync } from './temp-assets';
+import { UpdateDialogHost, UpdateOffer } from './components/updates/UpdateOffer';
 // Stylesheets in their cascade order (Stage G spec 3.1). Each later file overrides earlier ones at equal
 // specificity; see the ownership note at the top of each file. DM Sans (self-hosted, SIL OFL 1.1, see
 // THIRD-PARTY-NOTICES.md) comes right after the tokens: its variable-weight faces, latin and latin-ext by
@@ -90,6 +91,7 @@ import './playback.css';
 import './surfaces.css';
 // Stage H (2.44): each work package's own file, after Stage G's.
 import './backups.css';
+import './updates.css';
 
 const viewLabels: Record<(typeof viewModes)[number], string> = {
   icons: 'Icons',
@@ -718,6 +720,8 @@ function App() {
             ) : (
               <>
                 <WhatsNew projectUrl={repositoryUrl || PROJECT_URL} />
+                {/* 2.44 (gate updater): a newer companion is offered once per launch. */}
+                <UpdateOffer />
                 {connected && (protocol < 2 || needsCompanionUpdate) && (
                   <aside className="companion-update" role="status">
                     <strong>
@@ -1173,6 +1177,7 @@ function App() {
       </AppShell>
       <NoticeAnnouncer />
       <BackupLayoutSync workspace={w} ready={personal.ready} replace={personal.replace} />
+      <UpdateDialogHost />
       {settings && (
         <Modal label="Session & access" onClose={() => setSettings(false)}>
           <SettingsDialog

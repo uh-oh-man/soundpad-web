@@ -28,7 +28,9 @@ public record Snapshot(int V, long Revision, bool Available, string? Error, Libr
     // 2.43: rises when the host's shared style (ui.json, gate uiSync) changes, so host pages fetch uiPrefsGet. In memory only.
     long UiRevision = 0,
     // 2.44 (Stage H): rises when the backup settings, a backup run or a restore changes (host pages fetch backupSettings).
-    long Backups = 0);
+    long Backups = 0,
+    // 2.44 (gate updater): the self-update state, host only (pages strip it for guests). Left out when there is none.
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] UpdateStatus? Update = null);
 public record Participant(string Id, string Name);
 public record ParticipantPlays(string Name, long Count);
 public sealed class SoundStatistics

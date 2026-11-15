@@ -239,6 +239,22 @@ const envelopeSchema = z.object({ id: z.uuid(), op: z.string().max(40) });
 const fromNewerPage = (error: z.ZodError) =>
   error.issues.every((i) => i.code === 'unrecognized_keys' || i.code === 'invalid_value');
 const byteLength = (value: unknown) => new TextEncoder().encode(JSON.stringify(value)).byteLength;
+/** Snapshot fields only the host sees (Stage H, 2.44): guests' copies never carry them. */
+const HOST_ONLY = [
+  'update',
+  'soundpadProblem',
+  'companionElevated',
+  'hotkeys',
+  'setupDone',
+  'backups',
+] as const;
+function hostOnly(state: Snapshot): Snapshot {
+  if (!HOST_ONLY.some((key) => key in state)) return state;
+  const copy: Record<string, unknown> = { ...state };
+  for (const key of HOST_ONLY) delete copy[key];
+  return copy as Snapshot;
+}
+
 export class Session {
   private layoutAction?: RequestAction<string, string>;
   private layouts = new Map<string, SharedLayout>();
@@ -985,19 +1001,18 @@ export class Session {
     // How much history a crash recovered, and the host's disk problems, are the host's (2.39): they describe
     // recording from before any guest joined.
     const history = state.mimic?.history;
+    // Stage H (2.44): the host's update state, Soundpad diagnosis, hotkeys, setup and backups are the host's.
+    const own = hostOnly(state);
     const base =
       history && (history.recoveredMs || history.problem)
         ? {
-            ...state,
+            ...own,
             mimic: { ...state.mimic!, history: { ...history, recoveredMs: 0, problem: null } },
           }
-        : state;
-    // Stage H (2.44): what describes the host's own PC (backups) never reaches a guest.
-    const shown = base.backups === undefined ? base : { ...base };
-    delete shown.backups;
+        : own;
     return override
-      ? { ...shown, permissions: effectivePermissions(shown.permissions, override) }
-      : shown;
+      ? { ...base, permissions: effectivePermissions(base.permissions, override) }
+      : base;
   }
   private participantOf(peer: string, raw: unknown) {
     const person = participantSchema.safeParse(raw);

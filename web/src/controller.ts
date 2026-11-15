@@ -10,6 +10,7 @@ import {
 } from './protocol';
 import { acceptWaveform, clearWaveforms } from './waveform-cache';
 import { waveformSchema } from './protocol';
+import { GUEST_UPDATING, UPDATING_STATUS } from './updates';
 import {
   LocalBridge,
   LOBBY_VIEW_MAX,
@@ -529,7 +530,9 @@ export class Controller {
       },
       (status) => {
         this.live = false;
-        this.update({ status, state: { ...this.view.state, available: false, error: status } });
+        // Guests see the host's companion error: while it restarts for an update, say so (2.44).
+        const error = status === UPDATING_STATUS ? GUEST_UPDATING : status;
+        this.update({ status, state: { ...this.view.state, available: false, error } });
         this.session?.broadcast(true);
       },
       (raw) => {
@@ -549,7 +552,13 @@ export class Controller {
     );
   }
   /** The companion named this page the session owner or a view (2.36). */
-  private async takeRole({ role, identity, settings }: HostRole) {
+  private async takeRole({ role, identity, settings, ended }: HostRole) {
+    // 2.44: the companion restarted for an update while hosting was ended. This page (the new window,
+    // usually) shows Resume hosting instead of starting a new invitation by itself.
+    if (role === 'owner' && ended && !this.session) {
+      this.endedBeforeUpdate();
+      return;
+    }
     const was = this.role;
     this.role = role;
     this.relayed = identity;
@@ -702,6 +711,31 @@ export class Controller {
     if (this.role !== 'owner' || !this.session) return;
     if (action.action === 'rotate') void this.rotate();
     else if (this.view.guests.includes(action.peer)) this.disconnect(action.peer);
+  }
+  /** Hosting was ended before the companion updated (2.44): the page goes where End hosting leaves it. */
+  private endedBeforeUpdate() {
+    this.bridge?.close();
+    this.bridge = undefined;
+    this.live = false;
+    this.role = undefined;
+    this.relayed = null;
+    try {
+      sessionStorage.setItem('soundpad-ended', '1');
+    } catch {
+      /* Resume hosting still works in this tab */
+    }
+    this.update({
+      mode: 'landing',
+      state: EMPTY,
+      status: 'Hosting ended',
+      resumeAvailable: true,
+      guests: [],
+      people: {},
+      invite: '',
+      hosting: 'tab',
+      requests: [],
+      links: {},
+    });
   }
   resume() {
     if (!this.address) return;

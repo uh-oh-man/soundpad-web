@@ -1,0 +1,10 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- 2.44 (WP2): a stand-in "new version" for scripts/update-swap-test.ps1. Never shipped. Published with
+       -p:Version=<x.y.z> so its ProductVersion matches the fake release, single-file and self-contained like the
+       companion, at the same runtime version (no other runtime pack is needed). -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType><TargetFramework>net10.0</TargetFramework><Nullable>enable</Nullable><ImplicitUsings>enable</ImplicitUsings>
+    <AssemblyName>SoundpadWeb</AssemblyName><RuntimeIdentifier>win-x64</RuntimeIdentifier><Version>0.0.1</Version>
+    <PublishSingleFile>true</PublishSingleFile><SelfContained>true</SelfContained><RuntimeFrameworkVersion>10.0.13</RuntimeFrameworkVersion>
+  </PropertyGroup>
+</Project>

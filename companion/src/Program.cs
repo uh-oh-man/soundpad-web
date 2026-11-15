@@ -31,7 +31,9 @@ internal static class Program
         {
             // The 2.35 companion: a console window, Enter or its X stops it.
             ConsoleLink.EnsureWindow();
-            return Task.Run(() => Run(args, null, fallback)).GetAwaiter().GetResult();
+            int result = Task.Run(() => Run(args, null, fallback)).GetAwaiter().GetResult();
+            // 2.44: everything of this process is closed now (server, pipe, lock); the swap and its watchdog run here.
+            return pendingUpdate is { } swap ? swap.Finish() : result;
         }
         Application.SetHighDpiMode(HighDpiMode.PerMonitorV2);
         Application.EnableVisualStyles();
@@ -42,7 +44,43 @@ internal static class Program
         Application.Run(ui.Context);
         int code = companion.GetAwaiter().GetResult();
         if (ui.DataFolder != null) ui.ForgetLaunch(ui.DataFolder);
-        return code;
+        return pendingUpdate is { } update ? update.Finish() : code;
+    }
+
+    /// <summary>Set when the host confirmed an update (2.44): Main finishes it once Run has closed everything.</summary>
+    private static PendingUpdate? pendingUpdate;
+
+    /// <summary>The build's GitHub repository for updates (AssemblyMetadata UpdateRepository, set only by CI), or null.</summary>
+    private static string? Metadata(string key) => System.Reflection.Assembly.GetExecutingAssembly()
+        .GetCustomAttributes(typeof(System.Reflection.AssemblyMetadataAttribute), false)
+        .Cast<System.Reflection.AssemblyMetadataAttribute>().FirstOrDefault(a => a.Key == key)?.Value;
+
+    /// <summary>The flags a relaunch after an update keeps (2.44): where the data is, which Soundpad and website, how it shows.</summary>
+    private static List<string> SafeFlags(string[] args, string directory)
+    {
+        var kept = new List<string> { "--data-dir", directory };
+        foreach (var key in new[] { "--pipe", "--site", "--update-source" })
+        {
+            int i = Array.IndexOf(args, key);
+            if (i >= 0 && i + 1 < args.Length) { kept.Add(key); kept.Add(args[i + 1]); }
+        }
+        foreach (var flag in new[] { "--dev", "--hidden-window", "--no-window", "--no-browser" }) if (args.Contains(flag)) kept.Add(flag);
+        return kept;
+    }
+
+    /// <summary>
+    /// The data folder's lock: one companion at a time. A second one says so in plain words (2.44). After an update the
+    /// new process waits up to 30 s for the old one to let go of it.
+    /// </summary>
+    private static FileStream Lock(string directory, bool resuming)
+    {
+        var path = Path.Combine(directory, "companion.lock");
+        for (long until = Environment.TickCount64 + (resuming ? 30000 : 0); ; Thread.Sleep(200))
+        {
+            try { return new FileStream(path, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None); }
+            catch (IOException) when (Environment.TickCount64 < until) { }
+            catch (IOException) { throw new InvalidOperationException("Soundpad Web is already running. Use its window or tray, or quit it first."); }
+        }
     }
 
     private static async Task<int> Transcribe(string[] args)
@@ -74,20 +112,47 @@ internal static class Program
         try
         {
             string? Arg(string key) { int i = Array.IndexOf(args, key); return i >= 0 && i + 1 < args.Length ? args[i + 1] : null; }
-            var directory = Arg("--data-dir") ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "SoundpadWeb");
+            var directory = Path.GetFullPath(Arg("--data-dir") ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "SoundpadWeb"));
             Directory.CreateDirectory(directory);
-            using var instanceLock = new FileStream(Path.Combine(directory, "companion.lock"), FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
+            // 2.44: started by the companion that updated itself, to continue its session (see docs/UPDATES.md).
+            string? resumeId = Arg("--resume-update") is { } rid && System.Text.RegularExpressions.Regex.IsMatch(rid, "^[a-f0-9]{32}$") ? rid : null;
+            int? waitPid = int.TryParse(Arg("--wait-pid"), out int wp) && wp > 0 ? wp : null;
+            using var instanceLock = Lock(directory, resumeId != null);
             // Only the instance that holds the lock writes the log.
             CompanionLog.Start(directory);
+            var exePath = Environment.ProcessPath is { } running && Path.GetFileName(running).Equals("SoundpadWeb.exe", StringComparison.OrdinalIgnoreCase) ? running : null;
+            UpdateHandoff? handoff = null;
+            if (resumeId != null)
+            {
+                handoff = UpdateHandoffFile.TryConsume(directory, resumeId, waitPid, () => DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(), UpdateHandoffFile.Running, out var problem);
+                if (handoff == null)
+                {
+                    Console.WriteLine($"[{DateTime.Now:HH:mm:ss}] {problem} Starting as after an unexpected exit.");
+                    // The companion that updated is still waiting: it puts the previous version back and starts that instead.
+                    if (waitPid is int watcher && UpdateHandoffFile.Running(watcher)) return 3;
+                }
+            }
+            // A normal start: whatever an earlier update left is removed, the hand-over's private key first (2.44).
+            else UpdateFiles.CleanLeftovers(directory, exePath);
             using var pipe = new SoundpadPipe(Arg("--pipe") ?? "sp_remote_control");
             using var bridge = new Bridge(pipe, new StateStore(directory));
-            var builtInWebsite = System.Reflection.Assembly.GetExecutingAssembly()
-                .GetCustomAttributes(typeof(System.Reflection.AssemblyMetadataAttribute), false)
-                .Cast<System.Reflection.AssemblyMetadataAttribute>().FirstOrDefault(a => a.Key == "WebsiteUrl")?.Value;
+            var builtInWebsite = Metadata("WebsiteUrl");
             bridge.MimicLog += message => Console.WriteLine($"[{DateTime.Now:HH:mm:ss}] Mimic: {message}");
+            // Updates (2.44): from this project's GitHub releases in a CI build, from a loopback test server with
+            // --update-source, and not at all otherwise.
+            UpdateSource? updateSource = null;
+            if (Arg("--update-source") is { } testSource)
+            {
+                updateSource = UpdateSource.ForTest(testSource, out var refusal);
+                if (updateSource == null) Console.WriteLine(refusal);
+            }
+            else updateSource = UpdateSource.ForRepository(Metadata("UpdateRepository"));
+            bridge.ConfigureUpdates(new UpdateOptions { Source = updateSource, Current = typeof(Program).Assembly.GetName().Version?.ToString(3) ?? "0.0.0", ExePath = exePath, DataDir = directory });
             // Recording history left by a launch that did not close normally is recovered (the host can discard it);
             // anything else left over is removed (2.39). This instance holds the data folder's lock, so nothing else uses it.
-            bridge.RecoverHistory();
+            // After an update the session goes on instead (2.44): its history, drafts, Temp, guests and capture.
+            if (handoff != null) await bridge.ResumeFromHandoff(handoff.Bridge);
+            else bridge.RecoverHistory();
             var site = Arg("--site") ?? bridge.Website ?? Environment.GetEnvironmentVariable("SOUNDPAD_WEB_URL") ?? builtInWebsite;
             if (string.IsNullOrWhiteSpace(site))
             {
@@ -106,8 +171,9 @@ internal static class Program
             // The window's page proves it is the window with this key (2.36). New every launch, kept in memory only:
             // it is never printed or saved by the companion.
             var ownerKey = ui == null ? null : Convert.ToHexString(RandomNumberGenerator.GetBytes(32)).ToLowerInvariant();
-            await using var server = new LocalServer(bridge, origin, ownerKey) { Log = line => Console.WriteLine($"[{DateTime.Now:HH:mm:ss}] {line}") };
+            await using var server = new LocalServer(bridge, origin, ownerKey, handoff?.Server) { Log = line => Console.WriteLine($"[{DateTime.Now:HH:mm:ss}] {line}") };
             await server.Start();
+            bool updating = false;
             using var shutdown = new CancellationTokenSource();
             Console.CancelKeyPress += (_, e) => { e.Cancel = true; shutdown.Cancel(); };
             // Closing a console window with X (or logging off / shutting down) gives a console app about 5 seconds
@@ -135,8 +201,28 @@ internal static class Program
             void WatchEnter() => _ = Task.Run(() => { if (Console.ReadLine() != null) shutdown.Cancel(); });
             if (ConsoleLink.ReadsEnter) WatchEnter();
             // After a crash the last session's Temp waits for the host's Recover or Discard (2.40); otherwise it is cleaned up as before.
-            try { await bridge.StartupCleanup(); } catch (Exception) { Console.WriteLine("Temporary audio cleanup will retry when Soundpad is available."); }
+            // After an update nothing is cleaned up: the session continues (2.44).
+            if (handoff == null) { try { await bridge.StartupCleanup(); } catch (Exception) { Console.WriteLine("Temporary audio cleanup will retry when Soundpad is available."); } }
             var url = clean + "#host=" + server.Port + "." + server.Token;
+            // Tests only (2.44, scripts/update-swap-test.ps1): with --dev, --launch-file writes the launch link (it holds the
+            // token, which the companion never prints) to a file the test made, so a test client can connect without a browser.
+            if (args.Contains("--dev") && Arg("--launch-file") is { } launchFile) { try { File.WriteAllText(launchFile, url); } catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException) { Console.WriteLine("The launch file could not be written: " + ex.Message); } }
+            // 2.44: the host confirmed an update. Pages that can show it are told, the hand-over is kept in memory (it is
+            // written just before the new version starts), and the companion stops without its quit cleanup.
+            bridge.UpdateExitRequested += async exit =>
+            {
+                await server.NotifyUpdating(exit.Version);
+                var window = ui != null ? await ui.Placement(args.Contains("--hidden-window")) : new WindowHandoff(true, false);
+                var id = Guid.NewGuid().ToString("N");
+                var current = typeof(Program).Assembly.GetName().Version?.ToString(3) ?? "0.0.0";
+                var serverPart = server.Export();
+                UpdateHandoff Make() => new() { Id = id, CreatedUtcMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(), DataDir = directory, OldPid = Environment.ProcessId, FromVersion = current, ToVersion = exit.Version, Server = serverPart, Bridge = exit.Bridge, Window = window };
+                if (exePath == null || exit.DownloadPath == null) { Console.WriteLine("This build cannot replace its own EXE."); return; }
+                pendingUpdate = new PendingUpdate(new SwapPlan(exePath, exit.DownloadPath, exit.Version, current, directory, id, SafeFlags(args, directory), () => UpdateHandoffFile.Protect(Make()), ConsoleLink.OwnConsole));
+                updating = true;
+                ui?.CloseForUpdate();
+                shutdown.Cancel();
+            };
             bool closedWindow = false;
             var cleaned = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
             void OpenBrowser() { if (!args.Contains("--no-browser")) Process.Start(new ProcessStartInfo(url) { UseShellExecute = true }); }
@@ -145,7 +231,8 @@ internal static class Program
             if (ui == null) Console.WriteLine($"Soundpad Web is running on loopback port {server.Port}.\nKeep this window and your host browser tab open. {stops}\nAudio devices and Soundpad settings are unchanged.");
             else Console.WriteLine($"Soundpad Web is running on loopback port {server.Port}.\nHosting runs in the Soundpad Web window; closing it stops the companion.\nAudio devices and Soundpad settings are unchanged.");
             if (fallback != null) Console.WriteLine(fallback);
-            if (ui == null) OpenBrowser();
+            // After an update open pages reconnect by themselves; a browser opens only when the port had to change (2.44).
+            if (ui == null) { if (handoff == null || !server.PortKept) OpenBrowser(); }
             else
             {
                 await ui.Open(url + "&owner=" + ownerKey, origin, directory,
@@ -180,9 +267,10 @@ internal static class Program
                                 closedWindow = true; shutdown.Cancel();
                             });
                         });
-                    });
+                    },
+                    resumed: handoff?.Window);
             }
-            long nextLibrary = 0; int pollFailures = 0;
+            long nextLibrary = 0; int pollFailures = 0; bool readyWritten = handoff == null;
             using var wake = new SemaphoreSlim(0, 1);
             // Commands finish on several threads at once (a Stop does not wait for the gate, 2.35): two may both see the
             // semaphore empty, and the second Release must not turn an accepted command into a failure.
@@ -197,23 +285,38 @@ internal static class Program
                     // The poll loop must never end the companion (2.35): whatever one poll runs into, the next one tries again.
                     try { await bridge.Poll(refresh); }
                     catch (Exception ex) when (ex is not OutOfMemoryException) { if (pollFailures++ == 0) Console.WriteLine($"[{DateTime.Now:HH:mm:ss}] A status check failed and will be retried: {ex.Message}"); }
+                    if (!readyWritten)
+                    {
+                        // 2.44: the server runs and the first poll ran: the old process's watchdog may let go. The hand-over goes.
+                        readyWritten = true;
+                        try { UpdateFiles.WriteAtomic(Path.Combine(directory, "update-ready." + handoff!.Id), System.Text.Encoding.UTF8.GetBytes(Json.Write(new UpdateReady(typeof(Program).Assembly.GetName().Version?.ToString(3) ?? "0.0.0", Environment.ProcessId)))); }
+                        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { Console.WriteLine("The update could not report that it started: " + ex.Message); }
+                        UpdateHandoffFile.Finish(directory);
+                        Console.WriteLine($"[{DateTime.Now:HH:mm:ss}] Updated to version {typeof(Program).Assembly.GetName().Version?.ToString(3)}; the session continues.");
+                    }
+                    else if (refresh && updateSource != null) bridge.Updates.StartLaunchCheck();
                     try { await wake.WaitAsync(TimeSpan.FromMilliseconds(bridge.Snapshot.Playback.Status is "PLAYING" or "SEEKING" ? 250 : bridge.Snapshot.Playback.Status == "PAUSED" ? 500 : 1500), shutdown.Token); }
                     catch (OperationCanceledException) { }
                 }
             }
             finally
             {
-                if (closedWindow)
+                // Leaving for an update (2.44): no quit cleanup. Temp, the history and the journal session stay for the next process.
+                if (updating) cleaned.TrySetResult();
+                else if (closedWindow)
                 {
                     // As the console window's X did in 2.35: a Temp sound still playing is stopped so cleanup can remove it.
                     Console.WriteLine("Closing: removing temporary audio...");
                     try { await bridge.StopTemporaryPlayback().WaitAsync(TimeSpan.FromSeconds(1)); } catch (Exception) { /* cleanup below retries next start */ }
                 }
-                try { await bridge.CleanupSession(); } catch (Exception) { Console.WriteLine("Temporary entries retained for cleanup on next launch."); }
-                // Before `cleaned`: on logoff or shutdown the window's closing callback returns once it is set, and Windows
-                // may end the process before Bridge.Dispose runs (which still does it, as a backstop, on every other exit).
-                try { bridge.CloseHistory(); } catch (Exception) { /* removed by the next launch's recovery */ }
-                cleaned.TrySetResult();
+                if (!updating)
+                {
+                    try { await bridge.CleanupSession(); } catch (Exception) { Console.WriteLine("Temporary entries retained for cleanup on next launch."); }
+                    // Before `cleaned`: on logoff or shutdown the window's closing callback returns once it is set, and Windows
+                    // may end the process before Bridge.Dispose runs (which still does it, as a backstop, on every other exit).
+                    try { bridge.CloseHistory(); } catch (Exception) { /* removed by the next launch's recovery */ }
+                    cleaned.TrySetResult();
+                }
             }
             return Environment.ExitCode;
         }

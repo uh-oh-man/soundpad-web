@@ -1,45 +1,77 @@
+using SoundpadWeb;
 namespace SoundpadWeb.Testing;
 
 /// <summary>
 /// The harness's stdin verbs (Stage H, 2.44): each line names a verb and its argument; a line no verb knows ends the
-/// harness, as any line did before. Work packages register their own verbs.
+/// harness, as any line did before. HarnessStageH and the work packages' Harness*.cs files register them.
 /// </summary>
 public static class HarnessVerbs
 {
-    private static readonly Dictionary<string, Action<Bridge, string>> verbs = new(StringComparer.Ordinal);
-    public static void Register(string verb, Action<Bridge, string> run) { lock (verbs) verbs[verb] = run; }
-    /// <summary>Runs the line's verb; false when no verb knows it (the harness then quits).</summary>
+    private static readonly Dictionary<string, Func<Bridge, string, bool>> verbs = new(StringComparer.Ordinal);
+    /// <summary>Registers <paramref name="verb"/>: the line is "verb" or "verb arguments".</summary>
+    public static void Register(string verb, Action<Bridge, string> run) { lock (verbs) verbs[verb] = (b, rest) => { run(b, rest); return true; }; }
+    /// <summary>A verb that may end the harness: it returns false to quit after it ran (WP2's update-exit).</summary>
+    public static void RegisterFinal(string verb, Func<Bridge, string, bool> run) { lock (verbs) verbs[verb] = run; }
+    /// <summary>Runs the line's verb. False for an unknown line (the harness quits) or a verb that ends it.</summary>
     public static bool Run(string line, Bridge bridge)
     {
-        var space = line.IndexOf(' ');
+        line = line.TrimStart('﻿'); // Windows PowerShell 5.1 starts what it writes to a child's input with a byte order mark
+        int space = line.IndexOf(' ');
         var verb = space < 0 ? line : line[..space];
-        Action<Bridge, string>? run;
+        Func<Bridge, string, bool>? run;
         lock (verbs) if (!verbs.TryGetValue(verb, out run)) return false;
-        try { run(bridge, space < 0 ? "" : line[(space + 1)..]); }
-        catch (Exception ex) when (ex is not OutOfMemoryException) { Console.WriteLine("TEST_LOG verb " + verb + " failed: " + ex.Message); }
-        return true;
+        try { return run(bridge, space < 0 ? "" : line[(space + 1)..]); }
+        catch (Exception ex) when (ex is not OutOfMemoryException) { Console.WriteLine("TEST_LOG harness verb " + verb + " failed: " + ex.Message); return true; }
     }
 }
 
 /// <summary>
-/// Stage H hooks of the harness (2.44). This copy was made by WP1 (backups) on a base without Phase 0; it calls only
-/// the backups hooks. The integrator's Phase 0 version (all four work packages) replaces it.
+/// Stage H (2.44) harness wiring: backups (HarnessBackups.cs), the updater (HarnessUpdates.cs), Organize mode
+/// (HarnessOrganize.cs) and setup with host-wide hotkeys (HarnessSetup.cs).
 /// </summary>
 public static class HarnessStageH
 {
+    /// <summary>The mock Soundpad of the e2e harness, for verbs that change what it answers.</summary>
+    public static MockSoundpad? Mock { get; set; }
+
     static HarnessStageH()
     {
-        // 2.41: the recording history is replaced by a new one at once (the same as the companion restarting Mimic).
+        // 2.41: the recording history is replaced by a new one at once (the same as the companion restarting Mimic),
+        // so browser tests can check that nothing of the old one carries over.
         HarnessVerbs.Register("restart-history", (bridge, _) =>
         {
             bridge.CloseHistory();
             bridge.Execute(new Command(2, Guid.NewGuid().ToString(), DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(), "mimicStart") with { SourceId = MimicFixture.Source.Id }, "host").GetAwaiter().GetResult();
         });
     }
-    /// <summary>Before the Bridge is made, with the data folder it will use.</summary>
-    public static void BeforeBridge(string[] args, string dataDir) => HarnessBackups.BeforeBridge(args, dataDir);
-    /// <summary>After the loopback server started, before TEST_READY.</summary>
-    public static void AfterBridge(string[] args, Bridge bridge, LocalServer server) => HarnessBackups.AfterBridge(args, bridge, server);
-    /// <summary>At the end of --make-rollback-fixture: every Stage H file a rollback must survive.</summary>
-    public static Task RollbackFixture(string dir, Bridge bridge) => HarnessBackups.RollbackFixture(dir, bridge);
+
+    /// <summary>Once the mock Soundpad's library is set up, before the Bridge is built (Organize fixtures).</summary>
+    public static void MockReady(string[] args, MockSoundpad mock, string dataDir)
+    {
+        Mock = mock;
+    }
+
+    /// <summary>Before the e2e harness builds its Bridge on <paramref name="dataDir"/>.</summary>
+    public static void BeforeBridge(string[] args, string dataDir)
+    {
+        HarnessBackups.BeforeBridge(args, dataDir);
+        HarnessUpdates.BeforeBridge(args, dataDir);
+    }
+
+    /// <summary>After the Bridge is set up and before the server starts; the server's resume values after an update (WP2).</summary>
+    public static Task<ServerHandoff?> BeforeServer(string[] args, Bridge bridge) => HarnessUpdates.BeforeServer(args, bridge);
+
+    /// <summary>After the e2e harness's server started, before TEST_READY.</summary>
+    public static void AfterBridge(string[] args, Bridge bridge, LocalServer server)
+    {
+        HarnessBackups.AfterBridge(args, bridge, server);
+        HarnessUpdates.AfterBridge(args, bridge, server);
+    }
+
+    /// <summary>At the end of --make-rollback-fixture, before the session ends: each package writes its persisted files into <paramref name="dir"/>.</summary>
+    public static async Task RollbackFixture(string dir, Bridge b)
+    {
+        await HarnessBackups.RollbackFixture(dir, b);
+        HarnessUpdates.RollbackFixture(dir, b);
+    }
 }

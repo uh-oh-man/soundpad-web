@@ -126,8 +126,26 @@ export const commandSchema = z
       'backupRestore',
       'backupAttach',
       'backupLayout',
+      'updateStatus',
+      'updateCheck',
+      'updateDownload',
+      'updateInstall',
+      'updateLater',
+      'updateSettings',
+      'organizeGet',
+      'organizeEdit',
+      'organizeApply',
+      'organizeResolve',
+      'organizeDiscard',
+      'organizePropose',
+      'organizeWithdraw',
+      'organizeSettings',
+      'setupGet',
+      'setupSet',
+      'hotkeysGet',
+      'hotkeysSet',
     ]),
-    // Stage H (2.44): the one payload field of every Stage H op (JSON, so a relayed command stays JSON).
+    // Stage H (2.44): the one payload field of every Stage H op (any JSON; each op's module checks it).
     body: z.json().optional(),
     // uiPrefsSet (2.43): the style choices to store (any subset).
     uiPrefs: z.lazy(() => uiPrefsInputSchema).optional(),
@@ -507,6 +525,8 @@ export const snapshotSchema = z.object({
   // 2.44 (gate backups): rises when the backup settings, a backup run or a restore changes; host pages
   // fetch backupSettings. Host only: never sent to guests (network/session.ts).
   backups: z.number().int().nonnegative().optional(),
+  // 2.44 (gate updater): the self-update state, host only (stripped for guests). Older companions omit it.
+  update: z.lazy(() => updateSnapshotSchema).optional(),
   permissions: z.object({
     remotePlayback: z.boolean(),
     guestCounter: z.boolean(),
@@ -588,6 +608,29 @@ export const ackSchema = z.object({
   error: z.string().max(2000).nullable().optional(),
   data: z.unknown().optional(),
 });
+/** The companion's self-update state (2.44, gate updater); see updates.ts for what each state shows. */
+export const updateSnapshotSchema = z.object({
+  state: z.enum([
+    'idle',
+    'checking',
+    'available',
+    'downloading',
+    'verifying',
+    'ready',
+    'installing',
+    'failed',
+    'unsupported',
+  ]),
+  current: z.string(),
+  latest: z.string().optional(),
+  notesUrl: z.string().optional(),
+  bytes: z.number().optional(),
+  total: z.number().optional(),
+  error: z.string().optional(),
+  reason: z.string().optional(),
+  offered: z.boolean().optional(),
+});
+export type UpdateSnapshot = z.infer<typeof updateSnapshotSchema>;
 export const EMPTY: Snapshot = {
   v: 1,
   revision: 0,

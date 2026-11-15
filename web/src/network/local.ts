@@ -14,6 +14,7 @@ import type { SharedLayout } from '../shared-layout';
 import type { HostIdentity } from './identity';
 import type { LobbyRequest } from './session';
 import type { SessionPolicy } from './policy';
+import { UPDATING_STATUS } from '../updates';
 export type BridgeAddress = { port: number; token: string };
 
 /**
@@ -26,6 +27,11 @@ export type HostRole = {
   identity: HostIdentity | null;
   /** The session settings an owner sent earlier in this launch (2.37); read with `readPolicy`. */
   settings?: unknown;
+  /**
+   * 2.44: the companion restarted for an update while hosting was ended, so this owner must not
+   * start hosting by itself (Resume hosting does).
+   */
+  ended?: boolean;
 };
 /** What the owner tells every view about the session, relayed by the companion. */
 export type SessionInfo = {
@@ -77,7 +83,12 @@ const roleSchema = z.object({
   identity: identitySchema.nullable().optional(),
   // Checked by the controller (readPolicy), which falls back to the defaults.
   settings: z.unknown().optional(),
+  ended: z.boolean().optional(),
 });
+/** 2.44: the companion is restarting for an update; only sent to pages whose hello said `updates`. */
+const updatingSchema = z.object({ type: z.literal('updating'), version: z.string().max(40) });
+/** How long after an "updating" message a lost connection still means the update (then the usual wording). */
+export const UPDATE_RECONNECT_MS = 180000;
 const peerId = z.string().min(1).max(100);
 const soundIds = z.array(z.string().regex(/^[a-f0-9]{64}$/)).max(50000);
 /** Most waiting guests a session message may list; a view refuses a message with more (2.37). */
@@ -150,6 +161,11 @@ export class LocalBridge {
    * command and would drop the connection over any other kind, so nothing else is sent to them.
    */
   private desktopSession = false;
+  /** When the companion said it is restarting for an update (2.44): reconnects say so and come sooner. */
+  private updatingSince = 0;
+  private updating() {
+    return this.updatingSince > 0 && Date.now() - this.updatingSince < UPDATE_RECONNECT_MS;
+  }
   private audience?: string;
   setAudience(value: string) {
     this.audience = value;
@@ -199,6 +215,9 @@ export class LocalBridge {
     const ws = new WebSocket(`ws://127.0.0.1:${this.address.port}/bridge`);
     this.socket = ws;
     this.desktopSession = false;
+    // Revisions are ordered within one companion process; after an update (2.44) the same address
+    // answers from a new process that counts from the start again. Each connection starts with a full state.
+    this.latest = undefined;
     const timeout = setTimeout(() => ws.close(), 8000);
     ws.onopen = () => {
       // Protocol 3 (2.36) asks a desktop-session companion for a role. Older companions read only the
@@ -211,10 +230,14 @@ export class LocalBridge {
           ...(this.desktop?.ownerKey ? { ownerKey: this.desktop.ownerKey } : {}),
           // 2.40: this page can show the quit prompt (only the window's page is ever asked).
           quitPrompt: true,
+          // 2.44: this page understands "updating" (older pages would drop the connection over it).
+          updates: true,
         }),
       );
     };
     ws.onmessage = (e) => {
+      // A closed bridge (End hosting, or hosting ended before an update) reads nothing more.
+      if (this.stopped) return;
       try {
         const data = JSON.parse(e.data);
         if (data.type === 'waveform') {
@@ -229,7 +252,16 @@ export class LocalBridge {
             role: role.role,
             identity: role.identity ?? null,
             settings: role.settings ?? undefined,
+            ...(role.ended && { ended: true }),
           });
+          return;
+        }
+        if (data.type === 'updating') {
+          // 2.44: the companion restarts for an update and comes back on the same port and token.
+          if (updatingSchema.safeParse(data).success) {
+            this.updatingSince = Date.now();
+            this.status(UPDATING_STATUS);
+          }
           return;
         }
         if (data.type === 'quitPrompt') {
@@ -263,6 +295,8 @@ export class LocalBridge {
             data.type === 'tick' ? this.latest?.library : undefined,
           );
           if (this.latest && s.revision < this.latest.revision) return;
+          // The first state of a new connection after an update: the new companion is here.
+          if (!this.latest) this.updatingSince = 0;
           this.latest = s;
           clearTimeout(timeout);
           this.state(s);
@@ -281,7 +315,9 @@ export class LocalBridge {
     };
     ws.onerror = () =>
       this.status(
-        'Cannot reach companion. Keep the EXE running and allow this browser’s local-network prompt. Chrome or Edge is recommended.',
+        this.updating()
+          ? UPDATING_STATUS
+          : 'Cannot reach companion. Keep the EXE running and allow this browser’s local-network prompt. Chrome or Edge is recommended.',
       );
     ws.onclose = () => {
       clearTimeout(timeout);
@@ -293,8 +329,10 @@ export class LocalBridge {
       this.waiting = 0;
       this.controls.clear();
       if (!this.stopped) {
-        this.status('Companion disconnected. Reconnecting…');
-        this.retry = setTimeout(() => this.connect(), 2500);
+        // While the companion restarts for an update the same port and token come back: try sooner.
+        const updating = this.updating();
+        this.status(updating ? UPDATING_STATUS : 'Companion disconnected. Reconnecting…');
+        this.retry = setTimeout(() => this.connect(), updating ? 1000 : 2500);
       }
     };
   }

@@ -39,11 +39,18 @@ jobs:
         run: npx playwright test --output test-results/webkit
         env:
           TEST_BROWSER: webkit
+      # UpdateRepository (2.44): the release EXE updates itself from this repository's releases; other builds never do.
       - name: Publish portable companion
-        run: dotnet publish companion/SoundpadWeb.Companion.csproj -c Release -r win-x64 --self-contained true -o artifacts/release "-p:WebsiteUrl=$env:PUBLIC_WEBSITE_URL"
+        run: dotnet publish companion/SoundpadWeb.Companion.csproj -c Release -r win-x64 --self-contained true -o artifacts/release "-p:WebsiteUrl=$env:PUBLIC_WEBSITE_URL" "-p:UpdateRepository=$env:UPDATE_REPOSITORY"
         env:
           PUBLIC_WEBSITE_URL: ${{ vars.SOUNDPAD_WEB_URL || format('https://{0}.github.io/{1}/', github.repository_owner, github.event.repository.name) }}
+          UPDATE_REPOSITORY: ${{ github.repository }}
       - run: ./scripts/smoke-exe.ps1 -UseEmbeddedWebsite
+      # The self-update (2.44) end to end with a local fake release server: the swap, the verification refusals and the
+      # rollback of a new version that never starts. Publishes a "new" build (version + 1) into a temp folder.
+      - name: Self-update swap test
+        shell: powershell
+        run: ./scripts/update-swap-test.ps1 -Exe artifacts/release/SoundpadWeb.exe
       - name: Hash portable executable
         shell: pwsh
         run: (Get-FileHash artifacts/release/SoundpadWeb.exe -Algorithm SHA256).Hash | Set-Content artifacts/release/SHA256.txt

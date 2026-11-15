@@ -54,12 +54,13 @@ public sealed partial class Bridge(ISoundpad pipe, StateStore store) : IDisposab
         DisposeStageH();
         hotkey.Dispose(); waveformService.Dispose(); transcriber.Dispose(); audioWork.Dispose();
         // An ordinary quit deletes this launch's recording history and transcript (2.39); after a crash it is recovered instead.
-        try { CloseHistory(); } catch (Exception ex) when (ex is not OutOfMemoryException) { /* removed with the next launch's recovery */ }
+        // An update keeps it for the next process (2.44): EnterUpdateExit already closed it without deleting.
+        if (!updateExit) { try { CloseHistory(); } catch (Exception ex) when (ex is not OutOfMemoryException) { /* removed with the next launch's recovery */ } }
         mimicCapture.Dispose(); pcm.Dispose();
     }
     public Snapshot Snapshot => new(1, revision, available, error, parsed.Public, playback, disk.Counter, disk.Permissions, 2,
         Convert.ToHexString(System.Security.Cryptography.HMACSHA256.HashData(Convert.FromBase64String(disk.IdentityKey), System.Text.Encoding.UTF8.GetBytes("workspace-host-v2"))).ToLowerInvariant(), disk.StatisticsVersion, typeof(Bridge).Assembly.GetName().Version?.ToString(3), managed?.Public.Revision ?? 0, MimicSnapshot, playbackSuspended,
-        Interlocked.Read(ref draftsRevision), budgets.Revision, tempRecovery > 0 ? tempRecovery : null, VoicesRevisionNow, Interlocked.Read(ref sentencesRevision), counterSession, Interlocked.Read(ref uiRevision), BackupsRevisionH) { Permissions = PublicPermissions };
+        Interlocked.Read(ref draftsRevision), budgets.Revision, tempRecovery > 0 ? tempRecovery : null, VoicesRevisionNow, Interlocked.Read(ref sentencesRevision), counterSession, Interlocked.Read(ref uiRevision), BackupsRevisionH, UpdateSnapshotH) { Permissions = PublicPermissions };
     /// <summary>
     /// Kick presses since this companion started (2.43, gate kickSession): it moves with the lifetime counter (never
     /// below 0) and Reset clears both. In memory only, so a restart begins a new session and state.json is unchanged.

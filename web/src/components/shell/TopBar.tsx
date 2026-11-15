@@ -2,6 +2,7 @@ import { useEffect, useRef, type ReactNode } from 'react';
 import { AudioLines, History, Settings2 } from 'lucide-react';
 import { controller } from '../../controller';
 import { APP_VERSION_LABEL } from '../../version';
+import { UpdateChip } from '../updates/UpdateOffer';
 
 type View = ReturnType<typeof controller.getSnapshot>;
 
@@ -94,6 +95,8 @@ export function TopBar({
       <span className="edition">BROWSER REMOTE</span>
       {nav}
       <div className="top-actions">
+        {/* 2.44 (gate updater): after Later, the update stays one press away. */}
+        {mode !== 'landing' && <UpdateChip />}
         <span className={`status ${connected && state.available ? 'online' : ''}`} title={status}>
           <i />
           {statusLabel(

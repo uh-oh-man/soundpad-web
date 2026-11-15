@@ -67,7 +67,8 @@ jobs:
           $section
           "@
           Set-Content release-notes.md $notes -Encoding utf8
-          gh release create $tag artifacts/release/SoundpadWeb.exe artifacts/release/SHA256.txt --repo $env:REPOSITORY --title "$title" --notes-file release-notes.md
+          # --latest=false (2.44): a rebuilt old version must never become "latest", which the companion's updater reads.
+          gh release create $tag artifacts/release/SoundpadWeb.exe artifacts/release/SHA256.txt --repo $env:REPOSITORY --title "$title" --notes-file release-notes.md --latest=false
         env:
           GH_TOKEN: ${{ github.token }}
           REPOSITORY: ${{ github.repository }}
