@@ -395,6 +395,8 @@ if (args.FirstOrDefault() == "--make-rollback-fixture" && args.Length == 3)
     await Must(b.Execute(C("trimAudio") with { AssetId = asset.Id, PositionMs = 0, EndMs = 8000, Action = "echo" }, "host"), "effect");
     // 2.43: the host's shared style (ui.json), which older companions must ignore.
     await Must(b.Execute(C("uiPrefsSet") with { UiPrefs = System.Text.Json.JsonDocument.Parse("{\"navStyle\":\"tabs\",\"theme\":\"ocean\",\"motion\":\"reduce\",\"contrast\":\"high\",\"headerAnimation\":\"still\",\"activeDraft\":null}").RootElement.Clone() }, "host"), "ui prefs");
+    // Stage H (2.44): each package's new files, which older companions must ignore.
+    HarnessStageH.RollbackFixture(dir, b);
     if (args[2] == "ended") await Must(b.Execute(C("endSession"), "host"), "end");
     else b.Dispose();
     Console.WriteLine($"FIXTURE_READY {dir} pipe={soundpad.Name}");
@@ -461,6 +463,7 @@ mock.AllXml = all.ToString(); mock.CategoryXml = categories.ToString();
 int Option(string name) { int at = Array.IndexOf(args, name); return at >= 0 && at + 1 < args.Length && int.TryParse(args[at + 1], out int value) && value is >= 0 and <= 3000 ? value : 0; }
 mock.LatencyMs = Option("--latency-ms"); mock.SlowMs = Option("--slow-add-ms"); mock.SlowPrefix = "DoAddSound(";
 using var pipe = new SoundpadPipe(mock.Name, true);
+HarnessStageH.BeforeBridge(args, directory);
 using var bridge = new Bridge(pipe, new StateStore(directory));
 // The tone has been playing for 10 s when Mimic starts listening, so the browser tests' "Last 3 s" and "Last 10 s"
 // right after Start find that much recorded (2.39: the history view selects only audio that exists).
@@ -471,24 +474,22 @@ bridge.UseVoiceReplayLibrary(VoiceReplayFixture.Create(Path.Combine(directory, "
 // Exact cue starts and regions (2.37) only with --exact-slices: the browser tests check the play-then-seek commands
 // Soundpad receives for a cue start (DoPlaySound(n), DoSeekMs(t)), which slices replace with DoPlaySound(slot).
 bridge.UseExactSlices(args.Contains("--exact-slices"));
+// 2.44: --resume-update continues the session a harness with --handoff-out left (HarnessUpdates.cs).
+var resumeServer = await HarnessStageH.BeforeServer(args, bridge);
 await bridge.Poll(true);
 // --owner-key <64 hex> (2.36) stands in for the Soundpad Web window's key, so e2e tests can open a page that takes
 // hosting over. Without it there is no window: the first protocol-3 page becomes the session owner, as in --no-window.
 int ownerAt = Array.IndexOf(args, "--owner-key");
 var ownerKey = ownerAt >= 0 && ownerAt + 1 < args.Length && System.Text.RegularExpressions.Regex.IsMatch(args[ownerAt + 1], "^[a-f0-9]{64}$") ? args[ownerAt + 1] : null;
-await using var server = new LocalServer(bridge, args.FirstOrDefault() ?? "http://127.0.0.1:5173", ownerKey) { Log = line => Console.WriteLine("TEST_LOG " + line) };
+await using var server = new LocalServer(bridge, args.FirstOrDefault() ?? "http://127.0.0.1:5173", ownerKey, resumeServer) { Log = line => Console.WriteLine("TEST_LOG " + line) };
 await server.Start();
+HarnessStageH.AfterBridge(args, bridge, server);
 Console.WriteLine("TEST_READY " + Json.Write(new { port = server.Port, token = server.Token }));
 using var stop = new CancellationTokenSource();
-// Any line ends the harness, except "restart-history" (2.41): the recording history is replaced by a new one at once
-// (the same as the companion restarting Mimic), so browser tests can check that nothing of the old one carries over.
+// Any line ends the harness, except the verbs of HarnessStageH.cs (restart-history since 2.41, Stage H's since 2.44).
 _ = Task.Run(() =>
 {
-    while (Console.ReadLine() == "restart-history")
-    {
-        bridge.CloseHistory();
-        bridge.Execute(new Command(2, Guid.NewGuid().ToString(), DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(), "mimicStart") with { SourceId = MimicFixture.Source.Id }, "host").GetAwaiter().GetResult();
-    }
+    while (Console.ReadLine() is { } line && HarnessVerbs.Run(line, bridge)) { }
     stop.Cancel();
 });
 try { while (!stop.IsCancellationRequested) { await Task.Delay(250, stop.Token); await bridge.Poll(false); } }
