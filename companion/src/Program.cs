@@ -202,6 +202,9 @@ internal static class Program
             // After an update nothing is cleaned up: the session continues (2.44).
             if (handoff == null) { try { await bridge.StartupCleanup(); } catch (Exception) { Console.WriteLine("Temporary audio cleanup will retry when Soundpad is available."); } }
             var url = clean + "#host=" + server.Port + "." + server.Token;
+            // Tests only (2.44, scripts/update-swap-test.ps1): with --dev, --launch-file writes the launch link (it holds the
+            // token, which the companion never prints) to a file the test made, so a test client can connect without a browser.
+            if (args.Contains("--dev") && Arg("--launch-file") is { } launchFile) { try { File.WriteAllText(launchFile, url); } catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException) { Console.WriteLine("The launch file could not be written: " + ex.Message); } }
             // 2.44: the host confirmed an update. Pages that can show it are told, the hand-over is kept in memory (it is
             // written just before the new version starts), and the companion stops without its quit cleanup.
             bridge.UpdateExitRequested += async exit =>

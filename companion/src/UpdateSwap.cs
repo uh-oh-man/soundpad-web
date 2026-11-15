@@ -255,6 +255,9 @@ public sealed class WindowsLauncher : IProcessLauncher
                 startup.Flags = UseStdHandles | UseShowWindow; startup.ShowWindow = ShowNoActivate;
                 startup.StdInput = input.DangerousGetHandle(); startup.StdOutput = output.DangerousGetHandle(); startup.StdError = output.DangerousGetHandle();
                 flags |= CreateNoWindow; inherit = true;
+                // Only the two handles above go to the child: this process's own standard handles (a script's pipes,
+                // say) are not passed on, so whoever started the old companion is not kept waiting by the new one.
+                foreach (var which in new[] { -10, -11, -12 }) { var own = GetStdHandle(which); if (own != 0 && own != -1) SetHandleInformation(own, HandleFlagInherit, 0); }
             }
             if (!CreateProcess(null, line, 0, 0, inherit, flags, 0, Path.GetDirectoryName(exe), ref startup, out var info)) throw new Win32Exception(Marshal.GetLastWin32Error());
             CloseHandle(info.Thread);
@@ -316,6 +319,9 @@ public sealed class WindowsLauncher : IProcessLauncher
     [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true, EntryPoint = "CreateFileW")]
     private static extern SafeFileHandle CreateFile(string name, uint access, uint share, ref SecurityAttributes security, uint disposition, uint flags, nint template);
     [DllImport("kernel32.dll")] [return: MarshalAs(UnmanagedType.Bool)] private static extern bool CloseHandle(nint handle);
+    [DllImport("kernel32.dll")] private static extern nint GetStdHandle(int which);
+    [DllImport("kernel32.dll")] [return: MarshalAs(UnmanagedType.Bool)] private static extern bool SetHandleInformation(nint handle, uint mask, uint flags);
+    private const uint HandleFlagInherit = 1;
 }
 
 /// <summary>The swap Program.cs runs after Run returned (2.44): nothing of this process holds the data folder any more.</summary>
