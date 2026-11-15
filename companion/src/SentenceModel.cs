@@ -449,4 +449,86 @@ public sealed class SentenceStore
         if (!ValidId(sentenceId) || !AudioPattern.IsMatch(fileName)) throw new InvalidDataException("Unknown sentence audio.");
         return Path.Combine(AudioFolder, sentenceId, fileName);
     }
+
+    // ---- Backups (2.44) ----------------------------------------------------------------------------------------------
+
+    /// <summary>The file as it stands (its bytes) and every kept version's audio, for a backup. Null while the file is blocked.</summary>
+    public (byte[] Bytes, long Revision, (string SentenceId, int Version, string File, string Hash, long Bytes)[] Audio)? CaptureBackup()
+    {
+        lock (gate)
+        {
+            if (Blocked) return null;
+            return (JsonSerializer.SerializeToUtf8Bytes(file, Json.Options), Revision,
+                [.. file.Sentences.SelectMany(s => s.Versions.Select(v => (s.Id, v.N, v.File, v.Hash, v.Bytes)))]);
+        }
+    }
+
+    /// <summary>
+    /// Restores sentences from a backup: one that is gone comes back with all its versions; one that is here is left as
+    /// it is (<paramref name="replace"/> false) or replaced whole. Validated and saved like any change, within the
+    /// file's limits. Returns what was restored and, for Undo, each restored sentence's previous state (null: it was not here).
+    /// </summary>
+    public (int Restored, int Skipped, List<(string Id, SentenceProject? Before, long Updated)> Undo) Merge(IReadOnlyList<SentenceProject> projects, bool replace)
+    {
+        int restored = 0, skipped = 0; var undo = new List<(string, SentenceProject?, long)>();
+        Change(f =>
+        {
+            foreach (var p in projects)
+            {
+                var copy = Copy(p);
+                int at = f.Sentences.FindIndex(s => s.Id == p.Id);
+                if (at >= 0 && !replace) { skipped++; continue; }
+                if (at < 0 && f.Sentences.Count >= MaxSentences) throw new InvalidDataException($"There are as many sentences as the library can hold ({MaxSentences}).");
+                undo.Add((p.Id, at >= 0 ? Copy(f.Sentences[at]) : null, copy.Updated));
+                if (at >= 0) f.Sentences[at] = copy; else f.Sentences.Add(copy);
+                restored++;
+            }
+            return 0;
+        });
+        return (restored, skipped, undo);
+    }
+
+    /// <summary>Undoes a <see cref="Merge"/>: each sentence still as it was restored goes back to what it was. Returns how many did.</summary>
+    public int UndoMerge(IReadOnlyList<(string Id, SentenceProject? Before, long Updated)> undo)
+    {
+        int done = 0;
+        Change(f =>
+        {
+            foreach (var (id, before, updated) in undo)
+            {
+                int at = f.Sentences.FindIndex(s => s.Id == id);
+                if (at < 0 || f.Sentences[at].Updated != updated) continue;
+                if (before == null) f.Sentences.RemoveAt(at); else f.Sentences[at] = Copy(before);
+                done++;
+            }
+            return 0;
+        });
+        return done;
+    }
+
+    /// <summary>
+    /// Replaces the whole file with a backup's (validated first; the replaced file becomes sentences.v1.bak.json). A
+    /// file that could not be read is kept as sentences.v1.damaged-&lt;utc&gt;.json first, then replaced.
+    /// </summary>
+    public void ReplaceAll(SentenceFile next)
+    {
+        Validate(next);
+        lock (gate)
+        {
+            if (Blocked && File.Exists(MainPath)) { File.Copy(MainPath, Path.Combine(Folder, $"sentences.v1.damaged-{DateTime.UtcNow:yyyyMMddTHHmmssZ}.json"), true); Blocked = false; Problem = null; }
+            var before = file;
+            file = Copy(next);
+            try { SaveLocked(false, 0); }
+            catch { file = before; throw; }
+        }
+    }
+
+    /// <summary>Checks a backup's sentences file as Load would.</summary>
+    public static SentenceFile ParseBackup(byte[] bytes)
+    {
+        if (bytes.Length > MaxFileBytes) throw new InvalidDataException("The backup's sentences file is too large.");
+        var read = JsonSerializer.Deserialize<SentenceFile>(bytes, Json.Options) ?? throw new InvalidDataException("The backup's sentences file is empty.");
+        Validate(read);
+        return read;
+    }
 }

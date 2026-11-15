@@ -1,3 +1,4 @@
+using System.Text.Json;
 namespace SoundpadWeb;
 
 /// <summary>A change about to be recorded in the audit trail.</summary>
@@ -235,10 +236,12 @@ public sealed partial class VoiceLibrary
             if (!host && entries[0].By != by) throw new InvalidDataException("You can undo only your own changes.");
             if (audit.Any(a => a.UndoOf == group)) throw new InvalidDataException("That change was already undone.");
             var apply = new List<Action>(); var revert = new List<Action>(); var changes = new List<AuditChange>();
+            // Recordings and wanted words this Undo takes out again (a restore from a backup adds them with their voice, 2.44).
+            var leaving = entries.Where(x => x.Field == "record" && x.Before == null && x.Target is "recording" or "wanted").Select(x => x.TargetId).ToHashSet(StringComparer.Ordinal);
             foreach (var e in entries)
             {
                 if (Current(e) != e.After) throw new InvalidDataException("That changed again since. Nothing was undone.");
-                var (set, unset) = Setter(e);
+                var (set, unset) = Setter(e, leaving);
                 apply.Add(set); revert.Add(unset);
                 changes.Add(new(e.Target, e.TargetId, e.Field, e.After, e.Before));
             }
@@ -274,7 +277,7 @@ public sealed partial class VoiceLibrary
     private static T Read<T>(string? json) => json == null ? default! : System.Text.Json.JsonSerializer.Deserialize<T>(json, Json.Options)!;
 
     /// <summary>(set to Before, set back to After) for one entry.</summary>
-    private (Action Set, Action Unset) Setter(LibraryAudit e)
+    private (Action Set, Action Unset) Setter(LibraryAudit e, IReadOnlySet<string>? leaving = null)
     {
         switch (e.Target, e.Field)
         {
@@ -306,7 +309,7 @@ public sealed partial class VoiceLibrary
                 if (e.Before == null)
                 {
                     var voice = file.Voices.First(v => v.Id == e.TargetId);
-                    if (file.Recordings.Any(r => r.VoiceId == voice.Id) || file.Wanted.Any(w => w.VoiceId == voice.Id)) throw new InvalidDataException($"{voice.Name} has recordings or wanted words now. Nothing was undone.");
+                    if (file.Recordings.Any(r => r.VoiceId == voice.Id && leaving?.Contains(r.Id) != true) || file.Wanted.Any(w => w.VoiceId == voice.Id && leaving?.Contains(w.Id) != true)) throw new InvalidDataException($"{voice.Name} has recordings or wanted words now. Nothing was undone.");
                     return (() => file.Voices.Remove(voice), () => file.Voices.Add(voice));
                 }
                 var restored = Read<LibraryVoice>(e.Before);
@@ -374,4 +377,132 @@ public sealed partial class VoiceLibrary
     public string[] AllTags() { lock (gate) return [.. file.Recordings.SelectMany(r => r.Tags).Distinct(StringComparer.OrdinalIgnoreCase).Order(StringComparer.OrdinalIgnoreCase).Take(500)]; }
     public Dictionary<string, int> VoiceCounts() { lock (gate) return file.Recordings.GroupBy(r => r.VoiceId ?? "").ToDictionary(g => g.Key, g => g.Count()); }
     public int UnreviewedCount { get { lock (gate) return file.Recordings.Count(r => !r.Reviewed); } }
+
+    // ---- Restore from a backup (2.44) -----------------------------------------------------------------------------
+
+    /// <summary>
+    /// Brings recordings back from a backup as one action (one Undo): a recording that is gone comes back with its
+    /// words, and the voice it had when that voice is gone too; one that is here is skipped, or with
+    /// <paramref name="replace"/> its title, voice, tags, favourite, corrected text and review mark take the backup's
+    /// values (each change audited). Returns how many were restored and skipped, and the audit group (0: nothing changed).
+    /// </summary>
+    public (int Restored, int Skipped, long Group) RestoreRecordings(IReadOnlyList<LibraryRecording> recordings, IReadOnlyList<LibraryVoice> backupVoices, IReadOnlyDictionary<string, LibraryWord[]> backupWords, bool replace, string by, string byName)
+    {
+        lock (gate)
+        {
+            RequireWritable();
+            if (recordings.Count is 0 or > 500) throw new InvalidDataException("Choose between 1 and 500 recordings.");
+            var changes = new List<AuditChange>(); var redo = new List<Action>(); var undo = new List<Action>();
+            int restored = 0, skipped = 0;
+            // Voices first, so Undo (newest change first) takes the recordings out before their voice.
+            var voiceFor = new Dictionary<string, string?>(StringComparer.Ordinal);
+            int addingVoices = 0;
+            string? VoiceOf(string? id)
+            {
+                if (id == null) return null;
+                if (voiceFor.TryGetValue(id, out var known)) return known;
+                if (file.Voices.Any(v => v.Id == id)) return voiceFor[id] = id;
+                var old = backupVoices.FirstOrDefault(v => v.Id == id);
+                if (old == null) return voiceFor[id] = null;
+                // A voice of that name is here under another id: the recording takes that one.
+                if (file.Voices.FirstOrDefault(v => string.Equals(v.Name, old.Name, StringComparison.OrdinalIgnoreCase)) is { } same) return voiceFor[id] = same.Id;
+                if (file.Voices.Count + addingVoices >= MaxVoices) return voiceFor[id] = null;
+                addingVoices++;
+                var voice = new LibraryVoice { Id = old.Id, Name = old.Name, Color = old.Color, Created = old.Created };
+                changes.Add(new("voice", voice.Id, "record", null, Json.Write(voice)));
+                redo.Add(() => file.Voices.Add(voice)); undo.Add(() => file.Voices.Remove(voice));
+                return voiceFor[id] = voice.Id;
+            }
+            foreach (var old in recordings) VoiceOf(old.VoiceId);
+            int adds = 0;
+            foreach (var old in recordings.DistinctBy(r => r.Id))
+            {
+                if (!ValidId(old.Id)) throw new InvalidDataException("A recording in the backup is damaged.");
+                var voice = VoiceOf(old.VoiceId);
+                if (byId.TryGetValue(old.Id, out var here))
+                {
+                    if (!replace) { skipped++; continue; }
+                    int before = changes.Count;
+                    void Change<T>(string field, T was, T next, Action<T> set)
+                    {
+                        if (Json.Write(was) == Json.Write(next)) return;
+                        changes.Add(new("recording", here.Id, field, Json.Write(was), Json.Write(next)));
+                        redo.Add(() => set(next)); undo.Add(() => set(was));
+                    }
+                    Change("title", here.Title, old.Title, v => here.Title = v);
+                    Change("voice", here.VoiceId, voice, v => here.VoiceId = v);
+                    Change("tags", here.Tags.ToArray(), old.Tags.ToArray(), v => here.Tags = [.. v]);
+                    Change("favorite", here.Favorite, old.Favorite, v => here.Favorite = v);
+                    Change("correctedText", here.CorrectedText, old.CorrectedText, v => here.CorrectedText = v);
+                    Change("reviewed", here.Reviewed, old.Reviewed, v => here.Reviewed = v);
+                    if (changes.Count > before) restored++; else skipped++;
+                    continue;
+                }
+                if (file.Recordings.Count + ++adds > MaxRecordings) throw new InvalidDataException($"The voice library holds at most {MaxRecordings} recordings.");
+                var back = JsonSerializer.Deserialize<LibraryRecording>(JsonSerializer.Serialize(old, Json.Options), Json.Options)!;
+                back.VoiceId = voice;
+                var list = backupWords.GetValueOrDefault(back.Id);
+                if (list == null && back.WordsState == "ready") back.WordsState = "pending";
+                changes.Add(new("recording", back.Id, "record", null, Json.Write(back)));
+                redo.Add(() => { if (list != null) words[back.Id] = list; Restore(back); });
+                undo.Add(() => { file.Recordings.Remove(back); byId.Remove(back.Id); index.Remove(DocKey(back.Id)); if (list != null) words.Remove(back.Id); });
+                restored++;
+            }
+            long group = Commit(by, byName, changes, () => { foreach (var a in redo) a(); }, () => { for (int i = undo.Count - 1; i >= 0; i--) undo[i](); });
+            // The restored words go into the words file once the change is saved.
+            foreach (var c in changes.Where(c => c.Target == "recording" && c.Field == "record" && c.Before == null))
+                if (words.TryGetValue(c.TargetId, out var list)) Append(WordsPath, [Json.Write(new WordsLine(c.TargetId, list))]);
+            return (restored, skipped, group);
+        }
+    }
+
+    /// <summary>
+    /// Brings voices back from a backup as one action: a voice that is gone comes back with its wanted words; one that
+    /// is here is skipped, or with <paramref name="replace"/> takes the backup's name and colour. A voice whose name
+    /// another voice has now is reported in <c>Conflicts</c> and left out.
+    /// </summary>
+    public (int Restored, int Skipped, long Group, string[] Conflicts) RestoreVoices(IReadOnlyList<LibraryVoice> voices, IReadOnlyList<WantedWord> backupWanted, bool replace, string by, string byName)
+    {
+        lock (gate)
+        {
+            RequireWritable();
+            if (voices.Count is 0 or > MaxVoices) throw new InvalidDataException("Choose the voices to restore.");
+            var changes = new List<AuditChange>(); var redo = new List<Action>(); var undo = new List<Action>(); var conflicts = new List<string>();
+            int restored = 0, skipped = 0, added = 0;
+            foreach (var old in voices.DistinctBy(v => v.Id))
+            {
+                var here = file.Voices.FirstOrDefault(v => v.Id == old.Id);
+                bool clash = file.Voices.Any(v => v.Id != old.Id && string.Equals(v.Name, old.Name, StringComparison.OrdinalIgnoreCase));
+                if (here != null)
+                {
+                    if (!replace) { skipped++; continue; }
+                    if (clash) { conflicts.Add(old.Name); continue; }
+                    string name = here.Name, color = here.Color;
+                    if (name != old.Name) changes.Add(new("voice", here.Id, "name", Json.Write(name), Json.Write(old.Name)));
+                    if (color != old.Color) changes.Add(new("voice", here.Id, "color", Json.Write(color), Json.Write(old.Color)));
+                    if (name == old.Name && color == old.Color) { skipped++; continue; }
+                    redo.Add(() => { here.Name = old.Name; here.Color = old.Color; }); undo.Add(() => { here.Name = name; here.Color = color; });
+                    restored++;
+                    continue;
+                }
+                if (clash) { conflicts.Add(old.Name); continue; }
+                if (file.Voices.Count + ++added > MaxVoices) throw new InvalidDataException($"The library holds at most {MaxVoices} voices.");
+                var voice = new LibraryVoice { Id = old.Id, Name = old.Name, Color = old.Color, Created = old.Created };
+                changes.Add(new("voice", voice.Id, "record", null, Json.Write(voice)));
+                redo.Add(() => file.Voices.Add(voice)); undo.Add(() => file.Voices.Remove(voice));
+                foreach (var w in backupWanted.Where(w => w.VoiceId == voice.Id && !file.Wanted.Any(x => x.Id == w.Id)).Take(MaxWantedPerVoice))
+                {
+                    var wanted = new WantedWord { Id = w.Id, VoiceId = w.VoiceId, Text = w.Text, By = w.By, ByName = w.ByName, At = w.At };
+                    changes.Add(new("wanted", wanted.Id, "record", null, Json.Write(wanted)));
+                    redo.Add(() => file.Wanted.Add(wanted)); undo.Add(() => file.Wanted.Remove(wanted));
+                }
+                restored++;
+            }
+            long group = Commit(by, byName, changes, () => { foreach (var a in redo) a(); }, () => { for (int i = undo.Count - 1; i >= 0; i--) undo[i](); });
+            return (restored, skipped, group, [.. conflicts]);
+        }
+    }
+
+    /// <summary>The library's file in memory, as a copy (backup detail compares with it).</summary>
+    public LibraryFile CopyFile() { lock (gate) return JsonSerializer.Deserialize<LibraryFile>(JsonSerializer.SerializeToUtf8Bytes(file, Json.Options), Json.Options)!; }
 }

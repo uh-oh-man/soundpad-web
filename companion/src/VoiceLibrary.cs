@@ -515,4 +515,85 @@ public sealed partial class VoiceLibrary
         lock (gate) return file.Recordings.FirstOrDefault(r => r.WordsState == "pending" && (skip == null || !skip.Contains(r.Id)));
     }
     public int PendingCount { get { lock (gate) return file.Recordings.Count(r => r.WordsState == "pending"); } }
+
+    // ---- Backups (2.44) ----------------------------------------------------------------------------------------------
+
+    /// <summary>
+    /// The library as it stands, for a backup: its file's bytes, its words as one line per recording (the words file
+    /// compacted), copies of the recordings (for their files) and the revision. Null while the file is blocked.
+    /// </summary>
+    public (byte[] Library, byte[] Words, LibraryRecording[] Recordings, long Revision)? CaptureBackup()
+    {
+        lock (gate)
+        {
+            if (Blocked) return null;
+            var bytes = JsonSerializer.SerializeToUtf8Bytes(file, Json.Options);
+            var lines = new System.Text.StringBuilder();
+            foreach (var (id, list) in words) if (byId.ContainsKey(id)) lines.Append(Json.Write(new WordsLine(id, list))).Append('\n');
+            var copies = JsonSerializer.Deserialize<LibraryFile>(bytes, Json.Options)!.Recordings.ToArray();
+            return (bytes, System.Text.Encoding.UTF8.GetBytes(lines.ToString()), copies, Revision);
+        }
+    }
+
+    /// <summary>Checks a backup's library file as Load would.</summary>
+    public static LibraryFile ParseBackup(byte[] bytes)
+    {
+        if (bytes.Length > MaxFileBytes) throw new InvalidDataException("The backup's voice library is too large.");
+        var read = JsonSerializer.Deserialize<LibraryFile>(bytes, Json.Options) ?? throw new InvalidDataException("The backup's voice library is empty.");
+        Validate(read);
+        return read;
+    }
+
+    /// <summary>A backup's words file: the last valid line per recording, as Load reads the words file.</summary>
+    public static Dictionary<string, LibraryWord[]> ParseWords(byte[]? bytes)
+    {
+        var result = new Dictionary<string, LibraryWord[]>(StringComparer.Ordinal);
+        if (bytes == null) return result;
+        foreach (var text in System.Text.Encoding.UTF8.GetString(bytes).Split('\n'))
+        {
+            if (text.Length == 0) continue;
+            try { if (JsonSerializer.Deserialize<WordsLine>(text, Json.Options) is { R: { } id, W: { } list } && ValidId(id) && ValidWords(list)) result[id] = list; }
+            catch (JsonException) { }
+        }
+        return result;
+    }
+
+    /// <summary>
+    /// Replaces the whole library with a backup's (whole-library restore): the file through the normal save (the
+    /// replaced one becomes voice-library.v1.bak.json), the words file rewritten, the word index rebuilt. Earlier
+    /// changes can no longer be undone afterwards. A file that could not be read is kept as
+    /// voice-library.v1.damaged-&lt;utc&gt;.json first, then replaced.
+    /// </summary>
+    public void ReplaceAll(LibraryFile next, IReadOnlyDictionary<string, LibraryWord[]> nextWords)
+    {
+        Validate(next);
+        lock (gate)
+        {
+            if (Blocked && File.Exists(MainPath)) { File.Copy(MainPath, System.IO.Path.Combine(Folder, $"voice-library.v1.damaged-{DateTime.UtcNow:yyyyMMddTHHmmssZ}.json"), true); Blocked = false; Problem = null; }
+            var before = file;
+            var copy = JsonSerializer.Deserialize<LibraryFile>(JsonSerializer.SerializeToUtf8Bytes(next, Json.Options), Json.Options)!;
+            copy.NextAudit = Math.Max(copy.NextAudit, file.NextAudit);
+            file = copy;
+            try { SaveLocked(); }
+            catch { file = before; throw; }
+            foreach (var id in byId.Keys) index.Remove(DocKey(id));
+            byId.Clear(); words.Clear();
+            foreach (var r in file.Recordings) byId[r.Id] = r;
+            foreach (var (id, list) in nextWords) if (byId.ContainsKey(id)) words[id] = list;
+            foreach (var r in file.Recordings) if (r.WordsState == "ready" && !words.ContainsKey(r.Id)) r.WordsState = "pending";
+            foreach (var id in words.Keys) IndexLocked(id);
+            settingsNow = file.Settings;
+            try
+            {
+                var temporary = WordsPath + ".tmp";
+                File.WriteAllLines(temporary, words.Select(p => Json.Write(new WordsLine(p.Key, p.Value))));
+                File.Move(temporary, WordsPath, true);
+                obsoleteWordLines = 0;
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { Problem = "The library's words could not be saved: " + ex.Message; }
+            // Undo compares values now; changes from before the restore are not offered any more.
+            audit.Clear();
+            Raise();
+        }
+    }
 }
