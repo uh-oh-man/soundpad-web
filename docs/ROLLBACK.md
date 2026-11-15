@@ -6,6 +6,7 @@ Every release stays on GitHub permanently, so any earlier version can be restore
 
 | Version | What it is | Git tag | Download |
 | --- | --- | --- | --- |
+| 2.44.0 | Backups, updates, Organize and setup | `v2.44.0` | [Release](https://github.com/uh-oh-man/soundpad-web/releases/tag/v2.44.0) |
 | 2.43.0 | Blue studio | `v2.43.0` | [Release](https://github.com/uh-oh-man/soundpad-web/releases/tag/v2.43.0) |
 | 2.42.0 | Sentences from recorded words | `v2.42.0` | [Release](https://github.com/uh-oh-man/soundpad-web/releases/tag/v2.42.0) |
 | 2.41.0 | The voice library | `v2.41.0` | [Release](https://github.com/uh-oh-man/soundpad-web/releases/tag/v2.41.0) |
@@ -106,6 +107,8 @@ Every release stays on GitHub permanently, so any earlier version can be restore
 2. Download `SoundpadWeb.exe` from the release you want in the table above.
 3. Run it as usual.
 
+Since 2.44 the companion can update itself, and the version it replaced stays beside it as `SoundpadWeb.previous.exe`. To go back one version, quit the companion, rename `SoundpadWeb.exe` to something else and `SoundpadWeb.previous.exe` to `SoundpadWeb.exe`, and start it. If a new version doesn't start after an update, the companion puts the previous one back by itself; that automatic return only ever goes to 2.44 or later, since older versions can't update.
+
 Your data in `%LOCALAPPDATA%\SoundpadWeb` keeps working (Temp's 16 MiB per-sound limit is never raised for this reason, see 2.10.1):
 
 - 2.4.0 adds one optional setting (`guestMimic`) to `state.json`. Older companions ignore it.
@@ -113,6 +116,11 @@ Your data in `%LOCALAPPDATA%\SoundpadWeb` keeps working (Temp's 16 MiB per-sound
 - Mimic clips are ordinary Temp entries, so older companions manage, keep or clean them up like any upload.
 - Up to 2.38 the Mimic buffer is never written to disk (see 2.39.0 below).
 - 2.36.0 adds `companion.log`, `window.json` and `webview2\` (the window's browser profile). Older versions ignore them; delete them if you go back for good. `state.json` is unchanged.
+- 2.44.0 adds these files to the data folder, and older companions ignore all of them (checked: the 2.3.1 and 2.43.0 companions start normally beside them, see below). `state.json` (still schema version 2), the managed-audio journal (schema 3, same limits), the voice library, sentences and `mimic-settings.json` keep their formats.
+  - `backup-settings.v1.json` and `backup-workspace.v1.json`: the backup folder and schedule, and the host window's and browser's layouts for the backups. The backups themselves live in the folder you chose, outside the data folder. A library restored by 2.44 is written in the 2.41–2.43 formats. An offline restore (`--restore-state`) keeps the replaced file as `state.before-restore-<time>.json`.
+  - `update-settings.v1.json` (check at launch or not), and during an update only `update-handoff.v1.bin`, `update-ready.<id>` and `update-child.log`, which the next normal start deletes. A companion older than 2.44 started after an interrupted update takes its crash path: it offers Recover or Discard for Temp, and its recovery deletes the recording history that was closed for the update, as an ordinary quit would. It ignores the hand-over file; delete it.
+  - `organize\`: a pending organization plan, its settings (`guestOrganize`) and up to 10 checkpoints, each with a read-only copy of Soundpad's `soundlist.spl` named `.spl.bak`. Changes already applied to Soundpad stay in Soundpad. The app never puts `soundlist.spl` back by itself; to restore one, close Soundpad and copy the checkpoint's `.spl.bak` over `%APPDATA%\Leppsoft\soundlist.spl` yourself.
+  - `setup.json` (setup finished or dismissed) and `hotkeys.json` (host-wide hotkeys). Older companions ignore them, so host-wide hotkeys are off there; browser shortcuts are kept per browser by the website and are unaffected.
 - 2.43.0 adds `ui.json`: the host's shared style (navigation, theme, motion, contrast, header animation) and the Mimic draft that is open. Older companions ignore it and leave it alone (checked: the 2.3.1 companion starts normally beside a 2.43 `ui.json` and leaves it byte for byte as it was). Delete it if you go back for good; the website then keeps its style per browser, as before. The Kick session count is kept in memory only. `state.json` (still schema version 2) and the managed-audio journal are unchanged.
 - 2.42.0 adds sentences to `library\`: `sentences.v1.json` and its backup `sentences.v1.bak.json` (sentences with their versions, named palette pieces and performance sets), and `sentences\<id>\v<N>-<hash8>.wav`, one audio file for each kept version, written once and never changed. Older companions ignore them and leave them alone. If you go back for good you can delete them, or keep them: upgrading again picks the sentences up where they were. `state.json` and the managed-audio journal are unchanged. Sentences play from the 2.37 slot files, whose format is unchanged; from 2.42 the slots are also set up when exact starts are off, and an older companion treats them as it always did.
 - 2.41.0 adds the voice library to `library\` (the default folder for kept sounds): `voice-library.v1.json` and its backup `voice-library.v1.bak.json`, `voice-words.v1.jsonl`, `voice-audit.v1.jsonl` (rotated to `voice-audit.v1.old.jsonl` past 32 MiB) and `sound-words.v1.jsonl`. Older companions ignore them and leave them alone; your kept sounds stay where they are. If you go back for good you can delete those files, or keep them: upgrading again picks the library up where it was. `state.json` and the managed-audio journal are unchanged. Mimic's **Discard** after a crash (2.41) writes silence over the discarded part of `history\` in the same format, so an older companion recovering that history after another crash finds silence there, never the discarded audio.
@@ -134,6 +142,10 @@ companion\harness\bin\Release\net10.0-windows10.0.19041.0\win-x64\SoundpadWeb.Ha
 companion\harness\bin\Release\net10.0-windows10.0.19041.0\win-x64\SoundpadWeb.Harness.exe --mock-only   # prints TEST_PIPE <name>
 <older>\SoundpadWeb.exe --data-dir C:\temp\rollback-data --pipe <name> --no-browser --site https://example.invalid/
 ```
+
+### Tested again for 2.44.0
+
+`--make-rollback-fixture` now also writes every 2.44 file: backup settings, a layout attached for backups, one backup and a recording restored from it, the update settings and a 10-minute-old update hand-over, a paused organization plan with its settings, a finished `setup.json` and a `hotkeys.json` with two keys. The **v2.3.1** companion (built from its tag) was started on both fixtures (mid-session and after End hosting) with a test pipe, `--no-browser` and its output redirected: it started, printed no invalid-data error, loaded the Temp sounds and stopped cleanly on Enter. The **2.43.0** companion (its release source), started with `--hidden-window` on the mid-session fixture, started normally, offered its usual Recover or Discard for the Temp clips the fixture leaves, logged no error and stopped cleanly. In all three runs every 2.44 file, `ui.json` and the voice library were byte for byte as before, and `state.json` stayed at schema version 2 and the journal at schema 3.
 
 ### Mixed versions are tested too (2.10.2)
 

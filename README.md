@@ -16,7 +16,7 @@ A static website plus one portable Windows program on the host PC. No accounts, 
 2. Open Soundpad normally, then run the EXE. Since 2.36 it opens its own **Soundpad Web window**, which hosts your session: guests stay connected as long as that window is open, even minimized, and you need no browser tab.
 3. Click **Copy Invite** and share the link. Each launch makes a fresh invitation; reloading the window keeps it.
 
-You can still open the website in Chrome or Edge on the same PC as an extra view of your session (it shows the same guests and invite). Closing that tab does not affect guests. Closing the Soundpad Web window quits the companion and ends the session. If Windows lacks the WebView2 Runtime (it is part of Windows 11), the companion falls back to opening your browser as before; keep that tab open then. To update, close the old companion and run the new EXE.
+You can still open the website in Chrome or Edge on the same PC as an extra view of your session (it shows the same guests and invite). Closing that tab does not affect guests. Closing the Soundpad Web window quits the companion and ends the session. If Windows lacks the WebView2 Runtime (it is part of Windows 11), the companion falls back to opening your browser as before; keep that tab open then. Since 2.44 the companion offers new versions itself (see [Updates](#updates)); you can still update by closing the old companion and running the new EXE.
 
 ## Try it first
 
@@ -78,6 +78,41 @@ Guests can look, search and listen by default; changing the library needs the **
 
 Guests can read, search and preview sentences and play kept ones into the game. Building sentences follows **Edit the voice library**, keeping them follows **Keep clips** and the guest's Keep budget, and playing words or unkept sentences into the game also needs **Seeking & pause**. Unkept sentences are private to whoever made them. Full guide: [docs/SENTENCES.md](docs/SENTENCES.md).
 
+## Organize your sounds
+
+Press **Organize** on the board to tidy up without playing anything (companion 2.44 for the Host Layout; My Layout works with any companion). Tiles become checkboxes: click, Space or Enter ticks one, Shift-click ticks a range, Ctrl+A ticks every sound shown, and Esc leaves Organize mode. Then drag the selection onto a category in the sidebar, or use **Add selected to…** from the keyboard.
+
+- **My Layout** changes at once, with **Undo**.
+- **Host Layout** changes collect in **Review changes** in the editor panel. Each step says whether **Soundpad can do this** or you **do this in Soundpad**, and why. Only the host applies. Soundpad Web makes the changes Soundpad allows from outside (a new category, adding sounds to a category, removing an empty category), waits until nothing plays, checks every result and pauses instead of guessing if Soundpad changed meanwhile; you then **Skip**, **Retry**, **Rebind** or cancel. The rest (removing a sound from a category, moving, reordering, renaming) is listed as steps to do in Soundpad, and each is ticked off when Soundpad Web sees it done. After a plan that stopped partway, **Remove the empty categories this plan created** undoes what it added.
+- **Guests** can propose steps when the host turns on **Guests may propose organization changes** in Settings (off by default), and withdraw their own proposals. They never see file paths.
+- **Needs attention**: sounds whose file is missing on the host's PC are grouped at the end of their category with how to relink or remove them in Soundpad. They are not sent to Soundpad to play.
+- **Copy into My Layout** from a guest's shared layout shows a preview first: choose folders, favourites, hidden sounds and order, and **Merge** (the default) or **Replace**, with Undo.
+
+More: [docs/ORGANIZE.md](docs/ORGANIZE.md).
+
+## Backups
+
+**Settings → Backups** (host, companion 2.44) is off until you choose a folder: type one, or press **Use suggested folder** (`Documents\Soundpad Web Backups`). The companion then backs up your kept sounds, voice library, sentences, statistics, icons, settings and the window's and browser's layouts once a day and 10 minutes after a change, keeping the newest 14, everything from the last 30 days and one a week before that (all adjustable). Later backups only copy what changed. **Back up now** makes one at once.
+
+Open a backup to restore a single kept clip, recording, voice or sentence, a layout, or the whole library. A **Before restore** backup is made first, and restored recordings, voices and sentences can be undone from the notice. A clip goes back only to where it was; a different file already there is reported, never overwritten. If Soundpad no longer lists a restored clip, you are told which file to add again in Soundpad: nothing is added to Soundpad by itself. Restoring the whole library asks first and needs playback stopped.
+
+Backups contain your companion's identity, as its data folder does: keep the folder private and don't share it. If the companion ever says its local state is unreadable, the message tells you where the copy in your newest backup is; or close the companion and run `SoundpadWeb.exe --restore-state "<backup folder>"`. More: [docs/BACKUPS.md](docs/BACKUPS.md).
+
+## Updates
+
+When a newer Soundpad Web is released, the companion offers it at launch: **Update now**, **Later** or **What's new**. After **Later**, **Update** stays in the header and in Settings, where you can also **Check again** or turn off checking at launch. The update is downloaded from this project's GitHub releases and checked against the size and SHA-256 hash published with it; the EXE is not code-signed, so this proves it is the file that was published, not who built it.
+
+Updating makes a backup first (if you set a backup folder), then the companion closes and opens again by itself and continues your session: Temp, drafts, history and the invitation stay, guests reconnect on their own, recording continues on the same output and the timeline marks the gap. Sounds already playing in Soundpad keep playing. If the new version doesn't start, the previous one comes back; it also stays beside the new one as `SoundpadWeb.previous.exe` (see [going back](docs/ROLLBACK.md)). Builds from a fork or a development checkout don't update themselves. More: [docs/UPDATES.md](docs/UPDATES.md).
+
+## Setup and shortcuts
+
+A new host on companion 2.44 is guided through setup: a Soundpad check that names the fix (Soundpad not running, not answering, started with different rights, or too old), the capture output to remember (only what the PC plays, never a microphone; nothing is recorded until you press **Start listening**), invitations and permissions, and shortcuts. An existing install gets a small **Check your setup** card instead. **Settings → Setup → Run setup again** reopens it. Soundpad Web never starts with Windows: open it from its EXE or a shortcut when you host. When Soundpad can't be reached, the banner at the top shows the same fix and **Retry**.
+
+- **Settings → Keyboard** (everyone): change or turn off Search (`/`), Play/Pause (Space), Panic (Shift+Escape, host) and Stop (no key until you set one). Each browser keeps its own keys, so the companion window and Chrome can differ. Keys the browser or the app's own controls need are refused with the reason, and keys that only work in one place (Mimic, Review, Kick, the timeline) are listed.
+- **Host-wide hotkeys** (Settings → Setup, host): a **Capture** key that starts or stops listening on the output you remembered, a **Panic** key and optionally **Stop playback**. They work in every app on your PC while the companion runs, and other apps can't use those keys meanwhile. All are off until you record one; a key another app already uses is reported and your previous key keeps working. Mimic's F6 key (save the last few seconds) is separate and can't be the same key.
+
+More: [docs/SETUP.md](docs/SETUP.md).
+
 ## Features
 
 - **Mimic**, described above, merged from the Voice Replay Studio desktop app.
@@ -86,7 +121,7 @@ Guests can read, search and preview sentences and play kept ones into the game. 
 - Real named-pipe Soundpad integration, including Steam and standalone distributions using the same RC API.
 - Ordered, nested categories, native category icons, cross-category search, duplicate titles and empty categories.
 - Play, prominent Stop, accurate vendor playback status and progress where available. When two people click at once, the newest click wins: older ones never play late and show no error.
-- **Panic** (host): a separate button beside Stop, or **Shift+Escape**. It stops the sound and pauses guest playback until you press **Resume guest playback**; the session, Mimic and Temp carry on.
+- **Panic** (host): a separate button beside Stop, or **Shift+Escape** (you can change the key in **Settings → Keyboard**, or add a host-wide one in **Settings → Setup**). It stops the sound and pauses guest playback until you press **Resume guest playback**; the session, Mimic and Temp carry on.
 - Up to 12 authorized guests per session, independent cryptographic host sessions, pinned host identity and invitation rotation.
 - Host-controlled permissions for playback, the Kick counter, seeking, Spotify, uploads, reverse, Mimic, keeping clips and editing the voice library, for everyone or per guest; guests default to playback enabled and counter editing disabled.
 - Authoritative persistent Kick counter with duplicate-request protection.
@@ -105,13 +140,13 @@ More screenshots: [Phone](docs/screenshots/v23-phone.png) · [Original Purple](d
 
 Treat an invitation as a password. Anyone with it can join and use the permissions you enable. **Session & access → Replace invite** revokes the previous invitation and disconnects existing guests. Disconnecting one peer alone does not invalidate a bearer invitation; that person could return with a new browser identity.
 
-Guests receive sound titles, category names/order/membership/icons, custom icons, playback status, counter and permissions, and (since 2.41) the voice library's titles, tags, voices and words, and (since 2.42) kept sentences, their versions and the palette. Host library audio is not sent to guests, except private previews of up to 30 seconds of voice-library recordings and of sounds in the categories the host indexes for word search, and private previews of sentences and palette words; they play in the guest's own browser and are never offered as a download. Guests never receive the host's file paths. Each guest's browser keeps its own private key, which never leaves it; the host's page checks it on every connection so permissions follow the right person. Guest uploads travel directly to the host; local paths, native access tokens and host signing keys stay local. Shared organization and enabled Spotify metadata/artwork are visible to session participants. There are no analytics, fonts or scripts loaded from other sites (the DM Sans typeface is part of the website), arbitrary file endpoints, shell commands or arbitrary Soundpad API access. Managed imports are the only production library mutations; native entry removal is deliberately deferred when atomic ownership cannot be established. WebRTC exposes network connection information to peers; signaling relays see network metadata and encrypted session descriptions.
+Guests receive sound titles, category names/order/membership/icons, custom icons, playback status, counter and permissions, and (since 2.41) the voice library's titles, tags, voices and words, and (since 2.42) kept sentences, their versions and the palette, and (since 2.44) which sounds' files are missing and, when the host allows proposals, the organization plan's steps by name. Backups, updates, setup and host-wide hotkeys are never shown to guests. Host library audio is not sent to guests, except private previews of up to 30 seconds of voice-library recordings and of sounds in the categories the host indexes for word search, and private previews of sentences and palette words; they play in the guest's own browser and are never offered as a download. Guests never receive the host's file paths. Each guest's browser keeps its own private key, which never leaves it; the host's page checks it on every connection so permissions follow the right person. Guest uploads travel directly to the host; local paths, native access tokens and host signing keys stay local. Shared organization and enabled Spotify metadata/artwork are visible to session participants. There are no analytics, fonts or scripts loaded from other sites (the DM Sans typeface is part of the website), arbitrary file endpoints, shell commands or arbitrary Soundpad API access. Managed imports, and the Organize changes the host applies (a new category, adding a sound to a category, removing an empty category, each checked afterwards), are the only production library mutations; native entry removal is deliberately deferred when atomic ownership cannot be established, and Soundpad Web never removes a sound from a category or a category that still holds sounds. WebRTC exposes network connection information to peers; signaling relays see network metadata and encrypted session descriptions.
 
 **Mimic** is off until the host starts it and never records a microphone. Everyone is told when it starts and stops, and a **Mimic on** badge shows while it listens. Its audio stays on the host PC: guests allowed to use Mimic receive waveform levels and, if the host turns transcripts on, the transcript text. Speech recognition runs locally. Guest Mimic is off by default. See [Mimic privacy](docs/MIMIC.md#privacy-and-safety).
 
 ## Troubleshooting
 
-- **Waiting for Soundpad:** open Soundpad yourself. The companion retries automatically and refreshes the library every 30 seconds. You can also click Refresh.
+- **Waiting for Soundpad:** open Soundpad yourself. The companion retries automatically and refreshes the library every 30 seconds. You can also click Refresh. With companion 2.44 the banner says which problem it is (not running, not answering, started with different rights, too old) and has **Retry**; if Soundpad or Soundpad Web was started as administrator, start both the same way.
 - **Companion disconnected:** keep the EXE running. Permit local-network access for this site if prompted, and use current Chrome/Edge. Another host tab may already own the connection. Do not disable browser security settings.
 - **WebRTC blocked:** the guest's browser has WebRTC turned off or doesn't support it, often because of a privacy extension or setting. Allow WebRTC for the site, or use an up-to-date browser.
 - **Host unavailable:** the host tab or companion may be closed, a laptop may be asleep, or signaling/WebRTC may be blocked. Check the invite and try another network. The app does not display Connected until the host's cryptographic handshake verifies.
@@ -134,9 +169,9 @@ Every release stays on GitHub. Download any older `SoundpadWeb.exe` from [Releas
 | Part | Where | What it does |
 | --- | --- | --- |
 | Website | `web/` | The static React site on GitHub Pages: soundboard, Temp, Mimic window, host settings. Guests only ever need this. |
-| Windows companion | `companion/` | One portable `SoundpadWeb.exe` on the host PC. It talks to Soundpad, manages Temp audio, runs Mimic (capture, local Whisper transcript, the F6–F10 hotkey, preview, trim and effects) keeps the voice library and its word index, and puts sentences together from its recordings. |
+| Windows companion | `companion/` | One portable `SoundpadWeb.exe` on the host PC. It talks to Soundpad, manages Temp audio, runs Mimic (capture, local Whisper transcript, the F6–F10 hotkey, preview, trim and effects) keeps the voice library and its word index, puts sentences together from its recordings, backs up and restores your data, updates itself and applies Organize plans to Soundpad. |
 | Voice Replay Studio | `mimic/` | The original Mimic desktop app (V1.1), kept intact with its own [README](mimic/README.md), tests and licenses. |
-| Docs | `docs/` | [Mimic](docs/MIMIC.md), [sentences](docs/SENTENCES.md), [rolling back](docs/ROLLBACK.md), [developers](docs/DEVELOPERS.md), API research, protocol and verification notes. Version histories: [2.3](docs/V2.3.md), [V2](docs/V2.md). |
+| Docs | `docs/` | [Mimic](docs/MIMIC.md), [sentences](docs/SENTENCES.md), [Organize](docs/ORGANIZE.md), [backups](docs/BACKUPS.md), [updates](docs/UPDATES.md), [setup and shortcuts](docs/SETUP.md), [rolling back](docs/ROLLBACK.md), [developers](docs/DEVELOPERS.md), API research, protocol and verification notes. Version histories: [2.3](docs/V2.3.md), [V2](docs/V2.md). |
 
 Building, testing, publishing your own fork, companion options and technical limitations: **[docs/DEVELOPERS.md](docs/DEVELOPERS.md)**. Maintainer notes: [CLAUDE.md](CLAUDE.md).
 

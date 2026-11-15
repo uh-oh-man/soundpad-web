@@ -93,7 +93,8 @@ Like Voice Replay Studio's trim, it saves a new Temp sound and never changes the
 
 ## Privacy and safety
 
-- **Off until the host starts it.** Capture never starts on launch and is never restored after a restart.
+- **Off until the host starts it.** Capture never starts on launch and is never restored after an ordinary restart. There is one exception (2.44): when the companion restarts itself for an update with a valid hand-over that says capture was running, it starts again on the same source id if that source is still listed (outputs only; the output-only check applies), the timeline marks the gap as `update`, and everyone is told "Mimic resumed after the update". An ordinary launch never starts capture.
+- **Host-wide Capture key (2.44).** In **Settings → Setup** the host can set a key that works in any app and starts or stops listening on the remembered output, through the same start and stop as the Mimic window (the output-only check applies; never a microphone; never without a press). With nothing remembered it says "Choose an output in Setup or Mimic first." Setup's **Remember this output** saves the source (`sourceId` and `sourceName` in `mimic-settings.json`, whose format is unchanged) without listening. F6 is unchanged and can't share a key with a host-wide hotkey, in either direction.
 - **No microphones.** Only output devices and app loopback are offered, so Mimic cannot listen to the host's room.
 - **Everyone can see it.** Everyone gets a notice when Mimic starts (with the source) and stops, anyone joining while it is on is told immediately, every participant's header shows **Mimic on** while it runs, and every new clip is announced.
 - **Audio stays on the host PC.** Guests receive 300 peak levels for the waveform and, if the host enables it, the transcript text. If transcripts stop (turned off, or the speech engine fails), the stored lines are cleared at once, so guests stop receiving them. While transcripts are on, clips saved with the hotkey are named after their words, and those names show in everyone's Temp and **Just mimicked**. Clips are cut and imported on the host.
@@ -135,6 +136,7 @@ The website always serves the newest version and hides anything the host's compa
 | Voice library, history search, speaker groups | 2.41 |
 | Sentences, speaking palette, performances and sets ([guide](SENTENCES.md)) | 2.42 |
 | Edited and speed copies of any Soundpad sound; the open draft shared between the host's pages | 2.43 |
+| Host-wide Capture key, Remember this output in Setup, capture resumed after an in-app update | 2.44 |
 
 ## Protocol
 

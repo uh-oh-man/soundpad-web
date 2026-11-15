@@ -28,6 +28,14 @@ jobs:
       - run: npm run build
       - run: dotnet test companion/tests/SoundpadWeb.Tests.csproj -c Release --logger GitHubActions
       - run: dotnet build companion/harness/SoundpadWeb.Harness.csproj -c Release
+      # Backups (2.44): back up a fixture library, delete and damage it, restore it and compare every byte. The folder
+      # must be under the user's temp folder (GetTempPath), not RUNNER_TEMP.
+      - name: Backup round trip (harness)
+        shell: pwsh
+        run: |
+          $dir = Join-Path ([IO.Path]::GetTempPath()) "soundpad-web-backup-roundtrip"
+          & companion/harness/bin/Release/net10.0-windows10.0.19041.0/win-x64/SoundpadWeb.Harness.exe --backup-roundtrip $dir
+          if ($LASTEXITCODE -ne 0) { exit 1 }
       - name: Voice Replay Studio (mimic/) build and tests
         run: dotnet run --project mimic/tests/VoiceReplay.Tests -c Release
       - run: npx playwright install chromium

@@ -2,6 +2,49 @@
 
 Notable changes to Soundpad Web. Versions follow the website's `package.json`; the Windows companion is versioned separately and only needs updating when a release says so.
 
+## 2.44.0 — Backups, updates, Organize and setup
+
+Backups, updates from inside the app, Organize mode, a guided setup and your own shortcuts. **Update the companion** for all of them except **Settings → Keyboard**: with an older companion those parts are hidden, and everything else works as in 2.43.
+
+### Added
+
+- **Backups.** Choose a folder in **Settings → Backups** (or **Use suggested folder**, `Documents\Soundpad Web Backups`) and the companion backs up your kept sounds, voice library, sentences, statistics, icons, settings, and the companion window's and your browser's layouts. It does this once a day and 10 minutes after a change, keeping the newest 14 backups, everything from the last 30 days and one a week before that (all adjustable). Later backups copy only what changed. **Back up now** makes one at once. Backups are off until you choose a folder, and they contain your companion's identity: keep the folder private.
+- **Restore from a backup.** Open a backup to restore a single kept clip, recording, voice or sentence, a layout (merge or replace), or the whole library. A **Before restore** backup is made first. Restored recordings, voices and sentences can be undone from the notice. A restored clip goes back to its old place only; a different file already there is reported, never overwritten, and a clip Soundpad no longer lists is not added to Soundpad by itself (you are told which file to add again). Restoring the whole library asks first, needs playback stopped and waits until no Keep is being finished.
+- **If local state ever becomes unreadable**, the companion's message now says where the copy in your newest backup is, and `SoundpadWeb.exe --restore-state "<backup>"` puts it back while the companion is closed (the replaced file is kept beside it).
+- **Updates from inside the app.** At launch the companion offers a newer release: **Update now**, **Later** or **What's new**. After **Later**, **Update** stays in the header and in Settings, with **Check again** and a setting to stop checking at launch. The update comes from this project's GitHub releases and is checked against the size and SHA-256 hash published with it, and the new version is test-run before it replaces the old one. A backup is made first when a backup folder is set. The companion then closes and opens again by itself and continues the same session: Temp, drafts, history, the invitation and guests' admission stay, guests reconnect on their own, recording continues on the same output and the timeline marks the gap. Sounds already playing in Soundpad are not stopped. If the new version doesn't start, the previous one comes back, and `SoundpadWeb.previous.exe` stays beside it. An ordinary launch still gets a new invitation and never starts recording.
+- **Organize mode.** Press **Organize** on the board, then tick sounds (Shift-click a range, Ctrl+A for all shown) without playing anything, and drag them onto a category or use **Add selected to…**. Esc leaves Organize mode. In **My Layout** changes apply at once, with Undo. In the **Host Layout** they collect in **Review changes**: guests can propose (if you allow it in Settings: **Guests may propose organization changes**, off by default), and only you apply. Soundpad Web makes the changes Soundpad allows from outside (a new category, adding sounds to a category, removing an empty category), waits until Soundpad is quiet, checks each result and pauses instead of guessing if Soundpad changed meanwhile. Anything Soundpad can't do from outside (removing a sound from a category, moving, reordering, renaming) is explained as a step to do in Soundpad and ticked off when Soundpad Web sees it done. The first time a sound is added to a category, Soundpad Web checks whether Soundpad listed it twice and asks you before going on.
+- **Needs attention.** Sounds whose file is missing on the host's PC are grouped at the end of their category with how to fix them in Soundpad, and are not sent to Soundpad to play.
+- **Copy into My Layout** from a guest's shared layout now shows a preview where you choose what to copy (folders, favourites, hidden sounds, order) and whether to merge (the default) or replace, with Undo.
+- **Guided setup** for a new host: it checks Soundpad and says exactly what to fix (not running, not answering, started as administrator, too old), lets you remember a capture output without recording anything, explains invitations and permissions, and offers shortcuts. An existing install gets a small **Check your setup** card instead. Run it again from **Settings → Setup**. Soundpad Web still never starts with Windows.
+- **Your own keyboard shortcuts.** **Settings → Keyboard** lets you change or turn off Search (`/`), Play/Pause (Space), Panic (Shift+Escape) and a new **Stop** shortcut, in each browser. Keys the browser or other parts of the app need are refused with the reason.
+- **Host-wide hotkeys** (off until you set them, in **Settings → Setup**): a **Capture** key that starts or stops listening on your remembered output, a **Panic** key and optionally **Stop playback**, working in any app on your PC while the companion runs. A key another app already uses is reported and your previous key keeps working. F6 "save the last N seconds" is unchanged and can't share a key with them.
+
+### Changed
+
+- The connection banner names the exact Soundpad problem and its fix, with **Retry** (companion 2.44).
+- An update waits while a whole library is being restored or an organization plan is being applied, and those wait while an update installs.
+
+### Fixed
+
+- After a Soundpad category above the companion's Temp or Saved category was removed, adding to Temp failed and the Temp category could be left behind at the end of the session. Two categories with exactly the Temp category's tagged name are now refused instead of using whichever sits at the old position.
+- An elevated Soundpad (started as administrator) left a stale "Waiting for Soundpad" message; it now says the two run with different rights.
+- Starting the companion twice now says it is already running instead of showing a raw file error.
+- Guests no longer receive the host's F6 status line.
+
+### Tests
+
+- About 100 new companion tests: backups and restore (hashes, copying only what changed, edits during a backup, a crash mid-backup, retention, clean-up that never touches other files, folder rules, low disk space, damaged settings, never delaying Play or Stop, every restore kind with Undo, identity and limits, the offline restore), updates (release choice and fallbacks, the allowed download hosts, hash and version checks, the encrypted hand-over, every failure of the swap rolling back, and a full session continuing across an update), Organize (the plan file, each native step verified, drift and conflicts, a crash mid-step, the quiet rule with plays in between, duplicates on add, guests' proposals, refused targets, never sending forbidden commands), missing files, the Temp-category renumbering fix, setup, Soundpad diagnosis and host-wide hotkeys. No test registers a real Windows hotkey or opens a microphone.
+- About 40 new website unit tests (the backups, updates, Organize, shortcuts and setup modules) and 25 new browser tests, run in Chromium and WebKit: backups and restore with Undo, an update with a guest connected (same invitation, history and Temp, the gap marked), Organize mode with guest proposals, Apply, pauses, recovery and Needs attention, the setup guide, the Soundpad fix, rebinding Panic and the host-wide hotkeys, and each feature hidden for a 2.43 companion.
+- A harness round trip backs up a fixture library, deletes and damages it, restores it and compares every byte; it also runs on CI. A process-level script (`scripts/update-swap-test.ps1`) updates a real published EXE from a local test release server and checks that a wrong hash, a cut-off download, a wrong version, a failed test run or a version that never starts each leave the old EXE working with the same port and invitation.
+- The new files (`backup-settings.v1.json`, `backup-workspace.v1.json`, `update-settings.v1.json`, `organize\`, `setup.json`, `hotkeys.json`) were checked against the 2.3.1 and 2.43.0 companions (see `docs/ROLLBACK.md`).
+
+### Not yet checked on a real Soundpad or real hardware
+
+- Organize: nested categories, whether adding a sound already in Soundpad lists it twice in All sounds (the first such change pauses to check), removing categories whose sounds are also elsewhere, names with brackets or commas, and Soundpad's reaction to a missing file were tested against the test Soundpad only. Nothing in this release was run against the owner's Soundpad.
+- Updates were tested end to end with local test releases, not real GitHub downloads. The EXE is not code-signed, so the check proves the file matches what was published with the release, not who built it. Windows SmartScreen or Smart App Control may still block a new version (Soundpad Web then keeps the current one). Recording continuity on a real output, guest reconnection over the internet and the length of the gap on real hardware are not measured.
+- Host-wide hotkeys inside games and fullscreen apps, and the elevated-Soundpad message, were not tried on real hardware.
+- Backups to network, removable or cloud-synced drives, restores on another PC or after reinstalling Windows, and how long a backup of a large real library takes were not tried.
+
 ## 2.43.0 — Blue studio
 
 A new look and layout. **Update the companion** for three parts of it: the Kick session count, edited and speed copies of any Soundpad sound, and sharing your style between your browser and the companion window. With an older companion those three are hidden or say what they need, and everything else works.
