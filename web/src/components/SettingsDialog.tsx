@@ -9,6 +9,7 @@ import { missingFeatures, supports } from '../version';
 import { DEMO_COPY, hostCopy } from '../hosting';
 import { themes, type Theme, type useAppearance } from '../appearance';
 import { usePref, type Prefs } from '../prefs';
+import { UpdateSection } from './settings/UpdateSection';
 
 const COMPANION_DOWNLOAD = `${(import.meta.env.VITE_REPOSITORY_URL as string | undefined) || 'https://github.com/uh-oh-man/soundpad-web'}/releases/latest/download/SoundpadWeb.exe`;
 
@@ -243,6 +244,8 @@ export function SettingsDialog({
           </a>
         </p>
       )}
+      {/* 2.44 (gate updater): the companion updates itself. */}
+      {host && !view.demo && <UpdateSection />}
       {host && (
         <>
           {copy.note && (

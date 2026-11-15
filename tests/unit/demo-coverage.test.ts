@@ -171,6 +171,37 @@ const FEATURE_OPS: Record<Feature, Op[]> = {
   kickSession: ['counter'],
   soundEdit: ['trimAudio', 'trimPreview'],
   uiSync: ['uiPrefsGet', 'uiPrefsSet'],
+  // Stage H (2.44): never shown in the example (DEMO_COMPANION stays 2.43.0).
+  backups: [
+    'backupSettings',
+    'backupNow',
+    'backupList',
+    'backupDetail',
+    'backupRestore',
+    'backupAttach',
+    'backupLayout',
+  ],
+  updater: [
+    'updateStatus',
+    'updateCheck',
+    'updateDownload',
+    'updateInstall',
+    'updateLater',
+    'updateSettings',
+  ],
+  organize: [
+    'organizeGet',
+    'organizeEdit',
+    'organizeApply',
+    'organizeResolve',
+    'organizeDiscard',
+    'organizePropose',
+    'organizeWithdraw',
+    'organizeSettings',
+  ],
+  missingFiles: [],
+  setup: ['setupGet', 'setupSet', 'mimicSources'],
+  hostHotkeys: ['hotkeysGet', 'hotkeysSet'],
 };
 
 /** What the example honestly cannot do, and the reason it gives. Each must be refused with exactly that. */

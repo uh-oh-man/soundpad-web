@@ -116,7 +116,36 @@ export const commandSchema = z
       // and active draft through the companion's ui.json. Host only; guests never send these.
       'uiPrefsGet',
       'uiPrefsSet',
+      // Stage H (2.44), host only unless isGuestAllowed says otherwise. Each op's details travel in
+      // `body`, checked by its own module before sending (updates.ts for the updater's).
+      'backupSettings',
+      'backupNow',
+      'backupList',
+      'backupDetail',
+      'backupRestore',
+      'backupAttach',
+      'backupLayout',
+      'updateStatus',
+      'updateCheck',
+      'updateDownload',
+      'updateInstall',
+      'updateLater',
+      'updateSettings',
+      'organizeGet',
+      'organizeEdit',
+      'organizeApply',
+      'organizeResolve',
+      'organizeDiscard',
+      'organizePropose',
+      'organizeWithdraw',
+      'organizeSettings',
+      'setupGet',
+      'setupSet',
+      'hotkeysGet',
+      'hotkeysSet',
     ]),
+    // Stage H (2.44): the one payload field of every Stage H op (any JSON; each op's module checks it).
+    body: z.json().optional(),
     // uiPrefsSet (2.43): the style choices to store (any subset).
     uiPrefs: z.lazy(() => uiPrefsInputSchema).optional(),
     // Sentences (2.42): which sentence, and what is asked of it (see sentenceInputSchema).
@@ -492,6 +521,8 @@ export const snapshotSchema = z.object({
   counterSession: z.number().int().nonnegative().optional(),
   // 2.43 (gate uiSync): rises when the host's shared style (ui.json) changes, so host pages fetch uiPrefsGet.
   uiRevision: z.number().int().nonnegative().optional(),
+  // 2.44 (gate updater): the self-update state, host only (stripped for guests). Older companions omit it.
+  update: z.lazy(() => updateSnapshotSchema).optional(),
   permissions: z.object({
     remotePlayback: z.boolean(),
     guestCounter: z.boolean(),
@@ -573,6 +604,29 @@ export const ackSchema = z.object({
   error: z.string().max(2000).nullable().optional(),
   data: z.unknown().optional(),
 });
+/** The companion's self-update state (2.44, gate updater); see updates.ts for what each state shows. */
+export const updateSnapshotSchema = z.object({
+  state: z.enum([
+    'idle',
+    'checking',
+    'available',
+    'downloading',
+    'verifying',
+    'ready',
+    'installing',
+    'failed',
+    'unsupported',
+  ]),
+  current: z.string(),
+  latest: z.string().optional(),
+  notesUrl: z.string().optional(),
+  bytes: z.number().optional(),
+  total: z.number().optional(),
+  error: z.string().optional(),
+  reason: z.string().optional(),
+  offered: z.boolean().optional(),
+});
+export type UpdateSnapshot = z.infer<typeof updateSnapshotSchema>;
 export const EMPTY: Snapshot = {
   v: 1,
   revision: 0,

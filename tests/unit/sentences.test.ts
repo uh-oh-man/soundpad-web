@@ -341,7 +341,7 @@ describe('sentence permissions, snapshot and gates (2.42)', () => {
     expect(parseSnapshot({ ...EMPTY, sentences: 4 }).sentences).toBe(4);
     expect(supports('2.41.0', 'sentences')).toBe(false);
     expect(supports('2.42.0', 'sentences')).toBe(true);
-    expect(missingFeatures('2.41.9')).toHaveLength(4); // sentences and the three 2.43 features
+    expect(missingFeatures('2.41.9')).toHaveLength(10); // sentences, the three 2.43 features and the six of Stage H (2.44)
     expect(siteRelaysSentences('2.41.9')).toBe(false);
     expect(siteRelaysSentences('2.42.0')).toBe(true);
   });
