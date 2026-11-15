@@ -89,8 +89,9 @@ public static class HarnessOrganize
         Command C(string op, object body) => new(2, Guid.NewGuid().ToString(), DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(), op) { Body = JsonSerializer.SerializeToElement(body, Json.Options) };
         async Task Must(Task<Reply> reply, string what) { var r = await reply; if (!r.Ok) throw new InvalidOperationException(what + ": " + r.Error); }
         await Must(b.Execute(C("organizeSettings", new { guestOrganize = true }), "host"), "organize settings");
-        var sound = b.Snapshot.Library.Sounds.First(s => !s.Temporary);
-        await Must(b.Execute(C("organizeEdit", new { planRevision = 0, add = new object[] { new { kind = "createCategory", name = "Rollback organize", key = "new" }, new { kind = "addSound", soundId = sound.Id, targetKey = "new" } } }), "host"), "organize plan");
+        // The fixture's library view may not load (its categories name the default mock paths), so the plan holds
+        // steps that need only Soundpad's categories: a new one, and the empty one removed.
+        await Must(b.Execute(C("organizeEdit", new { planRevision = 0, add = new object[] { new { kind = "createCategory", name = "Rollback organize" }, new { kind = "removeCategory", categoryId = "7", categoryName = "Empty category" }, new { kind = "renameCategory", categoryId = "8", categoryName = "Favorites", name = "Best" } } }), "host"), "organize plan");
         b.PauseOrganizePlanForFixture();
         Console.WriteLine("organize: " + (File.Exists(Path.Combine(dir, "organize", "plan.v1.json")) ? "plan.v1.json and settings.v1.json written" : "no plan"));
     }
