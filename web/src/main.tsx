@@ -27,6 +27,8 @@ import { SessionUpload } from './components/SessionUpload';
 import { Modal, dialogOpen } from './components/Modal';
 import { Sidebar } from './components/Sidebar';
 import { SettingsDialog } from './components/SettingsDialog';
+import { StageHContext, type StageH } from './stage-h';
+import { BackupLayoutSync } from './components/backups/BackupLayoutSync';
 import { LobbyRequests } from './components/LobbyRequests';
 import { BudgetRequests, QuitPromptDialog, TempRecovery } from './components/StoragePanel';
 import { useBudgetSync, useDraftStore, useDraftSync } from './mimic/draft-store';
@@ -86,6 +88,8 @@ import './sentences.css';
 import './shell.css';
 import './playback.css';
 import './surfaces.css';
+// Stage H (2.44): each work package's own file, after Stage G's.
+import './backups.css';
 
 const viewLabels: Record<(typeof viewModes)[number], string> = {
   icons: 'Icons',
@@ -286,6 +290,11 @@ function App() {
   const [resuming, setResuming] = useState(false);
   const personal = useWorkspace(state.hostId);
   const w = personal.workspace;
+  // Stage H (2.44): what every Stage H piece reads from the shell (stage-h.ts).
+  const stageH = useMemo<StageH>(
+    () => ({ state, controller, mode, demo: view.demo, notify: controller.notify }),
+    [state, mode, view.demo],
+  );
   useSpaceToggle();
   usePanicShortcut();
   useSearchShortcut();
@@ -622,7 +631,7 @@ function App() {
           : `Edit ${state.library.sounds.find((s) => s.id === shownPanel.soundId)?.name ?? 'sound'}`;
 
   return (
-    <>
+    <StageHContext.Provider value={stageH}>
       <AppShell
         className={`app-shell ${mode === 'landing' ? 'is-landing' : 'is-connected'} ${held ? 'playback-held' : ''}`}
         style={
@@ -1163,6 +1172,7 @@ function App() {
         {view.needsName && <GuestName initial={view.profile.name} />}
       </AppShell>
       <NoticeAnnouncer />
+      <BackupLayoutSync workspace={w} ready={personal.ready} replace={personal.replace} />
       {settings && (
         <Modal label="Session & access" onClose={() => setSettings(false)}>
           <SettingsDialog
@@ -1201,7 +1211,7 @@ function App() {
           <OrganizeSound sound={organizing} workspace={w} update={personal.update} />
         </Modal>
       )}
-    </>
+    </StageHContext.Provider>
   );
 }
 

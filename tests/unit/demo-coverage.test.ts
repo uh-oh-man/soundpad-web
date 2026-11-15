@@ -171,6 +171,16 @@ const FEATURE_OPS: Record<Feature, Op[]> = {
   kickSession: ['counter'],
   soundEdit: ['trimAudio', 'trimPreview'],
   uiSync: ['uiPrefsGet', 'uiPrefsSet'],
+  // Stage H (2.44): host-only, and the example (DEMO_COMPANION 2.43) never shows them.
+  backups: [
+    'backupSettings',
+    'backupNow',
+    'backupList',
+    'backupDetail',
+    'backupRestore',
+    'backupAttach',
+    'backupLayout',
+  ],
 };
 
 /** What the example honestly cannot do, and the reason it gives. Each must be refused with exactly that. */
