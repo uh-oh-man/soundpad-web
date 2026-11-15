@@ -60,7 +60,8 @@ public sealed partial class Bridge
     private BackupSettingsStore BackupStore { get { lock (backupInit) return backupSettingsStore ??= new(Path.Combine(store.DirectoryPath, "backup-settings.v1.json")); } }
     private BackupFiles backupFiles = new();
     private Func<DateTimeOffset> backupClock = () => DateTimeOffset.UtcNow;
-    private string leppsoftFolder = BackupFolders.Leppsoft();
+    /// <summary>Soundpad's settings folder for the backup folder rules and restores (never written): the one tests set with UseLeppsoftFolder (BridgeOrganize.cs), otherwise %APPDATA%\Leppsoft.</summary>
+    private string leppsoftFolder => leppsoftOverride ?? BackupFolders.Leppsoft();
     private string suggestedBackupFolder = BackupFolders.Suggested();
     private long backupsRevision;
     private volatile bool backupRunning;
@@ -71,7 +72,6 @@ public sealed partial class Bridge
     /// <summary>Test seams.</summary>
     internal void UseBackupFiles(BackupFiles files) => backupFiles = files;
     internal void UseBackupClock(Func<DateTimeOffset> clock) => backupClock = clock;
-    internal void UseLeppsoftFolder(string folder) => leppsoftFolder = folder;
     internal void UseSuggestedBackupFolder(string folder) => suggestedBackupFolder = folder;
     /// <summary>Tests and the harness: awaited at the start of every run, after it was marked running (a slow backup).</summary>
     internal Func<CancellationToken, Task>? BackupHold { get; set; }

@@ -907,3 +907,42 @@ html[data-motion='reduce'] .player.intent-pending .playback-icon {
     display: none;
   }
 }
+
+/* ---------- Organize mode tiles (2.44, WP3; the rest of Organize mode is in organize.css) ---------- */
+/* The whole tile is its checkbox: no play affordance, no quick actions, the selection outlined. */
+[data-organize='on'] .sound-tile {
+  position: relative;
+  cursor: pointer;
+}
+[data-organize='on'] .sound-tile .tile-play-strip,
+[data-organize='on'] .sound-tile .tile-quick,
+[data-organize='on'] .sound-tile .sound-actions {
+  visibility: hidden;
+}
+[data-organize='on'] .sound-tile.is-selected {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent) inset;
+  background: var(--accent-soft);
+}
+.tile-select {
+  position: absolute;
+  inset: 0;
+  z-index: var(--z-tile);
+  display: flex;
+  align-items: flex-start;
+  justify-content: flex-start;
+  padding: var(--space-2);
+  border-radius: inherit;
+  cursor: pointer;
+}
+.tile-select input {
+  width: 20px;
+  height: 20px;
+  margin: 0;
+  accent-color: var(--accent-fill);
+  cursor: pointer;
+}
+.sound-tile:has(.tile-select input:focus-visible) {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}

@@ -49,6 +49,7 @@ public static class HarnessStageH
     public static void MockReady(string[] args, MockSoundpad mock, string dataDir)
     {
         Mock = mock;
+        HarnessOrganize.MockReady(args, mock, dataDir);
     }
 
     /// <summary>Before the e2e harness builds its Bridge on <paramref name="dataDir"/>.</summary>
@@ -66,6 +67,7 @@ public static class HarnessStageH
     {
         HarnessBackups.AfterBridge(args, bridge, server);
         HarnessUpdates.AfterBridge(args, bridge, server);
+        HarnessOrganize.AfterBridge(args, bridge);
     }
 
     /// <summary>At the end of --make-rollback-fixture, before the session ends: each package writes its persisted files into <paramref name="dir"/>.</summary>
@@ -73,5 +75,6 @@ public static class HarnessStageH
     {
         await HarnessBackups.RollbackFixture(dir, b);
         HarnessUpdates.RollbackFixture(dir, b);
+        await HarnessOrganize.RollbackFixture(dir, b);
     }
 }

@@ -11,6 +11,7 @@ import { themes, type Theme, type useAppearance } from '../appearance';
 import { usePref, type Prefs } from '../prefs';
 import { BackupsSection } from './settings/BackupsSection';
 import { UpdateSection } from './settings/UpdateSection';
+import { GuestOrganizeToggle } from './settings/GuestOrganizeToggle';
 
 const COMPANION_DOWNLOAD = `${(import.meta.env.VITE_REPOSITORY_URL as string | undefined) || 'https://github.com/uh-oh-man/soundpad-web'}/releases/latest/download/SoundpadWeb.exe`;
 
@@ -278,6 +279,7 @@ export function SettingsDialog({
                 />
               </div>
             ))}
+          <GuestOrganizeToggle state={state} demo={view.demo} />
           {!view.demo && supports(state.companionVersion, 'drafts') && (
             <KeepSettingsForm state={state} connected={connected} />
           )}

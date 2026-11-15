@@ -5,8 +5,8 @@ import type { NoticeAction, NoticeKind } from './notifications';
 
 /**
  * Stage H (2.44) shared context: what every Stage H piece needs from the app shell, provided once in
- * main.tsx around the app body. This copy was made by WP1 (backups) on a base without Phase 0; the
- * integrator's Phase 0 version (with organizeActive for WP3) replaces it.
+ * main.tsx around the app body, so backups, the updater, Organize mode, setup and shortcuts read the same
+ * state without new props through the shell. Each package keeps its logic in its own module.
  */
 export type StageH = {
   state: Snapshot;
@@ -26,10 +26,13 @@ export const StageHContext = createContext<StageH>({
 
 export const useStageH = () => useContext(StageHContext);
 
-/** True when `el` is inside the board while Organize mode is on (WP3). */
+/**
+ * True while the board is in Organize mode (2.44): clicks and keys select sounds there instead of playing
+ * them, so the board's Space shortcut stays out of the way. Panic and search still work.
+ */
 export function organizeActive(el: Element | null): boolean {
   return (
     !!el?.closest?.('[data-organize="on"]') ||
-    document.getElementById('board')?.dataset.organize === 'on'
+    (typeof document !== 'undefined' && document.getElementById('board')?.dataset.organize === 'on')
   );
 }

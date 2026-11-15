@@ -2,7 +2,9 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 namespace SoundpadWeb;
 
-public record Sound(string Id, string Name, string? Icon, long? DurationMs = null, long? NativePlays = null, string? NativeLastPlayed = null, bool Temporary = false, string? UploadedBy = null, string? AssetId = null, string? Orientation = null, string? AudioKind = null, bool InternalVariant = false, string? AliasOf = null, string? WorkspaceId = null, string[]? Aliases = null);
+public record Sound(string Id, string Name, string? Icon, long? DurationMs = null, long? NativePlays = null, string? NativeLastPlayed = null, bool Temporary = false, string? UploadedBy = null, string? AssetId = null, string? Orientation = null, string? AudioKind = null, bool InternalVariant = false, string? AliasOf = null, string? WorkspaceId = null, string[]? Aliases = null,
+    // 2.44 (gate missingFiles): the sound's file is missing on the host's PC. Written only when true, so the snapshot does not grow per sound.
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] bool Missing = false);
 public record Category(string Id, string Name, string? Icon, string[] SoundIds, Category[] Children);
 public record Library(string Version, Sound[] Sounds, Category[] Categories);
 public record Playback(string Status = "UNKNOWN", long? PositionMs = null, long? DurationMs = null,
@@ -11,7 +13,9 @@ public record Permissions(bool RemotePlayback = true, bool GuestCounter = false,
     // Guest Keep (2.40). Never written to state.json (null there): it lives in keep-settings.json, which older companions ignore.
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] bool? GuestKeep = null,
     // Guests may edit the voice library (2.41). Never written to state.json either: it lives in library\voice-library.v1.json.
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] bool? GuestLibraryEdit = null);
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] bool? GuestLibraryEdit = null,
+    // Guests may propose organization changes (2.44, gate organize). Never in state.json: it lives in organize\settings.v1.json.
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] bool? GuestOrganize = null);
 public record Snapshot(int V, long Revision, bool Available, string? Error, Library Library, Playback Playback, int Counter, Permissions Permissions,
     int Protocol = 2, string? HostId = null, long StatisticsVersion = 0, string? CompanionVersion = null, long ManagedAudioVersion = 0, MimicState? Mimic = null,
     // True while the host has suspended guest playback with Panic (2.35). In memory only: a restart clears it.
@@ -30,7 +34,9 @@ public record Snapshot(int V, long Revision, bool Available, string? Error, Libr
     // 2.44 (Stage H): rises when the backup settings, a backup run or a restore changes (host pages fetch backupSettings).
     long Backups = 0,
     // 2.44 (gate updater): the self-update state, host only (pages strip it for guests). Left out when there is none.
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] UpdateStatus? Update = null);
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] UpdateStatus? Update = null,
+    // 2.44 (gate organize): rises when the organization plan, its proposals or its settings change (pages fetch organizeGet).
+    long Organize = 0);
 public record Participant(string Id, string Name);
 public record ParticipantPlays(string Name, long Count);
 public sealed class SoundStatistics

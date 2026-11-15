@@ -1,4 +1,4 @@
-import type { ButtonHTMLAttributes, ReactNode } from 'react';
+import type { ButtonHTMLAttributes, DragEvent, ReactNode } from 'react';
 import {
   AudioLines,
   Folder,
@@ -11,6 +11,9 @@ import type { Category, Snapshot } from '../protocol';
 import { moveSound, type Workspace } from '../workspace';
 import type { BoardSelection } from '../arrange';
 import { SpotifyPanel } from './SpotifyPanel';
+import { DRAG_TYPE, addToFolder, dragIds, isAppCategory, stepsForAdd } from '../organize';
+import { rememberLayout, useOrganize } from './organize/organize-store';
+import { planSteps } from './organize/OrganizeBar';
 
 type Update = (change: (current: Workspace) => Workspace) => void;
 
@@ -68,6 +71,7 @@ export function Sidebar({
   library = true,
   rail,
   inert,
+  canPlan = false,
 }: {
   state: Snapshot;
   host: boolean;
@@ -89,9 +93,19 @@ export function Sidebar({
   rail?: { collapsed: boolean; toggle: () => void };
   /** Out of reach while the editor sheet covers the board (narrow screens). */
   inert?: boolean;
+  /** Organize mode (2.44): Soundpad categories take dropped sounds into Review changes when planning is possible. */
+  canPlan?: boolean;
 }) {
   const { category, myCategory, search } = selection;
   const mine = w?.layout === 'mine';
+  const { on: organizing } = useOrganize();
+  /** The sounds a drop carries: the dragged selection (Organize mode), else the one dragged sound. */
+  const dropped = (e: DragEvent) => {
+    const ids = dragIds(e.dataTransfer.getData(DRAG_TYPE));
+    const one = e.dataTransfer.getData('application/x-soundpad-id');
+    return (ids.length ? ids : [one]).filter((id) => state.library.sounds.some((s) => s.id === id));
+  };
+  const takesDrops = (c: Category) => organizing && canPlan && !isAppCategory(c.name);
   return (
     <aside className="sidebar" inert={inert}>
       {rail && (
@@ -131,6 +145,24 @@ export function Sidebar({
                 label={c.name || 'Unnamed category'}
                 count={c.soundIds.length}
                 onClick={() => selectHost(c.id)}
+                data-drop-target={takesDrops(c) || undefined}
+                onDragOver={(e) => {
+                  if (takesDrops(c)) e.preventDefault();
+                }}
+                onDrop={(e) => {
+                  if (!takesDrops(c)) return;
+                  e.preventDefault();
+                  planSteps(
+                    host,
+                    stepsForAdd(
+                      dropped(e),
+                      { kind: 'category', category: { id: c.id, name: c.name } },
+                      state.library.categories,
+                    ),
+                    state.library.sounds,
+                    state.library.categories,
+                  );
+                }}
               />
             ))}
           </nav>
@@ -164,9 +196,13 @@ export function Sidebar({
                   onDragOver={(e) => e.preventDefault()}
                   onDrop={(e) => {
                     e.preventDefault();
-                    const id = e.dataTransfer.getData('application/x-soundpad-id');
-                    if (state.library.sounds.some((s) => s.id === id))
-                      update((current) => moveSound(current, id, f.id));
+                    const ids = dropped(e);
+                    if (!ids.length) return;
+                    // Organize mode (2.44): the whole selection, with Undo.
+                    if (organizing) {
+                      rememberLayout(w);
+                      update((current) => addToFolder(current, f.id, ids));
+                    } else update((current) => moveSound(current, ids[0], f.id));
                   }}
                   onClick={() => selectMine(f.id)}
                 />

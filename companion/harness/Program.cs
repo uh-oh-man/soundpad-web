@@ -460,6 +460,7 @@ if (args.Length > 1 && int.TryParse(args[1], out var count) && count is > 4 and 
 }
 foreach (var element in all.Descendants("Sound").Concat(categories.Descendants("Sound"))) { var original = (string?)element.Attribute("url"); if (original == null) continue; var path = Path.Combine(directory, Path.GetFileName(original)); if (!File.Exists(path)) AudioFixtures.Wave(path); element.SetAttributeValue("url", path); element.SetAttributeValue("duration", "00:02.500"); }
 mock.AllXml = all.ToString(); mock.CategoryXml = categories.ToString();
+HarnessStageH.MockReady(args, mock, directory);
 // After the origin and the sound count (2.35), for e2e tests of playback under delay: --latency-ms N makes every
 // Soundpad request take N ms; --slow-add-ms N makes only an import into Soundpad (DoAddSound) take N ms longer.
 int Option(string name) { int at = Array.IndexOf(args, name); return at >= 0 && at + 1 < args.Length && int.TryParse(args[at + 1], out int value) && value is >= 0 and <= 3000 ? value : 0; }

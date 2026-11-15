@@ -53,6 +53,35 @@ public sealed class MockSoundpad : IAsyncDisposable
     private string? playingPath, lastAudioPath;
     private long lastAudioEnded = long.MinValue / 2, playGeneration;
     private int selectedCategory = 1, selectedIndex;
+    // ---- Organize (2.44): the parts of Soundpad's behaviour that were never measured, each switchable. The defaults
+    // keep the behaviour every earlier test was written against. ----
+    public enum Indexing { Append, DepthFirst }
+    /// <summary>Append (default): a new category takes the next free index and others keep theirs. DepthFirst: every category is renumbered in tree order after each change.</summary>
+    public Indexing NestedIndexing { get; set; } = Indexing.Append;
+    /// <summary>DoAddSound of a path already in All sounds lists it there a second time (true, as before) or only adds it to the category.</summary>
+    public bool DuplicateOnAdd { get; set; } = true;
+    /// <summary>DoAddSound's position: false (default) always appends, as before; true honours -1 (end), 1 (first) and n.</summary>
+    public bool InsertPositions { get; set; }
+    public enum RemovalScope { EveryOccurrence, Exclusive }
+    /// <summary>EveryOccurrence (default, measured 2.16): a removed category's sounds leave All sounds and every other category. Exclusive: only sounds in no other category leave.</summary>
+    public RemovalScope RemoveCategoryScope { get; set; } = RemovalScope.EveryOccurrence;
+    /// <summary>After a change, this many library reads still describe the library as it was (Soundpad applies changes a moment later).</summary>
+    public int ApplyLagReads { get; set; }
+    private int lagLeft;
+    private string? lagAll, lagCategories;
+    /// <summary>A risky category removal (see <see cref="RiskyRemovals"/>) makes the mock stop answering, as the real Soundpad exited once.</summary>
+    public bool ExitOnRiskyRemoval { get; set; }
+    public bool Exited { get; private set; }
+    /// <summary>Runs before each command is handled, with the command (tests change the library or start playback "meanwhile").</summary>
+    public Func<string, Task>? BeforeCommand { get; set; }
+    /// <summary>Commands the companion must never send (selection-based edits, undo, saving, recording, search, scrolling).</summary>
+    public static readonly string[] ForbiddenPrefixes = ["DoSelect", "DoRemoveSelectedEntries", "DoUndo", "DoRedo", "DoSaveSoundlist", "DoStartRecording", "DoSearch", "DoResetSearch", "DoScroll"];
+    public List<string> ForbiddenCommands { get; } = [];
+    /// <summary>Set by a test that sends a forbidden command on purpose; otherwise disposing the mock fails the test.</summary>
+    public bool AllowForbiddenCommands { get; set; }
+    public void AssertNoForbiddenCommands() { lock (ForbiddenCommands) if (ForbiddenCommands.Count > 0) throw new InvalidOperationException("Forbidden Soundpad commands were sent: " + string.Join(", ", ForbiddenCommands)); }
+    /// <summary>Renumbers every category in tree order (2, 3, ...; 1 is All sounds), for <see cref="Indexing.DepthFirst"/>.</summary>
+    private static void Renumber(XDocument cats) { int next = 2; foreach (var e in cats.Descendants("Category").Where(e => (string?)e.Attribute("type") != "1")) e.SetAttributeValue("index", next++); }
     private string CategoriesMetadata(bool withSounds = false)
     {
         var doc = XDocument.Parse(CategoryXml);
@@ -75,14 +104,25 @@ public sealed class MockSoundpad : IAsyncDisposable
             var matches = all.Root!.Elements("Sound").Where(e => (string?)e.Attribute("url") == path).ToArray(); if (matches.Length != 1) return "R-409";
             selectedCategory = 1; selectedIndex = (int)matches[0].Attribute("index")!; command = "DoRemoveSelectedEntries(false)";
         }
-        if (command.StartsWith("DoAddCategory(")) { int id = cats.Descendants("Category").Select(e => (int)e.Attribute("index")!).DefaultIfEmpty(1).Max() + 1; cats.Root!.Add(new XElement("Category", new XAttribute("index", id), new XAttribute("name", Regex.Match(command, "\"([^\"]+)\"").Groups[1].Value))); }
+        if (command.StartsWith("DoAddCategory(")) { int id = cats.Descendants("Category").Select(e => (int)e.Attribute("index")!).DefaultIfEmpty(1).Max() + 1; cats.Root!.Add(new XElement("Category", new XAttribute("index", id), new XAttribute("name", Regex.Match(command, "\"([^\"]+)\"").Groups[1].Value))); if (NestedIndexing == Indexing.DepthFirst) Renumber(cats); }
         else if (command.StartsWith("DoAddSound("))
         {
             if (FailNextAddSound) { FailNextAddSound = false; return "R-500"; }
-            var m = Regex.Match(command, "^DoAddSound\\(\"([^\"]+)\", (\\d+), (?:-1|1)\\)$");
-            if (!m.Success) return "R-400";
-            int id = all.Root!.Elements("Sound").Select(e => (int)e.Attribute("index")!).DefaultIfEmpty(0).Max() + 1;
-            var sound = new XElement("Sound", new XAttribute("index", id), new XAttribute("url", m.Groups[1].Value), new XAttribute("title", "Uploaded audio")); try { using var wave = new NAudio.Wave.WaveFileReader(m.Groups[1].Value); sound.SetAttributeValue("duration", wave.TotalTime.ToString(@"mm\:ss\.fff")); } catch (Exception) { /* like Soundpad, length is optional */ } all.Root.Add(sound); cats.Descendants("Category").Single(e => (int)e.Attribute("index")! == int.Parse(m.Groups[2].Value)).Add(new XElement(sound));
+            var m = Regex.Match(command, "^DoAddSound\\(\"([^\"]+)\", (\\d+), (-1|\\d+)\\)$");
+            if (!m.Success || !InsertPositions && m.Groups[3].Value is not ("-1" or "1")) return "R-400";
+            var into = cats.Descendants("Category").SingleOrDefault(e => (int)e.Attribute("index")! == int.Parse(m.Groups[2].Value));
+            if (into == null) return "R-404";
+            var existing = DuplicateOnAdd ? null : all.Root!.Elements("Sound").FirstOrDefault(e => string.Equals((string?)e.Attribute("url"), m.Groups[1].Value, StringComparison.OrdinalIgnoreCase));
+            XElement sound;
+            if (existing != null) sound = new XElement(existing);
+            else
+            {
+                int id = all.Root!.Elements("Sound").Select(e => (int)e.Attribute("index")!).DefaultIfEmpty(0).Max() + 1;
+                sound = new XElement("Sound", new XAttribute("index", id), new XAttribute("url", m.Groups[1].Value), new XAttribute("title", "Uploaded audio")); try { using var wave = new NAudio.Wave.WaveFileReader(m.Groups[1].Value); sound.SetAttributeValue("duration", wave.TotalTime.ToString(@"mm\:ss\.fff")); } catch (Exception) { /* like Soundpad, length is optional */ } all.Root.Add(sound);
+            }
+            int position = int.Parse(m.Groups[3].Value);
+            var members = into.Elements("Sound").ToArray();
+            if (InsertPositions && position >= 1 && position <= members.Length) members[position - 1].AddBeforeSelf(new XElement(sound)); else if (members.Length > 0) members[^1].AddAfterSelf(new XElement(sound)); else into.AddFirst(new XElement(sound));
         }
         else if (command.StartsWith("DoRemoveCategory("))
         {
@@ -92,14 +132,18 @@ public sealed class MockSoundpad : IAsyncDisposable
             if (target == null) return "R-404";
             // Measured on Soundpad 4.0.35 (2.16): a removed category's sounds leave the main list too (files stay on disk).
             var urls = target.Descendants("Sound").Select(e => (string?)e.Attribute("url")).ToHashSet(StringComparer.OrdinalIgnoreCase);
+            var inside = target.DescendantsAndSelf("Category").ToHashSet();
             lock (held)
             {
                 bool playing = Status is "PLAYING" or "PAUSED" && Position < CurrentDuration && playingPath != null && urls.Contains(playingPath);
                 bool justPlayed = lastAudioPath != null && urls.Contains(lastAudioPath) && Environment.TickCount64 - lastAudioEnded < 1000;
-                if (playing || justPlayed) { RiskyRemovals++; Console.WriteLine("TEST_RISK " + command + (playing ? " while one of its sounds plays" : " right after one of its sounds played")); }
+                if (playing || justPlayed) { RiskyRemovals++; Console.WriteLine("TEST_RISK " + command + (playing ? " while one of its sounds plays" : " right after one of its sounds played")); if (ExitOnRiskyRemoval) { Exited = true; return "R-500"; } }
             }
+            // Exclusive: a sound that is also in a category that stays keeps its place in All sounds and there.
+            if (RemoveCategoryScope == RemovalScope.Exclusive) urls.RemoveWhere(u => cats.Descendants("Category").Where(c => !inside.Contains(c)).Any(c => c.Elements("Sound").Any(x => string.Equals((string?)x.Attribute("url"), u, StringComparison.OrdinalIgnoreCase))));
             target.Remove();
             foreach (var e in cats.Descendants("Category").Where(e => (int)e.Attribute("index")! > removed)) e.SetAttributeValue("index", (int)e.Attribute("index")! - 1);
+            if (NestedIndexing == Indexing.DepthFirst) Renumber(cats);
             if (urls.Count > 0)
             {
                 all.Root!.Elements("Sound").Where(e => urls.Contains((string?)e.Attribute("url"))).Remove();
@@ -119,6 +163,7 @@ public sealed class MockSoundpad : IAsyncDisposable
             foreach (var e in cats.Descendants("Sound")) e.SetAttributeValue("index", indexes[(int)e.Attribute("index")!]);
             foreach (var e in all.Root.Elements("Sound")) e.SetAttributeValue("index", indexes[(int)e.Attribute("index")!]);
         }
+        if (ApplyLagReads > 0) { lagAll = AllXml; lagCategories = CategoryXml; lagLeft = ApplyLagReads; }
         AllXml = all.ToString(); CategoryXml = cats.ToString(); return "R-200";
     }
     private long startedTick, position;
@@ -198,26 +243,31 @@ public sealed class MockSoundpad : IAsyncDisposable
     public MockSoundpad(string? name = null) { if (name != null) Name = name; loop = Run(); }
     private async Task Run()
     {
-        while (!cancel.IsCancellationRequested)
+        while (!cancel.IsCancellationRequested && !Exited)
         {
             await using var server = new NamedPipeServerStream(Name, PipeDirection.InOut, 1, PipeTransmissionMode.Message, PipeOptions.Asynchronous);
             try
             {
                 await server.WaitForConnectionAsync(cancel.Token);
-                while (server.IsConnected && !cancel.IsCancellationRequested)
+                while (server.IsConnected && !cancel.IsCancellationRequested && !Exited)
                 {
                     byte[] buffer = new byte[4096]; int read = await server.ReadAsync(buffer, cancel.Token); if (read == 0) break;
                     // Real Soundpad decodes commands in the Windows ANSI code page (1252 on the owner's PC and CI), not
                     // UTF-8; decoding UTF-8 here hid the 2.15.8 bug where "·" arrived as "Â·".
                     var command = Ansi.GetString(buffer, 0, read); lock (Commands) Commands.Add(command);
                     lock (Timeline) Timeline.Add((System.Diagnostics.Stopwatch.GetTimestamp(), command));
+                    if (ForbiddenPrefixes.Any(p => command.StartsWith(p, StringComparison.Ordinal))) lock (ForbiddenCommands) ForbiddenCommands.Add(command);
+                    if (BeforeCommand is { } before) await before(command);
                     // Windows timers are too coarse (about 15 ms) for a few milliseconds, so the short part is spun.
                     if (LatencyMs > 0) { long until = System.Diagnostics.Stopwatch.GetTimestamp() + LatencyMs * System.Diagnostics.Stopwatch.Frequency / 1000; if (LatencyMs > 20) await Task.Delay(LatencyMs - 16, cancel.Token); while (System.Diagnostics.Stopwatch.GetTimestamp() < until) Thread.SpinWait(64); }
                     if (SlowMs > 0 && SlowPrefix is { } slow && command.StartsWith(slow)) await Task.Delay(SlowMs, cancel.Token);
                     if (Status == "PLAYING" && Position >= CurrentDuration) { Status = "STOPPED"; PlayingIndex = null; EndAudio(); }
                     if (RejectPrefix is { } rejected && command.StartsWith(rejected)) { await server.WriteAsync(Encoding.UTF8.GetBytes("R-500"), cancel.Token); continue; }
-                    string result = command switch { "GetSoundlist()" => AllXml, "GetCategories(true, true)" => CategoryXml, "GetCategories(false, false)" => CategoriesMetadata(), "GetCategories(true, false)" => CategoriesMetadata(true), "GetPlayStatus()" => ReportStatus(), "GetPlaybackPositionInMs()" => ReportPosition().ToString(), "GetPlaybackDurationInMs()" => CurrentDuration.ToString(), "IsAlive()" => "R-200", _ => command.StartsWith("Do") ? "R-200" : "R-404" };
+                    bool lagging = lagLeft > 0 && command is "GetSoundlist()" or "GetCategories(true, true)" or "GetCategories(true, false)";
+                    if (lagging) lagLeft--;
+                    string result = lagging ? LaggingRead(command) : command switch { "GetSoundlist()" => AllXml, "GetCategories(true, true)" => CategoryXml, "GetCategories(false, false)" => CategoriesMetadata(), "GetCategories(true, false)" => CategoriesMetadata(true), "GetPlayStatus()" => ReportStatus(), "GetPlaybackPositionInMs()" => ReportPosition().ToString(), "GetPlaybackDurationInMs()" => CurrentDuration.ToString(), "IsAlive()" => "R-200", _ => command.StartsWith("Do") ? "R-200" : "R-404" };
                     if (command.StartsWith("FixtureRemoveOwnedEntry(") || command.StartsWith("DoAdd") || command.StartsWith("DoRemoveCategory(") || command.StartsWith("DoSelectCategory(") || command.StartsWith("DoSelectIndex(") || command.StartsWith("DoRemoveSelectedEntries(")) result = Manage(command);
+                    if (Exited) break;
                     if (command.StartsWith("DoPlaySound(")) { BeginFixturePlayback(); PlayingIndex = int.TryParse(command[12..^1], out int playing) ? playing : null; Console.WriteLine("TEST_PLAY " + command); StartAudio(PlayingIndex); }
                     if (command.StartsWith("DoSeekMs(")) { beforeSeek = Position; remainingLag = SeekLagSamples; remainingStops = TransientSeekStop ? 1 : 0; position = long.Parse(command[9..^1]); startedTick = Environment.TickCount64; Console.WriteLine("TEST_PLAY " + command); }
                     if (command == "DoTogglePause()") { Console.WriteLine("TEST_PLAY " + command); position = Position; Status = Status == "PLAYING" ? "PAUSED" : "PLAYING"; startedTick = Environment.TickCount64; }
@@ -229,5 +279,18 @@ public sealed class MockSoundpad : IAsyncDisposable
             catch (Exception ex) when (ex is IOException or OperationCanceledException) { }
         }
     }
-    public async ValueTask DisposeAsync() { cancel.Cancel(); await loop; EndAudio(); cancel.Dispose(); }
+    /// <summary>A read during <see cref="ApplyLagReads"/>: the library as it was before the last change.</summary>
+    private string LaggingRead(string command)
+    {
+        var (all, cats) = (AllXml, CategoryXml);
+        AllXml = lagAll!; CategoryXml = lagCategories!;
+        try { return command == "GetSoundlist()" ? AllXml : command == "GetCategories(true, true)" ? CategoryXml : CategoriesMetadata(true); }
+        finally { AllXml = all; CategoryXml = cats; }
+    }
+    public async ValueTask DisposeAsync()
+    {
+        cancel.Cancel(); await loop; EndAudio(); cancel.Dispose();
+        // The shared teardown of every test with a mock (2.44): no forbidden command was ever sent.
+        if (!AllowForbiddenCommands) AssertNoForbiddenCommands();
+    }
 }

@@ -8,7 +8,17 @@ import {
   type CSSProperties,
 } from 'react';
 import { createRoot } from 'react-dom/client';
-import { Search, Link, Music2, RefreshCw, Users, X, Radio, OctagonPause } from 'lucide-react';
+import {
+  Search,
+  Link,
+  Music2,
+  RefreshCw,
+  Users,
+  X,
+  Radio,
+  OctagonPause,
+  ListChecks,
+} from 'lucide-react';
 import { controller } from './controller';
 import { flattenCategories, type Sound } from './protocol';
 import { z } from 'zod';
@@ -27,7 +37,7 @@ import { SessionUpload } from './components/SessionUpload';
 import { Modal, dialogOpen } from './components/Modal';
 import { Sidebar } from './components/Sidebar';
 import { SettingsDialog } from './components/SettingsDialog';
-import { StageHContext, type StageH } from './stage-h';
+import { StageHContext, organizeActive, type StageH } from './stage-h';
 import { BackupLayoutSync } from './components/backups/BackupLayoutSync';
 import { LobbyRequests } from './components/LobbyRequests';
 import { BudgetRequests, QuitPromptDialog, TempRecovery } from './components/StoragePanel';
@@ -75,6 +85,17 @@ import { useUnreadNotices } from './notifications';
 import { useNoticeSounds } from './notice-sound';
 import { useTempAssetsSync } from './temp-assets';
 import { UpdateDialogHost, UpdateOffer } from './components/updates/UpdateOffer';
+import { rebindCategory } from './organize';
+import type { SharedLayout } from './shared-layout';
+import { OrganizeBar } from './components/organize/OrganizeBar';
+import { ReviewChanges } from './components/organize/ReviewChanges';
+import { SharedCopyPreview } from './components/organize/SharedCopyPreview';
+import {
+  selectAll,
+  setOrganizeMode,
+  useOrganize,
+  useOrganizeSync,
+} from './components/organize/organize-store';
 // Stylesheets in their cascade order (Stage G spec 3.1). Each later file overrides earlier ones at equal
 // specificity; see the ownership note at the top of each file. DM Sans (self-hosted, SIL OFL 1.1, see
 // THIRD-PARTY-NOTICES.md) comes right after the tokens: its variable-weight faces, latin and latin-ext by
@@ -92,6 +113,7 @@ import './surfaces.css';
 // Stage H (2.44): each work package's own file, after Stage G's.
 import './backups.css';
 import './updates.css';
+import './organize.css';
 
 const viewLabels: Record<(typeof viewModes)[number], string> = {
   icons: 'Icons',
@@ -119,6 +141,8 @@ const totalsSchema = z.object({
 function useSpaceToggle() {
   useEffect(() => {
     function space(event: KeyboardEvent) {
+      // Organize mode (2.44): Space toggles the selection there, never playback.
+      if (organizeActive(event.target as Element)) return;
       if (
         event.code !== 'Space' ||
         event.defaultPrevented ||
@@ -297,6 +321,9 @@ function App() {
     () => ({ state, controller, mode, demo: view.demo, notify: controller.notify }),
     [state, mode, view.demo],
   );
+  // Organize mode (2.44): tiles select instead of playing; Host Layout changes go to Review changes.
+  const organize = useOrganize();
+  const [copying, setCopying] = useState<SharedLayout | null>(null);
   useSpaceToggle();
   usePanicShortcut();
   useSearchShortcut();
@@ -566,6 +593,28 @@ function App() {
     () => flattenCategories(state.library.categories),
     [state.library.categories],
   );
+  // The chosen category is held by its id, which is its place in Soundpad's list: after categories above it
+  // were added or removed (Organize, or by hand) the same id may be another category, so it follows its name.
+  const categoryName = useRef<string | null>(null);
+  useEffect(() => {
+    const next = rebindCategory(category, categoryName.current, state.library.categories);
+    if (next !== category) setCategory(next);
+    categoryName.current = categories.find((c) => c.category.id === next)?.category.name ?? null;
+  }, [state.library.version, category]);
+  // Planning Host Layout changes: the companion's gate, never in the example, and for a guest the host's
+  // permission (which only a 2.44 host page passes on, so it also says the host page relays the ops).
+  const canPlan =
+    connected &&
+    !view.demo &&
+    supports(state.companionVersion, 'organize') &&
+    (host || state.permissions.guestOrganize === true);
+  useOrganizeSync(state, canPlan);
+  const reviewCount = !canPlan
+    ? 0
+    : (organize.view?.plan?.steps.filter((s) => !['verified', 'skipped', 'done'].includes(s.state))
+        .length ?? 0) +
+      (organize.view?.proposals.length ?? 0) +
+      (host ? 0 : organize.draft.length);
   const librarySize = useMemo(
     () => state.library.sounds.filter((s) => !s.internalVariant).length,
     [state.library.sounds],
@@ -577,6 +626,30 @@ function App() {
     [state.library, w, category, myCategory, search, totals],
   );
   const title = boardTitle(state, w, selection);
+  // Organize mode's keys: Ctrl+A selects every sound shown, Escape leaves Organize mode (not while typing,
+  // in a menu or in a dialog, which take them for themselves).
+  useEffect(() => {
+    if (!organize.on) return;
+    function key(e: KeyboardEvent) {
+      const target = e.target as HTMLElement | null;
+      if (
+        target?.closest?.(
+          'input:not([type="checkbox"]),textarea,select,[role="menu"],[role="dialog"]',
+        ) ||
+        target?.isContentEditable
+      )
+        return;
+      if ((e.ctrlKey || e.metaKey) && !e.altKey && e.key.toLowerCase() === 'a') {
+        e.preventDefault();
+        selectAll(sounds.map((s) => s.id));
+      } else if (e.key === 'Escape' && !e.shiftKey && !e.defaultPrevented && !dialogOpen()) {
+        e.preventDefault();
+        setOrganizeMode(false);
+      }
+    }
+    document.addEventListener('keydown', key);
+    return () => document.removeEventListener('keydown', key);
+  }, [organize.on, sounds]);
 
   function selectHost(id: string) {
     setCategory(id);
@@ -630,7 +703,9 @@ function App() {
         ? 'Copy editor'
         : shownPanel.kind === 'activity'
           ? 'Activity'
-          : `Edit ${state.library.sounds.find((s) => s.id === shownPanel.soundId)?.name ?? 'sound'}`;
+          : shownPanel.kind === 'organize'
+            ? 'Review changes'
+            : `Edit ${state.library.sounds.find((s) => s.id === shownPanel.soundId)?.name ?? 'sound'}`;
 
   return (
     <StageHContext.Provider value={stageH}>
@@ -684,6 +759,7 @@ function App() {
             }
             nav={sectionNav('sidebar')}
             library={shown === 'board'}
+            canPlan={canPlan}
             rail={
               navStyle === 'tabs' && !narrow
                 ? { collapsed: sidebarRail, toggle: () => setSidebarRail(!sidebarRail) }
@@ -696,6 +772,7 @@ function App() {
           <main
             id="board"
             className="soundboard"
+            data-organize={shown === 'board' && organize.on ? 'on' : undefined}
             tabIndex={-1}
             aria-label={
               shown === 'board' ? 'Soundboard' : shown === 'voices' ? 'Voices' : 'Sentences'
@@ -856,15 +933,8 @@ function App() {
                       <button
                         key={layout.owner}
                         disabled={!w}
-                        onClick={() => {
-                          personal.update((current) => ({
-                            ...current,
-                            ...layout.organization,
-                            layout: 'mine',
-                          }));
-                          setMyCategory('all');
-                          setSearch('');
-                        }}
+                        // 2.44: a preview first, where the person chooses what to copy (merge or replace).
+                        onClick={() => setCopying(layout)}
                       >
                         {layout.name} · {layout.organization.folders.length} folders · Copy into My
                         Layout
@@ -1005,6 +1075,15 @@ function App() {
                     <button disabled={!w} onClick={() => setManaging(true)}>
                       Manage layout
                     </button>
+                    <button
+                      type="button"
+                      className="organize-toggle"
+                      aria-pressed={organize.on}
+                      title="Select sounds without playing them, and drag them onto a category"
+                      onClick={() => setOrganizeMode(!organize.on)}
+                    >
+                      <ListChecks size={16} aria-hidden="true" /> Organize
+                    </button>
                   </div>
                   <SessionUpload
                     disabled={
@@ -1017,15 +1096,34 @@ function App() {
                     <TempManager state={state} host={host} connected={connected} />
                   )}
                   <span className="grid-caption" data-ok={(!held && canPlay) || undefined}>
-                    {held
-                      ? 'PAUSED BY HOST'
-                      : canPlay
-                        ? 'CLICK TO PLAY'
-                        : !state.available
-                          ? 'WAITING FOR SOUNDPAD'
-                          : 'PLAYBACK DISABLED'}
+                    {organize.on
+                      ? 'CLICK TO SELECT'
+                      : held
+                        ? 'PAUSED BY HOST'
+                        : canPlay
+                          ? 'CLICK TO PLAY'
+                          : !state.available
+                            ? 'WAITING FOR SOUNDPAD'
+                            : 'PLAYBACK DISABLED'}
                   </span>
                 </div>
+                {organize.on && (
+                  <OrganizeBar
+                    state={state}
+                    host={host}
+                    workspace={w}
+                    update={personal.update}
+                    visible={sounds}
+                    category={category}
+                    folder={
+                      w?.layout === 'mine' && myCategory !== 'all' && myCategory !== 'favorites'
+                        ? myCategory
+                        : undefined
+                    }
+                    canPlan={canPlan}
+                    pendingCount={reviewCount}
+                  />
+                )}
                 {w && w.layout === 'mine' && (
                   <p className="workspace-save">
                     {personal.status} · Personal organization never changes Soundpad.
@@ -1149,6 +1247,8 @@ function App() {
                   held={held}
                   onDone={closePanel}
                 />
+              ) : shownPanel.kind === 'organize' ? (
+                <ReviewChanges state={state} host={host} canPlan={canPlan} />
               ) : (
                 <ActivityView />
               )}
@@ -1211,6 +1311,26 @@ function App() {
           />
         </Modal>
       )}
+      {copying && w && (
+        <Modal label={`Copy ${copying.name}’s layout`} onClose={() => setCopying(null)}>
+          <SharedCopyPreview
+            layout={copying}
+            workspace={w}
+            onClose={() => setCopying(null)}
+            onCopy={(next) => {
+              const previous = w;
+              personal.update(() => next);
+              setMyCategory('all');
+              setSearch('');
+              setCopying(null);
+              controller.notify(`Copied from ${copying.name} into My Layout.`, 'success', {
+                label: 'Undo',
+                run: () => personal.update(() => previous),
+              });
+            }}
+          />
+        </Modal>
+      )}
       {organizing && w && (
         <Modal label="Organize sound" onClose={() => setOrganizing(null)}>
           <OrganizeSound sound={organizing} workspace={w} update={personal.update} />
@@ -1224,7 +1344,8 @@ function App() {
 function restorePanel(): EditorRequest | null {
   const saved = recall('shell').panel;
   if (!saved) return null;
-  if (saved.kind === 'mimic' || saved.kind === 'activity') return { kind: saved.kind };
+  if (saved.kind === 'mimic' || saved.kind === 'activity' || saved.kind === 'organize')
+    return { kind: saved.kind };
   if (saved.kind === 'temp-edit' && saved.sourceId) {
     const edit = recall('tempEdit');
     return {

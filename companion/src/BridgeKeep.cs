@@ -47,7 +47,7 @@ public sealed partial class Bridge
     /// <summary>Test seam and harness: guest budgets as they stand.</summary>
     public GuestBudgets Budgets => budgets;
 
-    private Permissions PublicPermissions => disk.Permissions with { GuestKeep = Keep.GuestKeep, GuestLibraryEdit = LibrarySettingsNow?.GuestLibraryEdit };
+    private Permissions PublicPermissions => disk.Permissions with { GuestKeep = Keep.GuestKeep, GuestLibraryEdit = LibrarySettingsNow?.GuestLibraryEdit, GuestOrganize = GuestOrganizeSetting };
 
     private void SaveKeep(KeepSettings next)
     {

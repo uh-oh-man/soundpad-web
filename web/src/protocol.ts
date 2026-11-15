@@ -132,6 +132,8 @@ export const commandSchema = z
       'updateInstall',
       'updateLater',
       'updateSettings',
+      // Organize mode (2.44, gate organize): the host's organization plan and guests' proposals. Guests may
+      // read the plan and propose or withdraw their own (with guestOrganize); everything else is the host's.
       'organizeGet',
       'organizeEdit',
       'organizeApply',
@@ -297,6 +299,7 @@ export const commandSchema = z
         guestMimic: z.boolean().optional(),
         guestKeep: z.boolean().optional(),
         guestLibraryEdit: z.boolean().optional(),
+        guestOrganize: z.boolean().optional(),
       })
       .strict()
       .optional(),
@@ -445,6 +448,8 @@ export type Sound = {
   aliases?: string[] | null;
   temporary?: boolean;
   uploadedBy?: string | null;
+  /** 2.44 (gate missingFiles): the sound's file is missing on the host's PC. */
+  missing?: boolean;
 };
 export type Category = {
   id: string;
@@ -499,6 +504,8 @@ export const snapshotSchema = z.object({
           aliases: z.array(z.string().max(64)).max(64).nullable().optional(),
           temporary: z.boolean().optional(),
           uploadedBy: z.string().max(40).nullable().optional(),
+          // 2.44 (gate missingFiles): the file is missing on the host's PC. Older companions omit it.
+          missing: z.boolean().optional(),
         }),
       )
       .max(50000),
@@ -527,6 +534,8 @@ export const snapshotSchema = z.object({
   backups: z.number().int().nonnegative().optional(),
   // 2.44 (gate updater): the self-update state, host only (stripped for guests). Older companions omit it.
   update: z.lazy(() => updateSnapshotSchema).optional(),
+  // 2.44 (gate organize): rises when the organization plan, proposals or settings change (fetch organizeGet).
+  organize: z.number().int().nonnegative().optional(),
   permissions: z.object({
     remotePlayback: z.boolean(),
     guestCounter: z.boolean(),
@@ -539,6 +548,8 @@ export const snapshotSchema = z.object({
     guestKeep: z.boolean().optional(),
     // 2.41: guests may name and tag voice-library recordings (with Undo and audit). Older companions omit it.
     guestLibraryEdit: z.boolean().optional(),
+    // 2.44: guests may propose organization changes (organize\settings.v1.json). Older companions omit it.
+    guestOrganize: z.boolean().optional(),
   }),
   // 2.41: rises when the voice library, its word index, notices or speaker groups change (fetch libraryStatus).
   voiceLibrary: z.number().int().nonnegative().optional(),
@@ -713,6 +724,10 @@ export function isGuestAllowed(c: Command, s: Snapshot) {
       c.categoryName === undefined
     );
   if (c.op === 'budgetStatus') return true;
+  // Organize (2.44): with the host's permission, a guest reads the plan and proposes or withdraws their
+  // own proposals; only the host edits and applies. The companion checks the permission again.
+  if (c.op === 'organizeGet' || c.op === 'organizePropose' || c.op === 'organizeWithdraw')
+    return s.permissions.guestOrganize === true;
   // The voice library (2.41): guests see and search the kept library by default; private previews
   // are answered to them only. Editing (names, tags, voices, wanted words, Undo) needs the host's
   // guestLibraryEdit; the settings and the category word index are the host's.
