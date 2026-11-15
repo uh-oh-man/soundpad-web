@@ -73,6 +73,9 @@ import { notify, useUnreadNotices } from './notifications';
 import { useNoticeSounds } from './notice-sound';
 import { useTempAssetsSync } from './temp-assets';
 import { StageHContext, organizeActive } from './stage-h';
+import { ariaChord, matchesShortcut, useShortcut } from './shortcuts';
+import { SetupCard } from './components/setup/SetupCard';
+import { SoundpadFix } from './components/setup/SoundpadFix';
 import { SetupGuide } from './components/setup/SetupGuide';
 import { UpdateOffer } from './components/updates/UpdateOffer';
 import { BackupLayoutSync } from './components/backups/BackupLayoutSync';
@@ -117,20 +120,16 @@ const totalsSchema = z.object({
   ),
 });
 
-/** Space pauses/resumes known playback (or stops it) unless focus is in something that uses Space. */
+/**
+ * Space (2.44: the Play/Pause shortcut, Settings → Keyboard) pauses/resumes known playback (or stops
+ * it) unless focus is in something that uses the key.
+ */
 function useSpaceToggle() {
   useEffect(() => {
     function space(event: KeyboardEvent) {
       // Organize mode (2.44): Space there selects a sound; it never plays or pauses.
       if (organizeActive(event.target as Element)) return;
-      if (
-        event.code !== 'Space' ||
-        event.defaultPrevented ||
-        event.ctrlKey ||
-        event.altKey ||
-        event.metaKey
-      )
-        return;
+      if (!matchesShortcut('playPause', event) || event.defaultPrevented) return;
       const target = event.target;
       if (target instanceof HTMLElement) {
         if (target.isContentEditable || target.closest('input,textarea,select,[role="dialog"]'))
@@ -167,20 +166,14 @@ function useSpaceToggle() {
 }
 
 /**
- * Shift+Escape is the host's Panic (2.35) from anywhere on the page, dialogs included, except while
- * typing in a field. It runs before a dialog or waveform would take the Escape for itself.
+ * Shift+Escape (2.44: the Panic shortcut, Settings → Keyboard) is the host's Panic (2.35) from anywhere
+ * on the page, dialogs included, except while typing in a field. It runs before a dialog or waveform
+ * would take the Escape for itself.
  */
 function usePanicShortcut() {
   useEffect(() => {
     function key(event: KeyboardEvent) {
-      if (
-        event.key !== 'Escape' ||
-        !event.shiftKey ||
-        event.ctrlKey ||
-        event.altKey ||
-        event.metaKey
-      )
-        return;
+      if (!matchesShortcut('panic', event)) return;
       const target = event.target;
       if (
         target instanceof HTMLElement &&
@@ -202,13 +195,14 @@ function usePanicShortcut() {
 }
 
 /**
- * "/" focuses the current view's search (2.43: `[data-view-search]`), except while typing or while a
- * dialog is open. The editor panel is not a modal dialog, so "/" works while it is open.
+ * "/" (2.44: the Search shortcut, Settings → Keyboard) focuses the current view's search (2.43:
+ * `[data-view-search]`), except while typing or while a dialog is open. The editor panel is not a
+ * modal dialog, so "/" works while it is open.
  */
 function useSearchShortcut() {
   useEffect(() => {
     function key(e: KeyboardEvent) {
-      if (e.key !== '/' || e.ctrlKey || e.metaKey || e.altKey || dialogOpen()) return;
+      if (!matchesShortcut('search', e) || dialogOpen()) return;
       const target = e.target;
       if (
         target instanceof HTMLElement &&
@@ -226,6 +220,38 @@ function useSearchShortcut() {
     }
     document.addEventListener('keydown', key);
     return () => document.removeEventListener('keydown', key);
+  }, []);
+}
+
+/**
+ * Stop (2.44, Settings → Keyboard; no key until someone sets one) stops what plays, for the host and
+ * for guests allowed remote playback, except while typing in a field.
+ */
+function useStopShortcut() {
+  useEffect(() => {
+    function key(event: KeyboardEvent) {
+      if (!matchesShortcut('stop', event) || event.defaultPrevented) return;
+      const target = event.target;
+      if (
+        target instanceof HTMLElement &&
+        (target.isContentEditable ||
+          target.matches(
+            'select, textarea, input:not([type="checkbox"]):not([type="radio"]):not([type="button"]):not([type="range"])',
+          ))
+      )
+        return;
+      const current = controller.getSnapshot();
+      if (
+        !current.state.available ||
+        !['Host ready', 'Connected'].includes(current.status) ||
+        (current.mode !== 'host' && !current.state.permissions.remotePlayback)
+      )
+        return;
+      event.preventDefault();
+      if (!event.repeat) void playback.stop();
+    }
+    document.addEventListener('keydown', key, true);
+    return () => document.removeEventListener('keydown', key, true);
   }, []);
 }
 
@@ -299,6 +325,8 @@ function App() {
   useSpaceToggle();
   usePanicShortcut();
   useSearchShortcut();
+  useStopShortcut();
+  const searchKey = useShortcut('search');
   useEffect(() => {
     void controller.start();
   }, []);
@@ -799,11 +827,19 @@ function App() {
                   {host && budget?.host && <BudgetRequests requests={budget.host.requests} />}
                   {host && !!state.tempRecovery && <TempRecovery clips={state.tempRecovery} />}
                 </SectionHeader>
+                {host && <SetupCard state={state} />}
                 {(!connected || state.error) && (
                   <div className="connection-banner" role="status">
                     <Radio size={18} />
                     {!connected && !host ? (
                       <GuestConnection status={status} info={view.connection} />
+                    ) : connected && host && state.soundpadProblem && !state.available ? (
+                      // 2.44 (gate setup): what to do about the reason the companion found.
+                      <SoundpadFix
+                        problem={state.soundpadProblem}
+                        elevated={state.companionElevated === true}
+                        connected={connected}
+                      />
                     ) : (
                       <span>
                         {!connected ? status : state.error}{' '}
@@ -876,6 +912,7 @@ function App() {
                       <Search size={18} />
                       <input
                         aria-label="Search sounds"
+                        aria-keyshortcuts={ariaChord(searchKey)}
                         data-view-search
                         value={search}
                         onChange={(e) => setSearch(e.target.value)}

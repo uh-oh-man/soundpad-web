@@ -233,6 +233,19 @@ const HOST_ONLY_FIELDS = [
   'setupDone',
   'backups',
 ] as const satisfies readonly (keyof Snapshot)[];
+/**
+ * What of the host's snapshot a guest may see (2.44): everything but HOST_ONLY_FIELDS and the F6 hotkey's
+ * status line (it names what was saved and when). The host's own copy is untouched.
+ */
+export function withoutHostOnly(state: Snapshot): Snapshot {
+  const shared: Snapshot = { ...state };
+  for (const key of HOST_ONLY_FIELDS) delete shared[key];
+  if (shared.mimic?.hotkeyStatus !== undefined) {
+    shared.mimic = { ...shared.mimic };
+    delete shared.mimic.hotkeyStatus;
+  }
+  return shared;
+}
 const remember = <K, V>(map: Map<K, V>, key: K, value: V) => {
   map.delete(key);
   map.set(key, value);
@@ -996,8 +1009,7 @@ export class Session {
     const history = state.mimic?.history;
     // Stage H (2.44): the updater, Soundpad's problem, the companion's rights, host-wide hotkeys, setup and
     // backups are the host's. Organize's revision and missing files stay (guests see them too).
-    const shared: Snapshot = { ...state };
-    for (const key of HOST_ONLY_FIELDS) delete shared[key];
+    const shared = withoutHostOnly(state);
     const base =
       history && (history.recoveredMs || history.problem)
         ? {

@@ -18,6 +18,7 @@ import { guestHeld, HELD_BY_HOST, intentKey, playback, usePendingIntent } from '
 import { supports } from '../version';
 import { useSentenceStore } from '../library/sentence-store';
 import { requestEditor } from '../shell';
+import { ariaChord, formatChord, useShortcut } from '../shortcuts';
 /** Panic's accessible name; its title adds the shortcut. */
 export const PANIC_LABEL = 'Panic: stop audio and pause guest playback';
 export function Player({
@@ -81,6 +82,9 @@ export function Player({
   const pending = usePendingIntent();
   const held = guestHeld(state, host);
   const canPanic = host && supports(state.companionVersion, 'intents');
+  // 2.44: this browser's keys (Settings → Keyboard) for the titles and aria-keyshortcuts.
+  const panicKey = useShortcut('panic');
+  const stopKey = useShortcut('stop');
   function replay() {
     const cue = workspace?.lastCue;
     if (!cue) return;
@@ -170,7 +174,8 @@ export function Player({
           className="stop btn btn-danger"
           disabled={disabled}
           aria-disabled={held || undefined}
-          title={held ? HELD_BY_HOST : undefined}
+          aria-keyshortcuts={ariaChord(stopKey)}
+          title={held ? HELD_BY_HOST : stopKey ? `Stop (${formatChord(stopKey)})` : undefined}
           onClick={() => !held && void playback.stop()}
         >
           <Square size={15} fill="currentColor" aria-hidden="true" /> Stop
@@ -180,7 +185,8 @@ export function Player({
           <button
             className="panic btn btn-warning"
             aria-label={PANIC_LABEL}
-            title={`${PANIC_LABEL} (Shift+Escape)`}
+            title={panicKey ? `${PANIC_LABEL} (${formatChord(panicKey)})` : PANIC_LABEL}
+            aria-keyshortcuts={ariaChord(panicKey)}
             disabled={!connected}
             aria-disabled={pending === intentKey.panic || undefined}
             onClick={() => pending !== intentKey.panic && void playback.panic()}

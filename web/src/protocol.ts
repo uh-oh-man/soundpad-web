@@ -286,6 +286,8 @@ export const commandSchema = z
         'stop',
         'cancel',
         'activate',
+        // 2.44 (gate setup): mimicSources remembers an output for Capture without listening.
+        'remember',
       ])
       .optional(),
     permissions: z
