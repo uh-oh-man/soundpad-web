@@ -1019,6 +1019,11 @@ test('live Nostr/WebRTC: compact invites, guest upload, shared organization and 
     const shared = g2.getByRole('button', { name: /Upload Alice.*Copy into My Layout/ });
     await expect(shared).toBeVisible();
     await shared.click();
+    // 2.44: the copy is previewed first (everything chosen, merged); Copy takes it.
+    await g2
+      .getByRole('dialog', { name: /Copy Upload Alice.s layout/ })
+      .getByRole('button', { name: 'Copy', exact: true })
+      .click();
     await expect(g2.getByRole('button', { name: 'Favorite Airhorn', exact: true })).toHaveAttribute(
       'aria-pressed',
       'true',

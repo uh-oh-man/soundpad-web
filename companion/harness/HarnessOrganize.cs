@@ -34,6 +34,8 @@ public static class HarnessOrganize
         if (args.Contains("--missing-fixture")) { bridge.UseFileExists(File.Exists); bridge.RescanMissingFiles(); }
         bridge.StageHStarted();
         HarnessVerbs.Register("library-mutate", (b, json) => { Mutate(json); b.Poll(true).GetAwaiter().GetResult(); Console.WriteLine("TEST_MUTATED"); });
+        // The mock refuses ("R-500") every command starting with this text until "reject-prefix" with nothing clears it.
+        HarnessVerbs.Register("reject-prefix", (_, prefix) => { mock!.RejectPrefix = prefix.Length == 0 ? null : prefix; Console.WriteLine("TEST_REJECTING " + prefix); });
         HarnessVerbs.Register("remove-file", (b, name) =>
         {
             if (name.Length == 0 || name.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0) throw new InvalidDataException("Give a file name.");
