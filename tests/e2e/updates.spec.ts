@@ -195,7 +195,9 @@ test('Update now and Later: the launch offer, the header chip and Settings, and 
     "If the new version doesn't start, the current one comes back.",
   );
   const now = dialog.getByRole('button', { name: 'Update now' });
-  await now.click();
+  // From the keyboard, so the button has focus in Safari too (it does not focus a clicked button).
+  await now.focus();
+  await now.press('Enter');
   // This harness has nothing to install with: it stays "installing", and the button stays focusable but busy.
   await expect(dialog.locator('.update-status')).toContainText('Installing v2.44.1');
   await expect(now).toHaveAttribute('aria-disabled', 'true');
