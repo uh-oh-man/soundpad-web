@@ -254,7 +254,12 @@ public sealed class ExactPlaybackTests : IDisposable
     [Fact]
     public async Task SeekInsideASliceStartsANewSliceThereAndPauseStaysNative()
     {
-        var a = Make("a.wav", 48000, 2, 2000); var b = Make("b.wav", 16000, 1, 1000);
+        // The sound lasts 4 s, so the slice from 1500 ms lasts 2.5 s (2.43.0). With a 2 s sound it lasted 0.5 s, and on a
+        // slow CI runner the one reading below came late enough (about 400 to 490 ms after the resume) to catch the slot
+        // ending while it was read: the test Soundpad said "playing", then gave a length that was not the slot's, and the
+        // sound was no longer known. The companion's own poll loop is woken shortly before a slice ends (WakeAfter), so a
+        // reading near the end comes first and that torn reading is tolerated; this test polls by hand, with no wake-up.
+        var a = Make("a.wav", 48000, 2, 4000); var b = Make("b.wav", 16000, 1, 1000);
         await using var mock = Mock(a.Path, b.Path); using var pipe = new SoundpadPipe(mock.Name); using var bridge = new Bridge(pipe, new StateStore(folder)); await bridge.Poll(true);
         var sounds = bridge.Snapshot.Library.Sounds; await Ready(bridge, mock, sounds[1]);
         var cue = await bridge.Execute(Cmd("region", sounds[0].Id) with { PositionMs = 200, EndMs = 900, Repeat = true }, "host");
@@ -271,9 +276,12 @@ public sealed class ExactPlaybackTests : IDisposable
         var now = bridge.Snapshot.Playback;
         Assert.Equal((sounds[0].Id, epoch, "PAUSED", 1500L, (long?)null, false), (now.SoundId, now.Epoch, now.Status, now.PositionMs!.Value, now.RegionEndMs, now.Repeat));
         Assert.True((await bridge.Execute(Cmd("pause", sounds[0].Id) with { Epoch = epoch }, "host")).Ok);
+        var resumed = Stopwatch.StartNew();
         await Task.Delay(100); await bridge.Poll(false);
-        now = bridge.Snapshot.Playback; Assert.Equal(("PLAYING", sounds[0].Id), (now.Status, now.SoundId)); Assert.InRange(now.PositionMs!.Value, 1500, 2000);
-        Assert.Equal(2000, now.DurationMs);
+        now = bridge.Snapshot.Playback;
+        Assert.True(("PLAYING", sounds[0].Id) == (now.Status, now.SoundId), $"{now.Status}, sound {now.SoundId ?? "unknown"}, read {resumed.ElapsedMilliseconds} ms after the resume");
+        Assert.InRange(now.PositionMs!.Value, 1500, 4000);
+        Assert.Equal(4000, now.DurationMs);
     }
 
     [Fact]
