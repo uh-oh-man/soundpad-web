@@ -30,7 +30,8 @@ public sealed partial class Bridge
     /// after recovery records from there on, so Discard removes only the frames before it. Guarded by <see cref="historyGate"/>.
     /// </summary>
     private (string SessionId, long Frame)? recoveredUntil;
-    private readonly long launchedUtcMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+    // Not readonly since 2.44: an update hands the old launch's start to the new process (BridgeUpdates.cs).
+    private long launchedUtcMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
     /// <summary>
     /// When a guest was admitted: the wall time (UTC ms) and, as a floor that clock changes and late run anchors
     /// cannot move, the live frame of <paramref name="SessionId"/>'s history at that moment.

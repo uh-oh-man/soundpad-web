@@ -15,7 +15,9 @@ namespace SoundpadWeb;
 
 /// <param name="ownerKey">The Soundpad Web window's per-launch key (2.36). A page that presents it is the session
 /// owner. Null when there is no window (--no-window, the fallback, the harness): the first page that asks becomes owner.</param>
-public sealed class LocalServer(Bridge bridge, string origin, string? ownerKey = null) : IAsyncDisposable
+/// <param name="resume">2.44: the old process's launch values after an update. The same token (and, when it is free, the
+/// same port), the owner's identity, settings and session summary, so open pages and guests carry on by themselves.</param>
+public sealed class LocalServer(Bridge bridge, string origin, string? ownerKey = null, ServerHandoff? resume = null) : IAsyncDisposable
 {
     private WebApplication? app;
     /// <summary>Playback-control messages accepted per sliding second on the socket (all people together, 2.35).</summary>
@@ -26,8 +28,15 @@ public sealed class LocalServer(Bridge bridge, string origin, string? ownerKey =
     public TimeSpan OwnerGrace { get; init; } = TimeSpan.FromSeconds(3);
     /// <summary>Warnings worth a line in the companion log (never carries keys or tokens).</summary>
     public Action<string>? Log { get; init; }
-    public string Token { get; } = Convert.ToHexString(RandomNumberGenerator.GetBytes(32)).ToLowerInvariant();
+    public string Token { get; } = resume?.Token ?? Convert.ToHexString(RandomNumberGenerator.GetBytes(32)).ToLowerInvariant();
     public int Port { get; private set; }
+    /// <summary>2.44: after an update, true when the old port was free again, so pages reconnect where they were.</summary>
+    public bool PortKept { get; private set; }
+    /// <summary>2.44: how long the place of the page that ran the session is held for it after an update.</summary>
+    public TimeSpan ResumeGrace { get; init; } = TimeSpan.FromSeconds(20);
+    // 2.44: the owner had pressed End hosting (the next owner is told once, so it does not start hosting by itself).
+    private bool sessionEnded = resume?.Ended ?? false;
+    private string? lastOwnerId = resume?.OwnerClientId;
     private int sockets;
 
     // Session ownership (2.36). Exactly one protocol-3 page runs the guest session (the Trystero host); the rest are
@@ -40,14 +49,14 @@ public sealed class LocalServer(Bridge bridge, string origin, string? ownerKey =
     private long graceGeneration;
     // The owner's HostIdentity and latest session summary live in memory only, for this launch: a reloaded, restarted
     // or promoted owner gets the same identity back, so guests' invitations keep working. A new launch starts afresh.
-    private JsonElement? identity;
+    private JsonElement? identity = resume?.Identity;
     // The owner's session settings (2.37: admission, guest places, per-guest permissions, turned-away guests), kept
     // exactly like the identity: memory only, owner only, handed to the next owner, forgotten on End hosting. The
     // companion never reads inside it; the owner page enforces it.
-    private JsonElement? settings;
+    private JsonElement? settings = resume?.Settings;
     /// <summary>Largest session settings message kept (2.37). Larger ones are ignored, and the owner page keeps its own copy.</summary>
     public const int MaxSessionSettingsBytes = 65536;
-    private string? session;
+    private string? session = resume?.Session;
     private long sessionVersion;
 
     // The quit prompt (2.40): closing the window while Temp holds clips asks its page first. Guarded by `roles`.
@@ -57,10 +66,12 @@ public sealed class LocalServer(Bridge bridge, string origin, string? ownerKey =
     /// <summary>A prompt the page has not answered for this long no longer holds the window open: the next close quits.</summary>
     public TimeSpan QuitPromptPatience { get; init; } = TimeSpan.FromSeconds(30);
 
-    private sealed class HostClient(string clientId, bool keyed, bool quitPrompt = false)
+    private sealed class HostClient(string clientId, bool keyed, bool quitPrompt = false, bool updates = false)
     {
         public string ClientId { get; } = clientId;
         public bool Keyed { get; } = keyed;
+        /// <summary>The page understands the "updating" message (2.44); older pages would drop the connection over it.</summary>
+        public bool Updates { get; } = updates;
         /// <summary>The page said it can show the quit prompt (2.40); older pages would drop the connection over it.</summary>
         public bool QuitPrompt { get; } = quitPrompt;
         public bool Owner;
@@ -74,9 +85,26 @@ public sealed class LocalServer(Bridge bridge, string origin, string? ownerKey =
 
     public async Task Start()
     {
+        // After an update the old port first, so pages that are open reconnect where they were (2.44); any port otherwise.
+        if (resume is { Port: > 0 } previous)
+        {
+            try { await Start(previous.Port); PortKept = Port == previous.Port; }
+            catch (Exception ex) when (ex is IOException or System.Net.Sockets.SocketException or InvalidOperationException)
+            {
+                if (app != null) { try { await app.DisposeAsync(); } catch (Exception) { } app = null; }
+                Log?.Invoke("The loopback port of the last launch is in use; the companion uses a new one.");
+                await Start(0);
+            }
+            if (lastOwnerId != null) lock (roles) { graceFor = lastOwnerId; long generation = ++graceGeneration; _ = Task.Delay(ResumeGrace).ContinueWith(_ => GraceOver(generation), TaskScheduler.Default); }
+        }
+        else await Start(0);
+    }
+
+    private async Task Start(int port)
+    {
         var builder = WebApplication.CreateSlimBuilder();
         builder.Logging.ClearProviders();
-        builder.WebHost.ConfigureKestrel(k => { k.Listen(IPAddress.Loopback, 0); k.Limits.MaxRequestBodySize = 16777216; });
+        builder.WebHost.ConfigureKestrel(k => { k.Listen(IPAddress.Loopback, port); k.Limits.MaxRequestBodySize = 16777216; });
         app = builder.Build();
         app.MapMethods("/session-audio", ["POST", "OPTIONS"], async context =>
         {
@@ -252,7 +280,8 @@ public sealed class LocalServer(Bridge bridge, string origin, string? ownerKey =
         // A page without a usable id can never reclaim a held place; it still gets a role like any other page.
         if (string.IsNullOrEmpty(id) || id.Length > 64) id = "unnamed-" + Convert.ToHexString(RandomNumberGenerator.GetBytes(8));
         bool quitPrompt = hello.TryGetProperty("quitPrompt", out var q) && q.ValueKind == JsonValueKind.True;
-        var client = new HostClient(id, ownerKey != null && Matches(key, ownerKey), quitPrompt);
+        bool updates = hello.TryGetProperty("updates", out var u) && u.ValueKind == JsonValueKind.True;
+        var client = new HostClient(id, ownerKey != null && Matches(key, ownerKey), quitPrompt, updates);
         string? warning = null;
         lock (roles)
         {
@@ -307,15 +336,24 @@ public sealed class LocalServer(Bridge bridge, string origin, string? ownerKey =
     }
 
     // Callers hold `roles`.
-    private void Promote(HostClient client) { graceFor = null; graceGeneration++; owner = client; client.Owner = true; client.Signal.Writer.TryWrite(0); }
+    private void Promote(HostClient client) { graceFor = null; graceGeneration++; owner = client; lastOwnerId = client.ClientId; client.Owner = true; client.Signal.Writer.TryWrite(0); }
     private static void Demote(HostClient client) { client.Owner = false; client.Signal.Writer.TryWrite(0); }
 
     /// <summary>Sends a page its role (when it changed) and, to a view, the latest session summary. Never runs twice at once for one page.</summary>
     private async Task Flush(HostClient client, Func<string, Task> send)
     {
-        string role; JsonElement? remembered; JsonElement? kept; string? summary; long version;
-        lock (roles) { role = client.Owner ? "owner" : "view"; remembered = client.Owner ? identity : null; kept = client.Owner ? settings : null; summary = session; version = sessionVersion; }
-        if (role != client.RoleSent) { await send(Json.Write(new { type = "role", role, identity = remembered, settings = kept })); client.RoleSent = role; }
+        string role; JsonElement? remembered; JsonElement? kept; string? summary; long version; bool ended = false;
+        lock (roles)
+        {
+            role = client.Owner ? "owner" : "view"; remembered = client.Owner ? identity : null; kept = client.Owner ? settings : null; summary = session; version = sessionVersion;
+            // 2.44: once, to the first owner after an update that happened while hosting was ended.
+            if (client.Owner && sessionEnded && role != client.RoleSent) { ended = true; sessionEnded = false; }
+        }
+        if (role != client.RoleSent)
+        {
+            await send(ended ? Json.Write(new { type = "role", role, identity = remembered, settings = kept, ended = true }) : Json.Write(new { type = "role", role, identity = remembered, settings = kept }));
+            client.RoleSent = role;
+        }
         if (role == "view" && summary != null && client.SessionSent != version) { await send(summary); client.SessionSent = version; }
     }
 
@@ -330,6 +368,7 @@ public sealed class LocalServer(Bridge bridge, string origin, string? ownerKey =
         {
             if (owner != from) return;
             from.Ended = ended;
+            sessionEnded = ended;
             if (!ended) return;
             identity = null; settings = null;
             session = Json.Write(new { type = "session", invite = "", guests = Array.Empty<string>(), people = new { }, layouts = Array.Empty<object>() }); sessionVersion++;
@@ -421,6 +460,28 @@ public sealed class LocalServer(Bridge bridge, string origin, string? ownerKey =
             quitPromptId = id; quitAnswered = answered;
         }
         return page.Forward.Writer.TryWrite(Json.Write(new { type = "quitPrompt", id, clips }));
+    }
+
+    /// <summary>
+    /// The companion is about to restart for an update (2.44): pages that said they understand it (hello "updates")
+    /// show that it is updating and keep trying the same port and token. Returns once the messages had a moment.
+    /// </summary>
+    public async Task NotifyUpdating(string version)
+    {
+        var text = Json.Write(new { type = "updating", version });
+        lock (roles) foreach (var h in hosts) if (h.Updates) h.Forward.Writer.TryWrite(text);
+        await Task.Delay(300);
+    }
+
+    /// <summary>What the next process needs to carry on this launch's pages and guests (2.44, the update hand-over).</summary>
+    public ServerHandoff Export()
+    {
+        lock (roles)
+        {
+            // An owner that pressed End hosting forgot its identity; so does the hand-over (sessionEnded says so).
+            bool ended = sessionEnded || owner is { Ended: true };
+            return new(Token, Port, identity?.Clone(), settings?.Clone(), session, ended, owner?.ClientId ?? lastOwnerId);
+        }
     }
 
     private static async Task<string> Receive(WebSocket socket, CancellationToken cancel)

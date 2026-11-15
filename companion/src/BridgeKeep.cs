@@ -105,9 +105,11 @@ public sealed partial class Bridge
             tempRecovery = left; recoveryPending = false;
             Log($"The companion did not close normally last time: {left} clip(s) from that session are still in Temp. Recover or discard them.");
             Publish();
+            StageHStarted();
             return;
         }
         await CleanupSession();
+        StageHStarted();
     }
 
     /// <summary>True when every temporary file there is now is one the last launch left (nothing was made since).</summary>

@@ -26,7 +26,9 @@ public record Snapshot(int V, long Revision, bool Available, string? Error, Libr
     // 2.43: Kick presses since this companion started (gate kickSession). In memory only: never written to state.json.
     int CounterSession = 0,
     // 2.43: rises when the host's shared style (ui.json, gate uiSync) changes, so host pages fetch uiPrefsGet. In memory only.
-    long UiRevision = 0);
+    long UiRevision = 0,
+    // 2.44 (gate updater): the self-update state, host only (pages strip it for guests). Left out when there is none.
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] UpdateStatus? Update = null);
 public record Participant(string Id, string Name);
 public record ParticipantPlays(string Name, long Count);
 public sealed class SoundStatistics
@@ -74,7 +76,9 @@ public record Command(int V, string Id, long At, string Op, string? SoundId = nu
     // a performance set to create or change.
     string? SentenceId = null, SentenceInput? Sentence = null, PerformanceSetInput? Set = null,
     // uiPrefsSet (2.43): the style fields to change, checked field by field by UiPrefsStore.
-    JsonElement? UiPrefs = null);
+    JsonElement? UiPrefs = null,
+    // Stage H (2.44): the one payload field of every Stage H op, checked strictly by that op's own code.
+    JsonElement? Body = null);
 /// <summary>The details of a sentence or palette command (2.42); null fields are not part of the request.</summary>
 public sealed record SentenceInput(string? Do = null, string? Text = null, string[]? Pieces = null, double? OffsetMs = null, long? StartMs = null, long? EndMs = null,
     double? FadeInMs = null, double? FadeOutMs = null, double? Gain = null, bool? Balanced = null, double? DurationMs = null, string? Mode = null, PieceEffect? Effect = null,

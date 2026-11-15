@@ -86,6 +86,17 @@ public sealed class OwnReplayLog
 
     public void Clear(string? sessionId = null) { lock (entries) entries.RemoveAll(e => sessionId == null || e.SessionId == sessionId); }
 
+    /// <summary>2.44: what an update hands to the new process, and takes back there.</summary>
+    public OwnReplayHandoff[] Export() { lock (entries) return [.. entries.Select(e => new OwnReplayHandoff(e.SessionId, e.Start, e.End, e.Label))]; }
+    public void Import(IEnumerable<OwnReplayHandoff> items)
+    {
+        lock (entries)
+        {
+            entries.Clear();
+            entries.AddRange(items.Where(e => e.SessionId is { Length: > 0 and <= 64 } && e.End >= e.Start && e.Start >= 0).TakeLast(MaxEntries).Select(e => new Entry(e.SessionId, e.Start, e.End, e.Label is { Length: <= 200 } ? e.Label : null)));
+        }
+    }
+
     /// <summary>2.41: forgets what was played before <paramref name="frame"/> of one history (that audio was discarded).</summary>
     public void DropBefore(string sessionId, long frame)
     {
@@ -399,4 +410,27 @@ public sealed class GuestBudgets(string? totalsPath = null, Func<long>? clock = 
 
     /// <summary>The settings changed (new budgets): the next check decides again.</summary>
     public void Touch() => Changed();
+
+    /// <summary>2.44: this launch's figures (grants, session totals, open requests, who made which Temp clip), for an update hand-over.</summary>
+    public BudgetsHandoff Export()
+    {
+        lock (guests)
+            return new([.. guests.Select(p => new BudgetGuestHandoff(p.Key, p.Value.Name, p.Value.SessionKept, p.Value.ExtraTemp, p.Value.ExtraKept, p.Value.Request))],
+                [.. tempAssets.Select(p => new BudgetAssetHandoff(p.Key, p.Value.Guest, p.Value.Bytes))]);
+    }
+    /// <summary>2.44: the figures of the companion that updated, in the one that continues its session.</summary>
+    public void Import(BudgetsHandoff from)
+    {
+        lock (guests)
+        {
+            foreach (var g in from.Guests.Take(MaxGuests))
+            {
+                if (g.Id is not { Length: > 0 and <= 128 } || g.SessionKept < 0 || g.ExtraTemp < 0 || g.ExtraKept < 0) continue;
+                guests[g.Id] = new() { Name = g.Name is { Length: > 0 and <= 40 } ? g.Name : "Guest", SessionKept = g.SessionKept, ExtraTemp = g.ExtraTemp, ExtraKept = g.ExtraKept, Request = g.Request };
+            }
+            foreach (var a in from.TempAssets.Take(8192))
+                if (a.AssetId is { Length: > 0 and <= 64 } && a.Guest is { Length: > 0 and <= 128 } && a.Bytes >= 0) tempAssets[a.AssetId] = (a.Guest, a.Bytes);
+            Changed();
+        }
+    }
 }

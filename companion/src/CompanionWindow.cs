@@ -36,17 +36,27 @@ internal sealed class DesktopUi : IDisposable
     /// when WebView2 cannot run, after the window is gone; <paramref name="closing"/> runs when the person closes it.</summary>
     /// <param name="asking">Asked when the person closes the window (2.40): true when the page was asked first (the quit
     /// prompt), so the window stays open until it answers.</param>
-    public Task Open(string url, string origin, string directory, Action<string> failed, Action<bool> closing, bool hidden = false, Func<bool>? asking = null) => OnUi(() =>
+    /// <param name="resumed">2.44: the window comes back after an update. It is shown without taking focus (minimized if it
+    /// was), never with Show/Activate, and WebView2 waits a little for the old window's profile to be let go.</param>
+    public Task Open(string url, string origin, string directory, Action<string> failed, Action<bool> closing, bool hidden = false, Func<bool>? asking = null, WindowHandoff? resumed = null) => OnUi(() =>
     {
-        window = new CompanionWindow(url, origin, directory) { AskBeforeClosing = asking };
+        window = new CompanionWindow(url, origin, directory) { AskBeforeClosing = asking, ProfileRetry = resumed != null };
         DataFolder = directory;
         window.Failed += failed;
         window.Quitting += closing;
         // --hidden-window (automated checks only): the window and its WebView2 run but are never shown, so a check
         // never takes the screen or keyboard focus from whatever the person is doing, such as a game.
-        if (hidden) _ = window.Handle; else window.Show();
+        if (hidden || resumed?.Hidden == true) _ = window.Handle;
+        else if (resumed != null) window.ShowQuietly(resumed.Minimized);
+        else window.Show();
         return true;
     });
+
+    /// <summary>2.44: how the window is shown now (hidden, minimized), for the update hand-over.</summary>
+    public Task<WindowHandoff> Placement(bool hidden) => OnUi(() => new WindowHandoff(hidden || window is not { Visible: true }, window?.WindowState == FormWindowState.Minimized));
+
+    /// <summary>2.44: the companion leaves for an update: the window closes at once, without the quit question.</summary>
+    public void CloseForUpdate() { try { marshal.BeginInvoke(() => window?.CloseForExit()); } catch (InvalidOperationException) { } }
 
     /// <summary>
     /// The window's own quit question (2.40), for when its page cannot ask (after End hosting, say): "keep", "quit" or
@@ -102,6 +112,9 @@ internal sealed class CompanionWindow : Form
     private CoreWebView2Controller? controller;
     private readonly Queue<long> browserRestarts = new();
     private bool failing, exiting;
+    /// <summary>2.44: after an update the old window's WebView2 may still hold the profile for a moment; creating it is retried for up to 10 s.</summary>
+    [System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)]
+    public bool ProfileRetry { get; init; }
     private int loadFailures;
     private System.Windows.Forms.Timer? retry;
     private void Retry(object? sender, EventArgs e) { retry?.Stop(); try { controller?.CoreWebView2.Navigate(url); } catch (Exception ex) when (ex is COMException or InvalidOperationException or ObjectDisposedException) { } }
@@ -133,9 +146,18 @@ internal sealed class CompanionWindow : Form
         {
             // Its own profile in the data folder, so it never shares cookies or storage with the person's Edge.
             if (environment == null) ForgetLastLaunch();
-            environment ??= await CoreWebView2Environment.CreateAsync(null, Path.Combine(directory, "webview2"));
-            if (IsDisposed || exiting) return;
-            controller = await environment.CreateCoreWebView2ControllerAsync(Handle);
+            for (long until = Environment.TickCount64 + (ProfileRetry ? 10000 : 0); ; await Task.Delay(500))
+            {
+                try
+                {
+                    environment ??= await CoreWebView2Environment.CreateAsync(null, Path.Combine(directory, "webview2"));
+                    if (IsDisposed || exiting) return;
+                    controller = await environment.CreateCoreWebView2ControllerAsync(Handle);
+                    break;
+                }
+                // The profile is still in use by the window of the companion that just updated (2.44).
+                catch (Exception ex) when (ex is COMException or InvalidOperationException && Environment.TickCount64 < until && !IsDisposed && !exiting) { environment = null; }
+            }
             if (IsDisposed || exiting) { controller.Close(); return; }
             controller.DefaultBackgroundColor = Charcoal;
             controller.Bounds = ClientRectangle;
@@ -253,6 +275,17 @@ internal sealed class CompanionWindow : Form
     protected override void OnActivated(EventArgs e) { base.OnActivated(e); try { controller?.MoveFocus(CoreWebView2MoveFocusReason.Programmatic); } catch (Exception ex) when (ex is COMException or InvalidOperationException or ObjectDisposedException) { } }
 
     protected override void OnMove(EventArgs e) { base.OnMove(e); try { controller?.NotifyParentWindowPositionChanged(); } catch (Exception ex) when (ex is COMException or InvalidOperationException or ObjectDisposedException) { } }
+
+    [DllImport("user32.dll")] [return: MarshalAs(UnmanagedType.Bool)] private static extern bool ShowWindow(IntPtr window, int command);
+    private bool quiet;
+    protected override bool ShowWithoutActivation => quiet || base.ShowWithoutActivation;
+
+    /// <summary>2.44: shows the window without activating it (SW_SHOWNOACTIVATE, or SW_SHOWMINNOACTIVE when it was minimized), so an update never takes focus from a game.</summary>
+    public void ShowQuietly(bool minimized)
+    {
+        quiet = true;
+        ShowWindow(Handle, minimized ? 7 : 4);
+    }
 
     /// <summary>Called when the companion has already stopped (Enter, Ctrl+C): closes without asking it to quit again.</summary>
     public void CloseForExit() { exiting = true; if (!IsDisposed) Close(); }
