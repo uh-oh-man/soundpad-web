@@ -126,6 +126,7 @@ export const commandSchema = z
       'backupRestore',
       'backupAttach',
       'backupLayout',
+      // The updater (gate updater), host only.
       'updateStatus',
       'updateCheck',
       'updateDownload',
@@ -142,6 +143,7 @@ export const commandSchema = z
       'organizePropose',
       'organizeWithdraw',
       'organizeSettings',
+      // Setup and host-wide hotkeys (gates setup, hostHotkeys), host only.
       'setupGet',
       'setupSet',
       'hotkeysGet',
@@ -286,6 +288,8 @@ export const commandSchema = z
         'stop',
         'cancel',
         'activate',
+        // 2.44 (gate setup): mimicSources remembers an output for Capture without listening.
+        'remember',
       ])
       .optional(),
     permissions: z
@@ -551,6 +555,16 @@ export const snapshotSchema = z.object({
     // 2.44: guests may propose organization changes (organize\settings.v1.json). Older companions omit it.
     guestOrganize: z.boolean().optional(),
   }),
+  // Stage H (2.44, gates setup and hostHotkeys), all optional (older companions omit them): why Soundpad
+  // can't be reached; whether the companion runs as administrator; the host-wide hotkeys' revision (pages
+  // fetch hotkeysGet); whether the host finished setup. Host only (session.ts strips them for guests).
+  soundpadProblem: z
+    .enum(['notRunning', 'noAnswer', 'accessDenied', 'oldVersion'])
+    .nullable()
+    .optional(),
+  companionElevated: z.boolean().optional(),
+  hotkeys: z.number().int().nonnegative().optional(),
+  setupDone: z.boolean().optional(),
   // 2.41: rises when the voice library, its word index, notices or speaker groups change (fetch libraryStatus).
   voiceLibrary: z.number().int().nonnegative().optional(),
   // 2.42: rises when sentences, named palette pieces or performance sets change (fetch sentenceList).
@@ -702,6 +716,10 @@ export const controlOps: readonly Command['op'][] = [
 export function isGuestAllowed(c: Command, s: Snapshot) {
   // "Make it and play it" (2.35) needs the same permission as playing it afterwards did.
   if (c.autoplay && !s.permissions.remotePlayback) return false;
+  // Organize mode (2.44): a guest may read the plan and propose or withdraw their own changes when the
+  // host allows it. Every other Stage H op is the host's (the fall-through below refuses it).
+  if (c.op === 'organizeGet' || c.op === 'organizePropose' || c.op === 'organizeWithdraw')
+    return s.permissions.guestOrganize === true;
   if (c.op === 'mimicPeek' || c.op === 'mimicClip') return s.permissions.guestMimic === true;
   // The recording history (2.39): only what a guest may see of it, which the companion limits to
   // what was recorded since they joined (and what the host shared).
@@ -724,10 +742,6 @@ export function isGuestAllowed(c: Command, s: Snapshot) {
       c.categoryName === undefined
     );
   if (c.op === 'budgetStatus') return true;
-  // Organize (2.44): with the host's permission, a guest reads the plan and proposes or withdraws their
-  // own proposals; only the host edits and applies. The companion checks the permission again.
-  if (c.op === 'organizeGet' || c.op === 'organizePropose' || c.op === 'organizeWithdraw')
-    return s.permissions.guestOrganize === true;
   // The voice library (2.41): guests see and search the kept library by default; private previews
   // are answered to them only. Editing (names, tags, voices, wanted words, Undo) needs the host's
   // guestLibraryEdit; the settings and the category word index are the host's.

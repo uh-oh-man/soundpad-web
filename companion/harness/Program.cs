@@ -468,6 +468,8 @@ mock.LatencyMs = Option("--latency-ms"); mock.SlowMs = Option("--slow-add-ms"); 
 using var pipe = new SoundpadPipe(mock.Name, true);
 HarnessStageH.BeforeBridge(args, directory);
 using var bridge = new Bridge(pipe, new StateStore(directory));
+// Stage H (2.44): test seams that must be in place before anything starts (also before an update resume).
+HarnessStageH.BridgeMade(args, bridge);
 // The tone has been playing for 10 s when Mimic starts listening, so the browser tests' "Last 3 s" and "Last 10 s"
 // right after Start find that much recorded (2.39: the history view selects only audio that exists).
 bridge.UseMimicCapture(new MimicFixture { PrefillSeconds = 10 });

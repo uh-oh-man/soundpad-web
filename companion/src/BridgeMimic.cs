@@ -210,6 +210,9 @@ public sealed partial class Bridge
             {
                 case "mimicSources":
                     {
+                        // 2.44 (gate setup): Setup's "Remember this output" saves it for Capture without starting anything.
+                        if (c.Action == "remember") return RememberOutput(c);
+                        if (c.Action != null) throw new InvalidDataException("Unsupported source request.");
                         var sources = mimicCapture.Sources();
                         // The source chosen last time (2.39): by id, or for an app by its name without the process id.
                         var remembered = sources.FirstOrDefault(s => s.Id == Settings.SourceId)
@@ -243,6 +246,8 @@ public sealed partial class Bridge
                         // Register the new key before releasing the old one, so a key another app owns
                         // leaves the working hotkey in place.
                         if (c.Name is not { } key || !HotkeyKeys.Contains(key)) throw new InvalidDataException("Choose F6, F7, F8, F9 or F10 for the hotkey.");
+                        // 2.44: a host-wide hotkey (Settings, Setup) may hold that key already.
+                        if (key != hotkey.Name && HostKeys.Uses(key)) throw new InvalidDataException($"{key} is one of your host-wide hotkeys (Settings, Setup). Choose another key for Mimic, or change that one first.");
                         if (key != hotkey.Name)
                         {
                             var next = makeHotkey(key);
@@ -254,9 +259,12 @@ public sealed partial class Bridge
                             else next.Unregister();
                             hotkey.Dispose(); hotkey = next;
                             Log($"Hotkey is now {key}");
+                            // A host-wide key left off because it was the Mimic key can be registered now.
+                            if (HostKeys.RetryConflicts(hotkey.Name)) Log("A host-wide hotkey that matched the old Mimic key is on now.");
                         }
                     }
                     else if (c.Action == "disable") { hotkey.Unregister(); hotkeyStatus = "Off"; Log($"{hotkey.Name} hotkey off"); }
+                    else if (c.Action == "enable" && HostKeys.Uses(hotkey.Name)) throw new InvalidDataException($"{hotkey.Name} is one of your host-wide hotkeys (Settings, Setup). Choose another key for Mimic first.");
                     else if (c.Action == "enable") { hotkey.Register(() => _ = HotkeyPressed()); hotkeyStatus = $"Press {hotkey.Name} in any app to save the last {hotkeySeconds} s"; Log($"{hotkey.Name} hotkey on: press it in any app to save the last {hotkeySeconds} s"); }
                     else throw new InvalidDataException("Unsupported hotkey setting.");
                     Publish();

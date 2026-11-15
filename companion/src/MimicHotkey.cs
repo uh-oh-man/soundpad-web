@@ -13,12 +13,27 @@ public interface IGlobalHotkey : IDisposable
 }
 
 /// <summary>
+/// A hotkey another app already registered (Win32 error 1409, ERROR_HOTKEY_ALREADY_REGISTERED): still an
+/// InvalidDataException (the message the host sees), marked so host-wide hotkeys can say "taken" (2.44).
+/// </summary>
+public static class HotkeyTaken
+{
+    public static InvalidDataException Error(string message) { var error = new InvalidDataException(message); error.Data["hotkeyTaken"] = true; return error; }
+    public static bool Is(Exception error) => error.Data.Contains("hotkeyTaken");
+}
+
+/// <summary>
 /// F6 anywhere on the host PC, as in Voice Replay Studio. The companion has no window, so a dedicated
-/// thread owns the registration and receives WM_HOTKEY in its own message queue.
+/// thread owns the registration and receives WM_HOTKEY in its own message queue. Since 2.44 the same class
+/// registers the host-wide hotkeys (Capture, Panic, Stop) with modifiers, one thread per key.
 /// </summary>
 public sealed class WindowsHotkey(uint key = 0x75, string name = "F6") : IGlobalHotkey
 {
-    private const int WmHotkey = 0x0312, WmQuit = 0x0012, ModNoRepeat = 0x4000;
+    private const int WmHotkey = 0x0312, WmQuit = 0x0012, ModNoRepeat = 0x4000, AlreadyRegistered = 1409;
+    private readonly uint modifiers;
+    private readonly bool hostWide;
+    /// <summary>A host-wide hotkey (2.44): <paramref name="modifiers"/> are MOD_ALT/CONTROL/SHIFT/WIN; MOD_NOREPEAT is added.</summary>
+    public WindowsHotkey(uint modifiers, uint vk, string name) : this(vk, name) { this.modifiers = modifiers & 0xF; hostWide = true; }
     [StructLayout(LayoutKind.Sequential)]
     private struct Message { public IntPtr Window; public uint Id; public IntPtr WParam, LParam; public uint Time; public int X, Y; public uint Private; }
     [DllImport("user32.dll", SetLastError = true)] private static extern bool RegisterHotKey(IntPtr window, int id, uint modifiers, uint key);
@@ -43,7 +58,7 @@ public sealed class WindowsHotkey(uint key = 0x75, string name = "F6") : IGlobal
             {
                 PeekMessage(out _, IntPtr.Zero, 0, 0, 0); // create this thread's message queue
                 threadId = GetCurrentThreadId();
-                if (!RegisterHotKey(IntPtr.Zero, 1, ModNoRepeat, key)) { ready.TrySetResult(Marshal.GetLastWin32Error()); return; }
+                if (!RegisterHotKey(IntPtr.Zero, 1, ModNoRepeat | modifiers, key)) { ready.TrySetResult(Marshal.GetLastWin32Error()); return; }
                 ready.TrySetResult(0);
                 try
                 {
@@ -51,13 +66,16 @@ public sealed class WindowsHotkey(uint key = 0x75, string name = "F6") : IGlobal
                         if (message.Id == WmHotkey) ThreadPool.QueueUserWorkItem(_ => pressed());
                 }
                 finally { UnregisterHotKey(IntPtr.Zero, 1); }
-            }) { IsBackground = true, Name = "Mimic hotkey" };
+            }) { IsBackground = true, Name = hostWide ? "Host hotkey " + Name : "Mimic hotkey" };
             worker.Start();
             int error = ready.Task.GetAwaiter().GetResult();
             if (error != 0)
             {
                 worker.Join();
-                throw new InvalidDataException($"{Name} is already used by another app (for example Voice Replay Studio). Pick another key next to Hotkey in the Mimic window, or close that app. ({new Win32Exception(error).Message})");
+                if (hostWide)
+                    throw error == AlreadyRegistered ? HotkeyTaken.Error($"{Name} is already used by another app.") : new InvalidDataException($"{Name} could not be registered with Windows ({new Win32Exception(error).Message}).");
+                var message = $"{Name} is already used by another app (for example Voice Replay Studio). Pick another key next to Hotkey in the Mimic window, or close that app. ({new Win32Exception(error).Message})";
+                throw error == AlreadyRegistered ? HotkeyTaken.Error(message) : new InvalidDataException(message);
             }
             thread = worker;
         }

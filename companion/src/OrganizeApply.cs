@@ -14,6 +14,8 @@ public sealed partial class Bridge
     /// <summary>Tests: the quiet second Apply waits for (default <see cref="QuietRule.QuietMs"/>).</summary>
     internal int OrganizeQuietMs { get; set; } = QuietRule.QuietMs;
     internal Task OrganizeApplyIdle() => applyTask ?? Task.CompletedTask;
+    /// <summary>True while a plan is being applied to Soundpad (an update waits for it: BridgeStageH.cs).</summary>
+    private bool OrganizeApplying { get { lock (organizeSync) return orgPlan?.State == "applying"; } }
     /// <summary>Runs one batch under the native gate in the background lane, so a ready play goes first.</summary>
     private async Task GateBatch(Func<Task> work)
     {
@@ -26,6 +28,9 @@ public sealed partial class Bridge
     {
         var body = OrganizeRules.Body<OrganizeApplyBody>(c);
         if (!available) throw new InvalidDataException("Soundpad is unavailable. Open it, then Apply.");
+        // Not while an update installs or a whole-library restore runs (Stage H cross-checks, BridgeStageH.cs).
+        if (UpdateBusy is { } updating) throw new InvalidDataException(updating);
+        if (restoringLibrary) throw new InvalidDataException("The host is restoring the library from a backup. Apply when it has finished.");
         string planId;
         lock (organizeSync)
         {
@@ -45,6 +50,15 @@ public sealed partial class Bridge
             copy = OrgFiles.WriteCheckpoint(planId, soundlist, categories, LeppsoftFolder);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { Log("The organize checkpoint could not be written: " + ex.Message); }
+        // And a backup first when a backup folder is set (WP1); without one Apply goes on and says so.
+        string backupNote;
+        try
+        {
+            var backup = await CheckpointH("pre-organize", CancellationToken.None);
+            backupNote = backup is { Skipped: false } ? "A backup was made first." : "No backup was made: " + (backup?.Reason ?? "Backups are not set up.");
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException) { backupNote = "No backup was made: " + ex.Message; }
+        Log("Organize: " + backupNote);
         lock (organizeSync)
         {
             if (orgPlan?.Id != planId || orgPlan.State == "applying") throw new InvalidDataException("The plan changed meanwhile. Review it again.");
@@ -55,7 +69,7 @@ public sealed partial class Bridge
             applyTask = Task.Run(() => RunApply(planId, token));
         }
         Publish();
-        return new("ack", c.Id, true, Data: new { started = true, checkpoint = copy != null });
+        return new("ack", c.Id, true, Data: new { started = true, checkpoint = copy != null, backup = backupNote });
     }
 
     private async Task RunApply(string planId, CancellationToken cancel)

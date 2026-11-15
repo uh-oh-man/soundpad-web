@@ -224,6 +224,28 @@ type Request = {
 };
 /** Challenges and unverified identities a host keeps at most (old ones go first). */
 const MAX_CHALLENGES = 512;
+/** Snapshot fields that describe the host's PC (Stage H, 2.44); never sent to guests. */
+const HOST_ONLY_FIELDS = [
+  'update',
+  'soundpadProblem',
+  'companionElevated',
+  'hotkeys',
+  'setupDone',
+  'backups',
+] as const satisfies readonly (keyof Snapshot)[];
+/**
+ * What of the host's snapshot a guest may see (2.44): everything but HOST_ONLY_FIELDS and the F6 hotkey's
+ * status line (it names what was saved and when). The host's own copy is untouched.
+ */
+export function withoutHostOnly(state: Snapshot): Snapshot {
+  const shared: Snapshot = { ...state };
+  for (const key of HOST_ONLY_FIELDS) delete shared[key];
+  if (shared.mimic?.hotkeyStatus !== undefined) {
+    shared.mimic = { ...shared.mimic };
+    delete shared.mimic.hotkeyStatus;
+  }
+  return shared;
+}
 const remember = <K, V>(map: Map<K, V>, key: K, value: V) => {
   map.delete(key);
   map.set(key, value);
@@ -239,22 +261,6 @@ const envelopeSchema = z.object({ id: z.uuid(), op: z.string().max(40) });
 const fromNewerPage = (error: z.ZodError) =>
   error.issues.every((i) => i.code === 'unrecognized_keys' || i.code === 'invalid_value');
 const byteLength = (value: unknown) => new TextEncoder().encode(JSON.stringify(value)).byteLength;
-/** Snapshot fields only the host sees (Stage H, 2.44): guests' copies never carry them. */
-const HOST_ONLY = [
-  'update',
-  'soundpadProblem',
-  'companionElevated',
-  'hotkeys',
-  'setupDone',
-  'backups',
-] as const;
-function hostOnly(state: Snapshot): Snapshot {
-  if (!HOST_ONLY.some((key) => key in state)) return state;
-  const copy: Record<string, unknown> = { ...state };
-  for (const key of HOST_ONLY) delete copy[key];
-  return copy as Snapshot;
-}
-
 export class Session {
   private layoutAction?: RequestAction<string, string>;
   private layouts = new Map<string, SharedLayout>();
@@ -1001,15 +1007,16 @@ export class Session {
     // How much history a crash recovered, and the host's disk problems, are the host's (2.39): they describe
     // recording from before any guest joined.
     const history = state.mimic?.history;
-    // Stage H (2.44): the host's update state, Soundpad diagnosis, hotkeys, setup and backups are the host's.
-    const own = hostOnly(state);
+    // Stage H (2.44): the updater, Soundpad's problem, the companion's rights, host-wide hotkeys, setup and
+    // backups are the host's. Organize's revision and missing files stay (guests see them too).
+    const shared = withoutHostOnly(state);
     const base =
       history && (history.recoveredMs || history.problem)
         ? {
-            ...own,
-            mimic: { ...state.mimic!, history: { ...history, recoveredMs: 0, problem: null } },
+            ...shared,
+            mimic: { ...shared.mimic!, history: { ...history, recoveredMs: 0, problem: null } },
           }
-        : own;
+        : shared;
     return override
       ? { ...base, permissions: effectivePermissions(base.permissions, override) }
       : base;

@@ -57,6 +57,14 @@ public static class HarnessStageH
     {
         HarnessBackups.BeforeBridge(args, dataDir);
         HarnessUpdates.BeforeBridge(args, dataDir);
+        HarnessSetup.BeforeBridge(args, dataDir);
+    }
+
+    /// <summary>Right after the Bridge is built: test seams that must be in place before Stage H starts (fixture hotkeys, file checks).</summary>
+    public static void BridgeMade(string[] args, Bridge bridge)
+    {
+        HarnessOrganize.BridgeMade(args, bridge);
+        HarnessSetup.BridgeMade(args, bridge);
     }
 
     /// <summary>After the Bridge is set up and before the server starts; the server's resume values after an update (WP2).</summary>
@@ -68,6 +76,10 @@ public static class HarnessStageH
         HarnessBackups.AfterBridge(args, bridge, server);
         HarnessUpdates.AfterBridge(args, bridge, server);
         HarnessOrganize.AfterBridge(args, bridge);
+        HarnessSetup.AfterBridge(args, bridge, server);
+        // The real companion starts Stage H's services in StartupCleanup (or ResumeFromHandoff); the harness has
+        // neither cleanup, so here, once every package's seams are set (a resumed harness has started them already).
+        bridge.StageHStarted();
     }
 
     /// <summary>At the end of --make-rollback-fixture, before the session ends: each package writes its persisted files into <paramref name="dir"/>.</summary>
@@ -76,5 +88,6 @@ public static class HarnessStageH
         await HarnessBackups.RollbackFixture(dir, b);
         HarnessUpdates.RollbackFixture(dir, b);
         await HarnessOrganize.RollbackFixture(dir, b);
+        HarnessSetup.RollbackFixture(dir, b);
     }
 }

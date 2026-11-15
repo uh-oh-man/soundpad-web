@@ -308,6 +308,9 @@ public sealed partial class Bridge
     private async Task RestoreLibrary(OpenBackup b, bool adoptIdentity, RestoreOutcome outcome)
     {
         if (playback.Status is "PLAYING" or "PAUSED" or "SEEKING") throw new InvalidDataException("Stop playback first. Nothing was restored.");
+        // Not during an update or an Organize apply (Stage H cross-checks, BridgeStageH.cs).
+        if (UpdateBusy is { } updating) throw new InvalidDataException(updating + " Nothing was restored.");
+        if (OrganizeApplying) throw new InvalidDataException("An organization plan is being applied to Soundpad. Try again when it has finished or paused; nothing was restored.");
         if (Audio.Public.Assets.Any(a => a.State is "promoting" or "promotion-pending")) throw new InvalidDataException("A Keep is still being finished. Try again when it is done; nothing was restored.");
         if (!audioGate.TryEnter()) throw new InvalidDataException("A Keep or a change in Temp is in progress. Try again in a moment; nothing was restored.");
         audioGate.Release();

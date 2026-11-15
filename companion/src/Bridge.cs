@@ -60,7 +60,8 @@ public sealed partial class Bridge(ISoundpad pipe, StateStore store) : IDisposab
     }
     public Snapshot Snapshot => new(1, revision, available, error, PublicLibraryH(parsed.Public), playback, disk.Counter, disk.Permissions, 2,
         Convert.ToHexString(System.Security.Cryptography.HMACSHA256.HashData(Convert.FromBase64String(disk.IdentityKey), System.Text.Encoding.UTF8.GetBytes("workspace-host-v2"))).ToLowerInvariant(), disk.StatisticsVersion, typeof(Bridge).Assembly.GetName().Version?.ToString(3), managed?.Public.Revision ?? 0, MimicSnapshot, playbackSuspended,
-        Interlocked.Read(ref draftsRevision), budgets.Revision, tempRecovery > 0 ? tempRecovery : null, VoicesRevisionNow, Interlocked.Read(ref sentencesRevision), counterSession, Interlocked.Read(ref uiRevision), BackupsRevisionH, UpdateSnapshotH, OrganizeRevisionH) { Permissions = PublicPermissions };
+        Interlocked.Read(ref draftsRevision), budgets.Revision, tempRecovery > 0 ? tempRecovery : null, VoicesRevisionNow, Interlocked.Read(ref sentencesRevision), counterSession, Interlocked.Read(ref uiRevision),
+        BackupsRevisionH, UpdateSnapshotH, OrganizeRevisionH, SoundpadProblemH, CompanionElevatedH, HotkeysRevisionH, SetupDoneH) { Permissions = PublicPermissions };
     /// <summary>
     /// Kick presses since this companion started (2.43, gate kickSession): it moves with the lifetime counter (never
     /// below 0) and Reset clears both. In memory only, so a restart begins a new session and state.json is unchanged.
@@ -93,8 +94,11 @@ public sealed partial class Bridge(ISoundpad pipe, StateStore store) : IDisposab
             parsed = next with { Public = next.Public with { Sounds = next.Public.Sounds.Select(s => managed?.Annotation(s.Id) is { } info ? s with { Name = info.Kind == "native" ? s.Name : info.Name, Icon = s.Icon ?? iconCache?.GetValueOrDefault(info.WorkspaceId) ?? info.Aliases.Select(id=>iconCache?.GetValueOrDefault(id)).FirstOrDefault(icon=>icon != null), Temporary = info.Temporary, UploadedBy = info.Uploader, AssetId = info.AssetId, Orientation = info.Orientation, AudioKind = info.Kind, InternalVariant = info.InternalVariant, AliasOf = info.AliasOf, WorkspaceId = info.WorkspaceId, Aliases = info.Aliases } : s).ToArray() } }; parsed = parsed with { Public = parsed.Public with { Version = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(Json.Write(parsed.Public)))).ToLowerInvariant()[..24] } }; available = true; error = null; lastSoundlist = all;
             LibraryRefreshedH();
         }
-        catch (Exception ex) when (ex is IOException or InvalidDataException or OperationCanceledException or System.Xml.XmlException or ArgumentException)
+        // 2.44: an elevated Soundpad refuses the pipe (UnauthorizedAccessException), which used to escape Poll; the
+        // reason is kept for the setup guide and the banner (SoundpadDiagnosis), the error text stays as it was.
+        catch (Exception ex) when (ex is IOException or InvalidDataException or OperationCanceledException or System.Xml.XmlException or ArgumentException or UnauthorizedAccessException or TimeoutException)
         {
+            NoteSoundpadFailure(ex);
             available = false; SlotLease? free; lock (playbackSync) { playbackVersion++; playback = new(); free = DropSliceLocked(); } Free(free);
             error = ex is InvalidDataException ? ex.Message : "Soundpad is unavailable. Open it normally; reconnection is automatic.";
         }
@@ -122,7 +126,7 @@ public sealed partial class Bridge(ISoundpad pipe, StateStore store) : IDisposab
                 {
                     await SamplePlayback();
                 }
-                catch (Exception ex) when (ex is IOException or OperationCanceledException) { available = false; SlotLease? free; lock (playbackSync) { playbackVersion++; playback = new(); free = DropSliceLocked(); } Free(free); error = "Soundpad disconnected; reconnecting automatically."; }
+                catch (Exception ex) when (ex is IOException or OperationCanceledException or UnauthorizedAccessException or TimeoutException) { NoteSoundpadFailure(ex); available = false; SlotLease? free; lock (playbackSync) { playbackVersion++; playback = new(); free = DropSliceLocked(); } Free(free); error = "Soundpad disconnected; reconnecting automatically."; }
                 // Soundpad refused the seek or stop at the end of a region (2.35). This used to end the companion;
                 // the next poll simply tries again.
                 catch (InvalidDataException) { }

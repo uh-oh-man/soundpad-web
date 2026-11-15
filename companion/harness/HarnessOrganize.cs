@@ -28,11 +28,15 @@ public static class HarnessOrganize
             soundpad.AllXml = all.ToString(); soundpad.CategoryXml = cats.ToString();
         }
     }
+    /// <summary>Right after the Bridge is built: with --missing-fixture the missing-file scan looks at real files.</summary>
+    public static void BridgeMade(string[] args, Bridge bridge)
+    {
+        if (args.Contains("--missing-fixture")) bridge.UseFileExists(File.Exists);
+    }
     public static void AfterBridge(string[] args, Bridge bridge)
     {
-        // The real companion starts Stage H services after its startup cleanup; the harness has none, so here.
-        if (args.Contains("--missing-fixture")) { bridge.UseFileExists(File.Exists); bridge.RescanMissingFiles(); }
-        bridge.StageHStarted();
+        // Stage H's services start in HarnessStageH.AfterBridge (the harness has no startup cleanup).
+        if (args.Contains("--missing-fixture")) bridge.RescanMissingFiles();
         HarnessVerbs.Register("library-mutate", (b, json) => { Mutate(json); b.Poll(true).GetAwaiter().GetResult(); Console.WriteLine("TEST_MUTATED"); });
         // The mock refuses ("R-500") every command starting with this text until "reject-prefix" with nothing clears it.
         HarnessVerbs.Register("reject-prefix", (_, prefix) => { mock!.RejectPrefix = prefix.Length == 0 ? null : prefix; Console.WriteLine("TEST_REJECTING " + prefix); });

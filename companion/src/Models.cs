@@ -31,12 +31,14 @@ public record Snapshot(int V, long Revision, bool Available, string? Error, Libr
     int CounterSession = 0,
     // 2.43: rises when the host's shared style (ui.json, gate uiSync) changes, so host pages fetch uiPrefsGet. In memory only.
     long UiRevision = 0,
-    // 2.44 (Stage H): rises when the backup settings, a backup run or a restore changes (host pages fetch backupSettings).
-    long Backups = 0,
-    // 2.44 (gate updater): the self-update state, host only (pages strip it for guests). Left out when there is none.
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] UpdateStatus? Update = null,
-    // 2.44 (gate organize): rises when the organization plan, its proposals or its settings change (pages fetch organizeGet).
-    long Organize = 0);
+    // Stage H (2.44), all in memory and host-only (pages strip them for guests, except Organize's revision):
+    // revisions of the backups, the organization plan and the host-wide hotkeys (pages fetch backupSettings,
+    // organizeGet and hotkeysGet); the updater's state; why Soundpad can't be reached; whether this companion runs as
+    // administrator; and whether the host finished (or dismissed) setup. Nulls are left out, so older websites and
+    // the 2.44 schema (optional, not nullable) both accept the snapshot.
+    long Backups = 0, [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] UpdateStatus? Update = null, long Organize = 0, string? SoundpadProblem = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] bool? CompanionElevated = null, long Hotkeys = 0,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] bool? SetupDone = null);
 public record Participant(string Id, string Name);
 public record ParticipantPlays(string Name, long Count);
 public sealed class SoundStatistics
