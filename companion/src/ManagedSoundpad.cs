@@ -49,9 +49,28 @@ internal static class ManagedSoundpad
     {
         if (!(await pipe.Request(command)).StartsWith("R-200", StringComparison.Ordinal)) throw new InvalidDataException("Soundpad rejected this managed-audio action. Check that its full version is open, then retry.");
     }
+    /// <summary>
+    /// Follows an app category whose index moved (2.44 fix): Soundpad renumbers every later category when one above it
+    /// is removed, so a created category's recorded index can point at another category, or at nothing. Its name
+    /// carries the app's random tag ("[ed4a3e-ee037c]"), so the one category with exactly that name is still ours:
+    /// the reference moves to it (the caller checkpoints the journal's NativeId; its format is unchanged). Returns the
+    /// new index, or null when nothing has to move or nothing matches. Two categories with that exact name are
+    /// refused, even when one of them is at the recorded index: neither is claimed.
+    /// </summary>
+    public static int? Rebind(NativeCatalog catalog, OwnedCategory reference)
+    {
+        if (reference.State != "created" || reference.NativeId is not int index || !reference.Name.Contains('[')) return null;
+        var matches = catalog.Categories.Where(c => c.Name == reference.Name && c.Type != "1").ToArray();
+        if (matches.Length > 1) throw new InvalidDataException("The app-owned category is ambiguous. Preserve both categories and resolve the conflict in Soundpad.");
+        if (matches.Length == 0 || matches[0].Index == index) return null;
+        reference.NativeId = matches[0].Index;
+        return matches[0].Index;
+    }
     public static async Task<int> EnsureCategory(ISoundpad pipe, OwnedCategory reference, Action checkpoint)
     {
         var catalog = await Read(pipe);
+        // A category above it was removed, so its index shifted (2.44): follow it by its tagged name.
+        if (Rebind(catalog, reference) is int moved) { checkpoint(); return moved; }
         if (reference.NativeId is int index && reference.State == "created" && catalog.Categories.Any(c => c.Index == index && c.Name == reference.Name)) return index;
         if (reference.State == "creating")
         {

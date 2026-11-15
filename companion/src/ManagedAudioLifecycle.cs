@@ -289,25 +289,20 @@ public sealed partial class ManagedAudioStore
     /// </summary>
     private async Task RemoveTempCategory()
     {
-        if (journal.TempCategory is not { State: "created", NativeId: int index } temp) return;
+        if (journal.TempCategory is not { State: "created", NativeId: int } temp) return;
         try
         {
             // Soundpad 4.0.35 exited once when a category was removed right after one of its sounds played (2.37,
             // measured during the slot probe). So the category goes only when Soundpad was seen stopped, stayed
-            // stopped for a second with nothing played by the companion meanwhile, and is still stopped.
+            // stopped for a second with nothing played by the companion meanwhile, and is still stopped (QuietRule).
             for (int round = 0; round < 3; round++)
             {
-                long? stopped = await Native(async () => await pipe.Request("GetPlayStatus()") == "STOPPED" ? Environment.TickCount64 : (long?)null);
-                if (stopped == null) return;
-                long activity = PlaybackActivity?.Invoke() ?? long.MinValue;
-                long wait = Math.Max(stopped.Value, activity) + TempQuietMs - Environment.TickCount64;
-                if (wait > 0) await Task.Delay((int)Math.Min(wait, TempQuietMs));
-                bool? done = await Native(async () =>
+                var (outcome, _) = await QuietRule.TryOnce(nativeBatch, pipe, PlaybackActivity, async () =>
                 {
-                    if (await pipe.Request("GetPlayStatus()") != "STOPPED") return false;
-                    if ((PlaybackActivity?.Invoke() ?? long.MinValue) != activity) return (bool?)null; // played meanwhile: wait again
                     var catalog = await ManagedSoundpad.Read(pipe);
-                    var category = catalog.Categories.SingleOrDefault(c => c.Index == index && c.Name == temp.Name);
+                    // A category above it was removed meanwhile, so its index moved (2.44): follow it by its tagged name.
+                    if (ManagedSoundpad.Rebind(catalog, temp) != null) Save();
+                    var category = catalog.Categories.SingleOrDefault(c => c.Index == temp.NativeId && c.Name == temp.Name);
                     if (category == null)
                     {
                         // Already gone (removed by hand, or Soundpad was reset): start fresh next session.
@@ -321,8 +316,8 @@ public sealed partial class ManagedAudioStore
                     await ManagedSoundpad.RemoveCategoryWithSounds(pipe, catalog, category);
                     journal.TempCategory = null; Save();
                     return true;
-                });
-                if (done != null) return;
+                }, TempQuietMs);
+                if (outcome != QuietRule.Outcome.Played) return; // played meanwhile: wait again
             }
         }
         catch (Exception ex) when (ex is InvalidDataException or IOException or OperationCanceledException or System.Xml.XmlException)
@@ -330,5 +325,25 @@ public sealed partial class ManagedAudioStore
             Issue(null, "temp-category", ex is InvalidDataException ? ex.Message : "Soundpad was unavailable while removing the Temp category. Cleanup retries later.", "info"); Save();
         }
     }
+    /// <summary>
+    /// Follows the app's Temp and Saved categories after Soundpad renumbered its categories (2.44, Organize removes
+    /// categories): each moves to the one category with its exact tagged name, and the journal's NativeId is saved.
+    /// Two categories with that name are left as they are (the next import or cleanup reports it). Runs as a managed batch.
+    /// </summary>
+    internal async Task RebindOwnedCategories()
+    {
+        if (blocked) return;
+        var owned = new[] { journal.TempCategory, journal.SavedCategory }.OfType<OwnedCategory>().ToArray();
+        if (owned.Length == 0) return;
+        bool moved = await Native(async () =>
+        {
+            var catalog = await ManagedSoundpad.Read(pipe); bool any = false;
+            foreach (var reference in owned) { try { any |= ManagedSoundpad.Rebind(catalog, reference) != null; } catch (InvalidDataException) { } }
+            return any;
+        });
+        if (moved) Save();
+    }
+    /// <summary>The names of the app's own categories (Temp, Saved), which Organize never offers as targets (2.44).</summary>
+    internal string[] OwnedCategoryNames() => [.. new[] { journal.TempCategory, journal.SavedCategory }.OfType<OwnedCategory>().Select(c => c.Name)];
     public object[] HostLocations() => Volatile.Read(ref hostLocations);
 }
