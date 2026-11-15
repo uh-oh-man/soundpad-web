@@ -9,6 +9,7 @@ import { missingFeatures, supports } from '../version';
 import { DEMO_COPY, hostCopy } from '../hosting';
 import { themes, type Theme, type useAppearance } from '../appearance';
 import { usePref, type Prefs } from '../prefs';
+import { BackupsSection } from './settings/BackupsSection';
 
 const COMPANION_DOWNLOAD = `${(import.meta.env.VITE_REPOSITORY_URL as string | undefined) || 'https://github.com/uh-oh-man/soundpad-web'}/releases/latest/download/SoundpadWeb.exe`;
 
@@ -277,6 +278,8 @@ export function SettingsDialog({
           {!view.demo && supports(state.companionVersion, 'drafts') && (
             <KeepSettingsForm state={state} connected={connected} />
           )}
+          {/* Stage H (2.44): hidden for guests, the example and older companions (it checks the gate). */}
+          <BackupsSection />
           <div className="invite-field">
             <label htmlFor="invite">Invitation link · anyone with this link can join</label>
             <input id="invite" value={view.invite} readOnly onFocus={(e) => e.target.select()} />

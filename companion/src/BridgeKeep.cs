@@ -96,6 +96,8 @@ public sealed partial class Bridge
     /// </summary>
     public async Task StartupCleanup()
     {
+        // Stage H (2.44): backups (and the other Stage H services) start with the companion, also after a crash.
+        StageHStarted();
         int left = 0;
         try { if (!Audio.Public.Blocked && Audio.SessionOpen) left = TemporaryClipCount; }
         catch (Exception ex) when (ex is not OutOfMemoryException) { left = 0; }

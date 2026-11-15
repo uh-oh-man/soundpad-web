@@ -116,7 +116,19 @@ export const commandSchema = z
       // and active draft through the companion's ui.json. Host only; guests never send these.
       'uiPrefsGet',
       'uiPrefsSet',
+      // Stage H (2.44). Every Stage H op carries its details in `body`, checked by its own module's
+      // schema before it is sent (backups.ts) and strictly by the companion. Host only (the guest rules
+      // below fall through to false).
+      'backupSettings',
+      'backupNow',
+      'backupList',
+      'backupDetail',
+      'backupRestore',
+      'backupAttach',
+      'backupLayout',
     ]),
+    // Stage H (2.44): the one payload field of every Stage H op (JSON, so a relayed command stays JSON).
+    body: z.json().optional(),
     // uiPrefsSet (2.43): the style choices to store (any subset).
     uiPrefs: z.lazy(() => uiPrefsInputSchema).optional(),
     // Sentences (2.42): which sentence, and what is asked of it (see sentenceInputSchema).
@@ -492,6 +504,9 @@ export const snapshotSchema = z.object({
   counterSession: z.number().int().nonnegative().optional(),
   // 2.43 (gate uiSync): rises when the host's shared style (ui.json) changes, so host pages fetch uiPrefsGet.
   uiRevision: z.number().int().nonnegative().optional(),
+  // 2.44 (gate backups): rises when the backup settings, a backup run or a restore changes; host pages
+  // fetch backupSettings. Host only: never sent to guests (network/session.ts).
+  backups: z.number().int().nonnegative().optional(),
   permissions: z.object({
     remotePlayback: z.boolean(),
     guestCounter: z.boolean(),

@@ -1,0 +1,208 @@
+/*
+ * Backups (Stage H, 2.44): the Settings → Backups section, its backup list and a backup's detail with
+ * restore (components/settings/BackupsSection.tsx, components/backups/*). Owned by WP1. Only these
+ * components' selectors; tokens and the controls primitives only, no raw colours, no !important.
+ * The section copies the Appearance section's frame (surfaces.css .appearance-setting).
+ */
+
+.backups-setting {
+  display: grid;
+  gap: var(--space-3);
+  padding: var(--space-4);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface-2);
+}
+.backups-setting h3 {
+  margin: 0;
+  color: var(--accent-text);
+  font-size: 11px;
+  letter-spacing: 1.4px;
+  text-transform: uppercase;
+}
+.backups-setting h4 {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin: var(--space-2) 0 0;
+  color: var(--text-primary);
+  font-size: 13px;
+}
+.backups-status {
+  margin: 0;
+  color: var(--text-primary);
+  font-variant-numeric: tabular-nums;
+}
+.backups-form {
+  display: grid;
+  gap: var(--space-3);
+}
+.backups-form label {
+  display: grid;
+  gap: var(--space-1);
+  font-size: 13px;
+}
+.backups-form input:not([type='checkbox']) {
+  min-height: 34px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-s);
+  background: var(--surface-1);
+  color: var(--text-primary);
+}
+.backups-form label.backups-native {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+.backups-native input {
+  accent-color: var(--accent);
+}
+.backups-suggested {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+.backups-suggested small {
+  color: var(--text-muted);
+  overflow-wrap: anywhere;
+}
+.backups-keep {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(10rem, 1fr));
+  gap: var(--space-2);
+  margin: 0;
+  padding: var(--space-3);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-s);
+}
+.backups-keep legend {
+  padding: 0 var(--space-1);
+  color: var(--text-muted);
+  font-size: 12px;
+}
+.backups-keep small {
+  align-self: end;
+  color: var(--text-muted);
+}
+.backups-now[aria-disabled='true'],
+.backup-detail button[aria-disabled='true'],
+.backups-form button[aria-disabled='true'] {
+  opacity: 0.65;
+  cursor: progress;
+}
+.backups-list {
+  display: grid;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.backups-list > li > button {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2) var(--space-3);
+  width: 100%;
+  min-height: 36px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-s);
+  background: var(--surface-1);
+  color: var(--text-primary);
+  text-align: start;
+  font-variant-numeric: tabular-nums;
+}
+.backups-list > li > button[aria-expanded='true'] {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+.backups-list > li > small {
+  color: var(--text-muted);
+}
+.backups-tag {
+  padding: 0 var(--space-2);
+  border-radius: var(--radius-pill);
+  background: var(--warning-soft);
+  color: var(--text-primary);
+  font-size: 11px;
+}
+.backup-detail {
+  display: grid;
+  gap: var(--space-3);
+  margin-top: var(--space-2);
+  padding: var(--space-3);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-s);
+  background: var(--surface-1);
+}
+.backup-detail-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+.backup-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+}
+.backup-tabs [role='tab'] {
+  min-height: 30px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-pill);
+  background: var(--surface-2);
+  color: var(--text-muted);
+}
+.backup-tabs [role='tab'][aria-selected='true'] {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--text-primary);
+}
+.backup-items {
+  display: grid;
+  gap: var(--space-1);
+  max-height: 40vh;
+  margin: 0;
+  padding: 0;
+  overflow: auto;
+  list-style: none;
+}
+.backup-items li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-1) 0;
+  border-bottom: 1px solid var(--line);
+}
+.backup-items li > span:first-child {
+  flex: 1 1 10rem;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.backup-state {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+.backup-result,
+.backup-confirm {
+  display: grid;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-s);
+  background: var(--surface-2);
+}
+.backup-result p,
+.backup-confirm p,
+.backup-whole p {
+  margin: 0;
+}
+.backup-result code {
+  overflow-wrap: anywhere;
+}
+.backup-confirm-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}

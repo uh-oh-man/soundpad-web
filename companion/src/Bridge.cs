@@ -51,6 +51,7 @@ public sealed partial class Bridge(ISoundpad pipe, StateStore store) : IDisposab
         Interlocked.Exchange(ref disposed, 1);
         if (Volatile.Read(ref stateDirty) != 0) { try { Task.Run(FlushState).Wait(TimeSpan.FromSeconds(2)); } catch (Exception) { /* the last durable save stands */ } }
         workerStop.Cancel();
+        DisposeStageH();
         hotkey.Dispose(); waveformService.Dispose(); transcriber.Dispose(); audioWork.Dispose();
         // An ordinary quit deletes this launch's recording history and transcript (2.39); after a crash it is recovered instead.
         try { CloseHistory(); } catch (Exception ex) when (ex is not OutOfMemoryException) { /* removed with the next launch's recovery */ }
@@ -58,7 +59,7 @@ public sealed partial class Bridge(ISoundpad pipe, StateStore store) : IDisposab
     }
     public Snapshot Snapshot => new(1, revision, available, error, parsed.Public, playback, disk.Counter, disk.Permissions, 2,
         Convert.ToHexString(System.Security.Cryptography.HMACSHA256.HashData(Convert.FromBase64String(disk.IdentityKey), System.Text.Encoding.UTF8.GetBytes("workspace-host-v2"))).ToLowerInvariant(), disk.StatisticsVersion, typeof(Bridge).Assembly.GetName().Version?.ToString(3), managed?.Public.Revision ?? 0, MimicSnapshot, playbackSuspended,
-        Interlocked.Read(ref draftsRevision), budgets.Revision, tempRecovery > 0 ? tempRecovery : null, VoicesRevisionNow, Interlocked.Read(ref sentencesRevision), counterSession, Interlocked.Read(ref uiRevision)) { Permissions = PublicPermissions };
+        Interlocked.Read(ref draftsRevision), budgets.Revision, tempRecovery > 0 ? tempRecovery : null, VoicesRevisionNow, Interlocked.Read(ref sentencesRevision), counterSession, Interlocked.Read(ref uiRevision), BackupsRevisionH) { Permissions = PublicPermissions };
     /// <summary>
     /// Kick presses since this companion started (2.43, gate kickSession): it moves with the lifetime counter (never
     /// below 0) and Reset clears both. In memory only, so a restart begins a new session and state.json is unchanged.
@@ -151,6 +152,7 @@ public sealed partial class Bridge(ISoundpad pipe, StateStore store) : IDisposab
     }
     private async Task<Reply> Dispatch(Command c, string actor, Participant? participant, string? requester, string? audience, Intent? intent)
     {
+        if (ExecuteStageH(c, actor, participant, requester, audience) is { } h) return await h;
         if (IsMimic(c.Op)) return await ExecuteMimic(c, actor, participant, requester, audience, intent);
         if (IsSentenceOp(c.Op)) return await ExecuteSentences(c, actor, participant, requester, audience, intent);
         if (c.Op == "trimAudio") return await TrimAudio(c, actor, participant, requester, audience, intent: intent);

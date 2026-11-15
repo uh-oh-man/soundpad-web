@@ -30,7 +30,8 @@ public sealed class StateStore(string directory)
             }
             return state;
         }
-        catch (Exception ex) when (ex is JsonException or InvalidDataException or FormatException) { throw new InvalidDataException("Local state is unreadable. Preserve state.json and repair it before starting; it has not been reset.", ex); }
+        // 2.44: with backups set up, the message says where the newest backup's copy is and how to put it back.
+        catch (Exception ex) when (ex is JsonException or InvalidDataException or FormatException) { throw new InvalidDataException("Local state is unreadable. Preserve state.json and repair it before starting; it has not been reset." + BackupLocator.Hint(directory), ex); }
     }
     public string WriteIcon(string id, string data)
     {

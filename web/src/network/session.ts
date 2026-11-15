@@ -992,9 +992,12 @@ export class Session {
             mimic: { ...state.mimic!, history: { ...history, recoveredMs: 0, problem: null } },
           }
         : state;
+    // Stage H (2.44): what describes the host's own PC (backups) never reaches a guest.
+    const shown = base.backups === undefined ? base : { ...base };
+    delete shown.backups;
     return override
-      ? { ...base, permissions: effectivePermissions(base.permissions, override) }
-      : base;
+      ? { ...shown, permissions: effectivePermissions(shown.permissions, override) }
+      : shown;
   }
   private participantOf(peer: string, raw: unknown) {
     const person = participantSchema.safeParse(raw);

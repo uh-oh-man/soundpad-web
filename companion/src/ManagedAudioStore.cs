@@ -251,6 +251,94 @@ public sealed partial class ManagedAudioStore
         Save();
     }
     public void RetryJournal() { if (blocked) { journal = new(); Load(); } RequireWritable(); }
+
+    // ---- Backups (2.44) --------------------------------------------------------------------------------------------
+    // The caller holds the audio gate (Background lane for a capture), so the journal does not change meanwhile.
+
+    /// <summary>A kept (permanent) file the journal records: what a backup copies and a restore brings back.</summary>
+    public sealed record KeptFile(string AssetId, string VariantId, string Name, string Path, string Hash, long Bytes);
+
+    /// <summary>
+    /// The journal as it stands, for a backup: its bytes (null while it is blocked or was never written), its revision,
+    /// its app id, and every kept file it records.
+    /// </summary>
+    public (byte[]? Bytes, long Revision, string AppId, bool OnDisk, KeptFile[] Kept) CaptureBackup()
+    {
+        bool onDisk = File.Exists(JournalPath);
+        var kept = journal.Assets.SelectMany(a => a.Variants.Where(v => v.Permanent && v.OwnsFile && v.Storage == "permanent" && v.State == "ready" && v.FileHash.Length == 64)
+            .Select(v => new KeptFile(a.Id, v.Id, a.Name, v.Path, v.FileHash, v.Bytes))).ToArray();
+        return (blocked || !onDisk ? null : JsonSerializer.SerializeToUtf8Bytes(journal, Json.Options), journal.Revision, journal.AppId, onDisk && !blocked, kept);
+    }
+
+    /// <summary>The kept files of a backup's journal (strictly read: its schema and limits as Load checks them).</summary>
+    public static (AudioJournal Journal, KeptFile[] Kept) ParseBackup(byte[] bytes)
+    {
+        if (bytes.Length > 4 * 1024 * 1024) throw new InvalidDataException("The backup's audio journal is too large.");
+        using (var document = JsonDocument.Parse(bytes))
+            if (!document.RootElement.TryGetProperty("schemaVersion", out var schema) || schema.GetInt32() != 3) throw new InvalidDataException("The backup's audio journal has an unknown format.");
+        var j = JsonSerializer.Deserialize<AudioJournal>(bytes, Json.Options) ?? throw new InvalidDataException("The backup's audio journal is empty.");
+        if (j.Assets.Count > 2048 || !Guid.TryParseExact(j.AppId, "N", out _) || j.Assets.Select(a => a.Id).Distinct().Count() != j.Assets.Count) throw new InvalidDataException("The backup's audio journal is damaged.");
+        var kept = j.Assets.SelectMany(a => a.Variants.Where(v => v.Permanent && v.OwnsFile && v.Storage == "permanent" && v.State == "ready" && v.FileHash.Length == 64 && Path.IsPathFullyQualified(v.Path))
+            .Select(v => new KeptFile(a.Id, v.Id, a.Name, v.Path, v.FileHash, v.Bytes))).ToArray();
+        return (j, kept);
+    }
+
+    /// <summary>True when the journal records this source.</summary>
+    public bool Knows(string assetId) => journal.Assets.Any(a => a.Id == assetId);
+
+    /// <summary>
+    /// Puts a kept source back into the journal from a backup's (it is not there any more): only its permanent variants
+    /// and its reference to a Soundpad original, never temporary or session records, and the session stays as it is.
+    /// Validated and saved within the journal's limits (schema 3, 2,048 sources, 4 MiB); refused otherwise, with
+    /// nothing changed. Its Soundpad entries are verified again by <see cref="RecheckKept"/>.
+    /// </summary>
+    public bool MergePermanent(AudioAsset fromBackup, bool keepWorkspaceKeys)
+    {
+        RequireWritable();
+        if (journal.Assets.Any(a => a.Id == fromBackup.Id)) return false;
+        if (journal.Assets.Count >= 2048) throw new InvalidDataException("The managed-audio catalog reached its 2,048-source limit.");
+        var variants = fromBackup.Variants.Where(v => v.Current && (v.Permanent && v.OwnsFile && v.Storage == "permanent" && v.State == "ready" || v.Storage == "external" && !v.OwnsFile)).ToList();
+        if (!variants.Any(v => v.Permanent)) return false;
+        var asset = new AudioAsset
+        {
+            Id = fromBackup.Id, Origin = fromBackup.Origin, Name = Clean(fromBackup.Name, 120), Uploader = Clean(fromBackup.Uploader, 40), UploaderId = fromBackup.UploaderId.Length <= 128 ? fromBackup.UploaderId : "anonymous",
+            SourceHash = fromBackup.SourceHash, SourcePath = fromBackup.SourcePath, UploadHash = fromBackup.UploadHash, CreatedAt = fromBackup.CreatedAt, ModifiedAt = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(), State = "permanent",
+            SourceSoundId = fromBackup.Origin == "native" && fromBackup.SourcePath != null ? nativeId(fromBackup.SourcePath) : null,
+            WorkspaceKey = keepWorkspaceKeys ? fromBackup.WorkspaceKey : null,
+        };
+        foreach (var v in variants)
+        {
+            asset.Variants.Add(new AudioVariant
+            {
+                Id = v.Id, Orientation = v.Orientation, SourceHash = v.SourceHash, Path = v.Path, FileHash = v.FileHash, Storage = v.Storage, Bytes = v.Bytes, OwnsFile = v.OwnsFile, Current = true,
+                Permanent = v.Permanent, State = v.Storage == "external" ? v.State : "ready", CreatedAt = v.CreatedAt, WorkspaceKey = keepWorkspaceKeys ? v.WorkspaceKey : null,
+                // The Soundpad entry is verified again before it counts (the ids follow this install's identity).
+                Native = new NativeAudioReference { Path = v.Path, SoundId = nativeId(v.Path) },
+            });
+        }
+        if (asset.WorkspaceKey == null && asset.Variants.FirstOrDefault(v => v.Orientation == "normal") is { } normal) asset.WorkspaceKey = asset.SourceSoundId ?? normal.Native!.SoundId;
+        journal.Assets.Add(asset);
+        try { Save(); }
+        catch { journal.Assets.Remove(asset); writeFailed = false; Publish(); throw; }
+        return true;
+    }
+
+    /// <summary>
+    /// Verifies a kept source's Soundpad entries again (after a restore): true when every kept file is listed in
+    /// Soundpad. Nothing is ever imported for a kept file; a missing entry is left for the host to add again.
+    /// </summary>
+    public async Task<bool> RecheckKept(string assetId)
+    {
+        var asset = journal.Assets.SingleOrDefault(a => a.Id == assetId);
+        if (asset == null) return false;
+        bool all = true;
+        foreach (var variant in asset.Variants.Where(v => v.Permanent && v.Current && v.State == "ready"))
+        {
+            try { await EnsureImported(asset, variant); ClearIssues(asset, "native-import"); }
+            catch (Exception ex) when (ex is not OutOfMemoryException) { all = false; Report(asset, "native-import", "The kept file is back, but Soundpad does not list it. Add it to Soundpad again (Saved category).", ex); Save(); }
+        }
+        return all;
+    }
 }
 /// <summary>Temporary files of one source at a moment (2.40 crash recovery): its variant ids and staged input, if any.</summary>
 public sealed record TemporaryFiles(string AssetId, string[] VariantIds, string? InputPath);

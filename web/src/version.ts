@@ -66,6 +66,8 @@ export const FEATURES = {
   kickSession: [2, 43],
   soundEdit: [2, 43],
   uiSync: [2, 43],
+  // Stage H (2.44).
+  backups: [2, 44],
 } as const satisfies Record<string, readonly [number, number]>;
 
 /** True when the website changed version since this browser last used it (and it had used it before). */
@@ -109,6 +111,8 @@ const FEATURE_NAMES: Record<keyof typeof FEATURES, string> = {
   kickSession: 'a Kick count for this session next to the lifetime total',
   soundEdit: 'effects and speed copies of any Soundpad sound',
   uiSync: 'your browser and the companion window share style and active draft',
+  backups:
+    'automatic backups to a folder you choose, with restore of single clips, recordings, voices, sentences or the whole library',
 };
 
 /**
