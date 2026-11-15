@@ -1120,7 +1120,9 @@ function App() {
                       title="Select sounds without playing them, and drag them onto a category"
                       onClick={() => setOrganizeMode(!organize.on)}
                     >
-                      <ListChecks size={16} aria-hidden="true" /> Organize
+                      {/* The word shows where there is room (like View and Sort), so the row still fits Temp at 1440 px. */}
+                      <ListChecks size={16} aria-hidden="true" />{' '}
+                      <span className="toolbar-word">Organize</span>
                     </button>
                   </div>
                   <SessionUpload

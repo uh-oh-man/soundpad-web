@@ -305,8 +305,9 @@
   margin: 0;
   gap: 8px;
 }
+/* 2.44: the search gives way down to 160 px so the row still holds Temp beside the Organize toggle at 1440 px. */
 .board-toolbar .toolbar {
-  flex: 1 1 200px;
+  flex: 1 1 160px;
   max-width: 420px;
 }
 .board-toolbar .search {
