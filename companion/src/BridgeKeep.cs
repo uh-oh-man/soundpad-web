@@ -47,7 +47,7 @@ public sealed partial class Bridge
     /// <summary>Test seam and harness: guest budgets as they stand.</summary>
     public GuestBudgets Budgets => budgets;
 
-    private Permissions PublicPermissions => disk.Permissions with { GuestKeep = Keep.GuestKeep, GuestLibraryEdit = LibrarySettingsNow?.GuestLibraryEdit };
+    private Permissions PublicPermissions => disk.Permissions with { GuestKeep = Keep.GuestKeep, GuestLibraryEdit = LibrarySettingsNow?.GuestLibraryEdit, GuestOrganize = GuestOrganizeSetting };
 
     private void SaveKeep(KeepSettings next)
     {
@@ -96,6 +96,7 @@ public sealed partial class Bridge
     /// </summary>
     public async Task StartupCleanup()
     {
+        StageHStarted();
         int left = 0;
         try { if (!Audio.Public.Blocked && Audio.SessionOpen) left = TemporaryClipCount; }
         catch (Exception ex) when (ex is not OutOfMemoryException) { left = 0; }

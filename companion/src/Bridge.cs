@@ -51,14 +51,15 @@ public sealed partial class Bridge(ISoundpad pipe, StateStore store) : IDisposab
         Interlocked.Exchange(ref disposed, 1);
         if (Volatile.Read(ref stateDirty) != 0) { try { Task.Run(FlushState).Wait(TimeSpan.FromSeconds(2)); } catch (Exception) { /* the last durable save stands */ } }
         workerStop.Cancel();
+        DisposeStageH();
         hotkey.Dispose(); waveformService.Dispose(); transcriber.Dispose(); audioWork.Dispose();
         // An ordinary quit deletes this launch's recording history and transcript (2.39); after a crash it is recovered instead.
         try { CloseHistory(); } catch (Exception ex) when (ex is not OutOfMemoryException) { /* removed with the next launch's recovery */ }
         mimicCapture.Dispose(); pcm.Dispose();
     }
-    public Snapshot Snapshot => new(1, revision, available, error, parsed.Public, playback, disk.Counter, disk.Permissions, 2,
+    public Snapshot Snapshot => new(1, revision, available, error, PublicLibraryH(parsed.Public), playback, disk.Counter, disk.Permissions, 2,
         Convert.ToHexString(System.Security.Cryptography.HMACSHA256.HashData(Convert.FromBase64String(disk.IdentityKey), System.Text.Encoding.UTF8.GetBytes("workspace-host-v2"))).ToLowerInvariant(), disk.StatisticsVersion, typeof(Bridge).Assembly.GetName().Version?.ToString(3), managed?.Public.Revision ?? 0, MimicSnapshot, playbackSuspended,
-        Interlocked.Read(ref draftsRevision), budgets.Revision, tempRecovery > 0 ? tempRecovery : null, VoicesRevisionNow, Interlocked.Read(ref sentencesRevision), counterSession, Interlocked.Read(ref uiRevision)) { Permissions = PublicPermissions };
+        Interlocked.Read(ref draftsRevision), budgets.Revision, tempRecovery > 0 ? tempRecovery : null, VoicesRevisionNow, Interlocked.Read(ref sentencesRevision), counterSession, Interlocked.Read(ref uiRevision), Organize: OrganizeRevisionH) { Permissions = PublicPermissions };
     /// <summary>
     /// Kick presses since this companion started (2.43, gate kickSession): it moves with the lifetime counter (never
     /// below 0) and Reset clears both. In memory only, so a restart begins a new session and state.json is unchanged.
@@ -89,6 +90,7 @@ public sealed partial class Bridge(ISoundpad pipe, StateStore store) : IDisposab
             // The app's exact-playback slots are hidden from the library the website sees (2.37).
             var next = HideSlots(LibraryParser.Parse(all, cats, disk, iconCache ??= store.ReadIcons(disk), nativeStatistics));
             parsed = next with { Public = next.Public with { Sounds = next.Public.Sounds.Select(s => managed?.Annotation(s.Id) is { } info ? s with { Name = info.Kind == "native" ? s.Name : info.Name, Icon = s.Icon ?? iconCache?.GetValueOrDefault(info.WorkspaceId) ?? info.Aliases.Select(id=>iconCache?.GetValueOrDefault(id)).FirstOrDefault(icon=>icon != null), Temporary = info.Temporary, UploadedBy = info.Uploader, AssetId = info.AssetId, Orientation = info.Orientation, AudioKind = info.Kind, InternalVariant = info.InternalVariant, AliasOf = info.AliasOf, WorkspaceId = info.WorkspaceId, Aliases = info.Aliases } : s).ToArray() } }; parsed = parsed with { Public = parsed.Public with { Version = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(Json.Write(parsed.Public)))).ToLowerInvariant()[..24] } }; available = true; error = null; lastSoundlist = all;
+            LibraryRefreshedH();
         }
         catch (Exception ex) when (ex is IOException or InvalidDataException or OperationCanceledException or System.Xml.XmlException or ArgumentException)
         {
@@ -151,6 +153,7 @@ public sealed partial class Bridge(ISoundpad pipe, StateStore store) : IDisposab
     }
     private async Task<Reply> Dispatch(Command c, string actor, Participant? participant, string? requester, string? audience, Intent? intent)
     {
+        if (ExecuteStageH(c, actor, participant, requester, audience) is { } h) return await h;
         if (IsMimic(c.Op)) return await ExecuteMimic(c, actor, participant, requester, audience, intent);
         if (IsSentenceOp(c.Op)) return await ExecuteSentences(c, actor, participant, requester, audience, intent);
         if (c.Op == "trimAudio") return await TrimAudio(c, actor, participant, requester, audience, intent: intent);
@@ -167,6 +170,8 @@ public sealed partial class Bridge(ISoundpad pipe, StateStore store) : IDisposab
         if (await ExecuteKeep(c, actor, participant, requester, audience) is { } keep) return keep;
         if (await ExecuteVoices(c, actor, participant, requester, audience) is { } voices) return voices;
         var query = await Query(c, actor); if (query != null) return query;
+        // A sound whose file is missing is never sent to Soundpad to play (2.44): its reaction is unknown.
+        if (c.Op is "play" or "startAt" or "region" && MissingRefusal(c) is { } miss) return miss;
         if (c.Op == "stop") return await ExecuteStop(c, actor, requester, audience, intent);
         if (c.Op == "panic") return await ExecutePanic(c, actor, intent);
         if (c.Op is "reverse" or "audioPlay" or "keepAudio" or "removeAudio" or "retryAudio" or "retryCleanup" or "cleanupCategories" or "clearTemp" or "beginSession" or "endSession" || (c.Op is "play" or "startAt" or "region" && c.SoundId != null && managed?.Annotation(c.SoundId) is { Kind: not "native" })) return await ExecuteAudio(c, actor, participant, intent, requester, audience);
@@ -271,7 +276,9 @@ public sealed partial class Bridge(ISoundpad pipe, StateStore store) : IDisposab
                             try { if (libraryEdit != Voices.Settings.GuestLibraryEdit) Voices.UpdateSettings(s => s with { GuestLibraryEdit = libraryEdit }); }
                             catch (InvalidDataException ex) { Log("The voice library setting could not be saved: " + ex.Message); }
                         }
-                        disk.Permissions = permissions with { GuestKeep = null, GuestLibraryEdit = null }; break;
+                        // Guest proposals (2.44) live in organize\settings.v1.json, never in state.json.
+                        ApplyGuestOrganizePermission(permissions.GuestOrganize);
+                        disk.Permissions = permissions with { GuestKeep = null, GuestLibraryEdit = null, GuestOrganize = null }; break;
                     case "icon":
                         if (c.SoundId == null || !parsed.Indexes.ContainsKey(c.SoundId)) throw new InvalidDataException("Unknown sound.");
                         var iconIdentity = managed?.Annotation(c.SoundId);

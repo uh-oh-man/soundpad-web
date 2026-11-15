@@ -395,6 +395,7 @@ if (args.FirstOrDefault() == "--make-rollback-fixture" && args.Length == 3)
     await Must(b.Execute(C("trimAudio") with { AssetId = asset.Id, PositionMs = 0, EndMs = 8000, Action = "echo" }, "host"), "effect");
     // 2.43: the host's shared style (ui.json), which older companions must ignore.
     await Must(b.Execute(C("uiPrefsSet") with { UiPrefs = System.Text.Json.JsonDocument.Parse("{\"navStyle\":\"tabs\",\"theme\":\"ocean\",\"motion\":\"reduce\",\"contrast\":\"high\",\"headerAnimation\":\"still\",\"activeDraft\":null}").RootElement.Clone() }, "host"), "ui prefs");
+    await HarnessStageH.RollbackFixture(dir, b);
     if (args[2] == "ended") await Must(b.Execute(C("endSession"), "host"), "end");
     else b.Dispose();
     Console.WriteLine($"FIXTURE_READY {dir} pipe={soundpad.Name}");
@@ -456,11 +457,13 @@ if (args.Length > 1 && int.TryParse(args[1], out var count) && count is > 4 and 
 }
 foreach (var element in all.Descendants("Sound").Concat(categories.Descendants("Sound"))) { var original = (string?)element.Attribute("url"); if (original == null) continue; var path = Path.Combine(directory, Path.GetFileName(original)); if (!File.Exists(path)) AudioFixtures.Wave(path); element.SetAttributeValue("url", path); element.SetAttributeValue("duration", "00:02.500"); }
 mock.AllXml = all.ToString(); mock.CategoryXml = categories.ToString();
+HarnessStageH.MockReady(args, mock, directory);
 // After the origin and the sound count (2.35), for e2e tests of playback under delay: --latency-ms N makes every
 // Soundpad request take N ms; --slow-add-ms N makes only an import into Soundpad (DoAddSound) take N ms longer.
 int Option(string name) { int at = Array.IndexOf(args, name); return at >= 0 && at + 1 < args.Length && int.TryParse(args[at + 1], out int value) && value is >= 0 and <= 3000 ? value : 0; }
 mock.LatencyMs = Option("--latency-ms"); mock.SlowMs = Option("--slow-add-ms"); mock.SlowPrefix = "DoAddSound(";
 using var pipe = new SoundpadPipe(mock.Name, true);
+HarnessStageH.BeforeBridge(args, directory);
 using var bridge = new Bridge(pipe, new StateStore(directory));
 // The tone has been playing for 10 s when Mimic starts listening, so the browser tests' "Last 3 s" and "Last 10 s"
 // right after Start find that much recorded (2.39: the history view selects only audio that exists).
@@ -478,17 +481,14 @@ int ownerAt = Array.IndexOf(args, "--owner-key");
 var ownerKey = ownerAt >= 0 && ownerAt + 1 < args.Length && System.Text.RegularExpressions.Regex.IsMatch(args[ownerAt + 1], "^[a-f0-9]{64}$") ? args[ownerAt + 1] : null;
 await using var server = new LocalServer(bridge, args.FirstOrDefault() ?? "http://127.0.0.1:5173", ownerKey) { Log = line => Console.WriteLine("TEST_LOG " + line) };
 await server.Start();
+HarnessStageH.AfterBridge(args, bridge, server);
 Console.WriteLine("TEST_READY " + Json.Write(new { port = server.Port, token = server.Token }));
 using var stop = new CancellationTokenSource();
-// Any line ends the harness, except "restart-history" (2.41): the recording history is replaced by a new one at once
-// (the same as the companion restarting Mimic), so browser tests can check that nothing of the old one carries over.
+// Any line ends the harness, except the verbs registered in HarnessStageH.cs ("restart-history" since 2.41; the
+// Stage H verbs since 2.44), which change the companion or the mock Soundpad while browser tests run.
 _ = Task.Run(() =>
 {
-    while (Console.ReadLine() == "restart-history")
-    {
-        bridge.CloseHistory();
-        bridge.Execute(new Command(2, Guid.NewGuid().ToString(), DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(), "mimicStart") with { SourceId = MimicFixture.Source.Id }, "host").GetAwaiter().GetResult();
-    }
+    while (Console.ReadLine() is { } line && HarnessVerbs.Run(line, bridge)) { }
     stop.Cancel();
 });
 try { while (!stop.IsCancellationRequested) { await Task.Delay(250, stop.Token); await bridge.Poll(false); } }
