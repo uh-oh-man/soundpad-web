@@ -34,8 +34,10 @@ public sealed class LocalServer(Bridge bridge, string origin, string? ownerKey =
     public bool PortKept { get; private set; }
     /// <summary>2.44: how long the place of the page that ran the session is held for it after an update.</summary>
     public TimeSpan ResumeGrace { get; init; } = TimeSpan.FromSeconds(20);
-    // 2.44: the owner had pressed End hosting (the next owner is told once, so it does not start hosting by itself).
-    private bool sessionEnded = resume?.Ended ?? false;
+    // 2.44: the last session command of the owner was End hosting (for the hand-over), and, after an update, that the
+    // old process's session had ended: the first owner is told once, so it does not start hosting by itself.
+    private bool sessionEnded;
+    private bool resumedEnded = resume?.Ended ?? false;
     private string? lastOwnerId = resume?.OwnerClientId;
     private int sockets;
 
@@ -347,7 +349,7 @@ public sealed class LocalServer(Bridge bridge, string origin, string? ownerKey =
         {
             role = client.Owner ? "owner" : "view"; remembered = client.Owner ? identity : null; kept = client.Owner ? settings : null; summary = session; version = sessionVersion;
             // 2.44: once, to the first owner after an update that happened while hosting was ended.
-            if (client.Owner && sessionEnded && role != client.RoleSent) { ended = true; sessionEnded = false; }
+            if (client.Owner && resumedEnded && role != client.RoleSent) { ended = true; resumedEnded = false; }
         }
         if (role != client.RoleSent)
         {
@@ -368,7 +370,7 @@ public sealed class LocalServer(Bridge bridge, string origin, string? ownerKey =
         {
             if (owner != from) return;
             from.Ended = ended;
-            sessionEnded = ended;
+            sessionEnded = ended; resumedEnded = false;
             if (!ended) return;
             identity = null; settings = null;
             session = Json.Write(new { type = "session", invite = "", guests = Array.Empty<string>(), people = new { }, layouts = Array.Empty<object>() }); sessionVersion++;
@@ -479,8 +481,9 @@ public sealed class LocalServer(Bridge bridge, string origin, string? ownerKey =
         lock (roles)
         {
             // An owner that pressed End hosting forgot its identity; so does the hand-over (sessionEnded says so).
-            bool ended = sessionEnded || owner is { Ended: true };
-            return new(Token, Port, identity?.Clone(), settings?.Clone(), session, ended, owner?.ClientId ?? lastOwnerId);
+            bool ended = sessionEnded || resumedEnded || owner is { Ended: true };
+            // Nobody's place is held after End hosting: the next page that connects becomes the owner, as before.
+            return new(Token, Port, identity?.Clone(), settings?.Clone(), session, ended, ended ? null : owner?.ClientId ?? lastOwnerId);
         }
     }
 

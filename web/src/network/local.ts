@@ -295,7 +295,8 @@ export class LocalBridge {
             data.type === 'tick' ? this.latest?.library : undefined,
           );
           if (this.latest && s.revision < this.latest.revision) return;
-          this.updatingSince = 0;
+          // The first state of a new connection after an update: the new companion is here.
+          if (!this.latest) this.updatingSince = 0;
           this.latest = s;
           clearTimeout(timeout);
           this.state(s);
