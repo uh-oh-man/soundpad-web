@@ -92,8 +92,11 @@ public sealed partial class Bridge(ISoundpad pipe, StateStore store) : IDisposab
             var next = HideSlots(LibraryParser.Parse(all, cats, disk, iconCache ??= store.ReadIcons(disk), nativeStatistics));
             parsed = next with { Public = next.Public with { Sounds = next.Public.Sounds.Select(s => managed?.Annotation(s.Id) is { } info ? s with { Name = info.Kind == "native" ? s.Name : info.Name, Icon = s.Icon ?? iconCache?.GetValueOrDefault(info.WorkspaceId) ?? info.Aliases.Select(id=>iconCache?.GetValueOrDefault(id)).FirstOrDefault(icon=>icon != null), Temporary = info.Temporary, UploadedBy = info.Uploader, AssetId = info.AssetId, Orientation = info.Orientation, AudioKind = info.Kind, InternalVariant = info.InternalVariant, AliasOf = info.AliasOf, WorkspaceId = info.WorkspaceId, Aliases = info.Aliases } : s).ToArray() } }; parsed = parsed with { Public = parsed.Public with { Version = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(Json.Write(parsed.Public)))).ToLowerInvariant()[..24] } }; available = true; error = null; lastSoundlist = all;
         }
-        catch (Exception ex) when (ex is IOException or InvalidDataException or OperationCanceledException or System.Xml.XmlException or ArgumentException)
+        // 2.44: an elevated Soundpad refuses the pipe (UnauthorizedAccessException), which used to escape Poll; the
+        // reason is kept for the setup guide and the banner (SoundpadDiagnosis), the error text stays as it was.
+        catch (Exception ex) when (ex is IOException or InvalidDataException or OperationCanceledException or System.Xml.XmlException or ArgumentException or UnauthorizedAccessException or TimeoutException)
         {
+            NoteSoundpadFailure(ex);
             available = false; SlotLease? free; lock (playbackSync) { playbackVersion++; playback = new(); free = DropSliceLocked(); } Free(free);
             error = ex is InvalidDataException ? ex.Message : "Soundpad is unavailable. Open it normally; reconnection is automatic.";
         }
@@ -121,7 +124,7 @@ public sealed partial class Bridge(ISoundpad pipe, StateStore store) : IDisposab
                 {
                     await SamplePlayback();
                 }
-                catch (Exception ex) when (ex is IOException or OperationCanceledException) { available = false; SlotLease? free; lock (playbackSync) { playbackVersion++; playback = new(); free = DropSliceLocked(); } Free(free); error = "Soundpad disconnected; reconnecting automatically."; }
+                catch (Exception ex) when (ex is IOException or OperationCanceledException or UnauthorizedAccessException or TimeoutException) { NoteSoundpadFailure(ex); available = false; SlotLease? free; lock (playbackSync) { playbackVersion++; playback = new(); free = DropSliceLocked(); } Free(free); error = "Soundpad disconnected; reconnecting automatically."; }
                 // Soundpad refused the seek or stop at the end of a region (2.35). This used to end the companion;
                 // the next poll simply tries again.
                 catch (InvalidDataException) { }
