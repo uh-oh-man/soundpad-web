@@ -9,6 +9,11 @@ import { missingFeatures, supports } from '../version';
 import { DEMO_COPY, hostCopy } from '../hosting';
 import { themes, type Theme, type useAppearance } from '../appearance';
 import { usePref, type Prefs } from '../prefs';
+import { KeyboardSection } from './settings/KeyboardSection';
+import { SetupSection } from './settings/SetupSection';
+import { UpdateSection } from './settings/UpdateSection';
+import { GuestOrganizeToggle } from './settings/GuestOrganizeToggle';
+import { BackupsSection } from './settings/BackupsSection';
 
 const COMPANION_DOWNLOAD = `${(import.meta.env.VITE_REPOSITORY_URL as string | undefined) || 'https://github.com/uh-oh-man/soundpad-web'}/releases/latest/download/SoundpadWeb.exe`;
 
@@ -221,6 +226,8 @@ export function SettingsDialog({
         </p>
         {appearance.error && <p className="inline-error">{appearance.error}</p>}
       </section>
+      <KeyboardSection />
+      <SetupSection />
       <div className="settings-status">
         <Radio size={18} />
         <div>
@@ -243,6 +250,7 @@ export function SettingsDialog({
           </a>
         </p>
       )}
+      <UpdateSection />
       {host && (
         <>
           {copy.note && (
@@ -274,9 +282,11 @@ export function SettingsDialog({
                 />
               </div>
             ))}
+          <GuestOrganizeToggle />
           {!view.demo && supports(state.companionVersion, 'drafts') && (
             <KeepSettingsForm state={state} connected={connected} />
           )}
+          <BackupsSection />
           <div className="invite-field">
             <label htmlFor="invite">Invitation link · anyone with this link can join</label>
             <input id="invite" value={view.invite} readOnly onFocus={(e) => e.target.select()} />

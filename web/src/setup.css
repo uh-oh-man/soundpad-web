@@ -1,0 +1,5 @@
+/*
+ * setup.css (Stage H, 2.44): owns the setup guide, the shortcut editor and the hotkey pickers.
+ * It comes after surfaces.css (see the import order in main.tsx) and styles only its own components,
+ * with tokens and the controls.css primitives. No raw colours, no !important.
+ */

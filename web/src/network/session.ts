@@ -224,6 +224,15 @@ type Request = {
 };
 /** Challenges and unverified identities a host keeps at most (old ones go first). */
 const MAX_CHALLENGES = 512;
+/** Snapshot fields that describe the host's PC (Stage H, 2.44); never sent to guests. */
+const HOST_ONLY_FIELDS = [
+  'update',
+  'soundpadProblem',
+  'companionElevated',
+  'hotkeys',
+  'setupDone',
+  'backups',
+] as const satisfies readonly (keyof Snapshot)[];
 const remember = <K, V>(map: Map<K, V>, key: K, value: V) => {
   map.delete(key);
   map.set(key, value);
@@ -985,13 +994,17 @@ export class Session {
     // How much history a crash recovered, and the host's disk problems, are the host's (2.39): they describe
     // recording from before any guest joined.
     const history = state.mimic?.history;
+    // Stage H (2.44): the updater, Soundpad's problem, the companion's rights, host-wide hotkeys, setup and
+    // backups are the host's. Organize's revision and missing files stay (guests see them too).
+    const shared: Snapshot = { ...state };
+    for (const key of HOST_ONLY_FIELDS) delete shared[key];
     const base =
       history && (history.recoveredMs || history.problem)
         ? {
-            ...state,
-            mimic: { ...state.mimic!, history: { ...history, recoveredMs: 0, problem: null } },
+            ...shared,
+            mimic: { ...shared.mimic!, history: { ...history, recoveredMs: 0, problem: null } },
           }
-        : state;
+        : shared;
     return override
       ? { ...base, permissions: effectivePermissions(base.permissions, override) }
       : base;

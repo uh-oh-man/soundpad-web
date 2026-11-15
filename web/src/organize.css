@@ -1,0 +1,5 @@
+/*
+ * organize.css (Stage H, 2.44): owns Organize mode, the tile check, the Review changes panel, Needs attention and the shared-copy preview.
+ * It comes after surfaces.css (see the import order in main.tsx) and styles only its own components,
+ * with tokens and the controls.css primitives. No raw colours, no !important.
+ */

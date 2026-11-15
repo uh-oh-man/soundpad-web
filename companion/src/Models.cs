@@ -2,7 +2,9 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 namespace SoundpadWeb;
 
-public record Sound(string Id, string Name, string? Icon, long? DurationMs = null, long? NativePlays = null, string? NativeLastPlayed = null, bool Temporary = false, string? UploadedBy = null, string? AssetId = null, string? Orientation = null, string? AudioKind = null, bool InternalVariant = false, string? AliasOf = null, string? WorkspaceId = null, string[]? Aliases = null);
+public record Sound(string Id, string Name, string? Icon, long? DurationMs = null, long? NativePlays = null, string? NativeLastPlayed = null, bool Temporary = false, string? UploadedBy = null, string? AssetId = null, string? Orientation = null, string? AudioKind = null, bool InternalVariant = false, string? AliasOf = null, string? WorkspaceId = null, string[]? Aliases = null,
+    // Stage H (2.44, gate missingFiles): the sound's file is missing on the host's PC. Written only when true, so the snapshot does not grow per sound.
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] bool Missing = false);
 public record Category(string Id, string Name, string? Icon, string[] SoundIds, Category[] Children);
 public record Library(string Version, Sound[] Sounds, Category[] Categories);
 public record Playback(string Status = "UNKNOWN", long? PositionMs = null, long? DurationMs = null,
@@ -11,7 +13,9 @@ public record Permissions(bool RemotePlayback = true, bool GuestCounter = false,
     // Guest Keep (2.40). Never written to state.json (null there): it lives in keep-settings.json, which older companions ignore.
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] bool? GuestKeep = null,
     // Guests may edit the voice library (2.41). Never written to state.json either: it lives in library\voice-library.v1.json.
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] bool? GuestLibraryEdit = null);
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] bool? GuestLibraryEdit = null,
+    // Guests may propose organization changes (2.44, gate organize). Never written to state.json: it lives in organize\settings.v1.json.
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] bool? GuestOrganize = null);
 public record Snapshot(int V, long Revision, bool Available, string? Error, Library Library, Playback Playback, int Counter, Permissions Permissions,
     int Protocol = 2, string? HostId = null, long StatisticsVersion = 0, string? CompanionVersion = null, long ManagedAudioVersion = 0, MimicState? Mimic = null,
     // True while the host has suspended guest playback with Panic (2.35). In memory only: a restart clears it.
@@ -26,7 +30,15 @@ public record Snapshot(int V, long Revision, bool Available, string? Error, Libr
     // 2.43: Kick presses since this companion started (gate kickSession). In memory only: never written to state.json.
     int CounterSession = 0,
     // 2.43: rises when the host's shared style (ui.json, gate uiSync) changes, so host pages fetch uiPrefsGet. In memory only.
-    long UiRevision = 0);
+    long UiRevision = 0,
+    // Stage H (2.44), all in memory and host-only (pages strip them for guests, except Organize's revision):
+    // revisions of the backups, the organization plan and the host-wide hotkeys (pages fetch backupSettings,
+    // organizeGet and hotkeysGet); the updater's state; why Soundpad can't be reached; whether this companion runs as
+    // administrator; and whether the host finished (or dismissed) setup. Nulls are left out, so older websites and
+    // the 2.44 schema (optional, not nullable) both accept the snapshot.
+    long Backups = 0, [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] UpdateStatus? Update = null, long Organize = 0, string? SoundpadProblem = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] bool? CompanionElevated = null, long Hotkeys = 0,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] bool? SetupDone = null);
 public record Participant(string Id, string Name);
 public record ParticipantPlays(string Name, long Count);
 public sealed class SoundStatistics
@@ -74,7 +86,9 @@ public record Command(int V, string Id, long At, string Op, string? SoundId = nu
     // a performance set to create or change.
     string? SentenceId = null, SentenceInput? Sentence = null, PerformanceSetInput? Set = null,
     // uiPrefsSet (2.43): the style fields to change, checked field by field by UiPrefsStore.
-    JsonElement? UiPrefs = null);
+    JsonElement? UiPrefs = null,
+    // Stage H (2.44): the one payload field of every Stage H op; each handler checks its own shape strictly.
+    JsonElement? Body = null);
 /// <summary>The details of a sentence or palette command (2.42); null fields are not part of the request.</summary>
 public sealed record SentenceInput(string? Do = null, string? Text = null, string[]? Pieces = null, double? OffsetMs = null, long? StartMs = null, long? EndMs = null,
     double? FadeInMs = null, double? FadeOutMs = null, double? Gain = null, bool? Balanced = null, double? DurationMs = null, string? Mode = null, PieceEffect? Effect = null,

@@ -116,7 +116,39 @@ export const commandSchema = z
       // and active draft through the companion's ui.json. Host only; guests never send these.
       'uiPrefsGet',
       'uiPrefsSet',
+      // Stage H (2.44). Each carries its details in `body`, which its own module checks before sending.
+      // Backups and restore (gate backups), host only.
+      'backupSettings',
+      'backupNow',
+      'backupList',
+      'backupDetail',
+      'backupRestore',
+      'backupAttach',
+      'backupLayout',
+      // The updater (gate updater), host only.
+      'updateStatus',
+      'updateCheck',
+      'updateDownload',
+      'updateInstall',
+      'updateLater',
+      'updateSettings',
+      // Organize mode (gate organize): guests may read and propose when the host allows it.
+      'organizeGet',
+      'organizeEdit',
+      'organizeApply',
+      'organizeResolve',
+      'organizeDiscard',
+      'organizePropose',
+      'organizeWithdraw',
+      'organizeSettings',
+      // Setup and host-wide hotkeys (gates setup, hostHotkeys), host only.
+      'setupGet',
+      'setupSet',
+      'hotkeysGet',
+      'hotkeysSet',
     ]),
+    // Stage H (2.44): the single payload field of every Stage H op (see the op list above).
+    body: z.json().optional(),
     // uiPrefsSet (2.43): the style choices to store (any subset).
     uiPrefs: z.lazy(() => uiPrefsInputSchema).optional(),
     // Sentences (2.42): which sentence, and what is asked of it (see sentenceInputSchema).
@@ -267,6 +299,8 @@ export const commandSchema = z
         guestMimic: z.boolean().optional(),
         guestKeep: z.boolean().optional(),
         guestLibraryEdit: z.boolean().optional(),
+        // 2.44 (gate organize): never stored in state.json; the companion keeps it in organize\settings.v1.json.
+        guestOrganize: z.boolean().optional(),
       })
       .strict()
       .optional(),
@@ -435,6 +469,28 @@ const category: z.ZodType<Category> = z.object({
   soundIds: z.array(z.string().max(64)).max(50000),
   children: z.lazy(() => z.array(category).max(5000)),
 });
+/** The updater's state in the host's snapshot (2.44, gate updater). */
+export const updateSnapshotSchema = z.object({
+  state: z.enum([
+    'idle',
+    'checking',
+    'available',
+    'downloading',
+    'verifying',
+    'ready',
+    'installing',
+    'failed',
+    'unsupported',
+  ]),
+  current: z.string(),
+  latest: z.string().optional(),
+  notesUrl: z.string().optional(),
+  bytes: z.number().optional(),
+  total: z.number().optional(),
+  error: z.string().optional(),
+  reason: z.string().optional(),
+  offered: z.boolean().optional(),
+});
 export const snapshotSchema = z.object({
   v: z.literal(1),
   revision: z.number().int().nonnegative(),
@@ -469,6 +525,8 @@ export const snapshotSchema = z.object({
           aliases: z.array(z.string().max(64)).max(64).nullable().optional(),
           temporary: z.boolean().optional(),
           uploadedBy: z.string().max(40).nullable().optional(),
+          // 2.44 (gate missingFiles): the file is missing on the host's PC; only sent when true.
+          missing: z.boolean().optional(),
         }),
       )
       .max(50000),
@@ -504,7 +562,23 @@ export const snapshotSchema = z.object({
     guestKeep: z.boolean().optional(),
     // 2.41: guests may name and tag voice-library recordings (with Undo and audit). Older companions omit it.
     guestLibraryEdit: z.boolean().optional(),
+    // 2.44: guests may propose organization changes (gate organize). Older companions omit it.
+    guestOrganize: z.boolean().optional(),
   }),
+  // Stage H (2.44), all optional (older companions omit them). Revisions of the backups, the organization
+  // plan and the host-wide hotkeys (pages fetch backupSettings, organizeGet, hotkeysGet); the updater's
+  // state; why Soundpad can't be reached; whether the companion runs as administrator; whether the host
+  // finished setup. Guests receive only `organize` (session.ts strips the rest).
+  backups: z.number().int().optional(),
+  update: updateSnapshotSchema.optional(),
+  organize: z.number().int().optional(),
+  soundpadProblem: z
+    .enum(['notRunning', 'noAnswer', 'accessDenied', 'oldVersion'])
+    .nullable()
+    .optional(),
+  companionElevated: z.boolean().optional(),
+  hotkeys: z.number().int().optional(),
+  setupDone: z.boolean().optional(),
   // 2.41: rises when the voice library, its word index, notices or speaker groups change (fetch libraryStatus).
   voiceLibrary: z.number().int().nonnegative().optional(),
   // 2.42: rises when sentences, named palette pieces or performance sets change (fetch sentenceList).
@@ -633,6 +707,10 @@ export const controlOps: readonly Command['op'][] = [
 export function isGuestAllowed(c: Command, s: Snapshot) {
   // "Make it and play it" (2.35) needs the same permission as playing it afterwards did.
   if (c.autoplay && !s.permissions.remotePlayback) return false;
+  // Organize mode (2.44): a guest may read the plan and propose or withdraw their own changes when the
+  // host allows it. Every other Stage H op is the host's (the fall-through below refuses it).
+  if (c.op === 'organizeGet' || c.op === 'organizePropose' || c.op === 'organizeWithdraw')
+    return s.permissions.guestOrganize === true;
   if (c.op === 'mimicPeek' || c.op === 'mimicClip') return s.permissions.guestMimic === true;
   // The recording history (2.39): only what a guest may see of it, which the companion limits to
   // what was recorded since they joined (and what the host shared).

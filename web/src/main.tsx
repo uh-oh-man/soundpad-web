@@ -69,9 +69,13 @@ import { recall, remember } from './sections';
 import { usePref } from './prefs';
 import { useHostStyleSync } from './ui-sync';
 import { currentOpener, returnFocus } from './focus-return';
-import { useUnreadNotices } from './notifications';
+import { notify, useUnreadNotices } from './notifications';
 import { useNoticeSounds } from './notice-sound';
 import { useTempAssetsSync } from './temp-assets';
+import { StageHContext, organizeActive } from './stage-h';
+import { SetupGuide } from './components/setup/SetupGuide';
+import { UpdateOffer } from './components/updates/UpdateOffer';
+import { BackupLayoutSync } from './components/backups/BackupLayoutSync';
 // Stylesheets in their cascade order (Stage G spec 3.1). Each later file overrides earlier ones at equal
 // specificity; see the ownership note at the top of each file. DM Sans (self-hosted, SIL OFL 1.1, see
 // THIRD-PARTY-NOTICES.md) comes right after the tokens: its variable-weight faces, latin and latin-ext by
@@ -86,6 +90,10 @@ import './sentences.css';
 import './shell.css';
 import './playback.css';
 import './surfaces.css';
+import './backups.css';
+import './updates.css';
+import './organize.css';
+import './setup.css';
 
 const viewLabels: Record<(typeof viewModes)[number], string> = {
   icons: 'Icons',
@@ -113,6 +121,8 @@ const totalsSchema = z.object({
 function useSpaceToggle() {
   useEffect(() => {
     function space(event: KeyboardEvent) {
+      // Organize mode (2.44): Space there selects a sound; it never plays or pauses.
+      if (organizeActive(event.target as Element)) return;
       if (
         event.code !== 'Space' ||
         event.defaultPrevented ||
@@ -622,7 +632,7 @@ function App() {
           : `Edit ${state.library.sounds.find((s) => s.id === shownPanel.soundId)?.name ?? 'sound'}`;
 
   return (
-    <>
+    <StageHContext.Provider value={{ state, controller, mode, demo: view.demo, notify }}>
       <AppShell
         className={`app-shell ${mode === 'landing' ? 'is-landing' : 'is-connected'} ${held ? 'playback-held' : ''}`}
         style={
@@ -1163,6 +1173,10 @@ function App() {
         {view.needsName && <GuestName initial={view.profile.name} />}
       </AppShell>
       <NoticeAnnouncer />
+      {/* Stage H (2.44): the setup guide, the update offer and the layout attach for backups. */}
+      <SetupGuide />
+      <UpdateOffer />
+      <BackupLayoutSync />
       {settings && (
         <Modal label="Session & access" onClose={() => setSettings(false)}>
           <SettingsDialog
@@ -1201,7 +1215,7 @@ function App() {
           <OrganizeSound sound={organizing} workspace={w} update={personal.update} />
         </Modal>
       )}
-    </>
+    </StageHContext.Provider>
   );
 }
 

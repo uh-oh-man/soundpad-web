@@ -15,6 +15,8 @@ internal static class Program
     {
         if (!OperatingSystem.IsWindows()) { Console.Error.WriteLine("Soundpad Web requires Windows 11 x64."); return 1; }
         ConsoleLink.Start();
+        // 2.44: puts state.json back from a backup while no companion runs (no window, pipe or network).
+        if (args.Contains("--restore-state")) return OfflineRestore.Run(args);
         if (args.Contains("--licenses"))
         {
             var assembly = System.Reflection.Assembly.GetExecutingAssembly();

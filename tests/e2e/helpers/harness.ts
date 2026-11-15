@@ -10,6 +10,8 @@ export type Harness = {
   launch: string;
   /** 2.41: replaces the recording history with a new one at once, as when Mimic restarts. */
   restartHistory: () => void;
+  /** 2.44: sends one line to the harness's stdin, a verb registered in companion/harness (HarnessStageH.cs). */
+  send: (line: string) => void;
   /** What reached Soundpad to play, seek or pause (TEST_PLAY lines), in order. */
   plays: string[];
   /** The same plus every stop (TEST_STOP lines, 2.35), in order: what Soundpad was told last. */
@@ -71,6 +73,7 @@ export async function startHarness(origin = ORIGIN, count = 4, options: string[]
         .join(' | '),
     /** 2.41: the companion replaces its recording history with a new one at once (as when Mimic restarts). */
     restartHistory: () => proc.stdin.write('restart-history\n'),
+    send: (line: string) => proc.stdin.write(line + '\n'),
     stop: async () => {
       proc.stdin.write('exit\n');
       await new Promise<void>((r) => {

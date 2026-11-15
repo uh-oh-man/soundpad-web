@@ -96,6 +96,12 @@ public sealed partial class Bridge
     /// </summary>
     public async Task StartupCleanup()
     {
+        // Stage H (2.44) starts after it, also after a crash left Temp waiting or Soundpad was unavailable.
+        try { await StartupCleanupNow(); }
+        finally { StageHStarted(); }
+    }
+    private async Task StartupCleanupNow()
+    {
         int left = 0;
         try { if (!Audio.Public.Blocked && Audio.SessionOpen) left = TemporaryClipCount; }
         catch (Exception ex) when (ex is not OutOfMemoryException) { left = 0; }

@@ -1,0 +1,5 @@
+/*
+ * updates.css (Stage H, 2.44): owns the update offer, chip and dialog.
+ * It comes after surfaces.css (see the import order in main.tsx) and styles only its own components,
+ * with tokens and the controls.css primitives. No raw colours, no !important.
+ */
