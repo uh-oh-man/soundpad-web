@@ -1394,6 +1394,7 @@ test('Mimic: host listens, everyone sees it, and a selection becomes a playable 
   await page.mouse.up();
   await expect(dialog.locator('.mimic-range')).toContainText('3.0 s');
   // Dragging the right edge handle extends the same selection instead of starting a new one.
+  box = await measure();
   await page.mouse.move(box.x + box.width * 0.9, box.y + box.height / 2);
   await page.mouse.down();
   await page.mouse.move(box.x + box.width * 0.95, box.y + box.height / 2);
@@ -3193,6 +3194,7 @@ test('Mimic on a phone: a fresh clip keeps its name readable beside Edit, Keep a
   await page.keyboard.press('Enter');
   await expect(dialog.getByRole('region', { name: 'Draft' })).toBeVisible();
   await page.keyboard.press('Enter');
+  await dialog.getByRole('button', { name: 'Clips', exact: true }).click();
   const recent = dialog.getByRole('region', { name: 'Just mimicked' });
   const name = recent.locator('.mimic-recent-name').first();
   await expect(name).toBeVisible();
@@ -4676,6 +4678,7 @@ test('voice library: a guest tags a recording and takes it back with Undo; the h
   await startListening(page);
   await page.keyboard.press('Escape');
   const id = await keepRecentInLibrary(page, 'Shared line');
+  await closeSection(page, 'Mimic');
   const guest = await joinGuest(page);
   await guest.getByRole('button', { name: 'Voices', exact: true }).click();
   const voices = section(guest, 'Voices');

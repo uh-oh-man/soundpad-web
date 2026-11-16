@@ -245,12 +245,12 @@ export const sendCommand = (page: Page, op: string, fields: Record<string, unkno
   page.evaluate(
     async ([op, fields]) => {
       const { controller } = await import(/* @vite-ignore */ '/src/' + 'controller.ts');
-      const { library } = controller.getSnapshot().state;
-      const play = { soundId: library.sounds[0].id, libraryVersion: library.version };
       try {
-        return {
-          data: await controller.run(op, op === 'play' ? play : fields, { quiet: true }),
-        };
+        if (op === 'play') {
+          const { library } = controller.getSnapshot().state;
+          fields = { soundId: library.sounds[0].id, libraryVersion: library.version };
+        }
+        return { data: await controller.run(op, fields, { quiet: true }) };
       } catch (e) {
         return { error: e instanceof Error ? e.message : String(e) };
       }

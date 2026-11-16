@@ -13,8 +13,11 @@ import { z } from 'zod';
 import type { SharedLayout } from '../shared-layout';
 import type { HostIdentity } from './identity';
 import type { LobbyRequest } from './session';
-import type { SessionPolicy } from './policy';
+import { MAX_PLACES, type SessionPolicy } from './policy';
 import { UPDATING_STATUS } from '../updates';
+// Allow concurrent queries and waveform reads from a full room without crowding out playback.
+const QUERY_LIMIT = 3 * MAX_PLACES;
+
 export type BridgeAddress = { port: number; token: string };
 
 /**
@@ -352,7 +355,7 @@ export class LocalBridge {
         reject(new Disconnected('Companion is unavailable.'));
         return;
       }
-      // Slow work (the host's own and every guest's) shares 20 places. A Play or Stop must never wait
+      // Slow work (the host's own and every guest's) shares a bounded pool. A Play or Stop must never wait
       // for one (2.35): control commands are answered quickly and skip the cap, up to a bound that
       // only a runaway sender reaches.
       const control = controlOps.includes(command.op);
@@ -360,7 +363,7 @@ export class LocalBridge {
       if (
         control
           ? (this.controls.get(owner) ?? 0) >= (owner === 'host' ? 512 : 64)
-          : this.waiting >= 20
+          : this.waiting >= QUERY_LIMIT
       ) {
         reject(Error('Too many pending commands.'));
         return;

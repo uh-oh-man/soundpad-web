@@ -48,21 +48,22 @@ describe('host tab to companion (2.35)', () => {
   it('never makes a Play or Stop wait behind unanswered slow work', async () => {
     const failed = (c: Command, actor = 'host') =>
       bridge.send(c, actor).catch((e: Error) => e.message);
-    // The host's own and every relayed guest's slow commands share 20 places.
-    const slow = Array.from({ length: 20 }, (_, i) =>
+    // The bounded pool supports concurrent reads for a full 12-person room.
+    const queryLimit = 36;
+    const slow = Array.from({ length: queryLimit }, (_, i) =>
       failed(command(i % 2 ? 'trimAudio' : 'waveform'), i % 3 ? 'guest' : 'host'),
     );
-    expect(socket.frames).toHaveLength(20);
+    expect(socket.frames).toHaveLength(queryLimit);
     await expect(bridge.send(command('statistics'))).rejects.toThrow('Too many pending commands');
-    expect(socket.frames).toHaveLength(20); // refused here, never sent
+    expect(socket.frames).toHaveLength(queryLimit); // refused here, never sent
     // Playback and transport commands skip that cap, for the host and for a relayed guest.
     const ops = ['play', 'startAt', 'region', 'stop', 'seek', 'pause', 'audioPlay', 'reverse'];
     const clicks = ops.map((op, i) =>
       bridge.send(command(op as Command['op']), i % 2 ? 'guest' : 'host'),
     );
     const panic = bridge.send(command('panic', { action: 'enable' }));
-    expect(socket.frames.slice(20).map((f) => f.command.op)).toEqual([...ops, 'panic']);
-    for (const frame of socket.frames.slice(20))
+    expect(socket.frames.slice(queryLimit).map((f) => f.command.op)).toEqual([...ops, 'panic']);
+    for (const frame of socket.frames.slice(queryLimit))
       socket.answer(frame.command.id, { superseded: true, reason: 'newer' });
     // A superseded acknowledgement is a success, with its data passed on.
     expect(await clicks[0]).toEqual({ superseded: true, reason: 'newer' });
@@ -78,7 +79,9 @@ describe('host tab to companion (2.35)', () => {
     const click = bridge.send(command('play')).catch((e: Error) => e);
     socket.close();
     expect(await click).toBeInstanceOf(Disconnected);
-    expect((await Promise.all(slow)).slice(1)).toEqual(Array(19).fill('Companion disconnected.'));
+    expect((await Promise.all(slow)).slice(1)).toEqual(
+      Array(queryLimit - 1).fill('Companion disconnected.'),
+    );
     await expect(bridge.send(command('play'))).rejects.toBeInstanceOf(Disconnected);
   });
 });

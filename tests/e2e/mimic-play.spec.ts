@@ -255,10 +255,15 @@ test('Mimic playing words with reduced motion: every word of the play is lit at 
   expect(motion.animation).toBe('none');
   // The page's reduced-motion rule shortens every transition to 0.01 ms (studio.css); nothing fades.
   expect(motion.transition.split(',').every((d) => parseFloat(d) < 0.001)).toBe(true);
-  // The lit words stay as they are while it plays, then clear on Stop.
-  const lit = await playingWords(dialog).count();
+  // The same words stay lit. Captions arriving for the play range may light up, too.
+  const lit = await playingWords(dialog).elementHandles();
   await page.waitForTimeout(600);
-  expect(await playingWords(dialog).count()).toBe(lit);
+  for (const word of lit)
+    expect(
+      await word.evaluate(
+        (el) => el instanceof Element && el.isConnected && el.matches('.playing-static'),
+      ),
+    ).toBe(true);
   await page.getByRole('button', { name: 'Stop', exact: true }).click();
   await expect(playingWords(dialog)).toHaveCount(0);
 });
@@ -290,7 +295,9 @@ test('Mimic play mode for a guest: Play into game needs remote playback, and not
   await expect(switcher).toContainText('The host has not allowed guests to play');
   expect(await guest.evaluate((key) => localStorage.getItem(key), MODE_KEY)).toBe('game');
   // Even sent past the page's checks, a play into the game is refused.
-  const view = (await sendCommand(guest, 'historyTimeline')).data as {
+  const response = await sendCommand(guest, 'historyTimeline');
+  expect(response).toHaveProperty('data');
+  const view = response.data as {
     sessionId: string;
     rate: number;
     liveFrame: number;
@@ -305,8 +312,8 @@ test('Mimic play mode for a guest: Play into game needs remote playback, and not
   });
   expect(refused.error).toBeTruthy();
 
-  // A click on the waveform before the guest joined plays nothing and says why.
-  await guest.waitForTimeout(1500);
+  // The 30 s viewport still shows time before this guest joined on slower browsers.
+  await dialog.getByRole('button', { name: '30 s', exact: true }).click();
   const before = harness.plays.length;
   await clickWave(guest, dialog, 0.05);
   await expect(guest.getByText(/recorded before you joined/).first()).toBeVisible();

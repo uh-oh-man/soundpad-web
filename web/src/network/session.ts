@@ -1394,7 +1394,24 @@ export class Session {
         // this page check a forged signature.
         if (!rate.other.accept()) return;
         const { host, guest } = this.proof(peer);
-        if (!(await verify(this.identity, this.nonce, host, guest, m.signature, m.publicKey))) {
+        const relay = this.link;
+        const verified = await verify(
+          this.identity,
+          this.nonce,
+          host,
+          guest,
+          m.signature,
+          m.publicKey,
+        );
+        // A disconnect can arrive while the signature is still being checked.
+        if (
+          this.stopped ||
+          this.revoked ||
+          this.rates.get(peer) !== rate ||
+          (isRelay(peer) && this.link !== relay)
+        )
+          return;
+        if (!verified) {
           // Someone answered for this room but cannot prove they are this invitation's host: the
           // host started over with a new identity (2.37). This page keeps looking quietly, since
           // another holder of the invitation could send the same, but says what it most likely means.
@@ -1406,7 +1423,6 @@ export class Session {
           }
           return;
         }
-        if (this.stopped || this.revoked) return;
         this.welcomed(peer, m);
         return;
       }
