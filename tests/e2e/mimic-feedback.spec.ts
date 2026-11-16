@@ -94,6 +94,7 @@ test('Mimic Delete: one press takes a clip and a draft away, Undo brings them ba
   await host(page, harness);
   const dialog = await openMimic(page);
   await page.waitForTimeout(2600);
+  await dialog.getByRole('heading', { name: 'Mimic' }).focus();
   await page.keyboard.press('5');
   await dialog.getByLabel('Clip name').fill('Gone soon');
   await page.keyboard.press('Enter');
@@ -104,7 +105,7 @@ test('Mimic Delete: one press takes a clip and a draft away, Undo brings them ba
   await expect(recent.getByRole('button', { name: /Replay Gone soon/ })).toBeVisible();
 
   // The clip: gone from the list at once, back with Undo.
-  await recent.getByRole('button', { name: 'Delete Gone soon' }).click();
+  await recent.getByRole('button', { name: 'Delete Gone soon' }).press('Enter');
   await expect(recent).toHaveCount(0);
   await expect(page.locator('#mimic-title')).toBeFocused();
   const clipNotice = page.getByRole('status').filter({ hasText: 'Deleted “Gone soon” from Temp.' });
@@ -112,13 +113,13 @@ test('Mimic Delete: one press takes a clip and a draft away, Undo brings them ba
   await expect(recent.getByRole('button', { name: /Replay Gone soon/ })).toBeVisible();
 
   // Deleted for good once its notice has gone.
-  await recent.getByRole('button', { name: 'Delete Gone soon' }).click();
+  await recent.getByRole('button', { name: 'Delete Gone soon' }).press('Enter');
   await page.mouse.move(0, 0);
 
   await expect(recent).toHaveCount(0);
 
   // The draft: Delete closes it at once, Undo opens it again.
-  await draft.getByRole('button', { name: 'Delete', exact: true }).click();
+  await draft.getByRole('button', { name: 'Delete', exact: true }).press('Enter');
   await expect(draft).toHaveCount(0);
   await expect(dialog.getByLabel('Draft history')).toHaveCount(0);
   await expect(page.locator('#mimic-title')).toBeFocused();
@@ -130,7 +131,7 @@ test('Mimic Delete: one press takes a clip and a draft away, Undo brings them ba
   await expect(draft.getByLabel('Clip name')).toHaveValue('Gone soon');
   expect(((await sendCommand(page, 'draftList')).data as DraftReply).drafts).toHaveLength(1);
   // ...and the companion lets go of it once the notice has gone.
-  await draft.getByRole('button', { name: 'Delete', exact: true }).click();
+  await draft.getByRole('button', { name: 'Delete', exact: true }).press('Enter');
   await page.mouse.move(0, 0);
   await expect
     .poll(async () => ((await sendCommand(page, 'draftList')).data as DraftReply).drafts.length, {
