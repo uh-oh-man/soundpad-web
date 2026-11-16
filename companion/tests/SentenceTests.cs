@@ -823,4 +823,277 @@ public sealed class SentenceTests : IDisposable
         // The recording ended with the saved take.
         Assert.False(Body(await Ok(rig.Host(Cmd("performance") with { Action = "status" }))).GetProperty("recording").GetBoolean());
     }
+
+    // ---- 2.45 (WP3): voice slots, phrase blocks, Add to sentence, guests' unkept sentences, audio cleanup -----------
+
+    private static readonly string VoiceA = new('a', 32), VoiceB = new('b', 32);
+
+    [Fact]
+    public void VoiceMarksSplitATemplateIntoRunsOfWordsWithTheirVoice()
+    {
+        var (text, runs) = SentenceComposer.VoiceMarked($"{{@{VoiceA}}} hello there, {{@{VoiceB}}}friend {{@}} [laugh] now");
+        Assert.Equal("hello there, friend [laugh] now", text);
+        Assert.Equal([(0, 2, (string?)VoiceA), (2, 3, VoiceB), (3, 5, null)], runs);
+        // No marks: one run in the mix. A mark that is not a voice id stays text; marks next to each other merge.
+        Assert.Equal([(0, 2, (string?)null)], SentenceComposer.VoiceMarked("hello there").Runs);
+        Assert.Equal("{@nope} hi", SentenceComposer.VoiceMarked("{@nope} hi").Text);
+        Assert.Equal([(0, 2, (string?)VoiceA)], SentenceComposer.VoiceMarked($"{{@{VoiceA}}} hello {{@{VoiceA}}} there").Runs);
+        // Words are the same as typed text's: Words gives each word's place, Tokens only the words.
+        var words = SentenceComposer.Words("  Hi,  — [laugh]! there").ToList();
+        Assert.Equal(["hi", "[laugh]", "there"], words.Select(w => w.Token.Key));
+        Assert.Equal([(2, 5), (9, 17), (18, 23)], words.Select(w => (w.Start, w.End)));
+        Assert.Equal(SentenceComposer.Tokens("  Hi,  — [laugh]! there").Select(t => t.Key), words.Select(w => w.Token.Key));
+    }
+
+    [Fact]
+    public void AVoiceSlotKeepsItsWordsInThatVoiceThroughTheMixSwapsShufflesAndEdits()
+    {
+        var corpus = new FakeCorpus();
+        corpus.Add(VoiceA, "hello there friend"); corpus.Add(VoiceA, "hello there friend");
+        corpus.Add(VoiceB, "hello there friend"); corpus.Add(VoiceB, "my");
+        var p = Project(chaos: 60, seed: 7);
+        var (text, runs) = SentenceComposer.VoiceMarked($"{{@{VoiceA}}} hello there {{@{VoiceB}}} friend");
+        SentenceComposer.Compose(p, text, runs, corpus);
+        Assert.Equal("hello there friend", p.Text);
+        string? VoiceOf(int token) => p.Pieces.Single(x => x.TokenStart <= token && x.TokenEnd > token).Source?.VoiceId;
+        Assert.Equal((VoiceA, VoiceA, VoiceB), (VoiceOf(0), VoiceOf(1), VoiceOf(2)));
+        Assert.All(p.Pieces, x => Assert.NotNull(x.VoiceLock));
+        // The mix (only voice B, chaotic) does not reach words a slot chose a voice for.
+        p.Settings.VoiceIds = [VoiceB]; p.Settings.Chaos = 100;
+        SentenceComposer.Recompose(p, corpus);
+        Assert.Equal((VoiceA, VoiceA, VoiceB), (VoiceOf(0), VoiceOf(1), VoiceOf(2)));
+        // Swap and Shuffle choose among that voice's takes only.
+        var first = p.Pieces.First(x => x.TokenStart == 0);
+        Assert.All(SentenceComposer.Alternatives(p, first, corpus), t => Assert.Equal(VoiceA, t.VoiceId));
+        Assert.True(SentenceComposer.Swap(p, first, corpus));
+        SentenceComposer.Shuffle(p, null, corpus);
+        Assert.Equal((VoiceA, VoiceA, VoiceB), (VoiceOf(0), VoiceOf(1), VoiceOf(2)));
+        // A word typed inside the slot's words stays in that voice: "my" was recorded only by B, so it is missing.
+        SentenceComposer.Rematch(p, "hello my there friend", corpus);
+        var my = p.Pieces.Single(x => x.TokenStart == 1 && x.TokenEnd == 2);
+        Assert.Equal(("missing", VoiceA), (my.Kind, my.VoiceLock));
+        // Find missing again also looks in that voice only; once A records it, it is found in A.
+        Assert.Equal(0, SentenceComposer.FindMissingAgain(p, corpus));
+        corpus.Add(VoiceA, "my");
+        Assert.Equal(1, SentenceComposer.FindMissingAgain(p, corpus));
+        Assert.Equal(VoiceA, VoiceOf(1));
+        // Similar words for a missing word come from that voice too (B's "my" is not offered for "mx" in A).
+        corpus.Add(VoiceB, "mine");
+        SentenceComposer.Rematch(p, "hello mx there friend", corpus);
+        var mx = p.Pieces.Single(x => x.TokenStart == 1 && x.TokenEnd == 2);
+        Assert.DoesNotContain(SentenceComposer.Similar("mx", corpus, SentenceComposer.FilterFor(p, mx)), s => s.Word == "mine");
+        // Words typed between two different voices' words are the mix's again.
+        SentenceComposer.Rematch(p, "hello mx there my friend", corpus);
+        Assert.Null(p.Pieces.Single(x => x.TokenStart == 3).VoiceLock);
+    }
+
+    [Fact]
+    public void WordsGoInAtTheCaretNeverSplittingAPieceAndLaterPiecesMoveAlong()
+    {
+        var corpus = new FakeCorpus();
+        corpus.Add(VoiceA, "alpha beta"); corpus.Add(VoiceA, "gamma");
+        var p = Project();
+        SentenceComposer.Rematch(p, "alpha beta, gamma", corpus);
+        var gamma = p.Pieces.Single(x => x.TokenStart == 2);
+        // Caret inside "gamma": after it, at the end.
+        Assert.Equal((3, 1), SentenceComposer.InsertText(p, 14, "delta"));
+        Assert.Equal("alpha beta, gamma delta", p.Text);
+        // Caret at the very start.
+        Assert.Equal((0, 2), SentenceComposer.InsertText(p, 0, "[laugh] oh"));
+        Assert.Equal("[laugh] oh alpha beta, gamma delta", p.Text);
+        Assert.Equal((4, 5), (gamma.TokenStart!.Value, gamma.TokenEnd!.Value));
+        // Caret between "alpha" and "beta", which are one recorded phrase: after the phrase, before its comma's next word.
+        var phrase = p.Pieces.Single(x => x.TokenEnd - x.TokenStart == 2 && x.Source != null);
+        Assert.Equal((2, 4), (phrase.TokenStart!.Value, phrase.TokenEnd!.Value));
+        Assert.Equal((4, 1), SentenceComposer.InsertText(p, p.Text.IndexOf("beta", StringComparison.Ordinal) - 1, "ok"));
+        Assert.Equal("[laugh] oh alpha beta, ok gamma delta", p.Text);
+        Assert.Equal((5, 6), (gamma.TokenStart!.Value, gamma.TokenEnd!.Value));
+        // Past the end is the end; nothing to add, or too much, is refused and changes nothing.
+        Assert.Equal((7, 1), SentenceComposer.InsertText(p, 9999, "end"));
+        var before = p.Text;
+        Assert.Throws<InvalidDataException>(() => SentenceComposer.InsertText(p, 0, " , "));
+        Assert.Throws<InvalidDataException>(() => SentenceComposer.InsertText(p, 0, string.Join(' ', Enumerable.Repeat("w", SentenceStore.MaxTokens))));
+        Assert.Equal(before, p.Text);
+    }
+
+    [Fact]
+    public async Task AddToSentencePutsThatExactPaletteTakeAtTheCaretWithoutPlayingIt()
+    {
+        await using var rig = new Rig(folder); await rig.Start();
+        var id = await Create(rig, "fixture tone");
+        var hello = new PaletteRef { RecordingId = rig.Recordings[2], StartMs = 0, EndMs = 300, Text = "hello" };
+        var reply = Body(await Ok(rig.Host(Edit(id, new SentenceInput(Do: "insert", Item: hello, Caret: 0)))));
+        var s = rig.Stored(id);
+        Assert.Equal("hello fixture tone", s.Text);
+        var piece = s.Pieces.Single(p => p.Id == reply.GetProperty("result").GetProperty("pieceId").GetString());
+        Assert.Equal((0, 1, true, false), (piece.TokenStart!.Value, piece.TokenEnd!.Value, piece.Chosen, piece.Manual));
+        Assert.Equal((rig.Recordings[2], 0L, 300L), (piece.Source!.RecordingId, piece.Source.StartMs, piece.Source.EndMs));
+        // The words after it moved along, in order on the timeline.
+        Assert.Equal(["hello", "fixture tone"], s.Pieces.OrderBy(p => p.OffsetMs).Select(p => p.Text));
+        // At the end when no caret is given with words; a named piece goes in as [name].
+        var named = Body(await Ok(rig.Host(Cmd("paletteMark") with { RecordingId = rig.Recordings[2], Name = "sigh", Sentence = new SentenceInput(StartMs: 400, EndMs: 700) })));
+        await Ok(rig.Host(Edit(id, new SentenceInput(Do: "insert", Item: new PaletteRef { NamedId = named.GetProperty("namedId").GetString(), Text = "[sigh]" }, Caret: 999))));
+        Assert.Equal("hello fixture tone [sigh]", rig.Stored(id).Text);
+        Assert.Equal("named", rig.Stored(id).Pieces.Single(p => p.TokenStart == 3).Kind);
+        // Nothing was played or written to a slot.
+        Assert.Empty(rig.SlotPlays());
+        lock (rig.Mock.Commands) Assert.DoesNotContain(rig.Mock.Commands, x => x.StartsWith("DoPlaySound"));
+        // Without a caret an item is placed by hand at the end of the timeline, as in 2.42 (older websites).
+        await Ok(rig.Host(Edit(id, new SentenceInput(Do: "insert", Item: hello))));
+        Assert.Equal("hello fixture tone [sigh]", rig.Stored(id).Text);
+        Assert.Single(rig.Stored(id).Pieces, p => p.TokenStart == null && p.Manual);
+        // Someone else's sentence is not theirs to add to.
+        Assert.False((await rig.As(Alice, Edit(id, new SentenceInput(Do: "insert", Item: hello, Caret: 0)))).Ok);
+    }
+
+    [Fact]
+    public async Task PhraseBlocksAreNamedReusableAndSaidInTheirVoice()
+    {
+        await using var rig = new Rig(folder); await rig.Start();
+        Command Sets(string action, PerformanceSetInput set) => Cmd("performanceSets") with { Action = action, Set = set };
+        // Create two blocks in the default set; names are unique (any case).
+        var sets = Body(await Ok(rig.As(Alice, Sets("update", new("default", Blocks: [new PhraseBlock { Name = "Greeting", Text = "hello sun", VoiceId = rig.VoiceB }, new PhraseBlock { Name = "Tone", Text = "fixture tone" }])))));
+        var blocks = sets.GetProperty("sets")[0].GetProperty("blocks").EnumerateArray().ToList();
+        Assert.Equal(["Greeting", "Tone"], blocks.Select(b => b.GetProperty("name").GetString()));
+        var greeting = blocks[0].GetProperty("id").GetString()!;
+        Assert.False((await rig.As(Alice, Sets("update", new("default", Blocks: [new PhraseBlock { Name = "x", Text = "a" }, new PhraseBlock { Name = "X", Text = "b" }])))).Ok);
+        // Rename and change its words: the same block (its id stays).
+        sets = Body(await Ok(rig.As(Alice, Sets("update", new("default", Blocks: [new PhraseBlock { Id = greeting, Name = "Hi", Text = "hello sun light", VoiceId = rig.VoiceB }, new PhraseBlock { Name = "Tone", Text = "fixture tone" }])))));
+        Assert.Equal((greeting, "Hi", "hello sun light"), (sets.GetProperty("sets")[0].GetProperty("blocks")[0].GetProperty("id").GetString(), sets.GetProperty("sets")[0].GetProperty("blocks")[0].GetProperty("name").GetString(), sets.GetProperty("sets")[0].GetProperty("blocks")[0].GetProperty("text").GetString()));
+        // Bob does not see Alice's blocks.
+        Assert.False(Body(await Ok(rig.As(Bob, Cmd("performanceSets")))).GetProperty("sets")[0].TryGetProperty("blocks", out _));
+        // Reuse: its words into a sentence at the caret, in its voice, twice.
+        var id = await Create(rig, "fixture tone", Alice);
+        await Ok(rig.As(Alice, Edit(id, new SentenceInput(Do: "insert", Text: "hello sun light", VoiceIds: [rig.VoiceB], Caret: 0))));
+        await Ok(rig.As(Alice, Edit(id, new SentenceInput(Do: "insert", Text: "hello sun light", VoiceIds: [rig.VoiceB]))));
+        var s = rig.Stored(id);
+        Assert.Equal("hello sun light fixture tone hello sun light", s.Text);
+        Assert.All(s.Pieces.Where(p => p.TokenStart is 0 or 5), p => Assert.Equal((rig.VoiceB, rig.VoiceB), (p.VoiceLock, p.Source!.VoiceId)));
+        Assert.All(s.Pieces.Where(p => p.TokenStart == 3), p => Assert.Null(p.VoiceLock));
+        // A block in a voice that never said the words leaves them missing (never another voice's).
+        await Ok(rig.As(Alice, Edit(id, new SentenceInput(Do: "insert", Text: "hello", VoiceIds: [rig.VoiceA]))));
+        Assert.Equal("missing", rig.Stored(id).Pieces.Single(p => p.TokenStart == 8).Kind);
+        // Delete one: the other stays. Deleting all leaves no blocks field in the file (as before 2.45).
+        sets = Body(await Ok(rig.As(Alice, Sets("update", new("default", Blocks: [new PhraseBlock { Name = "Tone", Text = "fixture tone" }])))));
+        Assert.Equal(["Tone"], sets.GetProperty("sets")[0].GetProperty("blocks").EnumerateArray().Select(b => b.GetProperty("name").GetString()));
+        await Ok(rig.As(Alice, Sets("update", new("default", Blocks: []))));
+        Assert.DoesNotContain("\"blocks\"", rig.Bridge.SentenceStoreForTests.Read(f => Json.Write(f.People)));
+        // A block survives a restart (it is in sentences.v1.json, checked strictly when loaded).
+        await Ok(rig.As(Alice, Sets("update", new("default", Blocks: [new PhraseBlock { Name = "Back", Text = "fixture" }]))));
+        var reloaded = new SentenceStore(folder);
+        Assert.Null(reloaded.Problem);
+        Assert.Equal("Back", reloaded.Read(f => f.People.Single(p => p.Owner == Alice.Id).Sets[0].Blocks!.Single().Name));
+    }
+
+    [Fact]
+    public async Task ATemplatesVoiceSlotsAreSaidByTheChosenVoices()
+    {
+        await using var rig = new Rig(folder); await rig.Start();
+        var c = Cmd("sentenceCreate") with { Sentence = new SentenceInput(Text: $"{{@{rig.VoiceB}}} fixture tone {{@{rig.VoiceA}}} fixture tone", Origin: "template") };
+        var id = Body(await Ok(rig.Host(c))).GetProperty("id").GetString()!;
+        var s = rig.Stored(id);
+        Assert.Equal(("fixture tone fixture tone", "template"), (s.Text, s.Origin));
+        Assert.Equal([rig.VoiceB, rig.VoiceA], s.Pieces.OrderBy(p => p.TokenStart).Select(p => p.Source!.VoiceId));
+        Assert.Equal([rig.VoiceB, rig.VoiceA], s.Pieces.OrderBy(p => p.TokenStart).Select(p => p.VoiceLock));
+        // The view says which voice a piece is kept to.
+        var view = Body(await Ok(rig.Host(Cmd("sentenceGet") with { SentenceId = id })));
+        Assert.Equal(rig.VoiceB, view.GetProperty("pieces")[0].GetProperty("voiceLock").GetString());
+        // Typed text is never read for marks.
+        var typed = await Create(rig, $"{{@{rig.VoiceB}}} fixture");
+        Assert.Contains("{@", rig.Stored(typed).Text);
+    }
+
+    [Fact]
+    public async Task TheHostSeesAndClearsEachGuestsUnkeptSentencesAndGuestsNeverSeeEachOthers()
+    {
+        await using var rig = new Rig(folder); await rig.Start();
+        var alice1 = await Create(rig, "fixture tone", Alice); var alice2 = await Create(rig, "hello sun", Alice);
+        var bob = await Create(rig, "fixture", Bob);
+        var aliceKept = await Create(rig, "hello", Alice);
+        await Ok(rig.Host(Cmd("keepSettings") with { GuestKeep = true }));
+        await Ok(rig.As(Alice, Cmd("sentenceKeep") with { SentenceId = aliceKept }));
+        var hosts = await Create(rig, "tone");
+        // The host's list: their own and kept sentences as before, and each guest's unkept ones apart.
+        var list = Body(await Ok(rig.Host(Cmd("sentenceList"))));
+        Assert.DoesNotContain(list.GetProperty("sentences").EnumerateArray(), s => s.GetProperty("id").GetString() is var x && (x == alice1 || x == bob));
+        var groups = list.GetProperty("guestUnkept").EnumerateArray().ToDictionary(g => g.GetProperty("guestId").GetString()!);
+        Assert.Equal(2, groups[Alice.Id].GetProperty("count").GetInt32());
+        Assert.Equal("Alice", groups[Alice.Id].GetProperty("ownerName").GetString());
+        Assert.Equal(new[] { alice1, alice2 }.Order(), groups[Alice.Id].GetProperty("sentences").EnumerateArray().Select(s => s.GetProperty("id").GetString()!).Order());
+        Assert.Equal(1, groups[Bob.Id].GetProperty("count").GetInt32());
+        Assert.DoesNotContain(list.GetProperty("guestUnkept").EnumerateArray(), g => g.GetProperty("sentences").EnumerateArray().Any(s => s.GetProperty("id").GetString() == aliceKept));
+        // The host may open one (read-only); guests see no one else's, and get no guest list.
+        var view = Body(await Ok(rig.Host(Cmd("sentenceGet") with { SentenceId = alice1 })));
+        Assert.False(view.GetProperty("canEdit").GetBoolean());
+        var aliceList = Body(await Ok(rig.As(Alice, Cmd("sentenceList"))));
+        Assert.Equal(JsonValueKind.Null, aliceList.GetProperty("guestUnkept").ValueKind);
+        Assert.DoesNotContain(aliceList.GetProperty("sentences").EnumerateArray(), s => s.GetProperty("id").GetString() is var x && (x == bob || x == hosts));
+        Assert.False((await rig.As(Alice, Cmd("sentenceGet") with { SentenceId = bob })).Ok);
+        // Guests cannot clear anyone's, their own included, this way.
+        Assert.False((await rig.As(Alice, Cmd("sentenceDiscard") with { GuestId = Bob.Id })).Ok);
+        Assert.False((await rig.As(Alice, Cmd("sentenceDiscard") with { GuestId = Alice.Id })).Ok);
+        // The host clears Alice's: both unkept ones go; her kept one, Bob's and the host's stay.
+        var cleared = Body(await Ok(rig.Host(Cmd("sentenceDiscard") with { GuestId = Alice.Id })));
+        Assert.Equal(2, cleared.GetProperty("removed").GetInt32());
+        var left = rig.Bridge.SentenceStoreForTests.Read(f => f.Sentences.Select(s => s.Id).ToHashSet());
+        Assert.Equal(new HashSet<string> { aliceKept, bob, hosts }, left);
+        Assert.DoesNotContain(Body(await Ok(rig.Host(Cmd("sentenceList")))).GetProperty("guestUnkept").EnumerateArray(), g => g.GetProperty("guestId").GetString() == Alice.Id);
+        // One of Bob's by its id, as before.
+        await Ok(rig.Host(Cmd("sentenceDiscard") with { SentenceId = bob }));
+        Assert.Equal(0, Body(await Ok(rig.Host(Cmd("sentenceList")))).GetProperty("guestUnkept").GetArrayLength());
+    }
+
+    [Fact]
+    public async Task RemovingAKeptSentenceFreesOnlyItsOwnUnreferencedRenderedAudio()
+    {
+        await using var rig = new Rig(folder); await rig.Start();
+        var id = await Create(rig, "hello fixture tone");
+        await Ok(rig.Host(Cmd("sentenceKeep") with { SentenceId = id }));
+        await Ok(rig.Host(Cmd("sentenceText") with { SentenceId = id, Sentence = new SentenceInput(Text: "hello fixture tone two") }));
+        await Ok(rig.Host(Cmd("sentenceKeep") with { SentenceId = id }));
+        var other = await Create(rig, "fixture tone");
+        await Ok(rig.Host(Cmd("sentenceKeep") with { SentenceId = other }));
+        var audio = Path.Combine(folder, "library", "sentences", id);
+        var versions = rig.Stored(id).Versions.Select(v => Path.Combine(audio, v.File)).ToList();
+        Assert.Equal(2, versions.Count); Assert.All(versions, v => Assert.True(File.Exists(v)));
+        var otherFile = Path.Combine(folder, "library", "sentences", other, rig.Stored(other).Versions[0].File);
+        // Something that is not kept audio in the same folder is never touched, and neither are the recordings.
+        var note = Path.Combine(audio, "notes.txt"); File.WriteAllText(note, "mine");
+        var sources = rig.Paths.Values.ToDictionary(p => p, p => File.ReadAllBytes(p));
+        var removed = Body(await Ok(rig.Host(Cmd("sentenceDiscard") with { SentenceId = id })));
+        Assert.Equal(2, removed.GetProperty("freedFiles").GetInt32());
+        Assert.All(versions, v => Assert.False(File.Exists(v)));
+        Assert.True(File.Exists(note));
+        Assert.True(File.Exists(otherFile));
+        foreach (var (path, bytes) in sources) Assert.Equal(bytes, File.ReadAllBytes(path));
+        // A version still in the file keeps its audio: only the file nobody refers to goes.
+        var store = rig.Bridge.SentenceStoreForTests;
+        var otherFolder = Path.GetDirectoryName(otherFile)!;
+        var stray = Path.Combine(otherFolder, "v9-0123abcd.wav"); File.WriteAllBytes(stray, [1, 2, 3]);
+        Assert.Equal((1, 3L), store.SweepAudio(other));
+        Assert.True(File.Exists(otherFile)); Assert.False(File.Exists(stray));
+        // An emptied folder goes too; a guest's unkept sentence has no audio and its removal frees nothing.
+        File.Delete(note);
+        Assert.Equal((0, 0L), store.SweepAudio(id));
+        Assert.False(Directory.Exists(audio));
+        // Kept clips (Keep) are elsewhere: removing a sentence never reaches the managed-audio folders.
+        Assert.False(Body(await Ok(rig.Host(Cmd("sentenceDiscard") with { SentenceId = await Create(rig, "tone") }))).TryGetProperty("freedFiles", out _));
+    }
+
+    [Fact]
+    public void SentencesAndSetsWithoutTheNewFieldsAreWrittenAsBefore()
+    {
+        // Older companions read sentences.v1.json too: nothing new appears in it unless a voice slot or a block is used.
+        var project = new SentenceProject { Id = new string('c', 32), Pieces = [new SentencePiece { Id = "0123456789ab", Kind = "pause", DurationMs = 100 }] };
+        Assert.DoesNotContain("voiceLock", Json.Write(project));
+        Assert.DoesNotContain("blocks", Json.Write(new PerformanceSet()));
+        var file = new SentenceFile { Sentences = [project], People = [new PersonSets { Owner = "host", Sets = [new PerformanceSet()] }] };
+        SentenceStore.Validate(file);
+        // A bad new field refuses the file, like any other.
+        project.Pieces[0].VoiceLock = "not-a-voice";
+        Assert.Throws<InvalidDataException>(() => SentenceStore.Validate(file));
+        project.Pieces[0].VoiceLock = null;
+        file.People[0].Sets[0].Blocks = [new PhraseBlock { Id = new string('d', 32), Name = "A", Text = "x" }, new PhraseBlock { Id = new string('e', 32), Name = "a", Text = "y" }];
+        Assert.Throws<InvalidDataException>(() => SentenceStore.Validate(file));
+    }
 }

@@ -65,6 +65,13 @@ public sealed class SentencePiece
     public PieceEffect? Effect { get; set; }
     /// <summary>The pause after these words in their recording, for "original timing".</summary>
     public long GapAfterMs { get; set; }
+    /// <summary>
+    /// 2.45: a template's voice slot or a phrase block chose this voice for these words, so every later choice (the
+    /// mix, Swap, Shuffle, Find missing again, similar words) stays within it. Null (and left out of the file, so
+    /// older sentences are written byte for byte as before): the sentence's own voice mix applies.
+    /// </summary>
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    public string? VoiceLock { get; set; }
 }
 
 public sealed class SentenceSettings
@@ -169,6 +176,18 @@ public sealed class SentenceTemplate
     public string Text { get; set; } = "";
 }
 
+/// <summary>
+/// A reusable named phrase block (2.45): words to say, and optionally the voice that says them. Added to a sentence (at
+/// the caret) or used in a template as {Name:block}; it is matched like typed text, within its voice. Text only.
+/// </summary>
+public sealed class PhraseBlock
+{
+    public string Id { get; set; } = "";
+    public string Name { get; set; } = "";
+    public string Text { get; set; } = "";
+    public string? VoiceId { get; set; }
+}
+
 /// <summary>Voice filters, palette favourites and templates; references to library items only.</summary>
 public sealed class PerformanceSet
 {
@@ -177,6 +196,9 @@ public sealed class PerformanceSet
     public List<string> VoiceIds { get; set; } = [];
     public List<PaletteRef> Favorites { get; set; } = [];
     public List<SentenceTemplate> Templates { get; set; } = [];
+    /// <summary>2.45: phrase blocks. Null when there are none (left out of the file, which older companions then read as before).</summary>
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    public List<PhraseBlock>? Blocks { get; set; }
 }
 
 public sealed class PersonSets
@@ -198,7 +220,7 @@ public sealed class SentenceStore
 {
     public const int SchemaVersion = 1;
     public const string DefaultSet = "default";
-    public const int MaxSentences = 2000, MaxPieces = 400, MaxTokens = 400, MaxVersions = 50, MaxNamed = 5000, MaxPeople = 512, MaxSets = 32, MaxFavorites = 200, MaxTemplates = 100, MaxText = 4000;
+    public const int MaxSentences = 2000, MaxPieces = 400, MaxTokens = 400, MaxVersions = 50, MaxNamed = 5000, MaxPeople = 512, MaxSets = 32, MaxFavorites = 200, MaxTemplates = 100, MaxBlocks = 100, MaxText = 4000;
     public const double MaxTimelineMs = 600000;
     public const long MaxFileBytes = 64L * 1024 * 1024;
     private static readonly Regex IdPattern = new("^[a-f0-9]{32}$", RegexOptions.CultureInvariant);
@@ -285,6 +307,7 @@ public sealed class SentenceStore
             Require(Clean(p.Text, 400, true) && Ms(p.OffsetMs) && Ms(p.FadeInMs, 2000) && Ms(p.FadeOutMs, 2000) && Ms(p.DurationMs, 60000) && (p.Gain is null or (>= 0 and <= 8)) && p.GapAfterMs is >= 0 and <= 60000, "bad piece timing");
             Require(p.Substitute == null || Clean(p.Substitute, 100), "bad substitute");
             Require(p.NamedId == null || ValidId(p.NamedId), "bad named piece");
+            Require(p.VoiceLock == null || ValidId(p.VoiceLock), "bad piece voice");
             ValidateEffect(p.Effect);
             switch (p.Kind)
             {
@@ -355,6 +378,11 @@ public sealed class SentenceStore
                 Require(set.Favorites != null && set.Favorites.Count <= MaxFavorites && set.Templates != null && set.Templates.Count <= MaxTemplates, "bad performance set");
                 foreach (var r in set.Favorites!) ValidateRef(r);
                 foreach (var t in set.Templates!) Require(t != null && ValidId(t.Id) && Clean(t.Name, 40) && Clean(t.Text, 400), "bad template");
+                if (set.Blocks == null) continue;
+                Require(set.Blocks.Count <= MaxBlocks, "too many phrase blocks");
+                var blockIds = new HashSet<string>(StringComparer.Ordinal); var blockNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                foreach (var b in set.Blocks)
+                    Require(b != null && ValidId(b.Id) && blockIds.Add(b.Id) && Clean(b.Name, 40) && blockNames.Add(b.Name.Trim()) && Clean(b.Text, 400) && (b.VoiceId == null || ValidId(b.VoiceId)), "bad phrase block");
             }
             Require(sets.Contains(DefaultSet) && sets.Contains(p.Active), "bad active set");
         }
@@ -443,6 +471,38 @@ public sealed class SentenceStore
     {
         try { File.Delete(AudioPath(sentenceId, fileName)); }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { /* an unreferenced file; nothing plays it */ }
+    }
+
+    /// <summary>
+    /// 2.45 (D10): frees a sentence's kept audio that no version in the file refers to any more, after the sentence was
+    /// removed. Only files named like kept audio (v&lt;N&gt;-&lt;hash8&gt;.wav), only in that sentence's own folder, never
+    /// through a link; the folder goes too once it is empty. Under the file's lock, so no Keep can record a version
+    /// meanwhile (a Keep that wrote its file first finds the sentence gone and removes that file itself). Source
+    /// recordings and kept clips live elsewhere and are never touched. Nothing happens while the file is blocked.
+    /// </summary>
+    public (int Files, long Bytes) SweepAudio(string sentenceId)
+    {
+        if (!ValidId(sentenceId)) return (0, 0);
+        lock (gate)
+        {
+            if (Blocked) return (0, 0);
+            var referenced = file.Sentences.Where(s => s.Id == sentenceId).SelectMany(s => s.Versions).Select(v => v.File).ToHashSet(StringComparer.OrdinalIgnoreCase);
+            var folder = new DirectoryInfo(Path.Combine(AudioFolder, sentenceId));
+            int count = 0; long bytes = 0;
+            try
+            {
+                if (!folder.Exists || folder.LinkTarget != null || folder.Attributes.HasFlag(FileAttributes.ReparsePoint)) return (0, 0);
+                foreach (var audio in folder.EnumerateFiles())
+                {
+                    if (!AudioPattern.IsMatch(audio.Name) || referenced.Contains(audio.Name) || audio.LinkTarget != null) continue;
+                    try { long length = audio.Length; audio.Delete(); count++; bytes += length; }
+                    catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { /* in use or read-only: it stays, unreferenced */ }
+                }
+                if (!folder.EnumerateFileSystemInfos().Any()) folder.Delete(false);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Security.SecurityException) { }
+            return (count, bytes);
+        }
     }
 
     public string AudioPath(string sentenceId, string fileName)
