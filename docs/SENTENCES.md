@@ -15,7 +15,8 @@ Every word you hear comes from a recording in the voice library. Soundpad Web ha
 1. Press **New sentence** and type. After a short pause (about a third of a second) the companion matches the text to recorded words and phrases and shows them on the timeline. Typing never plays anything.
 2. When you change the text, only the changed words are matched again; everything before and after keeps its take, voice and position.
 3. **Mix** sets which voices are used (from the active performance set), **Smooth to Chaotic** (Smooth prefers the longest recorded phrases in one voice; Chaotic switches voices and uses shorter pieces), the timing and the volume. The same text and settings always give the same choice. Changing the mix chooses again only where the builder chose by itself: pieces you moved, swapped or chose stay. **Use altered takes** also allows recordings that are reversed, sped-up or effect copies.
-4. Change single pieces: **Swap take** (the next take, or one picked from **Takes**, each previewable), **Shuffle voices** (the selection or the whole sentence), and **Try contrasting deliveries**, suggested for unsettling lines, which picks a take whose pace differs from the one before.
+4. **Add to sentence** (companion 2.45+): in the **Palette**, the **+** beside a word, phrase or named piece puts that exact take into the sentence you last had open, at the caret you left in its text (at the end if you did not place one). A caret inside a word or a recorded phrase puts it after that word or phrase. Nothing plays. Adds in a row go one after another. With no sentence open, the first add starts a new one; **Start a new one instead** does that on purpose.
+5. Change single pieces: **Swap take** (the next take, or one picked from **Takes**, each previewable), **Shuffle voices** (the selection or the whole sentence), and **Try contrasting deliveries**, suggested for unsettling lines, which picks a take whose pace differs from the one before.
 
 ### The timeline
 
@@ -50,7 +51,7 @@ Keyboard, on the timeline:
 - A kept version always plays its saved audio, so later edits, corrected words or removed recordings never change it. The sentence lists the pieces whose recording has changed or gone since.
 - Kept sentences are listed for everyone and found in Voices' search (type **Sentence**). **Pin to board** shows a tile on the board that plays the latest kept version into the game.
 - Edits not kept yet stay with their maker: everyone else sees the latest kept version.
-- Only its maker or the host can change a kept sentence, and only the host can remove one from the list. Removing it leaves its audio files on disk.
+- Only its maker or the host can change a kept sentence, and only the host can remove one from the list. Since 2.45, removing it also deletes its rendered audio (the `v<N>-….wav` files in its own folder) that no version refers to any more. Recordings in the voice library and kept clips are never touched. Audio of sentences removed with an older companion stays on disk.
 
 ## The speaking palette
 
@@ -60,7 +61,19 @@ Keyboard, on the timeline:
 
 ## Performance sets
 
-Everyone has a **default** set and up to 31 more. A set holds voices (the palette's and the builder's voice filter), palette favourites and **templates**: sentences with `{slots}` to fill in. Each person picks their own active set. Sets refer to recordings and named pieces in the library and hold no audio. The companion keeps them, so a guest's sets follow them across reloads.
+Everyone has a **default** set and up to 31 more. A set holds voices (the palette's and the builder's voice filter), palette favourites, **templates** and (2.45+) **phrase blocks**. Each person picks their own active set. Sets refer to recordings and named pieces in the library and hold no audio. The companion keeps them, so a guest's sets follow them across reloads.
+
+**Templates** are sentences with slots to fill in:
+
+| Slot | Means |
+| --- | --- |
+| `{name}` | Words you type when you use the template |
+| `{who:voice}` (2.45+) | A voice you choose when you use it. The words after the slot, up to the next voice slot, are said by that voice only ("the mix" leaves them to the sentence's voice mix) |
+| `{Greeting:block}` (2.45+) | The phrase block called Greeting (any case), said in its own voice. The words after it go back to the voice before it |
+
+**Phrase blocks** (2.45+) are words you use often, each with a name (unique in the set) and optionally the voice that says them. In **Sets → Phrase blocks** you can add, **Edit** (rename, change the words or the voice), remove, **Add to sentence** (at the caret, as above) or start a **New sentence** with one. Nothing plays.
+
+Words a voice slot or a phrase block gave a voice stay in that voice: changing the mix, **Swap take**, **Shuffle voices**, **Find missing again** and similar words only choose among that voice's takes, and a word you type in the middle of them is looked up in that voice too. If that voice never said a word, the word stays missing and is never taken from another voice. The piece's details say "Said by … only".
 
 ## Guests
 
@@ -72,7 +85,9 @@ Everyone has a **default** set and up to 31 more. A set holds voices (the palett
 | Play a kept version or a pinned tile into the game | Remote playback |
 | Play a palette word, or a sentence put together from words, into the game | Remote playback and **Seeking & pause** (it is part of a recording, like a region) |
 
-The host's per-guest **Off** applies to all of these, and Panic pauses guests' sentences like any guest playback. A guest's sentence that is still being prepared when the host removes them, turns remote playback or seeking off, or presses Panic does not play.
+The host's per-guest **Off** applies to all of these, and Panic pauses guests' sentences like any guest playback.
+
+The host (companion 2.45+) sees each guest's unkept sentences under **Guests' sentences in progress** in the Sentences list. **Show** lists them, and one opens read-only (with **Discard …'s sentence**). **Clear …'s** removes all of that guest's unkept sentences after a second confirmation; their kept sentences stay. Guests never see one another's unkept sentences, and the host's own list stays as it was. A guest's sentence that is still being prepared when the host removes them, turns remote playback or seeking off, or presses Panic does not play.
 
 Limits that keep room for the host:
 
@@ -86,7 +101,7 @@ Limits that keep room for the host:
 
 In the data folder's `library\` (by default `%LOCALAPPDATA%\SoundpadWeb\library\`):
 
-- `sentences.v1.json`: every sentence with its versions, the named pieces and everyone's performance sets. It is checked strictly when loaded and before every save, written safely (the previous copy is kept as `sentences.v1.bak.json`) and never saved larger than 64 MiB, the most the companion loads. If it is damaged the backup is used; if both are damaged, sentences are blocked and both files are left untouched.
+- `sentences.v1.json`: every sentence with its versions, the named pieces and everyone's performance sets (2.45 adds two optional fields, a piece's `voiceLock` and a set's `blocks`, written only when used, so older companions read the file as before; an older companion that changes sentences drops them). It is checked strictly when loaded and before every save, written safely (the previous copy is kept as `sentences.v1.bak.json`) and never saved larger than 64 MiB, the most the companion loads. If it is damaged the backup is used; if both are damaged, sentences are blocked and both files are left untouched.
 - `sentences\<id>\v<N>-<hash8>.wav`: one file per kept version, written once and never changed.
 
 `state.json` and the managed-audio journal are not changed by sentences. Going back to an older companion: see [rolling back](ROLLBACK.md).
@@ -97,6 +112,5 @@ In the data folder's `library\` (by default `%LOCALAPPDATA%\SoundpadWeb\library\
 - Sentences have not yet been played on the real Soundpad. They use the 2.37 slot mechanism, measured then for cue starts; a sentence slot can hold up to 2 minutes, longer than slices usually were.
 - Splices and "unsettling" lines are simple heuristics (a share of the word's time by its letters, and a word list).
 - Matching was tested on a small library, not on thousands of recordings.
-- The host cannot yet see or clear guests' unkept sentences, and audio of removed kept sentences is not cleaned up.
 
 Protocol details: [shared/protocol/README.md](../shared/protocol/README.md#sentences-and-the-speaking-palette-242).
