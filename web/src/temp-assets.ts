@@ -55,13 +55,20 @@ export const tempResponse = z.object({
       }),
     )
     .nullable(),
+  // 2.46: for a guest, the sources that are theirs to remove (absent from older companions and for the host).
+  mine: z.array(z.string()).max(4096).nullable().optional(),
 });
 export type TempData = z.infer<typeof tempResponse>;
 export type TempAsset = z.infer<typeof asset>;
 export type TempVariant = z.infer<typeof variant>;
 
-type Store = { data?: TempData; loadError: string; refresh: number };
-let store: Store = { loadError: '', refresh: 0 };
+/**
+ * Sources taken off the list by a Remove this page asked for (2.46): hidden at once, before the companion
+ * answers, and shown again if it refuses. Once removed, the companion's own record keeps them off the list
+ * (see `removedFromTemp`).
+ */
+type Store = { data?: TempData; loadError: string; refresh: number; hidden: ReadonlySet<string> };
+let store: Store = { loadError: '', refresh: 0, hidden: new Set() };
 const listeners = new Set<() => void>();
 const set = (next: Partial<Store>) => {
   store = { ...store, ...next };
@@ -76,6 +83,36 @@ const subscribe = (listener: () => void) => {
 export const useTempAssets = () => useSyncExternalStore(subscribe, () => store);
 /** Asks for the list again (after an action that changed it). */
 export const refreshTempAssets = () => set({ refresh: store.refresh + 1 });
+/** Takes these sources off the list at once (a Remove was pressed). */
+export function hideTemp(ids: readonly string[]) {
+  set({ hidden: new Set([...store.hidden, ...ids]) });
+}
+/** Shows these sources again (the companion refused the Remove, or Undo brought them back). */
+export function showTemp(ids: readonly string[]) {
+  const hidden = new Set(store.hidden);
+  for (const id of ids) hidden.delete(id);
+  set({ hidden });
+}
+/**
+ * Whether a source was removed from Temp, also while its files are still on the host's PC (2.46). The real
+ * Soundpad cannot remove one entry safely, so a removed file stays (retired, "cleanup-pending") until the
+ * app's Temp category goes at quit or Clear Temp. That is the companion's business, not a pending item: such a
+ * source has nothing left but files on their way out (and maybe the native original it was reversed from).
+ */
+export function removedFromTemp(a: TempAsset) {
+  if (a.state === 'removed') return true;
+  if (a.state !== 'cleanup-pending') return false;
+  return !a.variants.some(
+    (v) =>
+      v.permanent ||
+      v.legacyApproval ||
+      (v.nativeLabel !== null && v.state !== 'cleanup-pending' && v.state !== 'removed'),
+  );
+}
+/** Whether this guest may remove the source: the companion says (2.46), or else it is in their name. */
+export function guestOwns(data: TempData | undefined, a: TempAsset, name: string) {
+  return data?.mine ? data.mine.includes(a.id) : a.uploader === name;
+}
 
 /**
  * Keeps the list in step while `enabled` (mounted once, by the app). `scope` names whose list it is (the
@@ -113,5 +150,5 @@ export function useTempAssetsSync(enabled: boolean, version: number | undefined,
 export const tempAssetsSnapshot = () => store;
 /** Test seam. */
 export function resetTempAssets() {
-  store = { loadError: '', refresh: 0 };
+  store = { loadError: '', refresh: 0, hidden: new Set() };
 }

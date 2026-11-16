@@ -8,7 +8,15 @@ import { guestHeld, HELD_BY_HOST, intentKey, playback, usePendingIntent } from '
 import { recall, remember } from '../sections';
 import { useDraftStore } from '../mimic/draft-store';
 import { formatMb } from '../mimic/drafts';
-import { refreshTempAssets, useTempAssets, type TempAsset, type TempVariant } from '../temp-assets';
+import {
+  guestOwns,
+  refreshTempAssets,
+  removedFromTemp,
+  useTempAssets,
+  type TempAsset,
+  type TempVariant,
+} from '../temp-assets';
+import { canUndoTempRemoval, removeAllMyTemp, removeTempSource } from '../temp-remove';
 import { requestEditor } from '../shell';
 import { HostOnlyTag } from './SimulatedBadge';
 type Asset = TempAsset;
@@ -35,7 +43,7 @@ export function TempManager({
   // The list is fetched once for the page (2.43: the copy editor in the panel reads it too). An error from
   // loading it is shown until a later load works; one from an action the person took stays until their
   // next action, so a refresh landing just after a refused Keep never hides the refusal.
-  const { data, loadError } = useTempAssets();
+  const { data, loadError, hidden } = useTempAssets();
   const [saving, setSaving] = useState<{ asset: Asset; variant: Variant }>(),
     [directory, setDirectory] = useState(''),
     [category, setCategory] = useState('');
@@ -91,13 +99,7 @@ export function TempManager({
     [],
   );
   async function run(
-    op:
-      | 'keepAudio'
-      | 'removeAudio'
-      | 'retryAudio'
-      | 'retryCleanup'
-      | 'cleanupCategories'
-      | 'clearTemp',
+    op: 'keepAudio' | 'retryAudio' | 'retryCleanup' | 'cleanupCategories' | 'clearTemp',
     fields: Parameters<typeof controller.run>[1] = {},
   ) {
     // Busy buttons stay enabled (aria-disabled) so they keep keyboard focus; ignore presses until done.
@@ -175,10 +177,27 @@ export function TempManager({
       return;
     }
   });
+  // A source being removed, or removed with its files still on their way out, is not on the list (2.46).
+  const gone = (a: Asset) => hidden.has(a.id) || removedFromTemp(a);
   const listed = (data?.manager.assets ?? []).filter(
     (a) =>
-      a.state !== 'removed' &&
-      (a.origin === 'upload' || a.variants.some((v) => v.orientation === 'reversed')),
+      !gone(a) && (a.origin === 'upload' || a.variants.some((v) => v.orientation === 'reversed')),
+  );
+  // A guest removes their own clips while the host lets guests add audio (uploads or Mimic, 2.46).
+  const guestRemoves =
+    !host &&
+    drafts &&
+    (state.permissions.guestUploads !== false || state.permissions.guestMimic === true);
+  const mine = guestRemoves ? listed.filter((a) => a.hasTemporary && guestOwns(data, a, me)) : [];
+  // Before 2.46 a removed file's Soundpad entry was reported as needing removal by hand; it goes with the
+  // Temp category at quit, so such a notice about a removed source is left out.
+  const issues = (data?.manager.issues ?? []).filter(
+    (i) =>
+      !(
+        i.code === 'native-removal-required' &&
+        !supports(state.companionVersion, 'tempUndo') &&
+        data?.manager.assets.some((a) => a.id === i.assetId && gone(a))
+      ),
   );
   const findWords = listed.length > 6 ? find.trim().toLowerCase() : '';
   const shown = listed.filter(
@@ -199,7 +218,7 @@ export function TempManager({
         <small>
           ·{' '}
           {data?.manager.assets.filter(
-            (a) => a.hasTemporary || a.state === 'accepted-needs-migration',
+            (a) => !gone(a) && (a.hasTemporary || a.state === 'accepted-needs-migration'),
           ).length ?? 0}
           <span className="sr-only"> sources</span> ·{' '}
           {((data?.manager.temporaryBytes ?? 0) / 1048576).toFixed(1)} MiB
@@ -374,15 +393,16 @@ export function TempManager({
                   </button>
                   {a.hasTemporary && (
                     <button
-                      aria-disabled={!!pending || undefined}
                       onClick={() => {
+                        // It leaves the list at once (2.46): Undo on the notice, or a question
+                        // first where the companion can't undo.
                         if (
-                          !pending &&
+                          canUndoTempRemoval() ||
                           confirm(
                             `Remove temporary audio for “${a.name}”? Permanent copies and native originals are preserved.`,
                           )
                         )
-                          void run('removeAudio', { assetId: a.id });
+                          void removeTempSource(a);
                       }}
                     >
                       Remove temporary audio
@@ -390,26 +410,21 @@ export function TempManager({
                   )}
                 </div>
               )}
-              {!host &&
-                drafts &&
-                a.hasTemporary &&
-                a.uploader === me &&
-                state.permissions.guestUploads !== false && (
-                  <div className="temp-actions">
-                    <button
-                      aria-disabled={!!pending || undefined}
-                      onClick={() => {
-                        if (
-                          !pending &&
-                          confirm(`Remove your clip \u201c${a.name}\u201d from Temp?`)
-                        )
-                          void run('removeAudio', { assetId: a.id, action: 'stopIfPlaying' });
-                      }}
-                    >
-                      Remove my clip
-                    </button>
-                  </div>
-                )}
+              {mine.includes(a) && (
+                <div className="temp-actions">
+                  <button
+                    onClick={() => {
+                      if (
+                        canUndoTempRemoval() ||
+                        confirm(`Remove your clip \u201c${a.name}\u201d from Temp?`)
+                      )
+                        void removeTempSource(a);
+                    }}
+                  >
+                    Remove my clip
+                  </button>
+                </div>
+              )}
               {host && (
                 <details>
                   <summary>File locations</summary>
@@ -424,10 +439,10 @@ export function TempManager({
               )}
             </article>
           ))}
-          {!data?.manager.assets.length && (
+          {!listed.length && (
             <p className="muted">No managed audio yet. Upload a sound or reverse one to start.</p>
           )}
-          {data?.manager.issues.map((i) => (
+          {issues.map((i) => (
             <p className="warning" key={i.id}>
               {i.message}
               {host && i.code === 'category-duplicates' && (
@@ -451,6 +466,27 @@ export function TempManager({
               )}
             </p>
           ))}
+          {guestRemoves &&
+            supports(state.companionVersion, 'guestTempClear') &&
+            mine.length > 0 && (
+              <div className="temp-actions">
+                <button
+                  onClick={() => {
+                    // One question, then Undo on the notice (2.46).
+                    if (
+                      confirm(
+                        mine.length === 1
+                          ? `Remove your clip “${mine[0].name}” from Temp? Clips you kept permanently stay.`
+                          : `Remove all ${mine.length} of your Temp clips? Clips you kept permanently stay.`,
+                      )
+                    )
+                      void removeAllMyTemp(mine.map((a) => a.id));
+                  }}
+                >
+                  Remove all my Temp clips
+                </button>
+              </div>
+            )}
           {host && (
             <div className="temp-actions">
               <button
