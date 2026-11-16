@@ -1649,7 +1649,7 @@ test('Mimic history: go back, select words in older audio, clip them, and see ga
   await expect(buttons.nth(1)).toHaveClass(/hover/);
   await captureAndKeep(dialog);
   await expect(
-    page.getByRole('button', { name: `Play from start: ${words}`, exact: true }),
+    dialog.getByRole('button', { name: `Replay ${words}` }),
   ).toBeEnabled();
   // The draft goes; the clip stays in Temp (an open draft keeps its audio in view).
   await dialog.getByRole('button', { name: 'Delete', exact: true }).click();
@@ -1927,7 +1927,7 @@ test('guest storage: there is no limit (2.45), so guest clips never wait, the ho
   const dialog = page.getByRole('main', { name: 'Mimic', exact: true });
   await dialog.getByRole('button', { name: 'Start listening' }).click();
   await expect(dialog.getByRole('status').first()).toContainText('Listening to Fixture');
-  await page.keyboard.press('Escape');
+  await closeSection(page, 'Mimic');
   const guest = await joinGuest(page);
   await guest.waitForTimeout(14000);
   const view = (await sendCommand(guest, 'historyTimeline')).data as HistoryView;
@@ -4586,7 +4586,7 @@ test('Mimic history: dragging the overview keeps one request of a kind in flight
   await expect(overview).toHaveAttribute('aria-valuetext', /before live/);
   // Stop right after the drag (the window closed, the drag's reads still answering) is prompt, and so is a Play.
   const stopped = Date.now();
-  await page.keyboard.press('Escape');
+  await closeSection(page, 'Mimic');
   await page.getByRole('button', { name: 'Stop', exact: true }).click();
   await expect.poll(() => harness.soundpad.at(-1), { timeout: 2000 }).toBe('DoStopSound()');
   expect(Date.now() - stopped).toBeLessThan(1500);
