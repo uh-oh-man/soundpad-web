@@ -22,6 +22,17 @@ public sealed class LocalServer(Bridge bridge, string origin, string? ownerKey =
     private WebApplication? app;
     /// <summary>Playback-control messages accepted per sliding second on the socket (all people together, 2.35).</summary>
     public const int ControlPerSecond = 600;
+    /// <summary>Queries and other non-playback commands per sliding second from the host's own pages on the socket.</summary>
+    public const int QueriesPerSecond = 32;
+    /// <summary>
+    /// The same for each guest a host page relays (2.45). Until 2.44 every guest's queries shared the host page's 32,
+    /// and the capacity benchmark (tests/e2e/capacity.spec.ts) saw 5 of 96 refused with 12 guests active: each play
+    /// makes every page ask for the play counts again. A host page already holds each guest to 12 a second (8 paced),
+    /// so this only stops a runaway sender; the sixteen-at-a-time limit on expensive work below is unchanged.
+    /// </summary>
+    public const int GuestQueriesPerSecond = 16;
+    /// <summary>Relayed guests with their own query budget at once; any more share the host page's.</summary>
+    private const int MaxGuestBudgets = 64;
     /// <summary>Host pages connected at once (2.36): the Soundpad Web window plus browser tabs that view it.</summary>
     public const int MaxClients = 8;
     /// <summary>How long a vanished owner's place is held for it (2.36): long enough for a page reload.</summary>
@@ -192,6 +203,15 @@ public sealed class LocalServer(Bridge bridge, string origin, string? ownerKey =
                 // with "Too many requests"; its limit only stops a runaway sender. Queries and everything else
                 // (waveforms, statistics, Spotify, Mimic peeks, edits) keep the old, tighter limit.
                 var controlBucket = new Queue<long>(); var hostControlBucket = new Queue<long>(); var bucket = new Queue<long>();
+                var guestBuckets = new Dictionary<string, Queue<long>>(StringComparer.Ordinal);
+                Queue<long> GuestBucket(string requester, long now)
+                {
+                    if (guestBuckets.TryGetValue(requester, out var own)) return own;
+                    if (guestBuckets.Count >= MaxGuestBudgets)
+                        foreach (var (key, times) in guestBuckets.ToArray()) if (times.Count == 0 || times.Last() < now - 1000) guestBuckets.Remove(key);
+                    if (guestBuckets.Count >= MaxGuestBudgets) return bucket;
+                    return guestBuckets[requester] = new Queue<long>();
+                }
                 using var queries = new SemaphoreSlim(16);
                 var running = new List<Task>();
                 // Answers one command when it is done. Nothing is awaited in the receive loop any more (2.35): a Stop
@@ -222,15 +242,18 @@ public sealed class LocalServer(Bridge bridge, string origin, string? ownerKey =
                         var command = root.GetProperty("command").Deserialize<Command>(Json.Options) ?? throw new InvalidDataException();
                         running.RemoveAll(t => t.IsCompleted);
                         bool control = command.Op is "play" or "startAt" or "region" or "stop" or "seek" or "pause" or "panic" or "audioPlay" or "reverse" or "sentencePlay" or "paletteTap";
-                        // The host's own Stop and Panic never compete with relayed guest traffic for this budget (2.35).
-                        var budget = control ? (actor == "host" ? hostControlBucket : controlBucket) : bucket;
-                        while (budget.Count > 0 && budget.Peek() < now - 1000) budget.Dequeue();
-                        if (budget.Count >= (control ? ControlPerSecond : 32)) { running.Add(Answer(command.Id, Task.FromResult(new Reply("ack", command.Id, false, "Too many requests. Try again shortly.")), null)); continue; }
-                        budget.Enqueue(now);
-                        Participant? person = root.TryGetProperty("participant", out var p) ? p.Deserialize<Participant>(Json.Options) : null;
                         string? requester = root.TryGetProperty("requester", out var requestPeer) ? requestPeer.GetString() : null;
                         string? audience = root.TryGetProperty("audience", out var requestAudience) ? requestAudience.GetString() : null;
                         if (requester?.Length > 128 || audience?.Length > 64) throw new InvalidDataException("Invalid request ownership.");
+                        // The host's own Stop and Panic never compete with relayed guest traffic for this budget (2.35), and
+                        // each relayed guest's queries have their own (2.45).
+                        bool guestQuery = !control && actor == "guest" && requester is { Length: > 0 };
+                        var budget = control ? (actor == "host" ? hostControlBucket : controlBucket) : guestQuery ? GuestBucket(requester!, now) : bucket;
+                        int limit = control ? ControlPerSecond : guestQuery && budget != bucket ? GuestQueriesPerSecond : QueriesPerSecond;
+                        while (budget.Count > 0 && budget.Peek() < now - 1000) budget.Dequeue();
+                        if (budget.Count >= limit) { running.Add(Answer(command.Id, Task.FromResult(new Reply("ack", command.Id, false, "Too many requests. Try again shortly.")), null)); continue; }
+                        budget.Enqueue(now);
+                        Participant? person = root.TryGetProperty("participant", out var p) ? p.Deserialize<Participant>(Json.Options) : null;
                         // When the owner page first admitted this guest (2.39), so the recording history shows them only what
                         // was recorded since. The Bridge keeps the first value per participant; a later one never lowers it.
                         if (actor == "guest")
