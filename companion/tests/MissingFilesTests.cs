@@ -64,7 +64,10 @@ public sealed class MissingFilesTests : IDisposable
         await using var mock = Mock(out _, out _); using var pipe = new SoundpadPipe(mock.Name, true);
         using var bridge = new Bridge(pipe, new StateStore(folder));
         var release = new ManualResetEventSlim();
-        bridge.UseFileExists(path => { release.Wait(TimeSpan.FromSeconds(8)); return false; });
+        // The scan's own clock starts when it first asks about a file, which happens inside Poll (2.45 CI: timed from
+        // after Poll, a slow runner had already spent part of the 2 s limit and the scan looked too short).
+        Stopwatch? scanClock = null;
+        bridge.UseFileExists(path => { Interlocked.CompareExchange(ref scanClock, Stopwatch.StartNew(), null); release.Wait(TimeSpan.FromSeconds(8)); return false; });
         await bridge.Poll(true);
         var scan = bridge.MissingScanIdle();
         // A play during the scan is not held up by it.
@@ -72,7 +75,8 @@ public sealed class MissingFilesTests : IDisposable
         Assert.True((await bridge.Execute(Cmd("play", bridge.Snapshot.Library.Sounds[0].Id, bridge.Snapshot.Library.Version), "host")).Ok);
         Assert.True(clock.ElapsedMilliseconds < 1500, $"play took {clock.ElapsedMilliseconds} ms during the scan");
         await scan.WaitAsync(TimeSpan.FromSeconds(6));
-        Assert.True(clock.ElapsedMilliseconds >= MissingFiles.PathTimeoutMs - 200);
+        Assert.NotNull(scanClock);
+        Assert.True(scanClock!.ElapsedMilliseconds >= MissingFiles.PathTimeoutMs - 200, $"the scan gave up after {scanClock.ElapsedMilliseconds} ms");
         // Past the 2 s limit: unknown, so nothing is marked missing.
         Assert.DoesNotContain(bridge.Snapshot.Library.Sounds, s => s.Missing);
         release.Set();
