@@ -2,7 +2,9 @@ namespace SoundpadWeb;
 
 public sealed partial class Bridge
 {
-    private readonly SpotifyControl spotify = new();
+    private SpotifyGate spotify = new(new SpotifyControl());
+    /// <summary>Test seam (2.46): the e2e harness and unit tests use a fixture, never the PC's real Spotify.</summary>
+    public void UseSpotify(ISpotifySession session) => spotify = new(session);
     private long sampledTick;
     private long seekSettlesUntil;
     private long? regionStart;
