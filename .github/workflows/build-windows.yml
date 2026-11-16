@@ -81,6 +81,8 @@ jobs:
         with:
           dotnet-version: '10.0.x'
       - run: npm ci
+      # The synthetic HTTPS test serves the production bundle from dist/.
+      - run: npm run build
       - run: dotnet build companion/harness/SoundpadWeb.Harness.csproj -c Release
       - run: npx playwright install ${{ matrix.engine }}
       # Each shard runs one worker with its own Vite server and mock companion on a dedicated runner.

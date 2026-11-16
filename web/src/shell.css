@@ -518,6 +518,7 @@
 }
 /* Wide screens: in the board column's flow, under the board, so it never covers anything. */
 .notice-dock {
+  isolation: isolate;
   flex: none;
   max-height: 40%;
   overflow-y: auto;

@@ -832,6 +832,7 @@ test('host style sync: the host’s two pages (separate browsers) share navigati
     await expect(otherPanel.getByRole('region', { name: 'Draft' })).toBeVisible();
     await expect(otherPanel.getByLabel('Clip name')).toHaveValue('Shared draft');
     // A guest never sends the host's style: the companion refuses it, and nothing changes.
+    await nav(page, 'Soundboard').click();
     const guest = await joinGuest(page, 'Style Guest');
     const refused = await sendCommand(guest, 'uiPrefsSet', { uiPrefs: { theme: 'ocean' } });
     expect(refused.error).toBeTruthy();
@@ -943,10 +944,15 @@ test('two dialogs: Escape closes the newer one only, and the keyboard stays in t
   await expect(opener).toBeFocused();
 });
 
-test('a panel brought back by a reload leaves focus where it was', async ({ page, harness }) => {
+test('reloading into Mimic leaves keyboard focus at the start of the page', async ({
+  page,
+  harness,
+}) => {
   await host(page, harness);
-  await nav(page, 'Mimic').click();
-  await expect(nav(page, 'Mimic')).toBeFocused();
+  const mimicLink = nav(page, 'Mimic');
+  await mimicLink.focus();
+  await page.keyboard.press('Enter');
+  await expect(mimicLink).toBeFocused();
   await page.reload();
   await expect(mimicPanel(page)).toBeVisible();
   await page.waitForTimeout(300);
