@@ -151,6 +151,11 @@ export function MimicHostControls({ state, connected }: { state: Snapshot; conne
     running.current = false;
     setBusy(false);
   }
+  // 2.45 (gate sessionRecovery): the board's Recover previous session / Discard asks about this instead.
+  const recovered =
+    history && history.recoveredMs > 0 && !supports(state.companionVersion, 'sessionRecovery')
+      ? history
+      : null;
 
   return (
     <>
@@ -209,9 +214,9 @@ export function MimicHostControls({ state, connected }: { state: Snapshot; conne
           the history so far is kept.
         </p>
       )}
-      {history && history.recoveredMs > 0 && (
+      {recovered && (
         <p className="warning mimic-recovered">
-          Recovered {formatSpan(history.recoveredMs)} of history from the last session (the
+          Recovered {formatSpan(recovered.recoveredMs)} of history from the last session (the
           companion did not close normally).{' '}
           <button
             type="button"

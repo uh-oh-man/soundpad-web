@@ -102,7 +102,12 @@ describe('companion version gate', () => {
   });
 });
 
-/** The Stage H (2.44) features, last in every list of what an older companion lacks. */
+/** The 2.45 features (each WP adds its own here), last in every list of what an older companion lacks. */
+const V2_45 = [
+  'one Recover previous session or Discard after a crash, covering Temp, the recording history and your drafts',
+  "each guest's recent Temp and Keep clips under their storage request",
+];
+/** The Stage H (2.44) features and everything newer, last in every list of what an older companion lacks. */
 const STAGE_H = [
   'automatic backups to a folder you choose, with restore of single clips, recordings, voices, sentences or the whole library',
   'updates from inside the app that keep your session, guests and Temp',
@@ -110,6 +115,7 @@ const STAGE_H = [
   'a Needs attention group for sounds whose file is missing',
   'a guided setup: Soundpad check with fixes, capture output, invitations',
   'host-wide hotkeys for Capture, Panic and (optionally) Stop, with conflicts reported',
+  ...V2_45,
 ];
 describe('feature gates for older companions', () => {
   it('hides each feature until the companion that added it', () => {
@@ -420,7 +426,8 @@ describe('feature gates for older companions', () => {
       ...STAGE_H,
     ]);
     expect(missingFeatures('2.43.0')).toEqual(STAGE_H);
-    expect(missingFeatures('2.44.0')).toEqual([]);
+    expect(missingFeatures('2.44.0')).toEqual(V2_45);
+    expect(missingFeatures('2.45.0')).toEqual([]);
     expect(supports('2.39.0', 'drafts')).toBe(false);
     expect(supports('2.40.0', 'drafts')).toBe(true);
     expect(supports('2.40.0', 'reviewFixes')).toBe(false);

@@ -202,6 +202,9 @@ const FEATURE_OPS: Record<Feature, Op[]> = {
   missingFiles: [],
   setup: ['setupGet', 'setupSet', 'mimicSources'],
   hostHotkeys: ['hotkeysGet', 'hotkeysSet'],
+  // 2.45 (WP2; the example answers neither until DEMO_COMPANION is raised).
+  sessionRecovery: ['sessionRecover'],
+  budgetActions: ['budgetActions'],
 };
 
 /** What the example honestly cannot do, and the reason it gives. Each must be refused with exactly that. */

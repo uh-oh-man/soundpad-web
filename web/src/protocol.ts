@@ -148,6 +148,11 @@ export const commandSchema = z
       'setupSet',
       'hotkeysGet',
       'hotkeysSet',
+      // 2.45 (gates sessionRecovery, budgetActions): one Recover previous session / Discard after a
+      // crash (host only), and a guest's recent Temp and Keep actions (the host's for any guest, a
+      // guest's for their own only; the companion decides whose).
+      'sessionRecover',
+      'budgetActions',
     ]),
     // Stage H (2.44): the one payload field of every Stage H op (any JSON; each op's module checks it).
     body: z.json().optional(),
@@ -689,6 +694,7 @@ export const slowOps: readonly Command['op'][] = [
   'draftKeep',
   'draftPlay',
   'tempRecover',
+  'sessionRecover',
   'libraryPreview',
   'libraryAdd',
   'sentencePreview',
@@ -742,6 +748,8 @@ export function isGuestAllowed(c: Command, s: Snapshot) {
       c.categoryName === undefined
     );
   if (c.op === 'budgetStatus') return true;
+  // 2.45: always only their own storage actions (the companion ignores another guest's id).
+  if (c.op === 'budgetActions') return true;
   // The voice library (2.41): guests see and search the kept library by default; private previews
   // are answered to them only. Editing (names, tags, voices, wanted words, Undo) needs the host's
   // guestLibraryEdit; the settings and the category word index are the host's.

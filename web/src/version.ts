@@ -73,6 +73,9 @@ export const FEATURES = {
   missingFiles: [2, 44],
   setup: [2, 44],
   hostHotkeys: [2, 44],
+  // 2.45 (WP2): one Recover previous session / Discard with drafts, and guests' storage actions.
+  sessionRecovery: [2, 45],
+  budgetActions: [2, 45],
 } as const satisfies Record<string, readonly [number, number]>;
 
 /** True when the website changed version since this browser last used it (and it had used it before). */
@@ -125,6 +128,9 @@ const FEATURE_NAMES: Record<keyof typeof FEATURES, string> = {
   setup: 'a guided setup: Soundpad check with fixes, capture output, invitations',
   hostHotkeys:
     'host-wide hotkeys for Capture, Panic and (optionally) Stop, with conflicts reported',
+  sessionRecovery:
+    'one Recover previous session or Discard after a crash, covering Temp, the recording history and your drafts',
+  budgetActions: "each guest's recent Temp and Keep clips under their storage request",
 };
 
 /**

@@ -515,6 +515,53 @@
 .temp-recovery p {
   flex: 1 1 16rem;
 }
+/* 2.45: one Recover previous session / Discard (RecoverSession.tsx) and a guest's recent storage actions
+   under their request (StoragePanel.tsx). Only here; the shared .temp-recovery and .lobby-requests rules
+   above and in studio.css / surfaces.css still apply. */
+.recover-session-text {
+  flex: 1 1 16rem;
+  min-width: 0;
+}
+.recover-session-parts {
+  margin: 4px 0 0;
+  padding-left: 18px;
+  font-variant-numeric: tabular-nums;
+}
+.budget-actions-panel {
+  flex: 1 1 100%;
+  min-width: 0;
+}
+.budget-actions {
+  display: grid;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+/* Inside a request row: not another .lobby-requests row (studio.css and surfaces.css style those). */
+.budget-actions li,
+.lobby-requests .budget-actions li {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
+  gap: 8px;
+  align-items: baseline;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: none;
+  font-variant-numeric: tabular-nums;
+}
+.budget-action-kind {
+  color: var(--text-dim);
+}
+.budget-action-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+p.budget-actions {
+  margin: 0;
+}
 .keep-settings {
   display: grid;
   gap: 8px;
