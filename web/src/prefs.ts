@@ -17,6 +17,7 @@ export const PREF_KEYS = {
   noticeSounds: 'soundpad-web:notice-sounds',
   spotifyExpanded: 'soundpad-web:spotify-expanded',
   sidebarRail: 'soundpad-web:sidebar-rail',
+  mimicFull: 'soundpad-web:mimic-full',
 } as const;
 
 export type Prefs = {
@@ -35,6 +36,8 @@ export type Prefs = {
   spotifyExpanded: boolean;
   /** The contextual sidebar collapsed to icons (top tabs style). */
   sidebarRail: boolean;
+  /** Mimic fills the main area beside the sidebar instead of the right panel (2.46, wide screens). */
+  mimicFull: boolean;
 };
 export type PrefName = keyof Prefs;
 
@@ -47,6 +50,7 @@ export const PREF_DEFAULTS: Prefs = {
   noticeSounds: 'off',
   spotifyExpanded: false,
   sidebarRail: false,
+  mimicFull: false,
 };
 
 const oneOf =
@@ -68,6 +72,7 @@ const parsers: { [K in PrefName]: (raw: string) => Prefs[K] | undefined } = {
   noticeSounds: oneOf('off', 'subtle'),
   spotifyExpanded: flag,
   sidebarRail: flag,
+  mimicFull: flag,
 };
 
 /** Values set in this tab while storage was unavailable (so the change still holds until reload). */
