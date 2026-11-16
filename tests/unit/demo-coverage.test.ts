@@ -203,6 +203,7 @@ const FEATURE_OPS: Record<Feature, Op[]> = {
   setup: ['setupGet', 'setupSet', 'mimicSources'],
   hostHotkeys: ['hotkeysGet', 'hotkeysSet'],
   feedback: ['feedbackSend'],
+  noLimits: ['budgetStatus'],
 };
 
 /** What the example honestly cannot do, and the reason it gives. Each must be refused with exactly that. */

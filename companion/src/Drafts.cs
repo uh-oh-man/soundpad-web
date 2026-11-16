@@ -297,6 +297,13 @@ public sealed class GuestBudgets(string? totalsPath = null, Func<long>? clock = 
         lock (guests)
         {
             var g = For(guest, name);
+            // No storage limits (2.45, the owner's choice): guests are never paused or asked to wait. Usage is still
+            // counted and shown; the saved allowances are kept as they are, so older companions read them unchanged.
+            if (NoLimits)
+            {
+                if (g.Request != null) { g.Request = null; Changed(); }
+                return null;
+            }
             long kept = KeptUsed(guest, g, settings), keptLimit = KeptLimit(g, settings);
             // At the permanent budget, or waiting for the host to allow more of it: new clips and copies pause too.
             if (kept >= keptLimit || g.Request is { Kind: "kept" }) return Ask(guest, g, "kept", Math.Max(g.Request is { Kind: "kept" } open ? open.NeededBytes : 0, kept - keptLimit + 1), Waiting + " You have used your permanent allowance.");
@@ -316,8 +323,11 @@ public sealed class GuestBudgets(string? totalsPath = null, Func<long>? clock = 
             return CheckKeepLocked(guest, For(guest, name), bytes, settings);
         }
     }
+    /// <summary>The owner asked for no guest storage limits (2.45): every check passes. Tests of the limits turn it off.</summary>
+    public bool NoLimits { get; set; } = true;
     private string? CheckKeepLocked(string guest, Guest g, long bytes, KeepSettings settings)
     {
+        if (NoLimits) return null;
         long kept = KeptUsed(guest, g, settings) + g.PendingKept, limit = KeptLimit(g, settings);
         if (kept + bytes > limit) return Ask(guest, g, "kept", kept + bytes - limit, Waiting + " Keeping this would pass your permanent allowance.");
         return null;

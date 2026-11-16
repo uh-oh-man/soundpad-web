@@ -75,6 +75,8 @@ export const FEATURES = {
   hostHotkeys: [2, 44],
   // The header's Feedback button: notes saved by the host's companion on the host's desktop.
   feedback: [2, 45],
+  // Guests have no Temp or Keep storage limits (the owner's choice).
+  noLimits: [2, 45],
 } as const satisfies Record<string, readonly [number, number]>;
 
 /** True when the website changed version since this browser last used it (and it had used it before). */
@@ -128,6 +130,7 @@ const FEATURE_NAMES: Record<keyof typeof FEATURES, string> = {
   hostHotkeys:
     'host-wide hotkeys for Capture, Panic and (optionally) Stop, with conflicts reported',
   feedback: "the Feedback button (notes saved on the host's desktop)",
+  noLimits: 'no storage limits for guests',
 };
 
 /**

@@ -54,17 +54,24 @@ public sealed class ExactPlaybackTests : IDisposable
     /// <summary>
     /// The lazy registration as it happens in a session: the first cue start plays the old way at once and asks for
     /// slots; they are registered at the next quiet moment, never while something plays.
+    /// The first play lasts until the test stops it (CI failure on 3612520): with the fixture's own length, as little
+    /// as 600 ms was left after the seek, and on a busy runner the four polls below outlasted it, so the bridge
+    /// rightly registered the slots once Soundpad had stopped and the "still playing" check failed.
     /// </summary>
     private static async Task Ready(Bridge bridge, MockSoundpad mock, Sound sound)
     {
         Assert.False(bridge.SlotsReady);
+        bool follow = mock.FollowFileLength; long duration = mock.DurationMs;
+        mock.FollowFileLength = false; mock.DurationMs = 600_000;
         var first = await bridge.Execute(Cmd("startAt", sound.Id) with { PositionMs = 100 }, "host");
         Assert.True(Played(first), first.Error); Assert.Contains("DoSeekMs(100)", Sent(mock));
         int added = Sent(mock).Count(c => c.StartsWith("DoAdd"));
         for (int i = 0; i < 4; i++) { await Task.Delay(100); await bridge.Poll(false); }
+        Assert.Equal("PLAYING", mock.Status);
         Assert.False(bridge.SlotsReady); // still playing: nothing is added to Soundpad meanwhile
         Assert.Equal(added, Sent(mock).Count(c => c.StartsWith("DoAdd")));
         Assert.True((await bridge.Execute(Cmd("stop"), "host")).Ok);
+        mock.FollowFileLength = follow; mock.DurationMs = duration;
         for (int i = 0; i < 60 && !bridge.SlotsReady; i++) { await Task.Delay(50); await bridge.Poll(false); }
         Assert.True(bridge.SlotsReady);
     }

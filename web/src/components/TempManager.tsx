@@ -219,9 +219,18 @@ export function TempManager({
           </p>
           {own && (
             <p className={own.paused ? 'warning' : 'muted'} role="status">
-              Your Temp: {formatMb(own.tempBytes, own.tempLimitBytes)} · kept{' '}
-              {formatMb(own.keptBytes, own.keptLimitBytes)}
-              {own.waiting ? ' · waiting for the host to allow more' : ''}
+              {supports(state.companionVersion, 'noLimits') ? (
+                // 2.45: no storage limits; usage only.
+                <>
+                  Your Temp: {formatMb(own.tempBytes)} · kept {formatMb(own.keptBytes)}
+                </>
+              ) : (
+                <>
+                  Your Temp: {formatMb(own.tempBytes, own.tempLimitBytes)} · kept{' '}
+                  {formatMb(own.keptBytes, own.keptLimitBytes)}
+                  {own.waiting ? ' · waiting for the host to allow more' : ''}
+                </>
+              )}
             </p>
           )}
           {(error || loadError) && (

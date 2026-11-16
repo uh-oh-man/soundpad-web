@@ -4,11 +4,15 @@ Notable changes to Soundpad Web. Versions follow the website's `package.json`; t
 
 ## 2.45.0 — Feedback, and fixes from the real Soundpad
 
-A **Feedback** button for you and your guests, and two fixes found by testing on a real Soundpad. **Update the companion** for the Feedback button; with an older companion it is hidden and everything else works as in 2.44.
+A **Feedback** button for you and your guests, no more storage limits for guests, and two fixes found by testing on a real Soundpad. **Update the companion** for the Feedback button and for the limits to go; with an older companion the button is hidden, the old limits apply and everything else works as in 2.44.
 
 ### Added
 
 - **Feedback.** The header has a **Feedback** button for the host and every guest. Choose **Bug**, **Idea** or **Opinion**, write a note and press **Send** (or Ctrl+Enter). The host's companion adds each note, with who sent it, when, and which part of the app they were in, to one file on the host's desktop that always has the same name: **`Soundpad Web feedback.md`**. Notes are only ever added to the end of that file. Guests are never told where it is, can send up to 10 notes in 10 minutes, and a note can be up to 4000 characters. If the file grows past 8 MB it stops taking notes until you move or rename it.
+
+### Changed
+
+- **Guests have no storage limit.** Their clips, copies, uploads and kept clips never wait for you any more, and the Temp and kept-audio allowances are gone from **Session & access → Keep and guest storage**. You still see how much each guest uses. Your saved allowance settings are left as they were, so going back to an older companion brings the old limits back.
 
 ### Fixed
 
@@ -19,6 +23,8 @@ A **Feedback** button for you and your guests, and two fixes found by testing on
 
 - 3 new companion tests for Feedback: the host's and a guest's notes land in the one file with a fixed name, a guest never gets the path, empty, unknown, too long and too many notes are refused, and a full file stops growing. The browser-test harness writes notes to its own temporary folder, never to the desktop.
 - New real-Soundpad checks (harness, opt-in, run on the owner's PC with everything restored afterwards): import timing, responsiveness during slow work, session cleanup, Organize on the real Soundpad and Mimic capture from Soundpad's own output.
+- 1 new companion test: guests are never paused or asked to wait, whatever allowances were saved; the tests of the old limits switch them back on for themselves. The browser test for guest storage now checks that a guest's clips never wait.
+- The exact-playback tests no longer fail on a busy machine (CI failure on 3612520). Their setup checks that the slot files are not registered while the first sound still plays, but that sound had only 0.6 to 2.9 s left, and on a slow run it ended first, so the companion rightly registered the slots and the check failed. The first sound now plays until the test stops it, and the setup checks that it is still playing. The companion itself did nothing wrong and is unchanged.
 
 ## 2.44.0 — Backups, updates, Organize and setup
 

@@ -1872,7 +1872,7 @@ test('Mimic drafts: a guest previews privately only what was recorded since join
   expect(harness.plays.length).toBe(plays);
 });
 
-test('guest storage: at the Temp budget new clips wait for the host, who allows more; a guest keeps a clip', async ({
+test('guest storage: there is no limit (2.45), so guest clips never wait, the host sees their usage, and a guest keeps a clip', async ({
   page,
   harness,
 }) => {
@@ -1883,9 +1883,8 @@ test('guest storage: at the Temp budget new clips wait for the host, who allows 
   await page.getByLabel('Allow guest Mimic').check();
   await expect(page.getByLabel('Allow guest Keep')).toBeChecked(); // on with the usual friend permissions
   const storage = page.getByRole('form', { name: 'Keep and guest storage' });
-  await storage.getByLabel('Temp per guest (MB)').fill('1');
-  await storage.getByRole('button', { name: 'Save storage settings' }).click();
-  await expect(page.getByText('Keep and storage settings saved.')).toBeVisible();
+  await expect(storage).toContainText('Guests have no storage limit');
+  await expect(storage.getByLabel('Temp per guest (MB)')).toHaveCount(0);
   await page.keyboard.press('Escape');
   await page.getByRole('button', { name: 'Mimic', exact: true }).click();
   const dialog = page.getByRole('dialog', { name: 'Mimic' });
@@ -1902,22 +1901,18 @@ test('guest storage: at the Temp budget new clips wait for the host, who allows 
       sourceId: view.sessionId,
       name,
     });
-  // 12 s at the fixture's 16 kHz is about 380 KB: two fit in 1 MB, the third waits.
+  // About 380 KB each; before 2.45 the third passed the 1 MB a host could set and waited. Now none wait.
   expect((await clip(0.5, 'Budget one')).error).toBeUndefined();
   expect((await clip(1, 'Budget two')).error).toBeUndefined();
-  expect((await clip(1.5, 'Budget three')).error).toMatch(/Waiting for the host to allow more/);
-  // The guest is told where they stand; the host gets a request, like the lobby's.
-  await openTemp(guest);
-  await expect(guest.locator('#temp-manager')).toContainText('waiting for the host to allow more');
-  const requests = page.getByRole('list', { name: 'Guests waiting for more storage' });
-  await expect(requests).toContainText('Fixture Guest asks for more Temp space');
-  await page.getByRole('button', { name: 'Access settings' }).click();
-  await expect(page.locator('.guest-usage')).toContainText(/Temp 0\.\d of 1\.0 MB/);
-  await page.keyboard.press('Escape');
-  await requests.getByRole('button', { name: 'Allow Fixture Guest more' }).click();
-  await expect(requests).toHaveCount(0);
   expect((await clip(1.5, 'Budget three')).error).toBeUndefined();
   await expect(playButton(page, 'Budget three')).toBeEnabled({ timeout: TEMP_READY });
+  await openTemp(guest);
+  await expect(guest.locator('#temp-manager')).toContainText(/Your Temp: [\d.]+ MB · kept/);
+  await expect(guest.locator('#temp-manager')).not.toContainText('waiting for the host');
+  await expect(page.getByRole('list', { name: 'Guests waiting for more storage' })).toHaveCount(0);
+  await page.getByRole('button', { name: 'Access settings' }).click();
+  await expect(page.locator('.guest-usage')).toContainText(/Temp \d+(\.\d)? MB · kept/);
+  await page.keyboard.press('Escape');
   // Keep: into the host's destination (no folder choice for a guest), right from Temp.
   const source = guest
     .locator('.temp-source')

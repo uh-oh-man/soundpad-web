@@ -118,10 +118,6 @@ export function KeepSettingsForm({ state, connected }: { state: Snapshot; connec
     (c) =>
       /^\d+$/.test(c.category.id) && !/^All$|^Temp .{1,3} Soundpad Web \[/.test(c.category.name),
   );
-  const mb = (value: string, fallback: number) => {
-    const n = z.coerce.number().int().safeParse(value);
-    return n.success ? n.data : fallback;
-  };
   return (
     <form
       className="keep-settings"
@@ -179,42 +175,10 @@ export function KeepSettingsForm({ state, connected }: { state: Snapshot; connec
           ))}
         </select>
       </label>
-      <label>
-        Temp per guest (MB)
-        <input
-          type="number"
-          min={1}
-          max={4096}
-          value={draft.tempMb}
-          onChange={(e) => setDraft({ ...draft, tempMb: mb(e.target.value, draft.tempMb) })}
-        />
-      </label>
-      <label>
-        Kept audio per guest (MB)
-        <input
-          type="number"
-          min={1}
-          max={65536}
-          value={draft.keptMb}
-          onChange={(e) => setDraft({ ...draft, keptMb: mb(e.target.value, draft.keptMb) })}
-        />
-      </label>
-      <label>
-        Count kept audio
-        <select
-          value={draft.budgetMode}
-          onChange={(e) =>
-            setDraft({ ...draft, budgetMode: e.target.value === 'total' ? 'total' : 'session' })
-          }
-        >
-          <option value="session">Per session</option>
-          <option value="total">In total</option>
-        </select>
-      </label>
       <p className="muted">
-        Guests keep clips into this folder and category; they can never choose a path. When a guest
-        reaches their allowance, their new clips wait until you allow more (until the companion
-        closes). Nothing they kept is ever deleted.
+        Guests keep clips into this folder and category; they can never choose a path. Guests have
+        no storage limit: their clips and copies never wait for you. Nothing they kept is ever
+        deleted.
       </p>
       <button type="submit" disabled={!connected} aria-disabled={saving || undefined}>
         Save storage settings
@@ -232,9 +196,7 @@ export function GuestUsage({ participantId }: { participantId?: string }) {
   if (!usage) return null;
   return (
     <small className={`guest-usage${usage.paused ? ' paused' : ''}`}>
-      Temp {formatMb(usage.tempBytes, usage.tempLimitBytes)} · kept{' '}
-      {formatMb(usage.keptBytes, usage.keptLimitBytes)}
-      {usage.waiting ? ' · waiting for more' : ''}
+      Temp {formatMb(usage.tempBytes)} · kept {formatMb(usage.keptBytes)}
     </small>
   );
 }

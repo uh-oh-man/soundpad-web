@@ -112,6 +112,7 @@ const STAGE_H = [
   'host-wide hotkeys for Capture, Panic and (optionally) Stop, with conflicts reported',
   // 2.45, after Stage H.
   "the Feedback button (notes saved on the host's desktop)",
+  'no storage limits for guests',
 ];
 describe('feature gates for older companions', () => {
   it('hides each feature until the companion that added it', () => {
@@ -422,7 +423,10 @@ describe('feature gates for older companions', () => {
       ...STAGE_H,
     ]);
     expect(missingFeatures('2.43.0')).toEqual(STAGE_H);
-    expect(missingFeatures('2.44.0')).toEqual(["the Feedback button (notes saved on the host's desktop)"]);
+    expect(missingFeatures('2.44.0')).toEqual([
+      "the Feedback button (notes saved on the host's desktop)",
+      'no storage limits for guests',
+    ]);
     expect(missingFeatures('2.45.0')).toEqual([]);
     expect(supports('2.39.0', 'drafts')).toBe(false);
     expect(supports('2.40.0', 'drafts')).toBe(true);

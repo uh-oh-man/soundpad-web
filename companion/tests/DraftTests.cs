@@ -385,6 +385,7 @@ public sealed class DraftTests : IDisposable
     public async Task GuestKeepUsesTheHostsDestinationAndPausesAtThePermanentBudgetUntilTheHostAllowsMore()
     {
         await using var rig = new Rig(folder); var bridge = rig.Bridge;
+        rig.Bridge.Budgets.NoLimits = false; // these tests are about the limits (off by default since 2.45)
         await rig.Start();
         bridge.NoteGuest(Alice, "peer-a", rig.Now);
         rig.Advance(50);
@@ -434,6 +435,7 @@ public sealed class DraftTests : IDisposable
     public async Task TheTempBudgetPausesNewClipsAndAGuestMayRemoveTheirOwnToMakeRoom()
     {
         await using var rig = new Rig(folder); var bridge = rig.Bridge;
+        rig.Bridge.Budgets.NoLimits = false; // these tests are about the limits (off by default since 2.45)
         await rig.Start();
         bridge.NoteGuest(Alice, "peer-a", rig.Now);
         rig.Advance(50);
@@ -457,11 +459,11 @@ public sealed class DraftTests : IDisposable
         string totals = Path.Combine(folder, "guest-kept.json");
         var session = new KeepSettings(KeptMb: 1, BudgetMode: "session");
         var total = session with { BudgetMode = "total" };
-        var first = new GuestBudgets(totals);
+        var first = new GuestBudgets(totals) { NoLimits = false };
         Assert.Null(first.CheckKeep("g", "Gee", 700_000, session));
         first.NoteKept("g", "Gee", 700_000);
         // A new launch: the session budget starts again, the total one remembers.
-        var second = new GuestBudgets(totals);
+        var second = new GuestBudgets(totals) { NoLimits = false };
         Assert.Null(second.CheckKeep("g", "Gee", 700_000, session));
         Assert.NotNull(second.CheckKeep("g", "Gee", 700_000, total));
         Assert.True(second.Grant("g", total));
@@ -610,7 +612,7 @@ public sealed class DraftTests : IDisposable
     {
         const string site = "https://example.test";
         await using var mock = new MockSoundpad(); using var pipe = new SoundpadPipe(mock.Name, true);
-        using var bridge = new Bridge(pipe, new StateStore(folder)); await bridge.Poll(true);
+        using var bridge = new Bridge(pipe, new StateStore(folder)); bridge.Budgets.NoLimits = false; await bridge.Poll(true);
         await Ok(bridge.Execute(Cmd("beginSession"), "host"));
         await Ok(bridge.Execute(Cmd("keepSettings") with { TempMb = 1 }, "host"));
         await using var server = new LocalServer(bridge, site); await server.Start();

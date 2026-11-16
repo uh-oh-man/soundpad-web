@@ -434,7 +434,8 @@ public sealed class SentenceTests : IDisposable
     [Fact]
     public async Task KeptVersionsPinTheirSourcesAndStayPlayableWhenSourcesChange()
     {
-        await using var rig = new Rig(folder); await rig.Start();
+        await using var rig = new Rig(folder); rig.Bridge.Budgets.NoLimits = false;
+        await rig.Start();
         var id = await Create(rig, "hello fixture tone");
         Assert.False((await rig.Host(Edit(id, new SentenceInput(Do: "pin", Pinned: true)))).Ok); // keep first
         var kept = Body(await Ok(rig.Host(Cmd("sentenceKeep") with { SentenceId = id })));
@@ -680,7 +681,7 @@ public sealed class SentenceTests : IDisposable
     [Fact]
     public void KeepAllowancesAreHeldWhenChecked()
     {
-        var budgets = new GuestBudgets();
+        var budgets = new GuestBudgets { NoLimits = false };
         var settings = new KeepSettings(KeptMb: 1);
         Assert.Null(budgets.ReserveKeep("g", "G", 600 * 1024, settings));
         // A second Keep at the same moment sees the first one.
