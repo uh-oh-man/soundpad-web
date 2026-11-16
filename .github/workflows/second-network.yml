@@ -1,4 +1,5 @@
 name: Second-network Soundpad proof
+run-name: Second-network Soundpad proof (${{ inputs.peer }})
 on:
   workflow_dispatch:
     inputs:

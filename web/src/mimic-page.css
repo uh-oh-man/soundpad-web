@@ -235,7 +235,7 @@
 .mimic-reading .mimic-reading-body {
   display: block;
   min-height: 104px;
-  max-height: clamp(150px, 27vh, 320px);
+  max-height: clamp(138px, 22vh, 275px);
   padding: 9px 16px 12px;
   border: 0;
   border-radius: 0;
@@ -307,10 +307,6 @@
 }
 
 @container mimic (max-width: 720px) {
-  .mimic-page .mimic-reading {
-    order: -2;
-  }
-
   .mimic-reading .mimic-transcript-head {
     gap: 6px;
     padding-inline: 9px;
@@ -336,4 +332,24 @@
   .mimic-reading .mimic-follow-key {
     display: none;
   }
+}
+
+.mimic-reading .mimic-search {
+  padding: 7px 14px;
+  border-bottom: 1px solid var(--line);
+}
+
+.mimic-reading .mimic-search input {
+  min-width: 0;
+  flex: 1 1 180px;
+  max-width: 330px;
+}
+
+.mimic-reading .mimic-search button {
+  min-height: 32px;
+  padding-block: 4px;
+}
+
+.mimic-reading .mimic-reading-empty {
+  padding: 14px 4px;
 }

@@ -866,7 +866,6 @@ function Builder({
           </div>
         </div>
         <div className="sentence-editing">
-          <h3>Timeline</h3>
           <Timeline
             sentence={sentence}
             voices={voices}
@@ -1176,7 +1175,7 @@ function Timeline({
   return (
     <div className="sentence-timeline-wrap">
       <div className="voices-inline">
-        <strong>Timeline</strong>
+        <h3>Timeline</h3>
         <span className="muted">
           {formatMs(sentence.durationMs)} · drag freely, Shift snaps · Space selects · Alt+←/→
           nudges · Delete leaves a pause

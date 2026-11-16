@@ -1324,6 +1324,161 @@ export function MimicHistory({
           {timeline.shared.length ? ', and the parts the host shared with guests' : ''}.
         </p>
       )}
+      {(libraryOn || mimic?.transcribing || words.length > 0 || canLoadOlder) && (
+        <section className="mimic-reading" aria-labelledby="mimic-transcript-title">
+          <div className="mimic-transcript-head">
+            <h2 id="mimic-transcript-title">Transcript</h2>
+            <div className="mimic-reading-actions">
+              <button
+                type="button"
+                onClick={loadOlderTranscript}
+                aria-disabled={!canLoadOlder || loadingOlder}
+                title={canLoadOlder ? undefined : 'The oldest available transcript is loaded'}
+              >
+                {loadingOlder ? 'Loading…' : 'Earlier words'}
+              </button>
+              {/* Always here (its label changes), so it keeps the keyboard when pressed. */}
+              <button
+                type="button"
+                className={following ? 'mimic-follow live' : 'mimic-follow primary'}
+                aria-pressed={following}
+                title="Show the newest words and follow them (End)"
+                aria-keyshortcuts="End"
+                onClick={jumpToNewest}
+              >
+                <ArrowDownToLine size={14} aria-hidden="true" />{' '}
+                {following ? 'Following latest' : 'Jump to latest'}
+                <kbd className="mimic-follow-key" aria-hidden="true">
+                  End
+                </kbd>
+              </button>
+            </div>
+          </div>
+          {libraryOn && (
+            <form
+              className="mimic-search"
+              role="search"
+              aria-label="Search this recording"
+              onSubmit={(e) => {
+                e.preventDefault();
+                void searchHistory();
+              }}
+            >
+              <div className="mimic-quick">
+                <input
+                  type="search"
+                  aria-label="Words to find in the recording"
+                  placeholder="Find words"
+                  maxLength={100}
+                  value={query}
+                  onChange={(e) => setQuery(e.target.value)}
+                />
+                <button type="submit">
+                  <Search size={14} /> Find
+                </button>
+                {found && (
+                  <button type="button" onClick={() => setFound(null)}>
+                    <X size={14} /> Close results
+                  </button>
+                )}
+              </div>
+              {found &&
+                (found.matches.length ? (
+                  <ul aria-label="Found in the recording">
+                    {found.matches.map((m) => {
+                      const at = wallOf(timeline, m.startFrame);
+                      return (
+                        <li key={m.startFrame}>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              if (open) closeDraft();
+                              select({ startFrame: m.startFrame, endFrame: m.endFrame }, true);
+                            }}
+                          >
+                            {at !== null && <time>{formatClock(at)}</time>} “{m.context || m.text}”
+                          </button>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                ) : (
+                  <p className="muted">Not found in what you can see of the recording.</p>
+                ))}
+            </form>
+          )}
+          <ol
+            ref={(element) => {
+              newest.ref.current = element;
+              transcriptList.current = element;
+            }}
+            onScroll={newest.onScroll}
+            onPointerDown={newest.onPointerDown}
+            onPointerUp={newest.onPointerUp}
+            onPointerCancel={newest.onPointerUp}
+            onPointerLeave={newest.onPointerUp}
+            className="mimic-transcript mimic-words mimic-reading-body"
+            aria-label="Transcript"
+          >
+            {shown.length ? (
+              shown.map((sentence) => (
+                <li key={sentence[0].id} className="mimic-reading-line">
+                  <time>
+                    {formatClock(wallOf(timeline, sentence[0].start) ?? 0).replace(/\s[AP]M$/i, '')}
+                  </time>
+                  {speakers?.enabled && sentence[0].speaker != null && (
+                    <SpeakerChip id={sentence[0].speaker} groups={speakers} />
+                  )}
+                  <span className="mimic-sentence">
+                    {sentence.map((w) => (
+                      <button
+                        key={w.id}
+                        type="button"
+                        className={`mimic-word${w.status === 'uncertain' ? ' uncertain' : ''}${hover?.id === w.id ? ' hover' : ''}${playingIds.has(w.id) ? (reduced ? ' playing playing-static' : ' playing') : ''}`}
+                        aria-pressed={wordSelected(w, selection)}
+                        title={
+                          w.status === 'uncertain'
+                            ? 'Uncertain: check this word and its edges before using it'
+                            : undefined
+                        }
+                        onMouseEnter={() => setHover(w)}
+                        onMouseLeave={() => setHover((h) => (h?.id === w.id ? null : h))}
+                        onFocus={() => setHover(w)}
+                        onBlur={() => setHover((h) => (h?.id === w.id ? null : h))}
+                        onClick={(e) => {
+                          // Clamped to the audio this person may hear around the word (2.41).
+                          const cut = timeline
+                            ? wordCut(words, anchor, w.id, e.shiftKey, timeline)
+                            : { range: wordSelection(words, anchor, w.id, e.shiftKey, rate) };
+                          if ('reason' in cut) {
+                            controller.notify(cut.reason, 'error');
+                            return;
+                          }
+                          select(cut.range);
+                          if (!e.shiftKey || anchor === null) setAnchor(w.id);
+                          // A click (or Enter) plays the word in the person's mode; Shift-click only selects (2.45).
+                          if (!e.shiftKey && cut.range) playRange(cut.range);
+                        }}
+                      >
+                        {w.text}
+                      </button>
+                    ))}
+                  </span>
+                </li>
+              ))
+            ) : (
+              <li className="muted mimic-reading-empty">
+                {mimic?.transcribing
+                  ? 'Words will appear here a few seconds after they are said.'
+                  : host
+                    ? 'Enable subtitles in Mimic settings to see new words here.'
+                    : 'New words appear here when the host enables subtitles.'}
+              </li>
+            )}
+            {recognising && <li className="muted mimic-pending">Recognising more of this part…</li>}
+          </ol>
+        </section>
+      )}
       <div className="mimic-nav" role="group" aria-label="Move through the history">
         <button
           type="button"
@@ -1450,59 +1605,6 @@ export function MimicHistory({
           ))}
         </ul>
       )}
-      {libraryOn && (
-        <form
-          className="mimic-search"
-          role="search"
-          aria-label="Search this recording"
-          onSubmit={(e) => {
-            e.preventDefault();
-            void searchHistory();
-          }}
-        >
-          <div className="mimic-quick">
-            <input
-              type="search"
-              aria-label="Words to find in the recording"
-              placeholder="Find words"
-              maxLength={100}
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-            />
-            <button type="submit">
-              <Search size={14} /> Find
-            </button>
-            {found && (
-              <button type="button" onClick={() => setFound(null)}>
-                <X size={14} /> Close results
-              </button>
-            )}
-          </div>
-          {found &&
-            (found.matches.length ? (
-              <ul aria-label="Found in the recording">
-                {found.matches.map((m) => {
-                  const at = wallOf(timeline, m.startFrame);
-                  return (
-                    <li key={m.startFrame}>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          if (open) closeDraft();
-                          select({ startFrame: m.startFrame, endFrame: m.endFrame }, true);
-                        }}
-                      >
-                        {at !== null && <time>{formatClock(at)}</time>} “{m.context || m.text}”
-                      </button>
-                    </li>
-                  );
-                })}
-              </ul>
-            ) : (
-              <p className="muted">Not found in what you can see of the recording.</p>
-            ))}
-        </form>
-      )}
       {speakers?.enabled && (
         <div className="mimic-speakers" role="group" aria-label="Speakers">
           <span className="muted">Speakers (experimental):</span>
@@ -1520,102 +1622,6 @@ export function MimicHistory({
             <span className="muted">{speakers.unassigned} unassigned</span>
           )}
         </div>
-      )}
-      {(mimic?.transcribing || words.length > 0 || (before !== null && canLoadOlder)) && (
-        <section className="mimic-reading" aria-labelledby="mimic-transcript-title">
-          <div className="mimic-transcript-head">
-            <h2 id="mimic-transcript-title">Transcript</h2>
-            <div className="mimic-reading-actions">
-              <button
-                type="button"
-                onClick={loadOlderTranscript}
-                aria-disabled={!canLoadOlder || loadingOlder}
-                title={canLoadOlder ? undefined : 'The oldest available transcript is loaded'}
-              >
-                {loadingOlder ? 'Loading…' : 'Earlier words'}
-              </button>
-              {/* Always here (its label changes), so it keeps the keyboard when pressed. */}
-              <button
-                type="button"
-                className={following ? 'mimic-follow live' : 'mimic-follow primary'}
-                aria-pressed={following}
-                title="Show the newest words and follow them (End)"
-                aria-keyshortcuts="End"
-                onClick={jumpToNewest}
-              >
-                <ArrowDownToLine size={14} aria-hidden="true" />{' '}
-                {following ? 'Following latest' : 'Jump to latest'}
-                <kbd className="mimic-follow-key" aria-hidden="true">
-                  End
-                </kbd>
-              </button>
-            </div>
-          </div>
-          <ol
-            ref={(element) => {
-              newest.ref.current = element;
-              transcriptList.current = element;
-            }}
-            onScroll={newest.onScroll}
-            onPointerDown={newest.onPointerDown}
-            onPointerUp={newest.onPointerUp}
-            onPointerCancel={newest.onPointerUp}
-            onPointerLeave={newest.onPointerUp}
-            className="mimic-transcript mimic-words mimic-reading-body"
-            aria-label="Transcript"
-          >
-            {shown.length ? (
-              shown.map((sentence) => (
-                <li key={sentence[0].id} className="mimic-reading-line">
-                  <time>
-                    {formatClock(wallOf(timeline, sentence[0].start) ?? 0).replace(/\s[AP]M$/i, '')}
-                  </time>
-                  {speakers?.enabled && sentence[0].speaker != null && (
-                    <SpeakerChip id={sentence[0].speaker} groups={speakers} />
-                  )}
-                  <span className="mimic-sentence">
-                    {sentence.map((w) => (
-                      <button
-                        key={w.id}
-                        type="button"
-                        className={`mimic-word${w.status === 'uncertain' ? ' uncertain' : ''}${hover?.id === w.id ? ' hover' : ''}${playingIds.has(w.id) ? (reduced ? ' playing playing-static' : ' playing') : ''}`}
-                        aria-pressed={wordSelected(w, selection)}
-                        title={
-                          w.status === 'uncertain'
-                            ? 'Uncertain: check this word and its edges before using it'
-                            : undefined
-                        }
-                        onMouseEnter={() => setHover(w)}
-                        onMouseLeave={() => setHover((h) => (h?.id === w.id ? null : h))}
-                        onFocus={() => setHover(w)}
-                        onBlur={() => setHover((h) => (h?.id === w.id ? null : h))}
-                        onClick={(e) => {
-                          // Clamped to the audio this person may hear around the word (2.41).
-                          const cut = timeline
-                            ? wordCut(words, anchor, w.id, e.shiftKey, timeline)
-                            : { range: wordSelection(words, anchor, w.id, e.shiftKey, rate) };
-                          if ('reason' in cut) {
-                            controller.notify(cut.reason, 'error');
-                            return;
-                          }
-                          select(cut.range);
-                          if (!e.shiftKey || anchor === null) setAnchor(w.id);
-                          // A click (or Enter) plays the word in the person's mode; Shift-click only selects (2.45).
-                          if (!e.shiftKey && cut.range) playRange(cut.range);
-                        }}
-                      >
-                        {w.text}
-                      </button>
-                    ))}
-                  </span>
-                </li>
-              ))
-            ) : (
-              <li className="muted">Words will appear here a few seconds after they are said.</li>
-            )}
-            {recognising && <li className="muted mimic-pending">Recognising more of this part…</li>}
-          </ol>
-        </section>
       )}
       <div className="mimic-quick" role="group" aria-label="Quick select">
         {QUICK_SECONDS.map((s) => (
