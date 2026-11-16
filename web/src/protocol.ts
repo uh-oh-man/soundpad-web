@@ -148,6 +148,11 @@ export const commandSchema = z
       'setupSet',
       'hotkeysGet',
       'hotkeysSet',
+      // Diagnostics (2.45, gate diagnostics), host only: the host pages' Activity kept in the companion
+      // (activityAdd, activityList) and the tail of companion.log (diagnosticsLog). Details go in `body`.
+      'activityAdd',
+      'activityList',
+      'diagnosticsLog',
     ]),
     // Stage H (2.44): the one payload field of every Stage H op (any JSON; each op's module checks it).
     body: z.json().optional(),

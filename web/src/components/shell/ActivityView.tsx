@@ -2,29 +2,54 @@ import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } fr
 import { Check, Info, TriangleAlert, UserMinus, UserPlus, Users } from 'lucide-react';
 import {
   markActivitySeen,
+  onNoticePushed,
   runNoticeAction,
+  setDetailsContext,
   useNoticeHistory,
   type NoticeKind,
 } from '../../notifications';
+import { controller } from '../../controller';
+import { APP_VERSION, supports } from '../../version';
+import { createActivitySync, noticeEntry, type KeptEntry } from '../../activity-sync';
+import { TechnicalDetails } from '../TechnicalDetails';
 
 /**
  * What happened in the session lately, as this page saw it (2.43): guests joining and leaving and
- * guests waiting in the lobby. Built from the snapshot and the controller's view, so nothing new is
- * asked of the companion. Kept in memory for this page only, the newest 50.
+ * guests waiting in the lobby. Built from the snapshot and the controller's view. Since 2.45 (gate
+ * diagnostics) a host page also keeps it, with its notices, in the companion, so a reload brings it
+ * back (activity-sync.ts). The newest 200.
  */
 export type SharedEvent = {
-  id: number;
+  id: string;
   at: number;
   text: string;
   kind: 'join' | 'leave' | 'lobby';
 };
 let events: SharedEvent[] = [];
-let nextId = 1;
 const listeners = new Set<() => void>();
-function add(kind: SharedEvent['kind'], text: string) {
-  events = [{ id: nextId++, at: Date.now(), text, kind }, ...events].slice(0, 50);
+const emitShared = () => {
   for (const l of listeners) l();
+};
+const SHARED_SIZE = 200;
+function add(kind: SharedEvent['kind'], text: string) {
+  const event = { id: crypto.randomUUID(), at: Date.now(), text, kind };
+  events = [event, ...events].slice(0, SHARED_SIZE);
+  emitShared();
+  sync.push({ ...event, source: kind, kind: 'info' });
 }
+/** The host's Activity in the companion (2.45): one sync per page, armed by useSharedActivity. */
+const sync = createActivitySync({
+  send: (op, body) => controller.run(op, { body: body as never }, { quiet: true }),
+  restoreShared: (kept: KeptEntry[]) => {
+    const known = new Set(events.map((e) => e.id));
+    const fresh = kept
+      .filter((e) => !known.has(e.id) && e.source !== 'notice')
+      .map((e) => ({ id: e.id, at: e.at, text: e.text, kind: e.source as SharedEvent['kind'] }));
+    if (!fresh.length) return;
+    events = [...events, ...fresh].sort((a, b) => b.at - a.at).slice(0, SHARED_SIZE);
+    emitShared();
+  },
+});
 const subscribe = (l: () => void) => {
   listeners.add(l);
   return () => {
@@ -37,11 +62,41 @@ type PeopleView = {
   guests: string[];
   people: Record<string, { name?: string } | undefined>;
   requests: { name?: string }[];
+  /** 2.45: what the page is, for Activity in the companion and errors' technical details. */
+  mode?: string;
+  status?: string;
+  demo?: boolean;
+  state?: { companionVersion?: string | null };
 };
-/** Mounted once by the app: notes joins, leaves and lobby requests as they happen. */
+/**
+ * Mounted once by the app: notes joins, leaves and lobby requests as they happen. Since 2.45 it also
+ * keeps a host page's Activity in the companion (when it supports diagnostics) and tells error notices
+ * what this page is (their technical details).
+ */
 export function useSharedActivity(view: PeopleView, enabled: boolean) {
   const seen = useRef<Map<string, string> | null>(null);
   const waiting = useRef(0);
+  const companion = view.state?.companionVersion ?? null;
+  const armed = enabled && !view.demo;
+  const live = armed && view.status === 'Host ready' && supports(companion, 'diagnostics');
+  useEffect(() => sync.arm(armed), [armed]);
+  useEffect(() => void sync.connect(live), [live]);
+  useEffect(
+    () =>
+      onNoticePushed((notice) => {
+        sync.push(noticeEntry(notice));
+      }),
+    [],
+  );
+  useEffect(() => {
+    const page = view.demo ? 'example' : (view.mode ?? 'landing');
+    setDetailsContext(() =>
+      [`Page: ${page}`, `Website: ${APP_VERSION}`, companion ? `Companion: ${companion}` : '']
+        .filter(Boolean)
+        .join('\n'),
+    );
+    return () => setDetailsContext(null);
+  }, [view.mode, view.demo, companion]);
   useEffect(() => {
     if (!enabled) {
       seen.current = null;
@@ -126,6 +181,7 @@ export function ActivityView() {
                 {icon(h.kind)}
                 <time dateTime={new Date(h.at).toISOString()}>{time(h.at)}</time>
                 <span>{h.message}</span>
+                {h.kind === 'error' && h.details && <TechnicalDetails details={h.details} />}
                 {h.action && !h.done && now < h.actionUntil && (
                   <button
                     type="button"

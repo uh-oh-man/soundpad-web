@@ -14,6 +14,7 @@ import { SetupSection } from './settings/SetupSection';
 import { UpdateSection } from './settings/UpdateSection';
 import { GuestOrganizeToggle } from './settings/GuestOrganizeToggle';
 import { BackupsSection } from './settings/BackupsSection';
+import { DiagnosticsSection } from './settings/DiagnosticsSection';
 
 const COMPANION_DOWNLOAD = `${(import.meta.env.VITE_REPOSITORY_URL as string | undefined) || 'https://github.com/uh-oh-man/soundpad-web'}/releases/latest/download/SoundpadWeb.exe`;
 
@@ -252,6 +253,8 @@ export function SettingsDialog({
       )}
       {/* 2.44 (gate updater): the companion updates itself. */}
       {host && !view.demo && <UpdateSection />}
+      {/* 2.45 (gate diagnostics): the end of companion.log; host only, it checks the gate itself. */}
+      <DiagnosticsSection />
       {host && (
         <>
           {copy.note && (

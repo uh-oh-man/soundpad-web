@@ -301,7 +301,7 @@ describe('permissions, snapshot and gates (2.41)', () => {
     expect(snapshot.permissions.guestLibraryEdit).toBe(false);
     expect(supports('2.40.0', 'voiceLibrary')).toBe(false);
     expect(supports('2.41.0', 'voiceLibrary')).toBe(true);
-    expect(missingFeatures('2.40.3')).toHaveLength(12); // the voice library, the 2.41 review fixes, sentences (2.42), the three 2.43 features and the six of Stage H (2.44)
+    expect(missingFeatures('2.40.3')).toHaveLength(13); // the voice library, the 2.41 review fixes, sentences (2.42), the three 2.43 features, the six of Stage H (2.44) and diagnostics (2.45)
     expect(siteRelaysLibrary('2.40.9')).toBe(false);
     expect(siteRelaysLibrary('2.41.0')).toBe(true);
   });
