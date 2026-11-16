@@ -122,5 +122,13 @@ export function usePreviewAudio() {
   const setLooping = useCallback((on: boolean) => {
     if (audio.current) audio.current.loop = on;
   }, []);
-  return { previewing, play, stop, setLooping, settled };
+  /**
+   * How far the preview sound has played (ms), or null while none is playing yet (still being made, or
+   * the browser has not started it). Mimic's history lights the word being heard with it (2.45).
+   */
+  const elapsedMs = useCallback(() => {
+    const sound = audio.current;
+    return sound && !sound.paused ? sound.currentTime * 1000 : null;
+  }, []);
+  return { previewing, play, stop, setLooping, settled, elapsedMs };
 }
