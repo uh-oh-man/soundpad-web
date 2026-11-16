@@ -38,15 +38,6 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit 1 }
       - name: Voice Replay Studio (mimic/) build and tests
         run: dotnet run --project mimic/tests/VoiceReplay.Tests -c Release
-      - run: npx playwright install chromium
-      - run: npm run test:e2e
-      # Guests often join from an iPhone or a Mac, so the same suite also runs in WebKit, Safari's engine.
-      # (Playwright's Firefox build is covered by no job yet.)
-      - run: npx playwright install webkit
-      - name: Browser tests in WebKit (Safari's engine)
-        run: npx playwright test --output test-results/webkit
-        env:
-          TEST_BROWSER: webkit
       # UpdateRepository (2.44): the release EXE updates itself from this repository's releases; other builds never do.
       - name: Publish portable companion
         run: dotnet publish companion/SoundpadWeb.Companion.csproj -c Release -r win-x64 --self-contained true -o artifacts/release "-p:WebsiteUrl=$env:PUBLIC_WEBSITE_URL" "-p:UpdateRepository=$env:UPDATE_REPOSITORY"
@@ -70,17 +61,41 @@ jobs:
         with:
           name: SoundpadWeb-static
           path: dist/
+  browser:
+    name: Browser (${{ matrix.engine }}, ${{ matrix.shard }}/4)
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        engine: [chromium, webkit]
+        shard: [1, 2, 3, 4]
+    env:
+      TEST_BROWSER: ${{ matrix.engine }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+          cache: npm
+      - uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: '10.0.x'
+      - run: npm ci
+      - run: dotnet build companion/harness/SoundpadWeb.Harness.csproj -c Release
+      - run: npx playwright install ${{ matrix.engine }}
+      # Each shard runs one worker with its own Vite server and mock companion on a dedicated runner.
+      - run: npm run test:e2e -- --fully-parallel --shard=${{ matrix.shard }}/4
       - uses: actions/upload-artifact@v7
         if: always()
         with:
-          name: browser-test-evidence
+          name: browser-test-evidence-${{ matrix.engine }}-${{ matrix.shard }}
           path: |
             test-results/
             artifacts/screenshots/
             artifacts/v2/*metrics.json
   release:
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: build
+    needs: [build, browser]
     runs-on: windows-latest
     permissions:
       contents: write
