@@ -172,6 +172,7 @@ public sealed partial class Bridge(ISoundpad pipe, StateStore store) : IDisposab
         // arrival order, before anything that may wait, so a command they sent later never sees the old one.
         if (c.Op == "revokePeer" && actor == "host" && c.GuestId is { Length: > 0 and <= 128 } guestId) ForgetGuest(guestId);
         if (ExecuteUiPrefs(c, actor) is { } ui) return ui;
+        if (ExecuteDiagnostics(c, actor) is { } diagnostics) return diagnostics;
         if (await ExecuteKeep(c, actor, participant, requester, audience) is { } keep) return keep;
         if (await ExecuteVoices(c, actor, participant, requester, audience) is { } voices) return voices;
         var query = await Query(c, actor); if (query != null) return query;
