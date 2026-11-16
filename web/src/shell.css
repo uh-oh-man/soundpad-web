@@ -30,27 +30,19 @@
   .app-shell.is-connected[data-rail='true'] {
     --sidebar-cur: 64px;
   }
-  .app-shell.is-connected[data-nav='tabs']:is([data-view='voices'], [data-view='sentences']) {
+  .app-shell.is-connected[data-nav='tabs']:is(
+      [data-view='voices'],
+      [data-view='sentences'],
+      [data-view='mimic']
+    ) {
     --sidebar-cur: 0px;
   }
   .app-shell.is-connected[data-panel='docked'] {
     --splitter-w: 8px;
     --editor-w: var(--editor-cur, 480px);
   }
-  /* Mimic's Full screen (2.46): the panel takes the main area. The view under it is hidden, but its column
-     stays (below the panel) for the notice dock, so Undo and errors still show. */
-  .app-shell.is-connected[data-panel='docked'][data-panel-full='true'] {
-    grid-template-columns: var(--sidebar-cur) minmax(0, 1fr);
-    grid-template-rows: var(--topbar-h) auto minmax(0, 1fr) auto auto;
-    grid-template-areas:
-      'top top'
-      'banner banner'
-      'side panel'
-      'side main'
-      'player player';
-  }
-  .app-shell.is-connected[data-panel-full='true'] .board-column > #board {
-    display: none;
+  .app-shell.is-connected[data-mimic-fill='true'] {
+    --sidebar-cur: 0px;
   }
   /* The element stays (scripts look for it); its children join the shell's grid. */
   .app-shell.is-connected .workspace {
@@ -66,7 +58,11 @@
   .app-shell.is-connected .sidebar {
     grid-area: side;
   }
-  .app-shell.is-connected[data-nav='tabs']:is([data-view='voices'], [data-view='sentences'])
+  .app-shell.is-connected[data-nav='tabs']:is(
+      [data-view='voices'],
+      [data-view='sentences'],
+      [data-view='mimic']
+    )
     .sidebar {
     display: none;
   }

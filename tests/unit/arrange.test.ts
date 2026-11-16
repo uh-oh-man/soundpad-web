@@ -103,11 +103,17 @@ describe('companion version gate', () => {
 });
 
 /** The 2.45 features (each WP adds its own here), last in every list of what an older companion lacks. */
-const V2_45 = [
+const NEW_FEATURES = [
+  "the Feedback button (notes saved on the host's desktop)",
+  'no storage limits for guests',
+  'a Remove all my Temp clips button for guests',
+  'Undo after removing Temp audio',
   'one Recover previous session or Discard after a crash, covering Temp, the recording history and your drafts',
   "each guest's recent Temp and Keep clips under their storage request",
+  "voice slots and phrase blocks in sentence templates, Add to sentence from the palette, and guests' unkept sentences for the host to see and clear",
+  "Activity that stays after a reload, and the companion's log in Settings for when something goes wrong",
+  'one-press Save into the voice library',
 ];
-/** The Stage H (2.44) features and everything newer, last in every list of what an older companion lacks. */
 const STAGE_H = [
   'automatic backups to a folder you choose, with restore of single clips, recordings, voices, sentences or the whole library',
   'updates from inside the app that keep your session, guests and Temp',
@@ -115,16 +121,6 @@ const STAGE_H = [
   'a Needs attention group for sounds whose file is missing',
   'a guided setup: Soundpad check with fixes, capture output, invitations',
   'host-wide hotkeys for Capture, Panic and (optionally) Stop, with conflicts reported',
-  // 2.45, after Stage H.
-  "the Feedback button (notes saved on the host's desktop)",
-  'no storage limits for guests',
-  // 2.46.
-  'a Remove all my Temp clips button for guests',
-  'Undo after removing Temp audio',
-];
-/** The 2.45 features, after Stage H's (each work package adds its own here). */
-const V2_45 = [
-  "voice slots and phrase blocks in sentence templates, Add to sentence from the palette, and guests' unkept sentences for the host to see and clear",
 ];
 describe('feature gates for older companions', () => {
   it('hides each feature until the companion that added it', () => {
@@ -163,7 +159,7 @@ describe('feature gates for older companions', () => {
       'effects and speed copies of any Soundpad sound',
       'your browser and the companion window share style and active draft',
       ...STAGE_H,
-      ...V2_45,
+      ...NEW_FEATURES,
     ]);
     expect(missingFeatures('2.15.9')).toEqual([
       'any speed for edited copies (0.05× to 20×)',
@@ -185,7 +181,7 @@ describe('feature gates for older companions', () => {
       'effects and speed copies of any Soundpad sound',
       'your browser and the companion window share style and active draft',
       ...STAGE_H,
-      ...V2_45,
+      ...NEW_FEATURES,
     ]);
     expect(missingFeatures('2.16.2')).toEqual([
       'Keep pitch when changing speed',
@@ -206,7 +202,7 @@ describe('feature gates for older companions', () => {
       'effects and speed copies of any Soundpad sound',
       'your browser and the companion window share style and active draft',
       ...STAGE_H,
-      ...V2_45,
+      ...NEW_FEATURES,
     ]);
     expect(missingFeatures('2.17.0')).toEqual([
       'clearing all temporary audio during a session',
@@ -226,7 +222,7 @@ describe('feature gates for older companions', () => {
       'effects and speed copies of any Soundpad sound',
       'your browser and the companion window share style and active draft',
       ...STAGE_H,
-      ...V2_45,
+      ...NEW_FEATURES,
     ]);
     expect(missingFeatures('2.19.0')).toEqual([
       'previewing an edited copy before saving it',
@@ -245,7 +241,7 @@ describe('feature gates for older companions', () => {
       'effects and speed copies of any Soundpad sound',
       'your browser and the companion window share style and active draft',
       ...STAGE_H,
-      ...V2_45,
+      ...NEW_FEATURES,
     ]);
     expect(supports('2.19.0', 'trimPreview')).toBe(false);
     expect(supports('2.20.0', 'trimPreview')).toBe(true);
@@ -266,7 +262,7 @@ describe('feature gates for older companions', () => {
       'effects and speed copies of any Soundpad sound',
       'your browser and the companion window share style and active draft',
       ...STAGE_H,
-      ...V2_45,
+      ...NEW_FEATURES,
     ]);
     expect(missingFeatures('2.20.0')).toEqual([
       'naming trimmed copies after their words',
@@ -284,7 +280,7 @@ describe('feature gates for older companions', () => {
       'effects and speed copies of any Soundpad sound',
       'your browser and the companion window share style and active draft',
       ...STAGE_H,
-      ...V2_45,
+      ...NEW_FEATURES,
     ]);
     expect(missingFeatures('2.29.3')).toEqual([
       'Undo that stops only its own clip',
@@ -301,7 +297,7 @@ describe('feature gates for older companions', () => {
       'effects and speed copies of any Soundpad sound',
       'your browser and the companion window share style and active draft',
       ...STAGE_H,
-      ...V2_45,
+      ...NEW_FEATURES,
     ]);
     expect(missingFeatures('2.24.0')).toEqual([
       'Undo that stops only its own clip',
@@ -318,7 +314,7 @@ describe('feature gates for older companions', () => {
       'effects and speed copies of any Soundpad sound',
       'your browser and the companion window share style and active draft',
       ...STAGE_H,
-      ...V2_45,
+      ...NEW_FEATURES,
     ]);
     expect(missingFeatures('2.30.0')).toEqual([
       'Undo for guests on their own clips and copies',
@@ -334,7 +330,7 @@ describe('feature gates for older companions', () => {
       'effects and speed copies of any Soundpad sound',
       'your browser and the companion window share style and active draft',
       ...STAGE_H,
-      ...V2_45,
+      ...NEW_FEATURES,
     ]);
     expect(missingFeatures('2.32.0')).toEqual([
       'playback that follows the newest click, and Panic',
@@ -349,7 +345,7 @@ describe('feature gates for older companions', () => {
       'effects and speed copies of any Soundpad sound',
       'your browser and the companion window share style and active draft',
       ...STAGE_H,
-      ...V2_45,
+      ...NEW_FEATURES,
     ]);
     expect(missingFeatures('2.34.2')).toEqual([
       'playback that follows the newest click, and Panic',
@@ -364,7 +360,7 @@ describe('feature gates for older companions', () => {
       'effects and speed copies of any Soundpad sound',
       'your browser and the companion window share style and active draft',
       ...STAGE_H,
-      ...V2_45,
+      ...NEW_FEATURES,
     ]);
     expect(missingFeatures('2.35.0')).toEqual([
       'the companion window that keeps your session running when the browser tab closes',
@@ -378,7 +374,7 @@ describe('feature gates for older companions', () => {
       'effects and speed copies of any Soundpad sound',
       'your browser and the companion window share style and active draft',
       ...STAGE_H,
-      ...V2_45,
+      ...NEW_FEATURES,
     ]);
     expect(missingFeatures('2.36.0')).toEqual([
       'guest admission, places and permissions that survive a reload of the host page',
@@ -391,7 +387,7 @@ describe('feature gates for older companions', () => {
       'effects and speed copies of any Soundpad sound',
       'your browser and the companion window share style and active draft',
       ...STAGE_H,
-      ...V2_45,
+      ...NEW_FEATURES,
     ]);
     expect(missingFeatures('2.37.0')).toEqual([
       'a rolling recording history of up to an hour, with clickable word-by-word subtitles',
@@ -403,7 +399,7 @@ describe('feature gates for older companions', () => {
       'effects and speed copies of any Soundpad sound',
       'your browser and the companion window share style and active draft',
       ...STAGE_H,
-      ...V2_45,
+      ...NEW_FEATURES,
     ]);
     // 2.38.0 (Try the example) changed the website only, so its companion lacks the history.
     expect(missingFeatures('2.38.0')).toEqual([
@@ -416,7 +412,7 @@ describe('feature gates for older companions', () => {
       'effects and speed copies of any Soundpad sound',
       'your browser and the companion window share style and active draft',
       ...STAGE_H,
-      ...V2_45,
+      ...NEW_FEATURES,
     ]);
     expect(missingFeatures('2.39.0')).toEqual([
       'drafts of Mimic clips you can edit before keeping, Latest phrase, private preview for guests, guest Keep with storage budgets, and Temp that stays until you quit',
@@ -427,7 +423,7 @@ describe('feature gates for older companions', () => {
       'effects and speed copies of any Soundpad sound',
       'your browser and the companion window share style and active draft',
       ...STAGE_H,
-      ...V2_45,
+      ...NEW_FEATURES,
     ]);
     expect(missingFeatures('2.40.0')).toEqual([
       'discarding only the recording history a crash recovered (what was recorded since stays), and edits that always stay with the recording they were made on',
@@ -437,7 +433,7 @@ describe('feature gates for older companions', () => {
       'effects and speed copies of any Soundpad sound',
       'your browser and the companion window share style and active draft',
       ...STAGE_H,
-      ...V2_45,
+      ...NEW_FEATURES,
     ]);
     expect(missingFeatures('2.41.0')).toEqual([
       'sentences built from recorded words on a timeline, a speaking palette with recorded performances, performance sets, and kept sentences with versions that you can pin to the board',
@@ -445,26 +441,18 @@ describe('feature gates for older companions', () => {
       'effects and speed copies of any Soundpad sound',
       'your browser and the companion window share style and active draft',
       ...STAGE_H,
-      ...V2_45,
+      ...NEW_FEATURES,
     ]);
     expect(missingFeatures('2.42.0')).toEqual([
       'a Kick count for this session next to the lifetime total',
       'effects and speed copies of any Soundpad sound',
       'your browser and the companion window share style and active draft',
       ...STAGE_H,
-      ...V2_45,
+      ...NEW_FEATURES,
     ]);
-    expect(missingFeatures('2.43.0')).toEqual(STAGE_H);
-    expect(missingFeatures('2.44.0')).toEqual([
-      "the Feedback button (notes saved on the host's desktop)",
-      'no storage limits for guests',
-      'a Remove all my Temp clips button for guests',
-      'Undo after removing Temp audio',
-    ]);
-    expect(missingFeatures('2.45.0')).toEqual([
-      'a Remove all my Temp clips button for guests',
-      'Undo after removing Temp audio',
-    ]);
+    expect(missingFeatures('2.43.0')).toEqual([...STAGE_H, ...NEW_FEATURES]);
+    expect(missingFeatures('2.44.0')).toEqual(NEW_FEATURES);
+    expect(missingFeatures('2.45.0')).toEqual(NEW_FEATURES.slice(2));
     expect(missingFeatures('2.46.0')).toEqual([]);
     expect(supports('2.39.0', 'drafts')).toBe(false);
     expect(supports('2.40.0', 'drafts')).toBe(true);

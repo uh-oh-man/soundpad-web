@@ -9,8 +9,8 @@ import { useEffect, useRef } from 'react';
  * functions (the panel itself listens with `useEditorRequests`/`useViewRequests`).
  */
 
-/** The main views. Mimic is not a view: it is an editor, in the panel. */
-export type ShellView = 'board' | 'voices' | 'sentences';
+/** The main views. */
+export type ShellView = 'board' | 'voices' | 'sentences' | 'mimic';
 export type NavStyle = 'sidebar' | 'tabs';
 export type EditorKind = 'mimic' | 'temp-edit' | 'sound-edit' | 'activity' | 'organize';
 /** How the open panel is shown: a grid column, a sheet over the board, or a bar above the player. */
@@ -40,7 +40,7 @@ export const OPEN_EDITOR_EVENT = 'soundpad-web:open-editor';
 export const SHOW_VIEW_EVENT = 'soundpad-web:show-view';
 
 const kinds: readonly EditorKind[] = ['mimic', 'temp-edit', 'sound-edit', 'activity', 'organize'];
-const views: readonly ShellView[] = ['board', 'voices', 'sentences'];
+const views: readonly ShellView[] = ['board', 'voices', 'sentences', 'mimic'];
 
 /** True for a well-formed request (events can come from anywhere on the page). */
 export function isEditorRequest(value: unknown): value is EditorRequest {

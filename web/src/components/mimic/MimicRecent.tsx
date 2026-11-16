@@ -1,13 +1,16 @@
 import { useRef, useState } from 'react';
-import { BookmarkPlus, Play, Rewind, Scissors, Trash2 } from 'lucide-react';
+import { BookAudio, BookmarkPlus, Check, Play, Rewind, Scissors, Trash2 } from 'lucide-react';
 import { controller } from '../../controller';
 import type { Snapshot } from '../../protocol';
 import { supports } from '../../version';
 import { guestHeld, HELD_BY_HOST, intentKey, playback, usePendingIntent } from '../../playback';
 import { removeNewTempAudio } from '../../remove-temp';
-import { refreshTempAssets, useTempAssets } from '../../temp-assets';
+import { guestOwns, refreshTempAssets, useTempAssets } from '../../temp-assets';
 import { clipDeletable, deleteWithUndo, useDeleted } from '../../mimic/pending-delete';
 import { followFocus } from '../../focus-follow';
+import { canQuickSave, saveClip } from '../../library/quick-save';
+import { canEditLibrary } from '../../library/voices';
+import { useVoiceStore } from '../../library/voice-store';
 
 /** Quick effects for a fresh clip (2.18.1): each makes an Edit copy of the whole clip and plays it at once. */
 const quickEffects = [
@@ -31,26 +34,41 @@ export function MimicRecent({
   onTempRequest?: (kind: 'edit' | 'keep', assetId: string) => void;
 }) {
   const [making, setMaking] = useState('');
+  const [filter, setFilter] = useState('');
+  // One-press Save (2.46): the clip goes into the voice library at once, under its own name.
+  const [saving, setSaving] = useState('');
+  const [saved, setSaved] = useState<string[]>([]);
+  const { status: library } = useVoiceStore();
   // The replay this page asked for and has not heard back about (2.35).
   const intent = usePendingIntent();
   const deleted = useDeleted();
   const { data: temp } = useTempAssets();
   const list = useRef<HTMLElement>(null);
   // Skip clips already removed from Temp, and those deleted here (2.46).
-  const recent = (state.mimic?.recent ?? []).filter(
-    (clip) =>
-      !deleted.has(clip.assetId) && state.library.sounds.some((s) => s.assetId === clip.assetId),
+  const visibleAssets = new Set(state.library.sounds.map((sound) => sound.assetId));
+  const clips = [...(state.mimic?.recent ?? []), ...(state.mimic?.moreRecent ?? [])].filter(
+    (clip) => !deleted.has(clip.assetId) && visibleAssets.has(clip.assetId),
   );
-  if (!recent.length) return null;
+  if (!clips.length) return <p className="muted">Clips you make appear here.</p>;
+  const query = filter.trim().toLocaleLowerCase();
+  const recent = clips.filter(
+    (clip) => !query || `${clip.name} ${clip.by}`.toLocaleLowerCase().includes(query),
+  );
   const me = controller.getSnapshot().profile.name;
-  // The host may delete any clip; a guest their own, while the host lets guests add audio (2.32 Undo rules;
-  // the companion checks it really is theirs).
-  const canDelete = (clip: (typeof recent)[number]) =>
-    clipDeletable(temp?.manager.assets.find((a) => a.id === clip.assetId)) &&
-    (host ||
-      (clip.by === me &&
-        state.permissions.guestUploads !== false &&
-        supports(state.companionVersion, 'guestUndo')));
+  // The host may delete any clip; a guest their own, while the host lets guests add audio or use Mimic
+  // (Temp's rules since 2.46; the companion checks it really is theirs).
+  const canDelete = (clip: (typeof recent)[number]) => {
+    const asset = temp?.manager.assets.find((a) => a.id === clip.assetId);
+    return (
+      clipDeletable(asset) &&
+      (host ||
+        ((asset ? guestOwns(temp, asset, me) : clip.by === me) &&
+          supports(state.companionVersion, 'guestUndo') &&
+          (state.permissions.guestUploads !== false ||
+            (state.permissions.guestMimic === true &&
+              supports(state.companionVersion, 'tempUndo')))))
+    );
+  };
   function remove(index: number, from: Element) {
     const clip = recent[index];
     const next = recent[index + 1] ?? recent[index - 1];
@@ -65,7 +83,7 @@ export function MimicRecent({
           list.current?.querySelector<HTMLElement>(
             `[data-clip="${CSS.escape(next.assetId)}"] button`,
           )) ||
-        document.getElementById('editor-title'),
+        document.getElementById('mimic-title'),
     );
   }
   // Held by the host's Panic (2.35): play controls look unavailable, keep focus and ignore presses.
@@ -78,6 +96,19 @@ export function MimicRecent({
     supports(state.companionVersion, 'effects') &&
     (host || state.permissions.guestUploads !== false);
   const keepPitch = supports(state.companionVersion, 'keepPitch');
+  const canSave = canQuickSave(state, host, controller.hostSite());
+  async function save(assetId: string, name: string) {
+    if (saving) return;
+    setSaving(assetId);
+    try {
+      await saveClip(assetId, name, canEditLibrary(library, state.permissions, host));
+      setSaved((list) => [...list.filter((id) => id !== assetId), assetId]);
+    } catch {
+      /* The controller shows the refusal. */
+    } finally {
+      setSaving('');
+    }
+  }
   // Edit copy: same rules as Temp's own button (the host, or guests the host lets add audio).
   const canEdit =
     !!onTempRequest &&
@@ -109,7 +140,17 @@ export function MimicRecent({
   }
   return (
     <section className="mimic-recent" aria-label="Just mimicked" ref={list}>
-      <small>Just mimicked</small>
+      <small>Just mimicked · {clips.length}</small>
+      {(clips.length > 8 || filter) && (
+        <input
+          type="search"
+          aria-label="Filter Mimic clips"
+          placeholder="Find a clip"
+          value={filter}
+          onChange={(event) => setFilter(event.target.value)}
+        />
+      )}
+      {!recent.length && <p className="muted">No clips match.</p>}
       {recent.map((clip, index) => (
         <div className="mimic-recent-item" key={clip.assetId} data-clip={clip.assetId}>
           <button
@@ -147,7 +188,29 @@ export function MimicRecent({
               <Scissors size={14} />
             </button>
           )}
-          {/* Voice Replay Studio keeps every capture; here the host keeps the ones worth it (2.26). */}
+          {canSave && (
+            <button
+              className="mimic-save"
+              aria-label={`Save ${clip.name} to the voice library`}
+              title="Save it to the voice library now, under this name (kept where Keep puts files)"
+              aria-busy={saving === clip.assetId || undefined}
+              aria-disabled={!!saving || undefined}
+              onClick={() => void save(clip.assetId, clip.name)}
+            >
+              {saved.includes(clip.assetId) ? (
+                <Check size={14} aria-hidden="true" />
+              ) : (
+                <BookAudio size={14} aria-hidden="true" />
+              )}{' '}
+              {saving === clip.assetId
+                ? 'Saving…'
+                : saved.includes(clip.assetId)
+                  ? 'Saved'
+                  : 'Save'}
+            </button>
+          )}
+          {/* Voice Replay Studio keeps every capture; here the host keeps the ones worth it (2.26).
+              With one-press Save (2.46) this stays for choosing another folder or category. */}
           {host && onTempRequest && (
             <button
               className="icon-button"

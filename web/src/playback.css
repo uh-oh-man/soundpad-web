@@ -946,3 +946,12 @@ html[data-motion='reduce'] .player.intent-pending .playback-icon {
   outline: 2px solid var(--focus);
   outline-offset: 2px;
 }
+
+.player-wave-zoom {
+  display: inline-flex;
+  gap: 4px;
+}
+
+.player-wave-zoom button {
+  min-inline-size: 22px;
+}

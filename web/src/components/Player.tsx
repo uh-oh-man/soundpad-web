@@ -139,11 +139,11 @@ export function Player({
             compact
             sound={sound}
             state={state}
-            disabled={disabled || !canSeek || !known || !current.epoch}
+            disabled={disabled || !canSeek || (!current.epoch && current.status !== 'STOPPED')}
             held={held}
             workspace={workspace}
             update={update}
-            choose={(at) => playback.seek(at)}
+            choose={(at) => playback.position(sound.id, at, false)}
           />
         ) : (
           <div className="unknown-progress">

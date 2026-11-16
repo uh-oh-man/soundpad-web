@@ -19,6 +19,9 @@ import {
 import { canUndoTempRemoval, removeAllMyTemp, removeTempSource } from '../temp-remove';
 import { requestEditor } from '../shell';
 import { HostOnlyTag } from './SimulatedBadge';
+import { canQuickSave, saveClip } from '../library/quick-save';
+import { canEditLibrary } from '../library/voices';
+import { useVoiceStore } from '../library/voice-store';
 type Asset = TempAsset;
 type Variant = TempVariant;
 
@@ -73,6 +76,21 @@ export function TempManager({
       );
     } catch {
       /* Controller shows the error. */
+    }
+  }
+  // One-press Save (2.46): a clip straight into the voice library, where Keep puts files, under its name.
+  const canSave = canQuickSave(state, host, controller.hostSite());
+  const { status: library } = useVoiceStore();
+  async function save(asset: Asset) {
+    if (pending) return;
+    setPending(asset.id);
+    setError('');
+    try {
+      await saveClip(asset.id, asset.name, canEditLibrary(library, state.permissions, host));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Save failed.');
+    } finally {
+      setPending('');
     }
   }
   const me = controller.getSnapshot().profile.name;
@@ -339,6 +357,29 @@ export function TempManager({
                           ? 'accepted — move to permanent storage'
                           : v.state}
                     </span>
+                    {canSave &&
+                      a.origin === 'upload' &&
+                      v.orientation === 'normal' &&
+                      !v.permanent &&
+                      v.state === 'ready' &&
+                      v.nativeLabel && (
+                        <button
+                          className="temp-save-now"
+                          aria-label={`Save ${a.name} to the voice library`}
+                          aria-disabled={!!pending || !!keepBlocked || undefined}
+                          aria-busy={pending === a.id || undefined}
+                          title={
+                            keepBlocked ||
+                            'Save it to the voice library now, under this name (kept where Keep puts files)'
+                          }
+                          onClick={() => {
+                            if (pending || keepBlocked) return;
+                            void save(a);
+                          }}
+                        >
+                          Save
+                        </button>
+                      )}
                     {guestKeeps && !v.permanent && v.state === 'ready' && v.nativeLabel && (
                       <button
                         aria-disabled={!!pending || !!keepBlocked || undefined}

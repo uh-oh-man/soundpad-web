@@ -18,11 +18,11 @@ import {
   TEMP_READY,
   useLocalGuests,
 } from './helpers/harness';
-import { closeEditor, editCopyForm, editorPanel, section, sectionNav } from './helpers/shell';
+import { closeSection, editCopyForm, editorPanel, section, sectionNav } from './helpers/shell';
 
 const nav = (page: Page, name: string) =>
   sectionNav(page).getByRole('button', { name, exact: true });
-const mimicPanel = (page: Page) => page.getByRole('dialog', { name: 'Mimic' });
+const mimicPanel = (page: Page) => page.getByRole('main', { name: 'Mimic', exact: true });
 /** The first "Play from start" at 1440×900 before Stage G (Phase 0's before shots, host board). */
 const TILE_Y_BEFORE = 612.375;
 
@@ -143,7 +143,7 @@ test('section memory: the board scroll and view come back, and "/" focuses the c
   await expect(nav(page, 'Sentences')).toHaveAttribute('aria-current', 'page');
 });
 
-test('the panel stays open while tiles play: the Mimic draft and its selection survive alternating plays', async ({
+test('a Mimic draft and its selection survive while the Soundboard plays', async ({
   page,
   harness,
 }) => {
@@ -151,14 +151,16 @@ test('the panel stays open while tiles play: the Mimic draft and its selection s
   await host(page, harness);
   const panel = await startMimic(page);
   await page.waitForTimeout(2600);
-  await panel.getByLabel('F6 hotkey').focus();
+  await panel.getByRole('heading', { name: 'Mimic' }).focus();
   await page.keyboard.press('5');
   await panel.getByLabel('Clip name').fill('Kept while playing');
   await page.keyboard.press('Enter');
   const draft = panel.getByRole('region', { name: 'Draft' });
   await expect(draft).toBeVisible();
   const names = ['Airhorn', 'Laugh'];
+  await nav(page, 'Soundboard').click();
   for (let i = 0; i < 10; i++) await playButton(page, names[i % 2]).click();
+  await nav(page, 'Mimic').click();
   await expect.poll(() => harness.plays.filter((p) => p.startsWith('DoPlaySound')).length).toBe(10);
   await expect(panel).toBeVisible();
   await expect(draft).toBeVisible();
@@ -171,7 +173,7 @@ test('splitter: keys, pointer drag, the width survives a reload and is clamped t
 }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
   await host(page, harness);
-  await nav(page, 'Mimic').click();
+  await page.getByRole('button', { name: 'Activity' }).click();
   const splitter = page.getByRole('separator', { name: 'Resize editor' });
   const width = async () => Number(await splitter.getAttribute('aria-valuenow'));
   await expect(splitter).toHaveAttribute('aria-valuenow', '480');
@@ -198,7 +200,7 @@ test('splitter: keys, pointer drag, the width survives a reload and is clamped t
   expect(Math.round(panelBox.width)).toBe(460);
   await page.reload();
   await expect(playButton(page, 'Airhorn')).toBeEnabled();
-  await expect(mimicPanel(page)).toBeVisible(); // the open panel is section memory too
+  await expect(editorPanel(page)).toBeVisible(); // the open panel is section memory too
   await expect(splitter).toHaveAttribute('aria-valuenow', '460');
   // The VR window: the sidebar folds to a rail and the panel keeps the board 480 px wide.
   await page.setViewportSize({ width: 1100, height: 800 });
@@ -211,41 +213,23 @@ test('splitter: keys, pointer drag, the width survives a reload and is clamped t
   expect(boardBox.width).toBeGreaterThanOrEqual(479);
 });
 
-test('Escape closes the panel from inside it and gives the keyboard back to the nav; board keys keep their meaning', async ({
+test('Mimic shortcuts clear the selection and leave view navigation available', async ({
   page,
   harness,
 }) => {
   await host(page, harness);
-  const panel = await startMimic(page);
-  await page.waitForTimeout(2600);
-  // "5" in the board's search is typing, not Mimic's "last 5 seconds".
+  const mimic = await startMimic(page);
+  await expect(mimic.getByRole('button', { name: 'Last 5 s' })).toBeVisible();
+  await mimic.getByRole('heading', { name: 'Mimic' }).focus();
+  await page.keyboard.press('5');
+  await expect(mimic.getByLabel('Clip name')).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(mimic.getByLabel('Clip name')).toHaveCount(0);
+  await expect(mimic).toBeVisible();
+  await nav(page, 'Soundboard').click();
   const search = page.getByRole('textbox', { name: 'Search sounds' });
-  await search.fill('');
   await search.press('5');
   await expect(search).toHaveValue('5');
-  await expect(panel.locator('.mimic-range')).toHaveCount(0);
-  // ...and on a focused tile it is not Mimic's either.
-  await search.fill('');
-  await playButton(page, 'Airhorn').focus();
-  await page.keyboard.press('5');
-  await expect(panel.locator('.mimic-range')).toHaveCount(0);
-  // Escape in the search clears it and leaves the panel open.
-  await search.fill('Air');
-  await search.press('Escape');
-  await expect(search).toHaveValue('');
-  await search.press('Escape');
-  await expect(panel).toBeVisible();
-  // Inside the panel, Escape closes it, and the nav's Mimic (which opened it) has the keyboard.
-  await panel.getByRole('button', { name: 'Stop listening' }).focus();
-  await page.keyboard.press('Escape');
-  await expect(panel).toHaveCount(0);
-  await expect(nav(page, 'Mimic')).toBeFocused();
-  // Pressing Mimic while it is open moves the keyboard into it instead of closing it.
-  await nav(page, 'Mimic').click();
-  await expect(page.locator('#editor-title')).toBeFocused();
-  await nav(page, 'Mimic').click();
-  await expect(mimicPanel(page)).toBeVisible();
-  await expect(page.locator('#editor-title')).toBeFocused();
 });
 
 test('a dialog over the open panel: one Close dialog, Tab stays in the dialog, focus comes back to its opener', async ({
@@ -289,7 +273,8 @@ test('fast switching between editors: each kind shows its own content and title'
   const title = page.locator('#editor-title');
   const started = Date.now();
   await nav(page, 'Mimic').click();
-  await expect(title).toHaveText('Mimic');
+  await expect(section(page, 'Mimic')).toBeVisible();
+  await nav(page, 'Soundboard').click();
   await playButton(page, 'Airhorn').click();
   await page.locator('#temp-manager > summary').click();
   await page
@@ -313,21 +298,19 @@ test('fast switching between editors: each kind shows its own content and title'
   await expect(title).toHaveText('Activity');
   await expect(editorPanel(page).getByRole('heading', { name: 'Notices' })).toBeVisible();
   await nav(page, 'Mimic').click();
-  await expect(title).toHaveText('Mimic');
   await expect(mimicPanel(page).getByRole('button', { name: 'Start listening' })).toBeVisible();
   expect(Date.now() - started).toBeLessThan(15000);
   await expect(page.getByRole('dialog')).toHaveCount(1);
   await expect(editorPanel(page).locator('form.temp-trim')).toHaveCount(0);
 });
 
-test('phone sheet: Stop and Panic stay usable, Show board folds it to a bar and Show editor brings the draft back', async ({
+test('phone Mimic: Stop and Panic stay usable and the draft survives a visit to the board', async ({
   page,
   harness,
 }) => {
   await page.setViewportSize({ width: 412, height: 860 });
   await host(page, harness);
   const panel = await startMimic(page);
-  await expect(panel).toHaveAttribute('data-panel-mode', 'sheet');
   await page.waitForTimeout(2600);
   await panel.getByRole('button', { name: 'Last 5 s', exact: true }).click();
   await panel.getByLabel('Clip name').fill('Sheet draft');
@@ -341,16 +324,12 @@ test('phone sheet: Stop and Panic stay usable, Show board folds it to a bar and 
   }
   await stop.click();
   expect(await noSideScroll(page)).toBe(true);
-  // The board is out of reach under the sheet.
-  await expect(page.locator('#board')).toHaveAttribute('inert', '');
-  await panel.getByRole('button', { name: 'Show board' }).click();
-  await expect(panel).toHaveAttribute('data-panel-mode', 'minimized');
+  await nav(page, 'Soundboard').click();
   await expect(page.locator('#board')).not.toHaveAttribute('inert', '');
   const before = harness.plays.length;
   await playButton(page, 'Airhorn').click();
   await expect.poll(() => harness.plays.slice(before)).toContain('DoPlaySound(1)');
-  await panel.getByRole('button', { name: 'Show editor' }).click();
-  await expect(panel).toHaveAttribute('data-panel-mode', 'sheet');
+  await nav(page, 'Mimic').click();
   await expect(panel.getByRole('region', { name: 'Draft' })).toBeVisible();
   await expect(panel.getByLabel('Clip name')).toHaveValue('Sheet draft');
   expect(await noSideScroll(page)).toBe(true);
@@ -387,7 +366,7 @@ test('notices never cover the panel, Stop, Panic, the nav or Settings at four si
     await expect(page.getByRole('button', { name: /^\d+ more notices?$/ })).toBeVisible();
     const undo = page.locator('.notification-stack').getByRole('button', { name: 'Undo' }).first();
     const controls: [string, Locator][] = [
-      ['Close dialog', panel.getByRole('button', { name: 'Close dialog' })],
+      ['Mimic settings', panel.getByText('Mimic settings', { exact: true })],
       ['Stop', page.getByRole('button', { name: 'Stop', exact: true })],
       ['Panic', page.getByRole('button', { name: 'Panic: stop audio and pause guest playback' })],
       ['Mimic', nav(page, 'Mimic')],
@@ -396,8 +375,7 @@ test('notices never cover the panel, Stop, Panic, the nav or Settings at four si
       ['Kick counter details', page.getByRole('button', { name: 'Kick counter details' })],
       ['Undo', undo],
     ];
-    if (narrow) controls.push(['Show board', panel.getByRole('button', { name: 'Show board' })]);
-    else controls.push(['Resize editor', page.getByRole('separator', { name: 'Resize editor' })]);
+
     for (const [name, control] of controls) {
       await control.scrollIntoViewIfNeeded();
       expect(await onTop(control), `${name} at ${size.width}`).toBe(true);
@@ -412,10 +390,10 @@ test('notices never cover the panel, Stop, Panic, the nav or Settings at four si
     await expect(decrease).toHaveCount(0);
     // Keyboard: no focus trap; Shift+Tab from the panel's close button reaches a notice's Undo (the dock
     // comes just before the splitter and the panel).
-    await panel.getByRole('button', { name: 'Close dialog' }).focus();
+    await panel.getByText('Mimic settings', { exact: true }).focus();
     let reached = false;
     for (let i = 0; i < 40 && !reached; i++) {
-      await page.keyboard.press('Shift+Tab');
+      await page.keyboard.press('Tab');
       reached = await page.evaluate(
         () =>
           document.activeElement?.closest('.notification-stack') !== null &&
@@ -424,12 +402,12 @@ test('notices never cover the panel, Stop, Panic, the nav or Settings at four si
     }
     expect(reached, `Tab to Undo at ${size.width}`).toBe(true);
     // The panel closes and opens again with the notices showing.
-    await closeEditor(page);
+    await closeSection(page, 'Mimic');
     await expect(panel).toHaveCount(0);
     await nav(page, 'Mimic').click();
     await expect(panel).toBeVisible();
     await panel.getByRole('button', { name: 'Stop listening' }).click();
-    await closeEditor(page);
+    await closeSection(page, 'Mimic');
   }
 });
 
@@ -750,7 +728,7 @@ test('example: notices never cover Leave example, the panel, Stop, Panic, the na
     const narrow = size.width <= 1000;
     await expect(page.locator('.notification-stack .toast')).toHaveCount(narrow ? 2 : 3);
     const controls: [string, Locator][] = [
-      ['Close dialog', panel.getByRole('button', { name: 'Close dialog' })],
+      ['Mimic settings', panel.getByText('Mimic settings', { exact: true })],
       ['Stop', page.getByRole('button', { name: 'Stop', exact: true })],
       ['Panic', page.getByRole('button', { name: 'Panic: stop audio and pause guest playback' })],
       ['Mimic', nav(page, 'Mimic')],
@@ -758,24 +736,12 @@ test('example: notices never cover Leave example, the panel, Stop, Panic, the na
       ['Kick counter details', page.getByRole('button', { name: 'Kick counter details' })],
       ['Undo', page.locator('.notification-stack').getByRole('button', { name: 'Undo' }).first()],
     ];
-    if (narrow) controls.push(['Show board', panel.getByRole('button', { name: 'Show board' })]);
-    else {
-      controls.push(['Resize editor', page.getByRole('separator', { name: 'Resize editor' })]);
-      controls.push(['Leave example', page.getByRole('button', { name: 'Leave example' })]);
-    }
+    controls.push(['Leave example', page.getByRole('button', { name: 'Leave example' })]);
     for (const [name, control] of controls) {
       await control.scrollIntoViewIfNeeded();
       expect(await onTop(control), `${name} at ${size.width}`).toBe(true);
     }
-    if (narrow) {
-      // The phone sheet covers the banner; Show board folds it, and Leave example is reachable then.
-      await panel.getByRole('button', { name: 'Show board' }).click();
-      const leave = page.getByRole('button', { name: 'Leave example' });
-      await leave.scrollIntoViewIfNeeded();
-      expect(await onTop(leave), `Leave example at ${size.width}`).toBe(true);
-      await page.getByRole('button', { name: 'Show editor' }).click();
-    }
-    await closeEditor(page);
+    await closeSection(page, 'Mimic');
     await expect(panel).toHaveCount(0);
   }
   await page.getByRole('button', { name: 'Leave example' }).click();
@@ -791,9 +757,9 @@ test('phone widths: no view, the Mimic sheet, Settings or Kick details scroll si
     await host(page, harness);
     expect(await noSideScroll(page), `board at ${width}`).toBe(true);
     await nav(page, 'Mimic').click();
-    await expect(editorPanel(page)).toHaveAttribute('data-panel-mode', 'sheet');
-    expect(await noSideScroll(page), `Mimic sheet at ${width}`).toBe(true);
-    await closeEditor(page);
+    await expect(mimicPanel(page)).toBeVisible();
+    expect(await noSideScroll(page), `Mimic at ${width}`).toBe(true);
+    await closeSection(page, 'Mimic');
     for (const name of ['Voices', 'Sentences'] as const) {
       await nav(page, name).click();
       await expect(section(page, name)).toBeVisible();
@@ -852,7 +818,7 @@ test('host style sync: the host’s two pages (separate browsers) share navigati
     // The open draft: made on this page, it opens on the other one.
     const panel = await startMimic(page);
     await page.waitForTimeout(2600);
-    await panel.getByLabel('F6 hotkey').focus();
+    await panel.getByRole('heading', { name: 'Mimic' }).focus();
     await page.keyboard.press('5');
     await panel.getByLabel('Clip name').fill('Shared draft');
     await page.keyboard.press('Enter');
@@ -893,80 +859,20 @@ const focusedBox = (page: Page) =>
     };
   });
 
-test('phone sheet: Show board keeps the keyboard, the nav shows its view, and focus stays clear of the notices and the bar', async ({
-  page,
-  harness,
-}) => {
-  await page.setViewportSize({ width: 412, height: 860 });
-  await host(page, harness);
-  const panel = await startMimic(page);
-  await expect(panel).toHaveAttribute('data-panel-mode', 'sheet');
-  // Two notices up, then a Tab walk through the sheet: nothing focused ends up under the cards.
-  await page.evaluate(async () => {
-    const { controller } = await import(/* @vite-ignore */ '/src/' + 'controller.ts');
-    controller.notify('Sheet notice one', 'success', { label: 'Undo', run: () => {} });
-    controller.notify('Sheet notice two', 'info');
-  });
-  await expect(page.locator('.notification-stack .toast')).toHaveCount(2);
-  // Over the sheet only a card's buttons take the pointer: a press on its text reaches what is under it.
-  const passes = await page
-    .locator('.notification-stack .toast span')
-    .first()
-    .evaluate((el) => {
-      const r = el.getBoundingClientRect();
-      const hit = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2);
-      return !hit?.closest('.toast');
-    });
-  expect(passes).toBe(true);
-  await page.locator('#editor-title').focus();
-  let checked = 0;
-  for (let i = 0; i < 40; i++) {
-    await page.keyboard.press('Tab');
-    const box = await focusedBox(page);
-    if (!box.inBody || !box.height) continue;
-    checked++;
-    expect(box.bottom, `Tab ${i} under the notices`).toBeLessThanOrEqual(box.dockTop + 1);
-  }
-  expect(checked).toBeGreaterThan(5);
-  // Show board by keyboard: the same button stays focused, now "Show editor", so Space and Escape never
-  // reach the page (they paused playback and closed the panel).
-  await panel.getByRole('button', { name: 'Show board' }).focus();
-  await page.keyboard.press('Enter');
-  await expect(panel).toHaveAttribute('data-panel-mode', 'minimized');
-  await expect(panel.getByRole('button', { name: 'Show editor' })).toBeFocused();
-  await page.keyboard.press('Enter');
-  await expect(panel).toHaveAttribute('data-panel-mode', 'sheet');
-  // The nav's views fold the sheet to its bar, so the chosen view shows and can be used.
-  await nav(page, 'Voices').click();
-  await expect(section(page, 'Voices')).toBeVisible();
-  await expect(panel).toHaveAttribute('data-panel-mode', 'minimized');
-  await expect(page.locator('#board')).not.toHaveAttribute('inert', '');
-  await nav(page, 'Soundboard').click();
-  await expect(panel).toHaveAttribute('data-panel-mode', 'minimized');
-  // With the bar showing, Tab down the board never leaves a control under the bar or the notices.
-  await page.getByLabel('Search sounds').focus();
-  checked = 0;
-  for (let i = 0; i < 30; i++) {
-    await page.keyboard.press('Tab');
-    const box = await focusedBox(page);
-    if (!box.inBoard || !box.height) continue;
-    checked++;
-    expect(box.bottom, `board Tab ${i} under the bar`).toBeLessThanOrEqual(box.panelTop + 1);
-    expect(box.bottom, `board Tab ${i} under the notices`).toBeLessThanOrEqual(box.dockTop + 1);
-  }
-  expect(checked).toBeGreaterThan(5);
-});
-
-test('example on a phone: the editor sheet makes the banner it covers unreachable', async ({
+test('Mimic on a phone leaves the example banner and section navigation usable', async ({
   page,
 }) => {
   await page.setViewportSize({ width: 412, height: 860 });
   if (!(await startExample(page))) return;
   await nav(page, 'Mimic').click();
-  await expect(editorPanel(page)).toHaveAttribute('data-panel-mode', 'sheet');
-  await expect(page.locator('.demo-banner')).toHaveAttribute('inert', '');
-  await editorPanel(page).getByRole('button', { name: 'Show board' }).click();
-  await expect(page.locator('.demo-banner')).not.toHaveAttribute('inert', '');
+  await expect(mimicPanel(page)).toBeVisible();
+  const leave = page.getByRole('button', { name: 'Leave example' });
+  await expect(leave).toBeVisible();
+  expect(await onTop(leave)).toBe(true);
+  await nav(page, 'Voices').click();
+  await expect(section(page, 'Voices')).toBeVisible();
+  await nav(page, 'Mimic').click();
+  await expect(mimicPanel(page)).toBeVisible();
 });
 
 test('Activity: running a notice’s action keeps the keyboard in the list', async ({
@@ -1036,10 +942,9 @@ test('two dialogs: Escape closes the newer one only, and the keyboard stays in t
 test('a panel brought back by a reload leaves focus where it was', async ({ page, harness }) => {
   await host(page, harness);
   await nav(page, 'Mimic').click();
-  await expect(page.locator('#editor-title')).toBeFocused();
+  await expect(nav(page, 'Mimic')).toBeFocused();
   await page.reload();
   await expect(mimicPanel(page)).toBeVisible();
-  await expect(playButton(page, 'Airhorn')).toBeEnabled();
   await page.waitForTimeout(300);
   await expect(page.locator('#editor-title')).not.toBeFocused();
   // So the first Tab starts at the top of the page (in Safari, whose Tab skips links, at the topbar).

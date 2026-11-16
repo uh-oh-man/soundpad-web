@@ -81,6 +81,7 @@ export class PlaybackIntents {
   };
   /** Key of the click still waiting for the companion's answer, or ''. Playing comes from the snapshot. */
   getPending = () => this.pending.key;
+  getSequence = () => this.sequence;
   private setPending(key: string, sequence: number, slow = false) {
     this.pending = { key, sequence, slow };
     for (const listener of this.listeners) listener();
@@ -230,7 +231,7 @@ export class PlaybackIntents {
    * now from the latest report, not from the render the tile was drawn in, so two people alternating
    * do not send each other's old playback ids. A start of our own still on its way wins over the report.
    */
-  async position(soundId: string, positionMs: number) {
+  async position(soundId: string, positionMs: number, resumePaused = true) {
     const { soundId: current, epoch, status } = this.host.view().state.playback;
     const starting = !!this.pending.key && !this.pending.slow;
     if (!starting && current === soundId && epoch && status !== 'STOPPED') {
@@ -242,7 +243,7 @@ export class PlaybackIntents {
       if (sequence === this.sequence && now.epoch !== epoch)
         return void (await this.startAt(soundId, positionMs));
       // Resume only a sound that was paused when the click was made, as 2.34 did; one paused meanwhile stays paused.
-      if (status === 'PAUSED') await this.resumeAfterSeek(soundId, epoch);
+      if (resumePaused && status === 'PAUSED') await this.resumeAfterSeek(soundId, epoch);
     } else await this.startAt(soundId, positionMs);
   }
   /** A seek on a paused sound also resumes it; one toggle per paused position, however many seeks. */

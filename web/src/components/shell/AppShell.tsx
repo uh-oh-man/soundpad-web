@@ -73,7 +73,7 @@ export function AppShell({
   nav,
   panelMode,
   rail,
-  full = false,
+  mimicFill = false,
   topbar,
   banner,
   sidebar,
@@ -91,8 +91,7 @@ export function AppShell({
   nav: NavStyle;
   panelMode: PanelMode | 'closed';
   rail: boolean;
-  /** The docked panel fills the main area (2.46, Mimic's Full screen); the view under it is hidden. */
-  full?: boolean;
+  mimicFill?: boolean;
   topbar: ReactNode;
   banner?: ReactNode;
   sidebar?: ReactNode;
@@ -114,7 +113,7 @@ export function AppShell({
       data-nav={landing ? undefined : nav}
       data-panel={landing ? undefined : panelMode}
       data-rail={landing ? undefined : String(rail)}
-      data-panel-full={!landing && full ? 'true' : undefined}
+      data-mimic-fill={!landing && mimicFill ? 'true' : undefined}
     >
       {!landing && (
         <div className="skip-links">

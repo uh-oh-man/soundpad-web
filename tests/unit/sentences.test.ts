@@ -521,7 +521,7 @@ describe('voice slots, phrase blocks and Add to sentence (2.45)', () => {
       }),
     ).not.toThrow();
     expect(supports('2.44.0', 'sentenceCompose')).toBe(false);
-    expect(supports('2.45.0', 'sentenceCompose')).toBe(true);
+    expect(supports('2.46.0', 'sentenceCompose')).toBe(true);
     expect(missingFeatures('2.44.0').join(' ')).toContain('Add to sentence');
   });
 

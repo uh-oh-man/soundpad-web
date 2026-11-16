@@ -441,3 +441,35 @@
     flex: 1 1 140px;
   }
 }
+/* One-press Save (2.46): the newest clips still only in Temp, each with Save, above the recordings. */
+.voices-unsaved {
+  display: grid;
+  gap: var(--space-2);
+  padding: var(--space-2) 10px;
+  border: 1px dashed var(--line-strong);
+  border-radius: var(--radius);
+}
+.voices-unsaved h3 {
+  margin: 0;
+  font-size: 0.9rem;
+}
+.voices-unsaved ul {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.voices-unsaved li {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+}
+.voices-unsaved li .voices-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

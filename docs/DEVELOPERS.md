@@ -2,6 +2,10 @@
 
 Moved out of the README in 2.12.3, unchanged apart from links. See also [CLAUDE.md](../CLAUDE.md) (maintainer notes), [Mimic](MIMIC.md) and [rolling back](ROLLBACK.md).
 
+## Launch the local 2.46 build
+
+Run `npm run dev` from the repository. The portable companion accepts the development site through `--dev --site http://127.0.0.1:5173/`. Use `--data-dir <test-folder>` when you want its state isolated from your normal companion. For a browser-only tour, open the development site and select **Try the example**.
+
 ## Build from source
 
 Developer requirements: Node.js 24, .NET 10 SDK, Windows for native tests/publishing. End users need neither Node nor the .NET SDK.

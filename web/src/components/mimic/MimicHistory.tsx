@@ -74,7 +74,7 @@ import { refreshDrafts, useDraftStore } from '../../mimic/draft-store';
 import { shareActiveDraft, useSharedDraft } from '../../ui-sync';
 import { recall, remember } from '../../sections';
 import { z } from 'zod';
-import { requestOpen, takeOpen, useOpenRequests, useVoiceStore } from '../../library/voice-store';
+import { takeOpen, useOpenRequests, useVoiceStore } from '../../library/voice-store';
 import {
   canEditLibrary,
   historySearchSchema,
@@ -103,6 +103,7 @@ import {
   writePlayMode,
   type PlayMode,
 } from './playMode';
+import { announceSaved, canQuickSave, savedSchema } from '../../library/quick-save';
 
 // Guests refresh half as often: their requests share the host page's and the companion's request budgets.
 const POLL_MS = 500,
@@ -210,7 +211,15 @@ export function MimicHistory({
   const main = ofSession(mainData, sessionId);
   const overview = ofSession(overviewData, sessionId);
   const shownTranscript = ofSession(transcript, sessionId);
-  const words = shownTranscript?.words ?? NO_WORDS;
+  const words = useMemo(() => {
+    const items = shownTranscript?.words ?? NO_WORDS;
+    if (!timeline) return items;
+    return items.filter((word) =>
+      timeline.available.some(
+        (range) => word.start >= range.startFrame && word.end <= range.endFrame,
+      ),
+    );
+  }, [shownTranscript?.words, timeline?.available]);
   const pending = shownTranscript?.pending ?? NO_RANGES;
   const selection = selectionOn(picked, sessionId);
   /** A selection on the recording shown in this render. */
@@ -242,6 +251,9 @@ export function MimicHistory({
     supports(state.companionVersion, 'voiceLibrary') && (host || controller.relaysLibrary());
   const canLibraryKeep = libraryOn && (host || state.permissions.guestKeep === true);
   const { status: libraryStatus } = useVoiceStore();
+  // One-press Save of a selection (2.46): straight into the voice library, named from its words.
+  const canSave = libraryOn && draftsOn && canQuickSave(state, host, controller.hostSite());
+  const canEditVoices = canEditLibrary(libraryStatus, state.permissions, host);
   const [query, setQuery] = useState('');
   const [found, setFound] = useState<z.infer<typeof historySearchSchema> | null>(null);
   const [speakers, setSpeakers] = useState<SpeakerGroups | null>(null);
@@ -332,17 +344,37 @@ export function MimicHistory({
           });
           shownEnd = e;
         }
-        if (e > from && (nudged ? e !== wordsEnd : tick % 2 === 0)) {
+        const liveTranscript = !nudged && tick % 4 === 0;
+        const transcriptEnd = liveTranscript ? t.liveFrame : e;
+        const transcriptStart = Math.max(0, windowStart(transcriptEnd, t.rate));
+        if (transcriptEnd > transcriptStart && (nudged ? e !== wordsEnd : tick % 2 === 0)) {
           const reply = transcriptSchema.parse(
             await controller.run(
               'historyTranscript',
-              { startFrame: from, endFrame: e, sourceId: session },
+              { startFrame: transcriptStart, endFrame: transcriptEnd, sourceId: session },
               { quiet: true },
             ),
           );
           if (!alive() || currentSession.current !== session) return;
-          setTranscript({ sessionId: session, words: reply.words, pending: reply.pending });
-          wordsEnd = e;
+          const available = t.available;
+          setTranscript((previous) => {
+            const known = ofSession(previous, session)?.words ?? NO_WORDS;
+            const kept = known.filter(
+              (word) =>
+                (word.end <= transcriptStart || word.start >= transcriptEnd) &&
+                available.some(
+                  (range) => word.start >= range.startFrame && word.end <= range.endFrame,
+                ),
+            );
+            const unique = new Map(kept.map((word) => [word.id, word]));
+            for (const word of reply.words) unique.set(word.id, word);
+            return {
+              sessionId: session,
+              words: [...unique.values()].sort((a, b) => a.start - b.start || a.id - b.id),
+              pending: reply.pending,
+            };
+          });
+          if (transcriptEnd === e) wordsEnd = e;
         }
         const oldest = oldestFrame(t);
         if (!nudged && tick % 4 === 0 && t.liveFrame > oldest) {
@@ -739,10 +771,12 @@ export function MimicHistory({
     }
   }
   /** Capture (2.40): the selection becomes a draft for this person, shown at once. Nothing is imported or played. */
-  async function capture(quick?: 'phrase' | 'recent') {
+  async function capture(quick?: 'phrase' | 'recent', play = false) {
     if (busy) return;
     const chosen = quick ? null : fields();
     if (!quick && !chosen) return;
+    const sequence = playback.getSequence();
+    const epoch = controller.getSnapshot().state.playback.epoch;
     setBusy(true);
     try {
       // Only a typed name: otherwise the companion names the draft from the words this person may see, and
@@ -757,7 +791,15 @@ export function MimicHistory({
       );
       await refreshDrafts();
       // A draft on a recording that is no longer shown is not opened over this one (2.41).
-      if (draft.sessionId === currentSession.current) openDraft(draft);
+      if (draft.sessionId === currentSession.current) {
+        openDraft(draft);
+        if (
+          play &&
+          sequence === playback.getSequence() &&
+          epoch === controller.getSnapshot().state.playback.epoch
+        )
+          await playDraftAudio(draft);
+      }
     } catch {
       /* Controller shows the error. */
     } finally {
@@ -809,21 +851,54 @@ export function MimicHistory({
     setBusy(true);
     try {
       await saveName(draft);
-      const result = z
-        .object({ recordingId: z.string().max(64).nullish(), closed: z.boolean().optional() })
+      const result = savedSchema
+        .extend({ recordingId: z.string().max(64).nullish(), closed: z.boolean().optional() })
         .parse(await controller.run('draftKeep', { draftId: draft.id, action: 'library' }));
       const recordingId = result.recordingId;
-      controller.notify(
-        `“${name.trim() || draft.name || 'Draft'}” is in the voice library.`,
-        'success',
-        recordingId
-          ? { label: 'Open', run: () => requestOpen({ kind: 'recording', recordingId }) }
-          : undefined,
-      );
+      const fallback = name.trim() || draft.name || 'Draft';
+      // Where it went, with Undo and Rename (2.46); an older companion said nothing more than this.
+      if (recordingId) announceSaved({ ...result, recordingId }, fallback, canEditVoices);
+      else controller.notify(`“${fallback}” is in the voice library.`, 'success');
       closeDraft();
       await refreshDrafts();
     } catch {
       /* Controller shows the error. */
+    } finally {
+      setBusy(false);
+    }
+  }
+  /**
+   * Save (2.46): the selection goes into the voice library in one press, through a draft that is kept at
+   * once (the 2.41 path), named from its words unless a name was typed. A refusal leaves that draft open, so
+   * nothing is lost and it can be saved again.
+   */
+  async function saveSelection() {
+    const chosen = fields();
+    if (!chosen || busy) return;
+    setBusy(true);
+    let made: Draft | null = null;
+    try {
+      const named = name.trim();
+      made = draftSchema.parse(
+        await controller.run('draftCreate', {
+          ...chosen,
+          ...(named && { name: named }),
+          ...(sessionId && { sourceId: sessionId }),
+        }),
+      );
+      const result = savedSchema
+        .extend({ closed: z.boolean().optional() })
+        .parse(await controller.run('draftKeep', { draftId: made.id, action: 'library' }));
+      announceSaved(result, named || made.name || suggestion || 'Clip', canEditVoices);
+      select(null);
+      setName('');
+      await refreshDrafts();
+    } catch {
+      /* Controller shows the error; the draft made on the way stays, open. */
+      if (made) {
+        await refreshDrafts();
+        if (made.sessionId === currentSession.current) openDraft(made);
+      }
     } finally {
       setBusy(false);
     }
@@ -846,25 +921,28 @@ export function MimicHistory({
     setBusy(true);
     try {
       await saveName(draft);
-      stopPreview();
-      const token = startPlaying(draft, 'game');
-      try {
-        const { data, played } = await playback.make(
-          'draftPlay',
-          { draftId: draft.id, sourceId: draft.sessionId },
-          'make:mimic',
-        );
-        gameAnswered(token, played, data);
-      } catch (e) {
-        setPlaying((p) => (p?.token === token ? null : p));
-        throw e;
-      }
-      await refreshDrafts();
+      await playDraftAudio(draft);
     } catch {
       /* Controller shows the error. */
     } finally {
       setBusy(false);
     }
+  }
+  async function playDraftAudio(draft: Draft) {
+    stopPreview();
+    const token = startPlaying(draft, 'game');
+    try {
+      const { data, played } = await playback.make(
+        'draftPlay',
+        { draftId: draft.id, sourceId: draft.sessionId },
+        'make:mimic',
+      );
+      gameAnswered(token, played, data);
+    } catch (error) {
+      setPlaying((current) => (current?.token === token ? null : current));
+      throw error;
+    }
+    await refreshDrafts();
   }
   /**
    * Delete (2.46, was Discard): one press, with Undo. The draft goes from here at once and the companion
@@ -912,7 +990,7 @@ export function MimicHistory({
       from,
       () =>
         document.querySelector<HTMLElement>('#editor-panel select[aria-label="Draft history"]') ??
-        document.getElementById('editor-title'),
+        document.getElementById('mimic-title'),
     );
   }
   /** Host (2.40): lets go of someone else's draft, such as one a guest left behind holding recording history. */
@@ -1120,8 +1198,8 @@ export function MimicHistory({
 
   const behind = behindLiveMs(timeline, end);
   const atLive = follow || end >= timeline.liveFrame;
-  // Showing the newest words: the view is at live and the transcript is scrolled to its end.
-  const following = atLive && newest.following;
+  // The transcript follows independently of the waveform.
+  const following = newest.following;
   // Held still only because something is selected (as the 30 s view did): it still reads as "the last N seconds".
   const moved = !atLive && !frozenBySelection.current;
   const viewClock = wallOf(timeline, end);
@@ -1315,7 +1393,7 @@ export function MimicHistory({
             <input
               type="search"
               aria-label="Words to find in the recording"
-              placeholder="Find words said in this recording"
+              placeholder="Find words"
               maxLength={100}
               value={query}
               onChange={(e) => setQuery(e.target.value)}
@@ -1374,9 +1452,7 @@ export function MimicHistory({
       )}
       {(mimic?.transcribing || words.length > 0) && (
         <div className="mimic-transcript-head">
-          <span className="muted">
-            {following ? 'New words show as they are said' : 'Newer words are further down'}
-          </span>
+          <h2>Transcript</h2>
           {/* Always here (its label changes), so it keeps the keyboard when pressed. */}
           <button
             type="button"
@@ -1398,8 +1474,10 @@ export function MimicHistory({
         <ol
           ref={newest.ref}
           onScroll={newest.onScroll}
-          onPointerMove={newest.onPointerMove}
-          onPointerLeave={newest.onPointerLeave}
+          onPointerDown={newest.onPointerDown}
+          onPointerUp={newest.onPointerUp}
+          onPointerCancel={newest.onPointerUp}
+          onPointerLeave={newest.onPointerUp}
           className="mimic-transcript mimic-words"
           aria-label="Transcript"
         >
@@ -1407,7 +1485,7 @@ export function MimicHistory({
             shown.map((sentence) => (
               <li key={sentence[0].id}>
                 <time>
-                  {ago(Math.max(0, framesToMs(sentence[0].start - start, rate)), WINDOW_MS)}
+                  {formatClock(wallOf(timeline, sentence[0].start) ?? 0).replace(/\s[AP]M$/i, '')}
                 </time>
                 {speakers?.enabled && sentence[0].speaker != null && (
                   <SpeakerChip id={sentence[0].speaker} groups={speakers} />
@@ -1486,6 +1564,16 @@ export function MimicHistory({
           >
             <MessageSquareQuote size={15} /> Latest phrase
           </button>
+          {!selection && !open && canPlay && !held && !waiting && (
+            <button
+              type="button"
+              className="primary"
+              aria-disabled={busy || undefined}
+              onClick={() => void capture('phrase', true)}
+            >
+              <Play size={15} /> Play latest phrase
+            </button>
+          )}
           <button
             type="button"
             aria-disabled={busy || undefined}
@@ -1613,6 +1701,16 @@ export function MimicHistory({
               onClick={() => void share()}
             >
               <Share2 size={15} /> Share with guests
+            </button>
+          )}
+          {canSave && (
+            <button
+              className="mimic-save"
+              title="Save it to the voice library now, named from its words (kept where Keep puts files)"
+              aria-disabled={busy || !!waiting || undefined}
+              onClick={() => !busy && !waiting && void saveSelection()}
+            >
+              <BookAudio size={15} /> Save
             </button>
           )}
           {draftsOn ? (

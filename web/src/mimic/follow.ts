@@ -1,4 +1,4 @@
-import { useLayoutEffect, useRef, useState } from 'react';
+import { useLayoutEffect, useRef, useState, type PointerEvent } from 'react';
 
 /**
  * Mimic's live transcript follows the newest words (2.46). It is a short scrolling list with the newest
@@ -11,10 +11,9 @@ import { useLayoutEffect, useRef, useState } from 'react';
 export const FOLLOW_SLACK_PX = 24;
 
 /**
- * While the pointer moves over the list (someone aiming at a word), the list holds still this long after
- * the last movement, so a word never slides away under the cursor as a new phrase arrives.
+ * While the pointer is pressed on the list, the list holds still, and waits this long after release, so a word never slides away under the cursor as a new phrase arrives.
  */
-export const AIM_HOLD_MS = 1200;
+export const AIM_HOLD_MS = 400;
 
 type ScrollBox = { scrollTop: number; scrollHeight: number; clientHeight: number };
 
@@ -31,7 +30,8 @@ export function atEnd(box: ScrollBox, slack = FOLLOW_SLACK_PX) {
 export function useFollowNewest<T extends HTMLElement>() {
   const ref = useRef<T>(null);
   const following = useRef(true);
-  const aimed = useRef(0);
+  const lastScroll = useRef(0);
+  const aimed = useRef(-Infinity);
   const [shown, setShown] = useState(true);
   const set = (on: boolean) => {
     if (following.current === on) return;
@@ -43,27 +43,41 @@ export function useFollowNewest<T extends HTMLElement>() {
   useLayoutEffect(() => {
     const el = ref.current;
     if (!el || !following.current || performance.now() - aimed.current < AIM_HOLD_MS) return;
+    if (el.scrollTop < lastScroll.current - FOLLOW_SLACK_PX && !atEnd(el)) {
+      set(false);
+      return;
+    }
     if (!atEnd(el, 1)) el.scrollTop = el.scrollHeight;
+    lastScroll.current = el.scrollTop;
   });
   return {
     ref,
     following: shown,
     onScroll: () => {
       const el = ref.current;
-      if (el) set(atEnd(el));
+      if (el) {
+        lastScroll.current = el.scrollTop;
+        if (!following.current || performance.now() - aimed.current >= AIM_HOLD_MS) set(atEnd(el));
+      }
     },
-    onPointerMove: (e: { pointerType: string }) => {
-      if (e.pointerType === 'mouse' || e.pointerType === 'pen') aimed.current = performance.now();
+    onPointerDown: (event: PointerEvent<T>) => {
+      if (
+        event.pointerType !== 'touch' &&
+        event.target instanceof Element &&
+        event.target.closest('button')
+      )
+        aimed.current = Infinity;
     },
-    onPointerLeave: () => {
-      aimed.current = 0;
+    onPointerUp: () => {
+      if (aimed.current === Infinity) aimed.current = performance.now();
     },
     jump: () => {
-      aimed.current = 0;
+      aimed.current = -Infinity;
       set(true);
       const el = ref.current;
       if (!el) return;
       el.scrollTop = el.scrollHeight;
+      lastScroll.current = el.scrollTop;
       // The list may itself be below the panel's fold: bring its end into view too, at once.
       el.lastElementChild?.scrollIntoView?.({ block: 'nearest', behavior: 'instant' });
     },

@@ -59,7 +59,7 @@ public sealed partial class Bridge
 {
     private static readonly string[] BackupOps = ["backupSettings", "backupNow", "backupList", "backupDetail", "backupRestore", "backupAttach", "backupLayout"];
     /// <summary>Guest commands that change the voice library or sentences: refused while the host restores the whole library.</summary>
-    private static bool LibraryWrite(Command c) => c.Op is "libraryEdit" or "libraryRemove" or "libraryUndo" or "libraryVoice" or "libraryWanted" or "libraryAdd" or "libraryRetry" or "speakerName" or "speakerLink"
+    private static bool LibraryWrite(Command c) => c.Op is "libraryEdit" or "libraryRemove" or "libraryUndo" or "libraryVoice" or "libraryWanted" or "libraryAdd" or "libraryKeep" or "libraryRetry" or "speakerName" or "speakerLink"
         or "sentenceCreate" or "sentenceText" or "sentenceEdit" or "sentenceDiscard" or "sentenceKeep" or "paletteMark" or "performance" or "performanceSets" || c.Op == "draftKeep" && c.Action == "library";
     private const string WorkspaceFile = "backup-workspace.v1.json";
     private const int MaxWorkspaceBytes = 2 * 1024 * 1024, MaxWorkspaceFileBytes = 5 * 1024 * 1024;

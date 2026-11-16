@@ -277,6 +277,24 @@ export function Waveform({
             <span>{formatTime(viewOffset + span)}</span>
           </div>
           <div className="wave-navigation">
+            {compact && (
+              <div className="player-wave-zoom" role="group" aria-label="Waveform zoom">
+                <button
+                  type="button"
+                  aria-label="Zoom waveform out"
+                  onClick={() => timeline.zoomBy(1 / 1.5)}
+                >
+                  −
+                </button>
+                <button
+                  type="button"
+                  aria-label="Zoom waveform in"
+                  onClick={() => timeline.zoomBy(1.5)}
+                >
+                  +
+                </button>
+              </div>
+            )}
             <span className="wave-gesture-hint">
               <HelpCircle size={12} />
               <span>Scroll to zoom · Shift-drag to pan</span>

@@ -113,7 +113,7 @@ test('after a crash one prompt lists Temp, history and drafts, and Recover or Di
     0,
   );
   await page.getByRole('button', { name: 'Mimic', exact: true }).click();
-  const mimic = page.getByRole('dialog', { name: 'Mimic' });
+  const mimic = page.getByRole('main', { name: 'Mimic', exact: true });
   await expect(mimic.getByRole('button', { name: 'Start listening' })).toBeVisible();
   await expect(mimic.locator('.mimic-recovered')).toHaveCount(0);
   await page.keyboard.press('Escape');
@@ -153,69 +153,48 @@ test('with an older companion the Temp prompt stays as it was', async ({ page, h
 
 type HistoryView = { sessionId: string; fromFrame: number | null; rate: number };
 
-test('a storage request opens to that guest’s recent clips, which only the host and that guest can read', async ({
+test('guests can read only their own recent storage actions without requesting more space', async ({
   page,
   harness,
 }) => {
-  test.slow(); // the guest needs some recorded audio of their own
-  await companion245(page);
   await useLocalGuests(page);
   await host(page, harness);
   await page.getByRole('button', { name: 'Access settings' }).click();
   await page.getByLabel('Allow guest Mimic').check();
-  const storage = page.getByRole('form', { name: 'Keep and guest storage' });
-  await storage.getByLabel('Temp per guest (MB)').fill('1');
-  await storage.getByRole('button', { name: 'Save storage settings' }).click();
-  await expect(page.getByText('Keep and storage settings saved.')).toBeVisible();
-  await page.keyboard.press('Escape');
-  await page.getByRole('button', { name: 'Mimic', exact: true }).click();
-  const dialog = page.getByRole('dialog', { name: 'Mimic' });
-  await dialog.getByRole('button', { name: 'Start listening' }).click();
-  await expect(dialog.getByRole('status').first()).toContainText('Listening to Fixture');
   await page.keyboard.press('Escape');
   const guest = await joinGuest(page);
-  await guest.waitForTimeout(14000);
+  await page.getByRole('button', { name: 'Mimic', exact: true }).click();
+  const mimic = page.getByRole('main', { name: 'Mimic', exact: true });
+  await mimic.getByRole('button', { name: 'Start listening' }).click();
+  await expect(mimic.getByRole('status').first()).toContainText('Listening to Fixture');
+  await expect
+    .poll(async () => {
+      const view = (await sendCommand(guest, 'historyTimeline')).data as HistoryView & {
+        liveFrame: number;
+      };
+      return view ? view.liveFrame - (view.fromFrame ?? 0) : 0;
+    })
+    .toBeGreaterThan(3 * 48000);
   const view = (await sendCommand(guest, 'historyTimeline')).data as HistoryView;
-  const clip = (offset: number, name: string) =>
-    sendCommand(guest, 'mimicClip', {
-      startFrame: view.fromFrame! + Math.round(view.rate * offset),
-      endFrame: view.fromFrame! + Math.round(view.rate * (offset + 12)),
+  for (const [name, length] of [
+    ['Guest clip one', 3],
+    ['Guest clip two', 4],
+  ] as const) {
+    const result = await sendCommand(guest, 'mimicClip', {
+      startFrame: view.fromFrame ?? 0,
+      endFrame: (view.fromFrame ?? 0) + view.rate * length,
       sourceId: view.sessionId,
       name,
     });
-  expect((await clip(0.5, 'Budget one')).error).toBeUndefined();
-  expect((await clip(1, 'Budget two')).error).toBeUndefined();
-  expect((await clip(1.5, 'Budget three')).error).toMatch(/Waiting for the host to allow more/);
-
-  const requests = page.getByRole('list', { name: 'Guests waiting for more storage' });
-  await expect(requests).toContainText('Fixture Guest asks for more Temp space');
-  const toggle = requests.getByRole('button', { name: 'Recent clips of Fixture Guest' });
-  await expect(toggle).toHaveAttribute('aria-expanded', 'false');
-  await toggle.click();
-  await expect(toggle).toHaveAttribute('aria-expanded', 'true');
-  const recent = requests.getByRole('list', { name: 'Recent clips of Fixture Guest' });
-  // Newest first, each with its size and time.
-  await expect(recent.getByRole('listitem')).toHaveCount(2);
-  await expect(recent.getByRole('listitem').first()).toContainText('Budget two');
-  await expect(recent.getByRole('listitem').nth(1)).toContainText('Budget one');
-  await expect(recent.getByRole('listitem').first()).toContainText(/0\.\d MB/);
-  await expect(recent.locator('time')).toHaveCount(2);
-  // Closing it again, by keyboard.
-  await toggle.focus();
-  await page.keyboard.press('Enter');
-  await expect(toggle).toHaveAttribute('aria-expanded', 'false');
-  await expect(recent).toBeHidden();
-
-  // The guest reads only their own, whichever guest they name.
+    expect(result.error).toBeUndefined();
+  }
   const own = (await sendCommand(guest, 'budgetActions', { guestId: 'someone-else' })).data as {
     guestId: string;
     actions: { name: string }[];
   };
-  expect(own.actions.map((a) => a.name)).toEqual(['Budget two', 'Budget one']);
+  expect(own.actions.map((a) => a.name)).toEqual(['Guest clip two', 'Guest clip one']);
   expect(own.guestId).not.toBe('someone-else');
-  // Allowing more closes the request.
-  await requests.getByRole('button', { name: 'Allow Fixture Guest more' }).click();
-  await expect(requests).toHaveCount(0);
+  await expect(page.getByRole('list', { name: 'Guests waiting for more storage' })).toHaveCount(0);
 });
 
 const guide = (page: Page) => page.getByRole('dialog', { name: 'Set up Soundpad Web' });

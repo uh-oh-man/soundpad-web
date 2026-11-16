@@ -201,6 +201,8 @@ public sealed partial class Bridge
     private async Task<Reply?> ExecuteVoices(Command c, string actor, Participant? participant, string? requester, string? audience)
     {
         if (!IsLibraryOp(c.Op)) return null;
+        // One-press Save (2.46): keeps the clip, so it waits for the audio gate; off the receive loop like the others.
+        if (c.Op == "libraryKeep") return await Task.Run(() => LibraryKeep(c, actor, participant, requester, audience));
         return await Task.Run(() => VoicesCommand(c, actor, participant, requester, audience));
     }
 

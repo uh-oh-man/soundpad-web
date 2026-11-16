@@ -99,6 +99,9 @@ export function useTimeline({
       Math.max(0, Math.min(Math.max(0, duration - 1), effective.offset + fraction(x) * span)),
     );
   }
+  function zoomBy(factor: number) {
+    setView((previous) => zoomAt(duration, previous, previous.zoom * factor, 0.5));
+  }
   function fit() {
     setView({ zoom: 1, offset: 0 });
     setPreview(null);
@@ -240,9 +243,7 @@ export function useTimeline({
       }
       if (event.key === '+' || event.key === '=' || event.key === '-') {
         event.preventDefault();
-        setView((previous) =>
-          zoomAt(duration, previous, previous.zoom * (event.key === '-' ? 1 / 1.5 : 1.5), 0.5),
-        );
+        zoomBy(event.key === '-' ? 1 / 1.5 : 1.5);
         return;
       }
       if (event.altKey && ['ArrowLeft', 'ArrowRight'].includes(event.key)) {
@@ -294,5 +295,6 @@ export function useTimeline({
     setPreview,
     timeAt,
     fit,
+    zoomBy,
   };
 }

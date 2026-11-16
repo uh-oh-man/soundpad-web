@@ -12,7 +12,7 @@ public sealed record MimicSource(string Id, string Name, string Kind);
 public sealed record MimicClipInfo(string AssetId, string Name, string By, long At);
 public sealed record MimicState(bool Active, string? Source, string Status, int WindowMs, bool Transcribing = false, bool TranscriptModel = false, string TranscriptStatus = "Off", bool Hotkey = false, string HotkeyStatus = "Off", MimicClipInfo[]? Recent = null, int HotkeySeconds = 10, string HotkeyKey = "F6",
     // 2.39: the rolling recording history. Older websites ignore it.
-    MimicHistoryState? History = null);
+    MimicHistoryState? History = null, MimicClipInfo[]? MoreRecent = null);
 /// <summary>What the website shows about the recording history (2.39).</summary>
 /// <param name="SessionId">Id of this launch's history, also the "ringId" of peeks; null before anything was recorded.</param>
 /// <param name="Seconds">How much history is kept (60 to 3600 s).</param>

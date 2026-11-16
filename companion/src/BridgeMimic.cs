@@ -20,10 +20,21 @@ public sealed partial class Bridge
     private Func<string, IGlobalHotkey> makeHotkey = WindowsKey;
     private IGlobalHotkey hotkey = new WindowsHotkey();
     private volatile string hotkeyStatus = "Off";
-    public const int RecentClips = 5;
+    public const int RecentClips = 100;
     private readonly List<MimicClipInfo> recentClips = [];
     private MimicClipInfo[] RecentSnapshot { get { lock (recentClips) return [.. recentClips]; } }
-    private MimicState MimicSnapshot => new(mimicCapture.Running, mimicCapture.SourceName, mimicCapture.Status, MimicWindowMs, transcriber.Enabled, transcriber.ModelReady, transcriber.Status, hotkey.Active, hotkeyStatus, RecentSnapshot, hotkeySeconds, hotkey.Name, HistorySnapshot());
+    private MimicState MimicSnapshot
+    {
+        get
+        {
+            var recent = RecentSnapshot;
+            // Older websites validate the original list at 20 entries. Send the rest in an optional field.
+            return new(mimicCapture.Running, mimicCapture.SourceName, mimicCapture.Status, MimicWindowMs,
+                transcriber.Enabled, transcriber.ModelReady, transcriber.Status, hotkey.Active, hotkeyStatus,
+                recent.Take(20).ToArray(), hotkeySeconds, hotkey.Name, HistorySnapshot(),
+                recent.Length > 20 ? recent[20..] : null);
+        }
+    }
 
     /// <summary>Replaces the system-wide hotkey; tests use a fixture that can be "pressed" directly.</summary>
     public void UseHotkey(IGlobalHotkey key) { hotkey.Dispose(); hotkey = key; }

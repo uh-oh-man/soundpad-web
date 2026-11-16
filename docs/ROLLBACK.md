@@ -6,7 +6,8 @@ Every release stays on GitHub permanently, so any earlier version can be restore
 
 | Version | What it is | Git tag | Download |
 | --- | --- | --- | --- |
-| 2.45.0 | Feedback, and fixes from the real Soundpad | `v2.45.0` | [Release](https://github.com/uh-oh-man/soundpad-web/releases/tag/v2.45.0) |
+| 2.46.0 | Full-page Mimic and feedback fixes | Local development build | `artifacts/local-2.46.0/SoundpadWeb.exe` |
+| 2.45.0 | Feedback and real-Soundpad fixes | Untagged | Local builds in `artifacts/` |
 | 2.44.0 | Backups, updates, Organize and setup | `v2.44.0` | [Release](https://github.com/uh-oh-man/soundpad-web/releases/tag/v2.44.0) |
 | 2.43.0 | Blue studio | `v2.43.0` | [Release](https://github.com/uh-oh-man/soundpad-web/releases/tag/v2.43.0) |
 | 2.42.0 | Sentences from recorded words | `v2.42.0` | [Release](https://github.com/uh-oh-man/soundpad-web/releases/tag/v2.42.0) |
@@ -122,6 +123,7 @@ Your data in `%LOCALAPPDATA%\SoundpadWeb` keeps working (Temp's 16 MiB per-sound
   - `update-settings.v1.json` (check at launch or not), and during an update only `update-handoff.v1.bin`, `update-ready.<id>` and `update-child.log`, which the next normal start deletes. A companion older than 2.44 started after an interrupted update takes its crash path: it offers Recover or Discard for Temp, and its recovery deletes the recording history that was closed for the update, as an ordinary quit would. It ignores the hand-over file; delete it.
   - `organize\`: a pending organization plan, its settings (`guestOrganize`) and up to 10 checkpoints, each with a read-only copy of Soundpad's `soundlist.spl` named `.spl.bak`. Changes already applied to Soundpad stay in Soundpad. The app never puts `soundlist.spl` back by itself; to restore one, close Soundpad and copy the checkpoint's `.spl.bak` over `%APPDATA%\Leppsoft\soundlist.spl` yourself.
   - `setup.json` (setup finished or dismissed) and `hotkeys.json` (host-wide hotkeys). Older companions ignore them, so host-wide hotkeys are off there; browser shortcuts are kept per browser by the website and are unaffected.
+- 2.46.0 adds no files and changes no saved format. A Temp clip removed during a session is saved as before (its files marked for cleanup) and goes when the companion quits or Temp is cleared; an older companion started on that data retries the cleanup and may ask you to remove the Soundpad entry by hand, as it did before. Undo of a Temp removal is kept in memory only. Mimic full screen is a setting of your browser, not of the companion.
 - 2.43.0 adds `ui.json`: the host's shared style (navigation, theme, motion, contrast, header animation) and the Mimic draft that is open. Older companions ignore it and leave it alone (checked: the 2.3.1 companion starts normally beside a 2.43 `ui.json` and leaves it byte for byte as it was). Delete it if you go back for good; the website then keeps its style per browser, as before. The Kick session count is kept in memory only. `state.json` (still schema version 2) and the managed-audio journal are unchanged.
 - 2.42.0 adds sentences to `library\`: `sentences.v1.json` and its backup `sentences.v1.bak.json` (sentences with their versions, named palette pieces and performance sets), and `sentences\<id>\v<N>-<hash8>.wav`, one audio file for each kept version, written once and never changed. Older companions ignore them and leave them alone. If you go back for good you can delete them, or keep them: upgrading again picks the sentences up where they were. `state.json` and the managed-audio journal are unchanged. Sentences play from the 2.37 slot files, whose format is unchanged; from 2.42 the slots are also set up when exact starts are off, and an older companion treats them as it always did.
 - 2.41.0 adds the voice library to `library\` (the default folder for kept sounds): `voice-library.v1.json` and its backup `voice-library.v1.bak.json`, `voice-words.v1.jsonl`, `voice-audit.v1.jsonl` (rotated to `voice-audit.v1.old.jsonl` past 32 MiB) and `sound-words.v1.jsonl`. Older companions ignore them and leave them alone; your kept sounds stay where they are. If you go back for good you can delete those files, or keep them: upgrading again picks the library up where it was. `state.json` and the managed-audio journal are unchanged. Mimic's **Discard** after a crash (2.41) writes silence over the discarded part of `history\` in the same format, so an older companion recovering that history after another crash finds silence there, never the discarded audio.
@@ -143,6 +145,10 @@ companion\harness\bin\Release\net10.0-windows10.0.19041.0\win-x64\SoundpadWeb.Ha
 companion\harness\bin\Release\net10.0-windows10.0.19041.0\win-x64\SoundpadWeb.Harness.exe --mock-only   # prints TEST_PIPE <name>
 <older>\SoundpadWeb.exe --data-dir C:\temp\rollback-data --pipe <name> --no-browser --site https://example.invalid/
 ```
+
+### Local 2.46.0 checks
+
+On mocked open-session and ended-session fixtures, v2.3.1 started and exited cleanly. The 15 newer settings and library files checked in each fixture retained their hashes. The 2.46.0 portable EXE also passed the loopback update scenarios, including a successful update with the window hidden, rejection of invalid downloads and rollback when the new process did not become ready.
 
 ### Tested again for 2.44.0
 

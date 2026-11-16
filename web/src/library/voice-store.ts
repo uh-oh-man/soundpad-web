@@ -52,7 +52,8 @@ export function refreshLibrary(): Promise<void> {
 /** Someone asked to see a moment of the history (a notice's Jump) or a library recording. */
 export type OpenRequest =
   | { kind: 'history'; sessionId: string; startFrame: number; endFrame: number }
-  | { kind: 'recording'; recordingId: string };
+  /** `rename` (2.46): Rename after a one-press Save, so its title field takes the keyboard. */
+  | { kind: 'recording'; recordingId: string; rename?: boolean };
 let pending: OpenRequest | null = null;
 const openListeners = new Set<(request: OpenRequest) => void>();
 /**

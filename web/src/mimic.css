@@ -653,9 +653,3 @@ p.budget-actions {
   background: color-mix(in srgb, var(--danger) 12%, transparent);
 }
 /* Full screen (2.46): more room for the words and the waveform. */
-.editor-panel[data-full='true'] .mimic-transcript {
-  max-height: min(46vh, 560px);
-}
-.editor-panel[data-full='true'] .mimic-wave canvas {
-  height: 160px;
-}

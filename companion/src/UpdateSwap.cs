@@ -17,7 +17,7 @@ public interface IUpdateFiles
 }
 
 /// <summary>A process the swap started (the new version, or the old one again).</summary>
-public interface IUpdateChild
+public interface IUpdateChild : IDisposable
 {
     int Id { get; }
     bool HasExited { get; }
@@ -152,11 +152,12 @@ public sealed class UpdateSwap(IUpdateFiles files, IProcessLauncher launcher, Ac
             log(Problem);
             return Rollback(plan, true, true);
         }
-        var waited = WaitReady(plan, child, plan.Version);
+        using var started = child;
+        var waited = WaitReady(plan, started, plan.Version);
         if (waited == null) { log($"Version {plan.Version} started and took over."); files.Delete(plan.ReadyPath); return SwapResult.Updated; }
         Problem = waited;
         log(Problem);
-        Stop(child);
+        Stop(started);
         return Rollback(plan, true, true);
     }
 
@@ -205,7 +206,7 @@ public sealed class UpdateSwap(IUpdateFiles files, IProcessLauncher launcher, Ac
             files.Delete(plan.ReadyPath);
             files.Delete(plan.HandoffPath + ".consumed");
             files.WriteAtomic(plan.HandoffPath, plan.Handoff());
-            var again = launcher.Start(plan.ExePath, Arguments(plan), plan.ChildLog, plan.Console);
+            using var again = launcher.Start(plan.ExePath, Arguments(plan), plan.ChildLog, plan.Console);
             var waited = WaitReady(plan, again, plan.CurrentVersion);
             if (waited == null) { log($"Back on version {plan.CurrentVersion}; the session continues."); files.Delete(plan.ReadyPath); return SwapResult.RolledBack; }
             log(waited);
@@ -261,9 +262,9 @@ public sealed class WindowsLauncher : IProcessLauncher
             }
             if (!CreateProcess(null, line, 0, 0, inherit, flags, 0, Path.GetDirectoryName(exe), ref startup, out var info)) throw new Win32Exception(Marshal.GetLastWin32Error());
             CloseHandle(info.Thread);
-            try { return new Child(Process.GetProcessById(info.ProcessId)); }
-            catch (ArgumentException) { return new Gone(info.ProcessId); } // it already ended
-            finally { CloseHandle(info.Process); }
+            // The child keeps CreateProcess's own handle: its exit code stays readable after it ended (a new version
+            // that stopped while starting was logged as "exit code unknown" before; 2.44 real-hardware proof).
+            return new Child(new SafeProcessHandle(info.Process, true), info.ProcessId);
         }
         finally { output?.Dispose(); input?.Dispose(); }
     }
@@ -283,20 +284,19 @@ public sealed class WindowsLauncher : IProcessLauncher
         return quoted.Append('"').ToString();
     }
 
-    private sealed class Child(Process process) : IUpdateChild
-    {
-        public int Id => process.Id;
-        public bool HasExited { get { try { return process.HasExited; } catch (InvalidOperationException) { return true; } } }
-        public int? ExitCode { get { try { return process.HasExited ? process.ExitCode : null; } catch (InvalidOperationException) { return null; } } }
-        public void Kill() { process.Kill(true); process.WaitForExit(10000); }
-    }
-
-    private sealed class Gone(int id) : IUpdateChild
+    private sealed class Child(SafeProcessHandle handle, int id) : IUpdateChild
     {
         public int Id => id;
-        public bool HasExited => true;
-        public int? ExitCode => null;
-        public void Kill() { }
+        public void Dispose() => handle.Dispose();
+        public bool HasExited => WaitForSingleObject(handle, 0) == WaitObject0;
+        public int? ExitCode => HasExited && GetExitCodeProcess(handle, out uint code) ? unchecked((int)code) : null;
+        public void Kill()
+        {
+            if (HasExited) return;
+            // The whole tree (the new version's WebView2 processes too).
+            try { using var process = Process.GetProcessById(id); process.Kill(true); process.WaitForExit(10000); }
+            catch (ArgumentException) { } // it ended meanwhile
+        }
     }
 
     private const uint CreateNoWindow = 0x08000000, CreateNewConsole = 0x00000010, CreateUnicodeEnvironment = 0x00000400;
@@ -321,7 +321,9 @@ public sealed class WindowsLauncher : IProcessLauncher
     [DllImport("kernel32.dll")] [return: MarshalAs(UnmanagedType.Bool)] private static extern bool CloseHandle(nint handle);
     [DllImport("kernel32.dll")] private static extern nint GetStdHandle(int which);
     [DllImport("kernel32.dll")] [return: MarshalAs(UnmanagedType.Bool)] private static extern bool SetHandleInformation(nint handle, uint mask, uint flags);
-    private const uint HandleFlagInherit = 1;
+    private const uint HandleFlagInherit = 1, WaitObject0 = 0;
+    [DllImport("kernel32.dll", SetLastError = true)] private static extern uint WaitForSingleObject(SafeProcessHandle handle, uint milliseconds);
+    [DllImport("kernel32.dll", SetLastError = true)] [return: MarshalAs(UnmanagedType.Bool)] private static extern bool GetExitCodeProcess(SafeProcessHandle handle, out uint code);
 }
 
 /// <summary>The swap Program.cs runs after Run returned (2.44): nothing of this process holds the data folder any more.</summary>

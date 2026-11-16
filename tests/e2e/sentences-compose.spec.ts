@@ -6,7 +6,7 @@
  */
 import type { Page } from '@playwright/test';
 import { test, expect, host, joinGuest, sendCommand, useLocalGuests } from './helpers/harness';
-import { closeEditor, section } from './helpers/shell';
+import { closeSection, section, setMimicTranscription } from './helpers/shell';
 
 async function companionVersion(page: Page, version: string) {
   await page.routeWebSocket(/ws:\/\/127\.0\.0\.1:\d+\/bridge/, (socket) => {
@@ -23,17 +23,17 @@ async function companionVersion(page: Page, version: string) {
 /** Kept recordings whose words (from the transcript fixture) are "Fixture tone N"; their ids. */
 async function recordingsWithWords(page: Page, count: number) {
   await page.getByRole('button', { name: 'Mimic', exact: true }).click();
-  const dialog = page.getByRole('dialog', { name: 'Mimic' });
+  const dialog = page.getByRole('main', { name: 'Mimic', exact: true });
   await dialog.getByRole('button', { name: 'Start listening' }).click();
   await expect(dialog.getByRole('status').first()).toContainText('Listening to Fixture');
-  await dialog.getByLabel('Transcribe Mimic audio').check();
+  await setMimicTranscription(dialog);
   await expect(
     dialog
       .getByRole('list', { name: 'Transcript' })
       .getByRole('button', { name: 'Fixture', exact: true })
       .first(),
   ).toBeVisible({ timeout: 15000 });
-  await closeEditor(page);
+  await closeSection(page, 'Mimic');
   const ids: string[] = [];
   for (let i = 1; i <= count; i++) {
     const draft = (await sendCommand(page, 'draftCreate', {
@@ -67,7 +67,6 @@ test('Add to sentence puts the palette word at the caret without playing it; a p
   page,
   harness,
 }) => {
-  await companionVersion(page, '2.45.0');
   await host(page, harness);
   const [first] = await recordingsWithWords(page, 2);
   const voice = (await sendCommand(page, 'libraryVoice', { action: 'create', name: 'Ann' })) as {
@@ -160,7 +159,6 @@ test("the host sees a guest's unkept sentence, opens it read-only and clears it"
   harness,
 }) => {
   await useLocalGuests(page);
-  await companionVersion(page, '2.45.0');
   await host(page, harness);
   const guest = await joinGuest(page, 'Fixture Guest');
   await guest.getByRole('button', { name: 'Sentences', exact: true }).click();

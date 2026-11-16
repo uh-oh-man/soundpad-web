@@ -121,6 +121,7 @@ import './updates.css';
 import './organize.css';
 import './setup.css';
 import './feedback.css';
+import './mimic-page.css';
 
 const viewLabels: Record<(typeof viewModes)[number], string> = {
   icons: 'Icons',
@@ -415,25 +416,29 @@ function App() {
   const [storedWidth, setStoredWidth] = usePref('editorWidth');
   const narrow = useMediaQuery('(max-width: 1000px)');
   const belowWide = useMediaQuery('(max-width: 1279px)');
+  const mimicCompact = useMediaQuery('(max-width: 1365px)');
   const viewport = useViewportWidth();
-  const [section, setSection] = useState<ShellView>(() => recall('shell').view ?? 'board');
+  const [section, setSection] = useState<ShellView>(() =>
+    recall('shell').panel?.kind === 'mimic' ? 'mimic' : (recall('shell').view ?? 'board'),
+  );
   // A view whose feature is not (yet) available shows the Soundboard; the choice is kept for when it is.
   const shown: ShellView =
     section === 'voices' && libraryReady
       ? 'voices'
       : section === 'sentences' && sentencesReady
         ? 'sentences'
-        : 'board';
-  const [panel, setPanel] = useState<EditorRequest | null>(restorePanel);
-  // Mimic's Full screen (2.46): remembered in this browser. Choosing a view from the nav shows that view
-  // with Mimic beside it again, until Mimic is opened from the nav once more.
+        : section === 'mimic' && connected && mimicSupported
+          ? 'mimic'
+          : 'board';
+  const [panel, setPanel] = useState<Exclude<EditorRequest, { kind: 'mimic' }> | null>(
+    restorePanel,
+  );
   const [mimicFull, setMimicFull] = usePref('mimicFull');
-  const [fullSetAside, setFullSetAside] = useState(false);
   const [panelFocus, setPanelFocus] = useState(0);
   const [minimized, setMinimized] = useState(false);
   const [dragWidth, setDragWidth] = useState<number | null>(null);
   const opener = useRef<HTMLElement | null>(null);
-  const returning = useRef<{ kind: EditorRequest['kind'] } | null>(null);
+  const returning = useRef(false);
   const shownPanel = mode !== 'landing' ? panel : null;
   const panelMode: PanelMode | 'closed' = !shownPanel
     ? 'closed'
@@ -442,12 +447,15 @@ function App() {
         ? 'minimized'
         : 'sheet'
       : 'docked';
-  const full = panelMode === 'docked' && shownPanel?.kind === 'mimic' && mimicFull && !fullSetAside;
+  const full = shown === 'mimic' && mimicFull && !narrow;
   // With the panel docked under 1280 px (the VR or companion window) the sidebar folds to icons, so the
   // board keeps its room; in top tabs style the sidebar can be folded by hand.
   const rail =
-    !narrow && ((panelMode === 'docked' && belowWide) || (navStyle === 'tabs' && sidebarRail));
-  const sidebarWidth = rail ? 64 : navStyle === 'tabs' && shown !== 'board' ? 0 : 234;
+    !narrow &&
+    ((panelMode === 'docked' && belowWide) ||
+      (shown === 'mimic' && mimicCompact) ||
+      (navStyle === 'tabs' && sidebarRail));
+  const sidebarWidth = full || (navStyle === 'tabs' && shown !== 'board') ? 0 : rail ? 64 : 234;
   const editorMax = editorMaxWidth(viewport, sidebarWidth);
   const editorWidth = clampEditorWidth(dragWidth ?? storedWidth, viewport, sidebarWidth);
   const placement = navPlacement(navStyle, narrow);
@@ -464,8 +472,12 @@ function App() {
   /** Opens the panel at `request`, or switches it there; the heading gets the keyboard. */
   function openEditor(request: EditorRequest) {
     if (controller.getSnapshot().mode === 'landing') return;
+    if (request.kind === 'mimic') {
+      switchView('mimic');
+      requestAnimationFrame(() => document.getElementById('mimic-title')?.focus());
+      return;
+    }
     if (!panel) opener.current = currentOpener();
-    if (request.kind === 'mimic') setFullSetAside(false);
     setPanel((current) =>
       // Asking again for what is open keeps it as it is (a copy editor keeps its unsaved fields).
       current && JSON.stringify(current) === JSON.stringify(request) ? current : request,
@@ -477,25 +489,20 @@ function App() {
     if (!panel) return;
     if (panel.kind === 'temp-edit')
       remember('tempEdit', { sourceId: undefined, fields: undefined });
-    returning.current = { kind: panel.kind };
+    returning.current = true;
     setPanel(null);
     setMinimized(false);
   }
-  // Once the panel has gone, focus goes back to what opened it, else to the nav's Mimic or the board.
+  // Return focus to the opener, or to the active view if the opener is gone.
   useEffect(() => {
     if (panel || !returning.current) return;
-    const { kind } = returning.current;
-    returning.current = null;
+    returning.current = false;
     const back = opener.current;
     opener.current = null;
     const active = document.activeElement;
     // Something outside took the keyboard meanwhile (Keep's form in Temp): leave it there.
     if (active && active !== document.body && !active.closest('#editor-panel')) return;
-    returnFocus(back, () =>
-      kind === 'mimic'
-        ? document.querySelector<HTMLElement>('.section-nav [data-section="mimic"]')
-        : document.getElementById('board'),
-    );
+    returnFocus(back, () => document.getElementById('board'));
   }, [panel]);
   // A panel that comes back after the landing page (a reconnect) is not a new open: focus stays where it is.
   useEffect(() => {
@@ -521,8 +528,6 @@ function App() {
     const board = document.getElementById('board');
     if (board) remember(shown, { scrollTop: board.scrollTop });
     setSection(next);
-    // Mimic in full screen covers the view too: it goes back beside it, so the chosen view shows.
-    if (full) setFullSetAside(true);
     // On a phone the editor sheet covers the view: fold it to its bar, so the chosen view shows and can be
     // used (the editor keeps its state, and "Show editor" brings it back).
     if (panelMode === 'sheet') setMinimized(true);
@@ -732,27 +737,23 @@ function App() {
     mode !== 'landing' && placement === where ? (
       <SectionNav
         view={shown}
-        panelKind={shownPanel?.kind ?? null}
         placement={where}
-        canMimic={canMimic}
+        canMimic={connected && mimicSupported}
         libraryReady={libraryReady}
         sentencesReady={sentencesReady}
         showView={switchView}
-        openMimic={() => openEditor({ kind: 'mimic' })}
       />
     ) : null;
   const sheetShown = panelMode === 'sheet';
   const panelTitle = !shownPanel
     ? ''
-    : shownPanel.kind === 'mimic'
-      ? 'Mimic'
-      : shownPanel.kind === 'temp-edit'
-        ? 'Copy editor'
-        : shownPanel.kind === 'activity'
-          ? 'Activity'
-          : shownPanel.kind === 'organize'
-            ? 'Review changes'
-            : `Edit ${state.library.sounds.find((s) => s.id === shownPanel.soundId)?.name ?? 'sound'}`;
+    : shownPanel.kind === 'temp-edit'
+      ? 'Copy editor'
+      : shownPanel.kind === 'activity'
+        ? 'Activity'
+        : shownPanel.kind === 'organize'
+          ? 'Review changes'
+          : `Edit ${state.library.sounds.find((s) => s.id === shownPanel.soundId)?.name ?? 'sound'}`;
 
   return (
     <StageHContext.Provider value={stageH}>
@@ -768,7 +769,7 @@ function App() {
         nav={navStyle}
         panelMode={panelMode}
         rail={rail}
-        full={full}
+        mimicFill={full}
         topbar={
           <TopBar
             view={view}
@@ -794,32 +795,35 @@ function App() {
         }
         banner={mode !== 'landing' && view.demo ? <DemoBanner inert={sheetShown} /> : undefined}
         sidebar={
-          <Sidebar
-            state={state}
-            host={host}
-            categories={categories}
-            librarySize={librarySize}
-            workspace={w}
-            selection={selection}
-            selectHost={selectHost}
-            selectMine={selectMine}
-            update={personal.update}
-            manage={() => setManaging(true)}
-            hostNote={
-              view.demo
-                ? DEMO_COPY.sidebar
-                : hostCopy(view.hosting, state.companionVersion, view.ownerWindow).sidebar
-            }
-            nav={sectionNav('sidebar')}
-            library={shown === 'board'}
-            canPlan={canPlan}
-            rail={
-              navStyle === 'tabs' && !narrow
-                ? { collapsed: sidebarRail, toggle: () => setSidebarRail(!sidebarRail) }
-                : undefined
-            }
-            inert={sheetShown}
-          />
+          !full &&
+          !(shown === 'mimic' && narrow) && (
+            <Sidebar
+              state={state}
+              host={host}
+              categories={categories}
+              librarySize={librarySize}
+              workspace={w}
+              selection={selection}
+              selectHost={selectHost}
+              selectMine={selectMine}
+              update={personal.update}
+              manage={() => setManaging(true)}
+              hostNote={
+                view.demo
+                  ? DEMO_COPY.sidebar
+                  : hostCopy(view.hosting, state.companionVersion, view.ownerWindow).sidebar
+              }
+              nav={sectionNav('sidebar')}
+              library={shown === 'board'}
+              canPlan={canPlan}
+              rail={
+                navStyle === 'tabs' && !narrow
+                  ? { collapsed: sidebarRail, toggle: () => setSidebarRail(!sidebarRail) }
+                  : undefined
+              }
+              inert={sheetShown}
+            />
+          )
         }
         board={
           <main
@@ -828,11 +832,62 @@ function App() {
             data-organize={shown === 'board' && organize.on ? 'on' : undefined}
             tabIndex={-1}
             aria-label={
-              shown === 'board' ? 'Soundboard' : shown === 'voices' ? 'Voices' : 'Sentences'
+              shown === 'board'
+                ? 'Soundboard'
+                : shown === 'voices'
+                  ? 'Voices'
+                  : shown === 'mimic'
+                    ? 'Mimic'
+                    : 'Sentences'
             }
             inert={sheetShown}
           >
-            {shown === 'voices' ? (
+            {suspended && (
+              // Stays on screen until the host resumes (2.35); a notice would time out.
+              <div className="playback-suspended" role="status">
+                <OctagonPause size={18} aria-hidden="true" />
+                {host ? (
+                  <>
+                    <span>
+                      <strong>Guest playback is paused.</strong> You can still play; guests cannot
+                      until you resume.
+                    </span>
+                    <button
+                      className="primary"
+                      disabled={!connected}
+                      aria-disabled={resuming || undefined}
+                      onClick={() => {
+                        if (resuming) return;
+                        setResuming(true);
+                        void playback.resume().finally(() => setResuming(false));
+                      }}
+                    >
+                      Resume guest playback
+                    </button>
+                  </>
+                ) : (
+                  <span>
+                    <strong>{HELD_BY_HOST}</strong>. Play buttons work again when the host resumes
+                    it.
+                  </span>
+                )}
+              </div>
+            )}
+            {host && supports(state.companionVersion, 'sessionRecovery') ? (
+              <RecoverSession state={state} />
+            ) : (
+              host && !!state.tempRecovery && <TempRecovery clips={state.tempRecovery} />
+            )}
+            {shown === 'mimic' ? (
+              <MimicPanel
+                state={state}
+                host={host}
+                connected={connected}
+                canPlay={canPlay}
+                {...(!narrow && { full, onFull: () => setMimicFull(!mimicFull) })}
+                onTempRequest={requestTemp}
+              />
+            ) : shown === 'voices' ? (
               <SectionView view="voices" ribbon={ribbon}>
                 <VoicesPanel state={state} host={host} connected={connected} canPlay={canPlay} />
               </SectionView>
@@ -935,12 +990,6 @@ function App() {
                       history={supports(state.companionVersion, 'budgetActions')}
                     />
                   )}
-                  {/* 2.45 (WP2): one question for Temp, history and drafts after a crash. */}
-                  {host && supports(state.companionVersion, 'sessionRecovery') ? (
-                    <RecoverSession state={state} />
-                  ) : (
-                    host && !!state.tempRecovery && <TempRecovery clips={state.tempRecovery} />
-                  )}
                 </SectionHeader>
                 {host && <SetupCard state={state} />}
                 {(!connected || state.error) && (
@@ -961,37 +1010,6 @@ function App() {
                         {!connected &&
                           host &&
                           'Allow the browser’s local-network request if prompted. Keep the companion running.'}
-                      </span>
-                    )}
-                  </div>
-                )}
-                {suspended && (
-                  // Stays on screen until the host resumes (2.35); a notice would time out.
-                  <div className="playback-suspended" role="status">
-                    <OctagonPause size={18} aria-hidden="true" />
-                    {host ? (
-                      <>
-                        <span>
-                          <strong>Guest playback is paused.</strong> You can still play; guests
-                          cannot until you resume.
-                        </span>
-                        <button
-                          className="primary"
-                          disabled={!connected}
-                          aria-disabled={resuming || undefined}
-                          onClick={() => {
-                            if (resuming) return;
-                            setResuming(true);
-                            void playback.resume().finally(() => setResuming(false));
-                          }}
-                        >
-                          Resume guest playback
-                        </button>
-                      </>
-                    ) : (
-                      <span>
-                        <strong>{HELD_BY_HOST}</strong>. Play buttons work again when the host
-                        resumes it.
                       </span>
                     )}
                   </div>
@@ -1256,7 +1274,7 @@ function App() {
         }
         dock={<Notifications />}
         splitter={
-          panelMode === 'docked' && !full ? (
+          panelMode === 'docked' ? (
             <Splitter
               width={editorWidth}
               max={editorMax}
@@ -1274,7 +1292,6 @@ function App() {
               kind={shownPanel.kind}
               mode={panelMode === 'closed' ? 'docked' : panelMode}
               title={panelTitle}
-              summary={shownPanel.kind === 'mimic' && mimicListening ? 'listening' : 'open'}
               focusKey={panelFocus}
               onClose={closePanel}
               onMinimize={() => setMinimized(true)}
@@ -1282,28 +1299,8 @@ function App() {
                 setMinimized(false);
                 setPanelFocus((n) => n + 1);
               }}
-              {...(shownPanel.kind === 'mimic' && {
-                full,
-                onFull: (on: boolean) => {
-                  setFullSetAside(false);
-                  setMimicFull(on);
-                },
-              })}
             >
-              {shownPanel.kind === 'mimic' ? (
-                <MimicPanel
-                  state={state}
-                  host={host}
-                  connected={connected}
-                  canPlay={canPlay}
-                  onTempRequest={(kind, assetId) => {
-                    // Keep happens in the Temp list on the Soundboard; Edit switches the panel to the
-                    // copy editor (2.43: Mimic used to close for both).
-                    if (kind === 'keep') closePanel();
-                    requestTemp(kind, assetId);
-                  }}
-                />
-              ) : shownPanel.kind === 'temp-edit' ? (
+              {shownPanel.kind === 'temp-edit' ? (
                 <TempCopyEditor
                   key={shownPanel.sourceId}
                   state={state}
@@ -1365,7 +1362,7 @@ function App() {
         <FeedbackDialog
           host={host}
           where={
-            shownPanel?.kind === 'mimic'
+            shown === 'mimic'
               ? 'Mimic'
               : shown === 'voices'
                 ? 'Voices'
@@ -1454,11 +1451,10 @@ function App() {
 }
 
 /** The panel this tab showed before a reload (2.43 section memory), if it can be shown again. */
-function restorePanel(): EditorRequest | null {
+function restorePanel(): Exclude<EditorRequest, { kind: 'mimic' }> | null {
   const saved = recall('shell').panel;
   if (!saved) return null;
-  if (saved.kind === 'mimic' || saved.kind === 'activity' || saved.kind === 'organize')
-    return { kind: saved.kind };
+  if (saved.kind === 'activity' || saved.kind === 'organize') return { kind: saved.kind };
   if (saved.kind === 'temp-edit' && saved.sourceId) {
     const edit = recall('tempEdit');
     return {

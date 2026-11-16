@@ -570,6 +570,85 @@ public sealed class VoiceLibraryTests : IDisposable
         Assert.NotNull(library.Get(kept.GetProperty("recordingId").GetString()!));
     }
 
+    // ---- One-press Save (2.46) -----------------------------------------------------------------------------------
+
+    [Fact]
+    public async Task OnePressSaveKeepsATempClipInTheLibraryWhereKeepPutsFilesWithItsOwnNameAndNoPrompt()
+    {
+        await using var rig = new Rig(folder); var bridge = rig.Bridge;
+        await rig.Host();
+        rig.Advance(8);
+        // Where Keep puts files is the host's Keep settings (chosen once); the save asks nothing.
+        var keptFolder = Path.Combine(folder, "Kept sounds");
+        await Ok(bridge.Execute(Cmd("keepSettings") with { DestinationDirectory = keptFolder }, "host"));
+        var clip = Body(await Ok(bridge.Execute(Cmd("mimicClip") with { StartFrame = S(1.8), EndFrame = S(3), SourceId = rig.Session, Name = "Got him" }, "host")));
+        string assetId = clip.GetProperty("assetId").GetString()!;
+        var saved = Body(await Ok(bridge.Execute(Cmd("libraryKeep") with { AssetId = assetId }, "host")));
+        Assert.True(saved.GetProperty("added").GetBoolean());
+        Assert.Equal("Got him", saved.GetProperty("title").GetString());
+        var library = bridge.VoiceLibraryStore;
+        var recording = library.Get(saved.GetProperty("recordingId").GetString()!)!;
+        Assert.Equal(("Got him", "history", rig.Session), (recording.Title, recording.Source.Kind, recording.Source.SessionId));
+        Assert.StartsWith(Path.Combine(keptFolder, "Soundpad Web"), recording.Path);
+        Assert.True(File.Exists(recording.Path));
+        // The notice can say where it went: the app's Saved category, and (host only) the folder.
+        Assert.StartsWith("Saved - Soundpad Web", saved.GetProperty("category").GetString());
+        Assert.Equal(Path.Combine(keptFolder, "Soundpad Web"), saved.GetProperty("folder").GetString());
+        // Kept for good: no longer temporary, and Soundpad lists the kept file.
+        var asset = Body(await Ok(bridge.Execute(Cmd("audioAssets"), "host"))).GetProperty("manager").GetProperty("assets").EnumerateArray().First(a => a.GetProperty("id").GetString() == assetId);
+        Assert.Equal("permanent", asset.GetProperty("state").GetString());
+        Assert.Contains(bridge.Snapshot.Library.Sounds, s => s.AssetId == assetId && !s.Temporary);
+        // Saving it again changes nothing.
+        var again = Body(await Ok(bridge.Execute(Cmd("libraryKeep") with { AssetId = assetId }, "host")));
+        Assert.Equal((recording.Id, false), (again.GetProperty("recordingId").GetString(), again.GetProperty("added").GetBoolean()));
+        Assert.Equal(1, library.Count);
+        // Undo takes it out of the library; the kept file stays.
+        await Ok(bridge.Execute(Cmd("libraryRemove") with { RecordingIds = [recording.Id] }, "host"));
+        Assert.Equal(0, library.Count);
+        Assert.True(File.Exists(recording.Path));
+        // A clip that is gone from Temp is refused, and never said to be kept.
+        var error = await Refused(bridge.Execute(Cmd("libraryKeep") with { AssetId = Guid.NewGuid().ToString() }, "host"));
+        Assert.Equal("That clip is no longer in Temp.", error);
+    }
+
+    [Fact]
+    public async Task AGuestSavesInOnePressOnlyWhileTheHostAllowsGuestKeepAndNeverChoosesTheFolder()
+    {
+        await using var rig = new Rig(folder); var bridge = rig.Bridge;
+        await rig.Host();
+        await Ok(bridge.Execute(Cmd("keepSettings") with { GuestKeep = false }, "host"));
+        rig.Advance(8);
+        var clip = Body(await Ok(bridge.Execute(Cmd("mimicClip") with { StartFrame = S(1.8), EndFrame = S(3), SourceId = rig.Session, Name = "Guest line" }, "host")));
+        string assetId = clip.GetProperty("assetId").GetString()!;
+        Assert.Contains("not allowed guests to keep", await Refused(rig.As(Alice, Cmd("libraryKeep") with { AssetId = assetId })));
+        Assert.Equal(0, bridge.VoiceLibraryStore.Count);
+        await Ok(bridge.Execute(Cmd("keepSettings") with { GuestKeep = true }, "host"));
+        // A folder or category in a guest's command is ignored: the clip goes where the host's Keep settings say.
+        var elsewhere = Path.Combine(folder, "guest folder");
+        var saved = Body(await Ok(rig.As(Alice, Cmd("libraryKeep") with { AssetId = assetId, DestinationDirectory = elsewhere, CategoryId = 1, CategoryName = "Reactions" })));
+        var recording = bridge.VoiceLibraryStore.Get(saved.GetProperty("recordingId").GetString()!)!;
+        Assert.Equal(("Guest line", "Alice"), (recording.Title, recording.ByName));
+        Assert.StartsWith(Path.Combine(folder, "library"), recording.Path);
+        Assert.False(Directory.Exists(elsewhere));
+        Assert.StartsWith("Saved - Soundpad Web", saved.GetProperty("category").GetString());
+        // Guests are never told a host folder.
+        Assert.Equal(JsonValueKind.Null, saved.GetProperty("folder").ValueKind);
+        Assert.DoesNotContain(folder, saved.GetRawText(), StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task ADraftSavedToTheLibrarySaysItsNameAndWhereItWent()
+    {
+        await using var rig = new Rig(folder); var bridge = rig.Bridge;
+        await rig.Host();
+        rig.Advance(6);
+        string draftId = Body(await Ok(bridge.Execute(Cmd("draftCreate") with { StartFrame = S(1.8), EndFrame = S(3), SourceId = rig.Session, Name = "Quick one" }, "host"))).GetProperty("id").GetString()!;
+        var kept = Body(await Ok(bridge.Execute(Cmd("draftKeep") with { DraftId = draftId, Action = "library" }, "host")));
+        Assert.Equal("Quick one", kept.GetProperty("title").GetString());
+        Assert.StartsWith("Saved - Soundpad Web", kept.GetProperty("category").GetString());
+        Assert.Equal(Path.Combine(folder, "library"), kept.GetProperty("folder").GetString());
+    }
+
     [Fact]
     public async Task TheSnapshotNeverWaitsForTheVoiceLibrary()
     {

@@ -1,5 +1,5 @@
 import { useEffect, useRef, type ReactNode } from 'react';
-import { Expand, Maximize2, Minimize2, Shrink, X } from 'lucide-react';
+import { Maximize2, Minimize2, X } from 'lucide-react';
 import type { EditorKind, PanelMode } from '../../shell';
 import { dialogOpen } from '../Modal';
 
@@ -36,8 +36,6 @@ export function EditorPanel({
   onClose,
   onMinimize,
   onRestore,
-  full,
-  onFull,
   children,
 }: {
   kind: EditorKind;
@@ -54,19 +52,11 @@ export function EditorPanel({
   onClose: () => void;
   onMinimize: () => void;
   onRestore: () => void;
-  /**
-   * Full screen (2.46, Mimic, docked only): the panel fills the main area. With `onFull` the header has the
-   * toggle, and Escape leaves full screen before it closes the panel.
-   */
-  full?: boolean;
-  onFull?: (on: boolean) => void;
   children: ReactNode;
 }) {
   const heading = useRef<HTMLHeadingElement>(null);
   const close = useRef(onClose);
   close.current = onClose;
-  const leaveFull = useRef<(() => void) | null>(null);
-  leaveFull.current = full && onFull ? () => onFull(false) : null;
   useEffect(() => {
     if (focusKey > 0) heading.current?.focus({ preventScroll: true });
   }, [focusKey]);
@@ -90,8 +80,7 @@ export function EditorPanel({
         heading.current?.focus();
         return;
       }
-      if (leaveFull.current) leaveFull.current();
-      else close.current();
+      close.current();
     }
     document.addEventListener('keydown', escape);
     return () => document.removeEventListener('keydown', escape);
@@ -105,7 +94,6 @@ export function EditorPanel({
       aria-labelledby="editor-title"
       data-panel-kind={kind}
       data-panel-mode={mode}
-      data-full={full ? 'true' : undefined}
     >
       <header className="editor-head">
         <h2 id="editor-title" tabIndex={-1} ref={heading}>
@@ -131,25 +119,7 @@ export function EditorPanel({
             )}
           </button>
         )}
-        {/* One button whose label changes, so the keyboard stays on it. */}
-        {mode === 'docked' && onFull && (
-          <button
-            type="button"
-            className="btn editor-mode"
-            title={full ? 'Back to the panel beside the board (Esc)' : 'Fill the main area'}
-            onClick={() => onFull(!full)}
-          >
-            {full ? (
-              <>
-                <Shrink size={16} aria-hidden="true" /> Exit full screen
-              </>
-            ) : (
-              <>
-                <Expand size={16} aria-hidden="true" /> Full screen
-              </>
-            )}
-          </button>
-        )}
+
         <button type="button" className="icon-button" aria-label="Close dialog" onClick={onClose}>
           <X size={19} />
         </button>

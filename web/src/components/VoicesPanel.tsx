@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
+  BookAudio,
   ChevronLeft,
   ChevronRight,
   Headphones,
@@ -53,6 +54,8 @@ import { PAGE, useSectionScroll } from './VoiceShared';
 import { recall, remember } from '../sections';
 import { useSentenceStore } from '../library/sentence-store';
 import { usePreviewAudio } from '../preview-audio';
+import { useTempAssets } from '../temp-assets';
+import { canQuickSave, saveClip, unsavedClips } from '../library/quick-save';
 
 type Props = { state: Snapshot; host: boolean; connected: boolean; canPlay: boolean };
 type Tab = 'library' | 'review' | 'words' | 'voices' | 'index';
@@ -73,12 +76,17 @@ export function VoicesPanel({ state, host, connected, canPlay }: Props) {
     return TABS.includes(saved as Tab) ? (saved as Tab) : 'library';
   });
   const [openId, setOpenId] = useState<string | null>(() => recall('voices').recordingId ?? null);
+  // Rename after a one-press Save (2.46): the recording opens with its title ready to type.
+  const [renameId, setRenameId] = useState<string | null>(null);
   useEffect(() => remember('voices', { tab, recordingId: openId ?? undefined }), [tab, openId]);
   const panel = useRef<HTMLDivElement>(null);
   useSectionScroll('voices', panel, !!shared);
   useEffect(() => {
     const waiting = takeOpen('recording');
-    if (waiting?.kind === 'recording') setOpenId(waiting.recordingId);
+    if (waiting?.kind === 'recording') {
+      setOpenId(waiting.recordingId);
+      if (waiting.rename) setRenameId(waiting.recordingId);
+    }
     void refreshLibrary();
   }, []);
   useOpenRequests((request) => {
@@ -86,6 +94,7 @@ export function VoicesPanel({ state, host, connected, canPlay }: Props) {
     takeOpen('recording');
     setTab('library');
     setOpenId(request.recordingId);
+    setRenameId(request.rename ? request.recordingId : null);
   });
   if (!shared) return <p className="muted">Loading the voice library…</p>;
   // Every tab reads `canEdit` from here: it includes the host's setting for this guest (2.41 review).
@@ -132,6 +141,8 @@ export function VoicesPanel({ state, host, connected, canPlay }: Props) {
         (openId ? (
           <RecordingDetail
             id={openId}
+            rename={renameId === openId}
+            renamed={() => setRenameId(null)}
             status={status}
             canPlay={canPlay && connected}
             canRegion={canRegion}
@@ -140,6 +151,7 @@ export function VoicesPanel({ state, host, connected, canPlay }: Props) {
         ) : (
           <LibraryView
             state={state}
+            host={host}
             status={status}
             canPlay={canPlay && connected}
             canRegion={canRegion}
@@ -237,12 +249,14 @@ function FilterBar({
 
 function LibraryView({
   state,
+  host,
   status,
   canPlay,
   canRegion,
   open,
 }: {
   state: Snapshot;
+  host: boolean;
   status: LibraryStatus;
   canPlay: boolean;
   canRegion: boolean;
@@ -335,6 +349,7 @@ function LibraryView({
   );
   const order = list?.items.map((r) => r.id) ?? [];
   const voices = status.voices;
+  const canSave = canQuickSave(state, host, controller.hostSite());
   return (
     <section className="voices-library" aria-label="Voice library">
       <label className="search voices-search">
@@ -480,6 +495,7 @@ function LibraryView({
         </>
       ) : (
         <>
+          {canSave && <SaveFromTemp canEdit={status.canEdit} />}
           {picked.ids.length > 0 && (
             <BulkBar status={status} ids={picked.ids} clear={() => setPicked(NOTHING_PICKED)} />
           )}
@@ -489,7 +505,9 @@ function LibraryView({
             <p className="muted">
               {hasFilters(filters)
                 ? 'No recordings match these filters.'
-                : 'Nothing kept yet. Keep a clip (from Mimic or Temp) and it appears here with its words.'}
+                : canSave
+                  ? 'Nothing saved yet. Press Save on a clip above, in Mimic or in Temp, and it appears here with its words.'
+                  : 'Nothing kept yet. Keep a clip (from Mimic or Temp) and it appears here with its words.'}
             </p>
           ) : (
             <ul className="voices-list" aria-label="Recordings">
@@ -554,6 +572,46 @@ function LibraryView({
           )}
         </>
       )}
+    </section>
+  );
+}
+
+/**
+ * Voices can save too (2.46, from "cant even save voices"): the newest clips still only in Temp, each with
+ * Save, which puts it in the library at once under its name.
+ */
+function SaveFromTemp({ canEdit }: { canEdit: boolean }) {
+  const { data } = useTempAssets();
+  const [saving, setSaving] = useState('');
+  const clips = unsavedClips(data?.manager.assets ?? []);
+  if (!clips.length) return null;
+  return (
+    <section className="voices-unsaved" aria-label="In Temp, not saved yet">
+      <h3>In Temp, not saved yet</h3>
+      <ul>
+        {clips.map((a) => (
+          <li key={a.id}>
+            <span className="voices-title">{a.name}</span>
+            <small>{a.uploader}</small>
+            <button
+              type="button"
+              aria-label={`Save ${a.name} to the voice library`}
+              title="Save it to the voice library now, under this name (kept where Keep puts files)"
+              aria-busy={saving === a.id || undefined}
+              aria-disabled={!!saving || undefined}
+              onClick={() => {
+                if (saving) return;
+                setSaving(a.id);
+                void saveClip(a.id, a.name, canEdit)
+                  .catch(() => {})
+                  .finally(() => setSaving(''));
+              }}
+            >
+              <BookAudio size={13} aria-hidden="true" /> {saving === a.id ? 'Saving…' : 'Save'}
+            </button>
+          </li>
+        ))}
+      </ul>
     </section>
   );
 }
@@ -651,12 +709,17 @@ function BulkBar({
 /** One recording: its words (each plays), title, voice, tags, favourite, corrected text, where it came from and its history. */
 function RecordingDetail({
   id,
+  rename = false,
+  renamed,
   status,
   canPlay,
   canRegion,
   back,
 }: {
   id: string;
+  /** Opened by Rename after a Save (2.46): the title field takes the keyboard once it is shown. */
+  rename?: boolean;
+  renamed?: () => void;
   status: LibraryStatus;
   canPlay: boolean;
   canRegion: boolean;
@@ -670,6 +733,14 @@ function RecordingDetail({
   const [text, setText] = useState('');
   const [tag, setTag] = useState('');
   const shown = useRef<string | null>(null);
+  const titleField = useRef<HTMLInputElement>(null);
+  const ready = !!data && data.recording.id === id;
+  useEffect(() => {
+    if (!rename || !ready) return;
+    titleField.current?.focus();
+    titleField.current?.select();
+    renamed?.();
+  }, [rename, ready]);
   useEffect(() => {
     let live = true;
     controller
@@ -728,6 +799,7 @@ function RecordingDetail({
           }}
         >
           <input
+            ref={titleField}
             aria-label="Title"
             maxLength={200}
             value={title}

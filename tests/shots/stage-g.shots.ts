@@ -70,7 +70,7 @@ for (const s of MATRIX)
       test.skip(browserName === 'webkit', 'Playwright’s Windows WebKit cannot start the example');
       await example(page);
       await page.getByRole('button', { name: 'Mimic', exact: true }).click();
-      const mimic = page.getByRole('dialog', { name: 'Mimic' });
+      const mimic = page.getByRole('main', { name: 'Mimic', exact: true });
       await mimic.getByRole('button', { name: 'Start listening' }).click();
       await expect(mimic.getByRole('button', { name: 'Last 3 s' })).toBeVisible({
         timeout: 15000,
@@ -120,7 +120,7 @@ for (const s of MATRIX)
     test('host Mimic, Voices, Sentences, Settings', async ({ page, harness }) => {
       await host(page, harness);
       await page.getByRole('button', { name: 'Mimic', exact: true }).click();
-      const mimic = page.getByRole('dialog', { name: 'Mimic' });
+      const mimic = page.getByRole('main', { name: 'Mimic', exact: true });
       await expect(mimic.getByRole('button', { name: 'Start listening' })).toBeVisible();
       await shot(page, 'host-mimic', s);
       // Before Stage G, Mimic is modal and Session & access can only open alone; the scene name says which.

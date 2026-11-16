@@ -3,9 +3,9 @@
  * G; WP-A changes only the bodies when the shell changes (Voices and Sentences become main views, the
  * Mimic dialog becomes the editor panel). Owned by WP-A after Phase 0.
  */
-import { expect, type Page } from '@playwright/test';
+import { expect, type Locator, type Page } from '@playwright/test';
 
-export type SectionName = 'Voices' | 'Sentences';
+export type SectionName = 'Voices' | 'Sentences' | 'Mimic';
 
 /** The Voices or Sentences view: a `main` region named after it (2.43; a dialog before). */
 export function section(page: Page, name: SectionName) {
@@ -46,4 +46,14 @@ export function editCopyForm(page: Page, name: string) {
 /** Closes the editor panel (Mimic and the others): its "Close dialog". */
 export async function closeEditor(page: Page) {
   await editorPanel(page).getByRole('button', { name: 'Close dialog' }).click();
+}
+
+/** Enables or disables the live transcript through Mimic's settings disclosure. */
+export async function setMimicTranscription(mimic: Page | Locator, enabled = true) {
+  const settings = mimic.locator('.mimic-page-settings');
+  const summary = settings.locator('summary');
+  const open = (await settings.getAttribute('open')) !== null;
+  if (!open) await summary.click();
+  await settings.getByLabel('Transcribe Mimic audio').setChecked(enabled);
+  if (!open) await summary.click();
 }

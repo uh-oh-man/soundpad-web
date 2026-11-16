@@ -29,6 +29,9 @@ export const siteRelaysLibrary = (site: string | null | undefined) => companionA
 /** True when the host's page relays the 2.42 sentence and palette commands (its welcome also says so). */
 export const siteRelaysSentences = (site: string | null | undefined) =>
   companionAtLeast(site, 2, 42);
+/** True when the host's page relays the 2.46 one-press Save (libraryKeep); an older one would drop the guest. */
+export const siteRelaysQuickSave = (site: string | null | undefined) =>
+  companionAtLeast(site, 2, 46);
 
 /** Oldest companion that supports every feature of this website. */
 export const REQUIRED_COMPANION = { major: 2, minor: 3, label: '2.3' } as const;
@@ -81,12 +84,14 @@ export const FEATURES = {
   guestTempClear: [2, 46],
   tempUndo: [2, 46],
   // 2.45 (WP2): one Recover previous session / Discard with drafts, and guests' storage actions.
-  sessionRecovery: [2, 45],
-  budgetActions: [2, 45],
+  sessionRecovery: [2, 46],
+  budgetActions: [2, 46],
   // 2.45 (WP3): voice slots and phrase blocks, palette Add to sentence, guests' unkept sentences for the host.
-  sentenceCompose: [2, 45],
+  sentenceCompose: [2, 46],
   // 2.45 (WP4): Activity kept in the companion across reloads, and the companion log in Settings.
-  diagnostics: [2, 45],
+  diagnostics: [2, 46],
+  // One-press Save: a Temp clip, selection or draft straight into the voice library, no prompt (libraryKeep).
+  quickSave: [2, 46],
 } as const satisfies Record<string, readonly [number, number]>;
 
 /** True when the website changed version since this browser last used it (and it had used it before). */
@@ -150,6 +155,7 @@ const FEATURE_NAMES: Record<keyof typeof FEATURES, string> = {
     "voice slots and phrase blocks in sentence templates, Add to sentence from the palette, and guests' unkept sentences for the host to see and clear",
   diagnostics:
     "Activity that stays after a reload, and the companion's log in Settings for when something goes wrong",
+  quickSave: 'one-press Save into the voice library',
 };
 
 /**

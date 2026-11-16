@@ -472,11 +472,16 @@ public sealed partial class Bridge
                     // history as its provenance and its words copied from the transcript. A refusal leaves the clip in Temp
                     // and the draft open.
                     bool library = c.Op == "draftKeep" && c.Action == "library";
-                    string? recordingId = null;
+                    string? recordingId = null, title = null, category = null, folder = null;
                     if (library && Field(saved, "assetId") is string keptId)
                     {
                         var source = new LibrarySource { Kind = "history", SessionId = h.SessionId, StartFrame = draft.Start, EndFrame = draft.End, Rate = h.Rate };
-                        try { recordingId = (await KeepIntoLibrary(keptId, actor, participant, requester, audience, source, WordsFromHistory(source))).Id; }
+                        try
+                        {
+                            var recording = await KeepIntoLibrary(keptId, actor, participant, requester, audience, source, WordsFromHistory(source));
+                            // Its name and where it went, for the page's "Saved" notice (2.46).
+                            recordingId = recording.Id; title = recording.Title; (category, folder) = KeptWhere(keptId, host);
+                        }
                         // Kept, but not in the library: the draft stays open (and pinned) so nothing is lost.
                         catch (InvalidDataException ex) when (ex.Data.Contains(KeptOutsideLibrary)) { DraftsChanged(); return new("ack", c.Id, false, ex.Message); }
                         catch (InvalidDataException ex) { DraftsChanged(); return new("ack", c.Id, false, ex.Message + " The clip is in Temp."); }
@@ -486,7 +491,7 @@ public sealed partial class Bridge
                     DraftsChanged();
                     var result = c.Op == "draftPlay" ? await Autoplay(saved, c with { Autoplay = true }, actor, participant, requester, audience, intent) : saved;
                     var merged = Merge(result.Data, draft.Id, close);
-                    return result with { Id = c.Id, Data = library ? new { assetId = Field(saved, "assetId"), state = "permanent", played = false, draftId = draft.Id, closed = close, recordingId } : merged };
+                    return result with { Id = c.Id, Data = library ? new { assetId = Field(saved, "assetId"), state = "permanent", played = false, draftId = draft.Id, closed = close, recordingId, title, category, folder } : merged };
                 }
         }
         return null;

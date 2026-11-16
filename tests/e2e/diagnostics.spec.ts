@@ -22,22 +22,6 @@ const announcements = (page: Page) =>
       (window as unknown as { __soundpadAnnouncements?: string[] }).__soundpadAnnouncements ?? [],
   );
 const REFUSAL = 'Ask for 1 to 500 log lines.';
-/**
- * The harness reports the version in companion/SoundpadWeb.Companion.csproj, which the 2.45 release bump raises.
- * Until then the host page is told 2.45.0, so the diagnostics gate opens; after the bump this changes nothing.
- */
-async function companion245(page: Page) {
-  await page.routeWebSocket(/ws:\/\/127\.0\.0\.1:\d+\/bridge/, (socket) => {
-    const server = socket.connectToServer();
-    socket.onMessage((message) => server.send(message));
-    server.onMessage((message) => {
-      const frame = JSON.parse(String(message));
-      if (frame.state?.companionVersion) frame.state.companionVersion = '2.45.0';
-      socket.send(JSON.stringify(frame));
-    });
-  });
-}
-
 test('an error notice has Technical details, reached by keyboard and announced once', async ({
   page,
   harness,
@@ -73,7 +57,6 @@ test("the host's Activity comes back after a reload, with an error's details", a
   page,
   harness,
 }) => {
-  await companion245(page);
   await host(page, harness);
   await page.evaluate(async () => {
     const { controller } = await import(/* @vite-ignore */ '/src/' + 'controller.ts');
@@ -143,8 +126,7 @@ test.describe('with a companion log', () => {
     harness,
   }) => {
     await useLocalGuests(page);
-    await companion245(page);
-    await host(page, harness);
+      await host(page, harness);
     await page.getByRole('button', { name: 'Access settings' }).click();
     const settings = page.getByRole('dialog', { name: 'Session & access' });
     const section = settings.getByRole('region', { name: 'Companion log' });

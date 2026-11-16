@@ -299,8 +299,12 @@ export class Controller {
       this.bridge?.post(fits ? info : { ...info, layouts: [] });
     }, 250);
   }
-  notify = (message: string, kind: NoticeKind = 'info', action?: NoticeAction, details?: string) =>
-    notify(message, kind, action, details);
+  notify = (
+    message: string,
+    kind: NoticeKind = 'info',
+    action?: NoticeAction,
+    detailsOrSecond?: string | NoticeAction,
+  ) => notify(message, kind, action, detailsOrSecond);
   async start() {
     if (this.initialized) return;
     this.initialized = true;

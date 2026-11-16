@@ -276,6 +276,9 @@ public sealed partial class Bridge
             throw new InvalidDataException("The host has not allowed guests to keep clips.");
         // A library that cannot take it (damaged files, full) refuses before the clip leaves Temp (2.41 review).
         if (Voices.CannotAdd is { } refusal) throw new InvalidDataException(refusal);
+        // Nothing to keep (2.46): the clip is still being prepared, or its file went. Said so before anything happens;
+        // until 2.45 the host was told "The clip was kept, but it could not be added" although nothing was kept.
+        if (!KeptOrKeepable(assetId)) throw new InvalidDataException("That clip is not ready to keep yet. Try again in a moment.");
         libraryKeepProblem.TryRemove(assetId, out _);
         await audioGate.EnterAsync(PriorityGate.Lane.Normal);
         try
@@ -286,7 +289,12 @@ public sealed partial class Bridge
                 if (KeepableVariant(assetId) is { } variant) await Audio.Promote(assetId, variant.Id, settings.Destination, settings.CategoryId, settings.CategoryName, true);
                 LibraryFromKeep(assetId, "host", "Host", source, words);
             }
-            else await GuestKeep(new Command(2, Guid.NewGuid().ToString(), DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(), "keepAudio", AssetId: assetId), actor, participant, requester, source, words);
+            else
+            {
+                // Its temporary variant, or (kept already, not yet in the library) its kept one, which GuestKeep then only adds.
+                var variantId = KeepableVariant(assetId)?.Id ?? Audio.AssetById(assetId).Variants.LastOrDefault(v => v.Permanent && v.Current)?.Id;
+                await GuestKeep(new Command(2, Guid.NewGuid().ToString(), DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(), "keepAudio", AssetId: assetId, VariantId: variantId), actor, participant, requester, source, words);
+            }
         }
         finally { audioGate.Release(); }
         await gate.EnterAsync(PriorityGate.Lane.Normal); try { await RefreshInner(); Publish(); } finally { gate.Release(); }
@@ -299,4 +307,53 @@ public sealed partial class Bridge
     }
     /// <summary>Marks the refusal of <see cref="KeepIntoLibrary"/> that comes after the clip was kept (it is no longer in Temp).</summary>
     private const string KeptOutsideLibrary = "keptOutsideLibrary";
+
+    /// <summary>A clip <see cref="KeepIntoLibrary"/> can take: kept already, or with a temporary variant ready to keep.</summary>
+    private bool KeptOrKeepable(string assetId)
+    {
+        try { return Audio.AssetById(assetId).Variants.Any(v => v.Permanent && v.Current && v.State == "ready") || KeepableVariant(assetId) != null; }
+        catch (InvalidDataException) { return false; }
+    }
+
+    /// <summary>Where a kept clip went, for "Saved" notices (2.46): its Soundpad category, and (host only) the folder of kept files.</summary>
+    private (string? Category, string? Folder) KeptWhere(string assetId, bool host)
+    {
+        try
+        {
+            var asset = Audio.AssetById(assetId);
+            var kept = asset.Variants.LastOrDefault(v => v.Permanent && v.Current) ?? asset.Variants.LastOrDefault(v => v.Permanent);
+            // The folder Keep puts files in (each clip has a folder of its own inside it).
+            return (asset.Promotion?.CategoryName, host && kept != null ? Path.GetDirectoryName(Path.GetDirectoryName(kept.Path)) : null);
+        }
+        catch (InvalidDataException) { return (null, null); }
+    }
+
+    /// <summary>
+    /// One-press Save (2.46, libraryKeep): a clip in Temp (Just mimicked, Temp) is kept permanently into the voice
+    /// library at once, where Keep puts files (the host's Keep settings), with its own name and no prompt. The same
+    /// rules as a draft's Keep in voice library: a guest only while the host allows guest Keep, and never a folder or
+    /// category of their own (the command's are ignored). Saving one already in the library answers with it.
+    /// </summary>
+    private async Task<Reply> LibraryKeep(Command c, string actor, Participant? participant, string? requester, string? audience)
+    {
+        try
+        {
+            long now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+            if (c.V is not (1 or 2) || !Guid.TryParseExact(c.Id, "D", out _) || Math.Abs(now - c.At) > 30000) throw new InvalidDataException("Invalid or expired command.");
+            bool host = actor == "host";
+            var assetId = c.AssetId is { Length: > 0 and <= 64 } id && Audio.Public.Assets.Any(a => a.Id == id && a.State != "removed") ? id : throw new InvalidDataException("That clip is no longer in Temp.");
+            LibraryRecording recording; bool added;
+            if (Voices.FindByAsset(assetId) is { } existing) { recording = existing; added = false; }
+            else
+            {
+                var asset = Audio.AssetById(assetId);
+                var source = provenance.GetValueOrDefault(assetId) ?? new LibrarySource { Kind = asset.Origin == "native" ? "soundpad" : "upload" };
+                recording = await KeepIntoLibrary(assetId, actor, participant, requester, audience, source, null);
+                added = true;
+            }
+            var (category, folder) = KeptWhere(assetId, host);
+            return new("ack", c.Id, true, Data: new { recordingId = recording.Id, title = recording.Title, added, category, folder });
+        }
+        catch (InvalidDataException ex) { return new("ack", c.Id, false, ex.Message); }
+    }
 }

@@ -6,6 +6,7 @@ import {
   Keyboard,
   Mic2,
   RefreshCw,
+  Settings2,
   Square,
 } from 'lucide-react';
 import { z } from 'zod';
@@ -240,181 +241,187 @@ export function MimicHostControls({ state, connected }: { state: Snapshot; conne
         </p>
       )}
       {history?.problem && <p className="warning mimic-problem">{history.problem}</p>}
-      {history && (
-        <div className="mimic-transcribe mimic-history-settings">
-          <HistoryIcon size={16} />
-          <label>
-            Keep the last
-            <select
-              aria-label="Recording history length"
-              value={Math.round(history.seconds / 60)}
-              aria-disabled={busy || undefined}
-              onChange={(e) => {
-                if (running.current) return;
-                const minutes = Number(e.target.value);
-                void command(() => controller.run('historySettings', { seconds: minutes * 60 }));
-              }}
-            >
-              {HISTORY_MINUTES.map((m) => (
-                <option key={m} value={m}>
-                  {m === 60 ? '1 hour' : `${m} min`}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label>
-            Subtitles
-            <select
-              aria-label="Subtitles setting"
-              value={history.subtitles}
-              aria-disabled={busy || undefined}
-              onChange={(e) => {
-                if (running.current) return;
-                const subtitles = e.target.value as (typeof SUBTITLES)[number]['value'];
-                void command(() => controller.run('historySettings', { subtitles }));
-              }}
-            >
-              {SUBTITLES.map((s) => (
-                <option key={s.value} value={s.value}>
-                  {s.label}
-                </option>
-              ))}
-            </select>
-          </label>
-          <small>
-            {demo
-              ? 'In the example the history repeats its loop and is cleared when you leave.'
-              : 'Kept on this PC until the companion closes. Gaming recognises speech with the least CPU, at low priority.'}
-          </small>
-        </div>
-      )}
-      {supports(state.companionVersion, 'transcripts') && (
-        <div className="mimic-transcribe">
-          <Captions size={16} />
-          {mimic?.transcriptModel ? (
+      <details className="mimic-page-settings">
+        <summary>
+          <Settings2 size={15} aria-hidden="true" /> Mimic settings
+        </summary>
+        {history && (
+          <div className="mimic-transcribe mimic-history-settings">
+            <HistoryIcon size={16} />
             <label>
-              <input
-                type="checkbox"
-                aria-label="Transcribe Mimic audio"
-                checked={transcribing}
+              Keep the last
+              <select
+                aria-label="Recording history length"
+                value={Math.round(history.seconds / 60)}
                 aria-disabled={busy || undefined}
                 onChange={(e) => {
                   if (running.current) return;
-                  const on = e.target.checked;
-                  setWantTranscript(on);
-                  void command(
-                    () => controller.run('mimicTranscribe', { action: on ? 'enable' : 'disable' }),
-                    () => setWantTranscript(null),
-                  );
+                  const minutes = Number(e.target.value);
+                  void command(() => controller.run('historySettings', { seconds: minutes * 60 }));
                 }}
-              />
-              Transcript
+              >
+                {HISTORY_MINUTES.map((m) => (
+                  <option key={m} value={m}>
+                    {m === 60 ? '1 hour' : `${m} min`}
+                  </option>
+                ))}
+              </select>
             </label>
-          ) : (
-            <button
-              disabled={busy || mimic?.transcriptStatus?.startsWith('Downloading')}
-              onClick={() =>
-                void command(() => controller.run('mimicTranscribe', { action: 'download' }))
-              }
-            >
-              <Download size={15} /> Get transcripts (148 MB, once)
-            </button>
-          )}
-          <small>
-            {mimic?.transcriptStatus && mimic.transcriptStatus !== 'Off'
-              ? mimic.transcriptStatus
-              : 'Speech is recognized on this PC; only the text is shared.'}
-          </small>
-        </div>
-      )}
-      {supports(state.companionVersion, 'hotkey') && (
-        <div className="mimic-transcribe">
-          <Keyboard size={16} />
-          <label>
-            {/* aria-disabled, not disabled, while busy: Chrome drops focus from a control that becomes
-                disabled, and keyboard users would lose their place after every tick. */}
-            <input
-              type="checkbox"
-              aria-label={`${hotkeyKey} hotkey`}
-              checked={hotkey}
-              aria-disabled={busy || demo || undefined}
-              aria-describedby={demo ? 'mimic-hotkey-host-only mimic-hotkey-note' : undefined}
-              onChange={(e) => {
-                if (demo) return hostOnly();
-                if (running.current) return;
-                const on = e.target.checked;
-                setWantHotkey(on);
-                void command(
-                  async () => {
-                    await controller.run('mimicHotkey', { action: on ? 'enable' : 'disable' });
-                    if (on) await restoreHotkeyPrefs();
-                  },
-                  () => setWantHotkey(null),
-                );
-              }}
-            />
-            {/* With the key picker next to it, the label needn't repeat the key. */}
-            {supports(state.companionVersion, 'hotkeyKey') ? 'Hotkey' : `${hotkeyKey} hotkey`}
-          </label>
-          {/* Another key when a game or app already uses F6. */}
-          {supports(state.companionVersion, 'hotkeyKey') && (
-            <select
-              aria-label="Hotkey key"
-              value={hotkeyKey}
-              aria-disabled={busy || demo || undefined}
-              aria-describedby={demo ? 'mimic-hotkey-host-only mimic-hotkey-note' : undefined}
-              onChange={(e) => {
-                if (demo) return hostOnly();
-                if (running.current) return;
-                const key = e.target.value;
-                void command(async () => {
-                  await controller.run('mimicHotkey', { action: 'key', name: key });
-                  rememberHotkey({ key });
-                });
-              }}
-            >
-              {HOTKEY_KEYS.map((k) => (
-                <option key={k}>{k}</option>
-              ))}
-            </select>
-          )}
-          {supports(state.companionVersion, 'hotkeyLength') && (
             <label>
-              saves the last
+              Subtitles
               <select
-                aria-label={`${hotkeyKey} saves the last`}
-                value={mimic?.hotkeySeconds ?? 10}
+                aria-label="Subtitles setting"
+                value={history.subtitles}
+                aria-disabled={busy || undefined}
+                onChange={(e) => {
+                  if (running.current) return;
+                  const subtitles = e.target.value as (typeof SUBTITLES)[number]['value'];
+                  void command(() => controller.run('historySettings', { subtitles }));
+                }}
+              >
+                {SUBTITLES.map((s) => (
+                  <option key={s.value} value={s.value}>
+                    {s.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <small>
+              {demo
+                ? 'In the example the history repeats its loop and is cleared when you leave.'
+                : 'Kept on this PC until the companion closes. Gaming recognises speech with the least CPU, at low priority.'}
+            </small>
+          </div>
+        )}
+        {supports(state.companionVersion, 'transcripts') && (
+          <div className="mimic-transcribe">
+            <Captions size={16} />
+            {mimic?.transcriptModel ? (
+              <label>
+                <input
+                  type="checkbox"
+                  aria-label="Transcribe Mimic audio"
+                  checked={transcribing}
+                  aria-disabled={busy || undefined}
+                  onChange={(e) => {
+                    if (running.current) return;
+                    const on = e.target.checked;
+                    setWantTranscript(on);
+                    void command(
+                      () =>
+                        controller.run('mimicTranscribe', { action: on ? 'enable' : 'disable' }),
+                      () => setWantTranscript(null),
+                    );
+                  }}
+                />
+                Transcript
+              </label>
+            ) : (
+              <button
+                disabled={busy || mimic?.transcriptStatus?.startsWith('Downloading')}
+                onClick={() =>
+                  void command(() => controller.run('mimicTranscribe', { action: 'download' }))
+                }
+              >
+                <Download size={15} /> Get transcripts (148 MB, once)
+              </button>
+            )}
+            <small>
+              {mimic?.transcriptStatus && mimic.transcriptStatus !== 'Off'
+                ? mimic.transcriptStatus
+                : 'Speech is recognized on this PC; only the text is shared.'}
+            </small>
+          </div>
+        )}
+        {supports(state.companionVersion, 'hotkey') && (
+          <div className="mimic-transcribe">
+            <Keyboard size={16} />
+            <label>
+              {/* aria-disabled, not disabled, while busy: Chrome drops focus from a control that becomes
+                disabled, and keyboard users would lose their place after every tick. */}
+              <input
+                type="checkbox"
+                aria-label={`${hotkeyKey} hotkey`}
+                checked={hotkey}
                 aria-disabled={busy || demo || undefined}
                 aria-describedby={demo ? 'mimic-hotkey-host-only mimic-hotkey-note' : undefined}
                 onChange={(e) => {
                   if (demo) return hostOnly();
                   if (running.current) return;
-                  const seconds = Number(e.target.value);
-                  void controller
-                    .run('mimicHotkey', { action: 'length', positionMs: seconds * 1000 })
-                    .then(() => rememberHotkey({ seconds }))
-                    .catch(() => {});
+                  const on = e.target.checked;
+                  setWantHotkey(on);
+                  void command(
+                    async () => {
+                      await controller.run('mimicHotkey', { action: on ? 'enable' : 'disable' });
+                      if (on) await restoreHotkeyPrefs();
+                    },
+                    () => setWantHotkey(null),
+                  );
+                }}
+              />
+              {/* With the key picker next to it, the label needn't repeat the key. */}
+              {supports(state.companionVersion, 'hotkeyKey') ? 'Hotkey' : `${hotkeyKey} hotkey`}
+            </label>
+            {/* Another key when a game or app already uses F6. */}
+            {supports(state.companionVersion, 'hotkeyKey') && (
+              <select
+                aria-label="Hotkey key"
+                value={hotkeyKey}
+                aria-disabled={busy || demo || undefined}
+                aria-describedby={demo ? 'mimic-hotkey-host-only mimic-hotkey-note' : undefined}
+                onChange={(e) => {
+                  if (demo) return hostOnly();
+                  if (running.current) return;
+                  const key = e.target.value;
+                  void command(async () => {
+                    await controller.run('mimicHotkey', { action: 'key', name: key });
+                    rememberHotkey({ key });
+                  });
                 }}
               >
-                {HOTKEY_LENGTHS.map((s) => (
-                  <option key={s} value={s}>
-                    {s} s
-                  </option>
+                {HOTKEY_KEYS.map((k) => (
+                  <option key={k}>{k}</option>
                 ))}
               </select>
-            </label>
-          )}
-          {demo && <HostOnlyTag id="mimic-hotkey-host-only" />}
-          <small id="mimic-hotkey-note">
-            {demo
-              ? // 2.41: a web page cannot listen for keys in other apps; the example must not promise it.
-                `Host's PC only: there, pressing ${hotkeyKey} in any app saves the last ${mimic?.hotkeySeconds ?? 10} seconds. It does nothing in the example.`
-              : mimic?.hotkeyStatus && mimic.hotkeyStatus !== 'Off'
-                ? mimic.hotkeyStatus
-                : `Press ${hotkeyKey} in any app on this PC to save the last ${mimic?.hotkeySeconds ?? 10} seconds, like Voice Replay Studio.`}
-          </small>
-        </div>
-      )}
+            )}
+            {supports(state.companionVersion, 'hotkeyLength') && (
+              <label>
+                saves the last
+                <select
+                  aria-label={`${hotkeyKey} saves the last`}
+                  value={mimic?.hotkeySeconds ?? 10}
+                  aria-disabled={busy || demo || undefined}
+                  aria-describedby={demo ? 'mimic-hotkey-host-only mimic-hotkey-note' : undefined}
+                  onChange={(e) => {
+                    if (demo) return hostOnly();
+                    if (running.current) return;
+                    const seconds = Number(e.target.value);
+                    void controller
+                      .run('mimicHotkey', { action: 'length', positionMs: seconds * 1000 })
+                      .then(() => rememberHotkey({ seconds }))
+                      .catch(() => {});
+                  }}
+                >
+                  {HOTKEY_LENGTHS.map((s) => (
+                    <option key={s} value={s}>
+                      {s} s
+                    </option>
+                  ))}
+                </select>
+              </label>
+            )}
+            {demo && <HostOnlyTag id="mimic-hotkey-host-only" />}
+            <small id="mimic-hotkey-note">
+              {demo
+                ? // 2.41: a web page cannot listen for keys in other apps; the example must not promise it.
+                  `Host's PC only: there, pressing ${hotkeyKey} in any app saves the last ${mimic?.hotkeySeconds ?? 10} seconds. It does nothing in the example.`
+                : mimic?.hotkeyStatus && mimic.hotkeyStatus !== 'Off'
+                  ? mimic.hotkeyStatus
+                  : `Press ${hotkeyKey} in any app on this PC to save the last ${mimic?.hotkeySeconds ?? 10} seconds, like Voice Replay Studio.`}
+            </small>
+          </div>
+        )}
+      </details>
     </>
   );
 }

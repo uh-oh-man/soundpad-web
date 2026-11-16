@@ -13,6 +13,8 @@ export type Notice = {
    * notices show it behind a "Technical details" expander; it is never announced.
    */
   details?: string;
+  /** A second button (2.46: Rename after a one-press Save, beside Undo). Only with `action`. */
+  second?: NoticeAction;
 };
 /**
  * A notice as Activity keeps it (2.43): the last 200 (50 before 2.45), newest first. Its action stays usable for 60 s
@@ -25,6 +27,7 @@ export type NoticeRecord = {
   kind: NoticeKind;
   at: number;
   action?: NoticeAction;
+  second?: NoticeAction;
   actionUntil: number;
   done?: boolean;
   details?: string;
@@ -98,12 +101,15 @@ function contextDetails(message: string, at: number) {
  * Shows a notice and returns its id (for `dismissNotice`); '' when there was nothing to show. An error
  * notice always carries technical details (2.45): `details` when given, else the page's context.
  */
+/** Shows a notice and returns its id (for `dismissNotice`); '' when there was nothing to show. */
 export function notify(
   message: string,
   kind: NoticeKind = 'info',
   action?: NoticeAction,
-  details?: string,
+  detailsOrSecond?: string | NoticeAction,
 ) {
+  const details = typeof detailsOrSecond === 'string' ? detailsOrSecond : undefined;
+  const second = typeof detailsOrSecond === 'object' ? detailsOrSecond : undefined;
   if (!message) return '';
   const existing = notices.find((n) => n.message === message);
   const now = Date.now();
@@ -116,6 +122,7 @@ export function notify(
     expires: now + (action ? 10000 : kind === 'error' ? 8000 : 4000),
     ...(action && { action }),
     ...(technical && { details: technical }),
+    ...(action && second && { second }),
   };
   const next = [...notices.filter((n) => n.id !== entry.id), entry];
   // At most 4 visible; the ones pushed out keep their action in Activity.
@@ -128,6 +135,7 @@ export function notify(
     at: now,
     ...(action && { action }),
     ...(technical && { details: technical }),
+    ...(action && second && { second }),
     actionUntil: entry.expires + ACTION_GRACE_MS,
   };
   history = [record, ...history.filter((h) => h.id !== entry.id)].slice(0, HISTORY_SIZE);
@@ -161,15 +169,16 @@ export function restoreNoticeHistory(
   emit();
   return fresh.length;
 }
-/** Runs a notice's action from Activity, once, while it is still usable. */
-export function runNoticeAction(id: string) {
+/** Runs a notice's action (or its second one) from Activity, once, while it is still usable. */
+export function runNoticeAction(id: string, which: 'action' | 'second' = 'action') {
   const record = history.find((h) => h.id === id);
-  if (!record?.action || record.done || Date.now() >= record.actionUntil) return false;
+  const action = record?.[which];
+  if (!record || !action || record.done || Date.now() >= record.actionUntil) return false;
   history = history.map((h) => (h.id === id ? { ...h, done: true } : h));
   held.delete(id);
   notices = notices.filter((n) => n.id !== id);
   emit();
-  record.action.run();
+  action.run();
   return true;
 }
 /** Whether the notice `id` is still on screen (its card, not its Activity record). */

@@ -136,6 +136,17 @@ function NoticeCard({ notice }: { notice: Notice }) {
           {notice.action.label}
         </button>
       )}
+      {notice.action && notice.second && (
+        <button
+          className="toast-action"
+          onClick={() => {
+            noticeActionRan(notice.id);
+            notice.second!.run();
+          }}
+        >
+          {notice.second.label}
+        </button>
+      )}
       <button
         className="icon-button"
         aria-label="Dismiss notification"

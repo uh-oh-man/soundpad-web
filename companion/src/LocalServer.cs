@@ -265,6 +265,8 @@ public sealed class LocalServer(Bridge bridge, string origin, string? ownerKey =
                             or "mimicPreview" or "draftKeep" or "draftPlay" or "tempRecover"
                             // 2.41: previews from the voice library read files; adding and indexing do too.
                             or "libraryPreview" or "libraryAdd" or "libraryIndex"
+                            // 2.46: one-press Save keeps a clip.
+                            or "libraryKeep"
                             // 2.42: sentence previews and Keep render audio.
                             or "sentencePreview" or "sentenceKeep")
                         {

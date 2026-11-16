@@ -182,27 +182,35 @@ export function ActivityView() {
                 <time dateTime={new Date(h.at).toISOString()}>{time(h.at)}</time>
                 <span>{h.message}</span>
                 {h.kind === 'error' && h.details && <TechnicalDetails details={h.details} />}
-                {h.action && !h.done && now < h.actionUntil && (
-                  <button
-                    type="button"
-                    className="btn activity-action"
-                    onFocus={() => {
-                      focused.current = h.id;
-                    }}
-                    onBlur={(e) => {
-                      if (e.relatedTarget) focused.current = null;
-                    }}
-                    onClick={(e) => {
-                      // The row first: the action may open something else, which then takes focus.
-                      e.currentTarget.closest('li')?.focus();
-                      focused.current = null;
-                      runNoticeAction(h.id);
-                      setNow(Date.now());
-                    }}
-                  >
-                    {h.action.label}
-                  </button>
-                )}
+                {h.action &&
+                  !h.done &&
+                  now < h.actionUntil &&
+                  (['action', 'second'] as const).map((which) => {
+                    const action = h[which];
+                    if (!action) return null;
+                    return (
+                      <button
+                        key={which}
+                        type="button"
+                        className="btn activity-action"
+                        onFocus={() => {
+                          focused.current = h.id;
+                        }}
+                        onBlur={(e) => {
+                          if (e.relatedTarget) focused.current = null;
+                        }}
+                        onClick={(e) => {
+                          // The row first: the action may open something else, which then takes focus.
+                          e.currentTarget.closest('li')?.focus();
+                          focused.current = null;
+                          runNoticeAction(h.id, which);
+                          setNow(Date.now());
+                        }}
+                      >
+                        {action.label}
+                      </button>
+                    );
+                  })}
               </li>
             ))}
           </ol>

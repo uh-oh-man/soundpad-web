@@ -33,6 +33,7 @@ public sealed class UpdateSwapTests
         public bool HasExited { get; set; }
         public int? ExitCode { get; set; }
         public bool Killed;
+        public void Dispose() { }
         public void Kill() { Killed = true; HasExited = true; }
     }
 
@@ -122,5 +123,26 @@ public sealed class UpdateSwapTests
         Assert.Equal(2, launcher.Started.Count);
         Assert.False(files.Exists(plan.HandoffPath)); // never a key left behind; the next start offers Recover or Discard
         Assert.Equal("old", files.All[Exe]);
+    }
+
+    /// <summary>
+    /// The real launcher keeps the started process's exit code (2.44 real-hardware proof, 2026-11-15): a new version
+    /// that stopped while starting was logged as "exit code unknown", because the launcher closed its own handle to the
+    /// child and later read it by process id only, once the process was gone.
+    /// </summary>
+    [Fact]
+    public void TheWindowsLauncherReportsTheExitCodeOfAChildThatStopped()
+    {
+        var log = Path.Combine(Path.GetTempPath(), "soundpad-web-launcher-" + Guid.NewGuid().ToString("N") + ".log");
+        try
+        {
+            var cmd = Path.Combine(Environment.SystemDirectory, "cmd.exe");
+            using var child = new WindowsLauncher().Start(cmd, ["/c", "exit 7"], log, false);
+            for (int i = 0; i < 200 && !child.HasExited; i++) Thread.Sleep(50);
+            Thread.Sleep(200); // the process id is no longer in use by then
+            Assert.True(child.HasExited);
+            Assert.Equal(7, child.ExitCode);
+        }
+        finally { try { File.Delete(log); } catch (IOException) { } }
     }
 }

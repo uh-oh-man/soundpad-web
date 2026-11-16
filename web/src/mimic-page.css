@@ -1,0 +1,205 @@
+/* Mimic's full-page layout. Shared transport, waveform and buttons are styled in mimic.css. */
+.app-shell[data-view='mimic'] #board {
+  padding: 0;
+  container: mimic / inline-size;
+}
+
+.mimic-page {
+  grid-template-columns: minmax(0, 1fr) clamp(248px, 25%, 336px);
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 14px;
+  min-height: 100%;
+  padding: clamp(12px, 2vw, 26px);
+  align-items: start;
+}
+
+.mimic-page-head {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  min-width: 0;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--line);
+}
+
+.mimic-page-head h1 {
+  margin: 0;
+  color: var(--text-primary);
+  font-size: clamp(25px, 3vw, 36px);
+  line-height: 1.1;
+}
+
+.mimic-page-head .btn {
+  margin-inline-start: auto;
+}
+
+.mimic-page-live,
+.mimic-page-clips {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+}
+
+.mimic-page-clips {
+  align-content: start;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 14px;
+  background: var(--surface-1);
+}
+
+.mimic-page-clips h2 {
+  margin: 0;
+  color: var(--text-primary);
+  font-size: 17px;
+}
+
+.mimic-page-clips .mimic-recent {
+  max-block-size: min(50vh, 560px);
+  overflow: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+}
+
+.mimic-page-clips .mimic-recent-item {
+  padding-block: 6px;
+}
+
+.mimic-page-tabs {
+  display: none;
+}
+
+.mimic-page .mimic-transcript {
+  align-content: start;
+  min-height: 96px;
+  max-height: clamp(112px, 24vh, 250px);
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface-0);
+  scrollbar-gutter: stable;
+  overscroll-behavior: contain;
+}
+
+.mimic-page .mimic-transcript .mimic-word {
+  font-size: clamp(14px, 1.35vw, 18px);
+  line-height: 1.5;
+}
+
+.mimic-page .mimic-wave canvas {
+  height: clamp(52px, 8.5vh, 110px);
+}
+
+.mimic-page .mimic-actions {
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface-1);
+}
+
+.mimic-page .mimic-page-settings {
+  min-width: 0;
+}
+
+.mimic-page-settings summary {
+  color: var(--text-muted);
+  cursor: pointer;
+  width: fit-content;
+}
+
+.mimic-page-settings summary svg {
+  display: inline;
+  vertical-align: text-bottom;
+  margin-inline-end: 4px;
+}
+
+.mimic-page-settings[open] {
+  padding: 8px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+}
+
+.mimic-page .mimic-transcript-head h2 {
+  margin: 0;
+  color: var(--text-primary);
+  font-size: 17px;
+}
+
+.mimic-page .mimic-words time {
+  width: 6.5ch;
+  font-size: 11px;
+  line-height: 1.8;
+  white-space: nowrap;
+}
+
+.mimic-page .mimic-history {
+  gap: 8px;
+}
+
+.app-shell[data-view='mimic'] #board > :is(.playback-suspended, .recover-session) {
+  margin-inline: clamp(12px, 2vw, 26px);
+}
+
+@container mimic (min-width: 721px) {
+  .mimic-page-live {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .mimic-page-live > * {
+    grid-column: 1 / -1;
+  }
+
+  .mimic-page-live:has(.mimic-page-settings:not([open])) > .mimic-source {
+    grid-column: 1;
+  }
+
+  .mimic-page-live > .mimic-page-settings:not([open]) {
+    grid-column: 2;
+    align-self: end;
+    padding-block: 8px;
+  }
+}
+
+@container mimic (max-width: 720px) {
+  .mimic-page {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto auto minmax(0, 1fr);
+    gap: 10px;
+  }
+
+  .mimic-page .mimic-history {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+  }
+
+  .mimic-page .mimic-transcript-head,
+  .mimic-page .mimic-transcript {
+    order: -2;
+  }
+
+  .mimic-page .mimic-source {
+    align-items: center;
+  }
+
+  .mimic-page .mimic-source label {
+    flex-basis: 135px;
+  }
+
+  .mimic-page-tabs {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 6px;
+  }
+
+  .mimic-page-tabs button[aria-pressed='true'] {
+    border-color: var(--accent);
+    background: var(--accent-soft);
+  }
+
+  .mimic-page[data-tab='live'] .mimic-page-clips,
+  .mimic-page[data-tab='clips'] .mimic-page-live {
+    display: none;
+  }
+}

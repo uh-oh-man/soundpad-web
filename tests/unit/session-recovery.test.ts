@@ -59,7 +59,7 @@ describe('Recover previous session', () => {
 
   it('is gated: older companions keep the separate Temp prompt and history notice', () => {
     expect(supports('2.44.0', 'sessionRecovery')).toBe(false);
-    expect(supports('2.45.0', 'sessionRecovery')).toBe(true);
+    expect(supports('2.46.0', 'sessionRecovery')).toBe(true);
     expect(supports('2.44.0', 'budgetActions')).toBe(false);
   });
 });

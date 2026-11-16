@@ -423,7 +423,8 @@ export class DemoModel {
         hotkeyStatus: 'Off',
         hotkeySeconds: 10,
         hotkeyKey: 'F6',
-        recent: this.mimic.recent,
+        recent: this.mimic.recent.slice(0, 20),
+        moreRecent: this.mimic.recent.slice(20),
         history: this.history.snapshot(),
       },
     };
@@ -1340,7 +1341,7 @@ export class DemoModel {
     this.mimic.recent = [
       { assetId: asset.id, name, by: by.name, at: Date.now() },
       ...this.mimic.recent,
-    ].slice(0, 20);
+    ].slice(0, 100);
     this.publish();
     if (!c.autoplay) return { assetId: asset.id, state: 'temporary' };
     if (mine !== this.intent)
@@ -1407,7 +1408,7 @@ export class DemoModel {
     this.mimic.recent = [
       { assetId: asset.id, name, by: by.name, at: Date.now() },
       ...this.mimic.recent,
-    ].slice(0, 20);
+    ].slice(0, 100);
     const close = c.action === 'close';
     this.drafts.kept(draft, close, Date.now());
     this.publish();

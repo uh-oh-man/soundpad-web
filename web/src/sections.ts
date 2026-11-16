@@ -16,6 +16,7 @@ export type SectionMemory = {
     /** False when the view was moved off live, to `viewEnd` (a history frame). */
     follow?: boolean;
     viewEnd?: number;
+    scrollTop?: number;
   };
   temp: {
     open?: boolean;

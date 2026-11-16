@@ -3,11 +3,11 @@
  * waveform clicks that play from a point while a drag only selects, and the playing-word highlight.
  */
 import type { Locator, Page } from '@playwright/test';
+import { setMimicTranscription } from './helpers/shell';
 import {
   expect,
   host,
   joinGuest,
-  playButton,
   sendCommand,
   test,
   useLocalGuests,
@@ -20,9 +20,9 @@ const PLAY = /^DoPlaySound\(\d+\)$/;
 /** Opens Mimic on the host, starts listening with transcripts on, and waits for the first sentence. */
 async function listen(page: Page) {
   await page.getByRole('button', { name: 'Mimic', exact: true }).click();
-  const dialog = page.getByRole('dialog', { name: 'Mimic' });
+  const dialog = page.getByRole('main', { name: 'Mimic', exact: true });
   await dialog.getByRole('button', { name: 'Start listening' }).click();
-  await dialog.getByLabel('Transcribe Mimic audio').check();
+  await setMimicTranscription(dialog);
   return dialog;
 }
 /** The first whole sentence "Fixture tone N" (its three word buttons). */
@@ -91,21 +91,17 @@ test('Mimic play mode: Preview by default and remembered; a word click plays exa
   await first.click();
   await expect(first).toHaveAttribute('aria-pressed', 'true');
   await expect.poll(() => playsSince(harness, before)).toHaveLength(1);
-  await expect(playButton(page, 'Fixture')).toBeEnabled();
+  await expect(dialog.getByRole('button', { name: /Replay Fixture ·/ }).first()).toBeEnabled();
   await page.waitForTimeout(800);
   expect(playsSince(harness, before)).toHaveLength(1);
 
   // The same word again replays its clip rather than making another.
   before = harness.plays.length;
-  const clipsBefore = await page
-    .getByRole('button', { name: 'Play from start: Fixture', exact: true })
-    .count();
+  const clipsBefore = await dialog.getByRole('button', { name: /Replay Fixture ·/ }).count();
   await first.click();
   await expect.poll(() => playsSince(harness, before)).toHaveLength(1);
   await page.waitForTimeout(500);
-  expect(
-    await page.getByRole('button', { name: 'Play from start: Fixture', exact: true }).count(),
-  ).toBe(clipsBefore);
+  expect(await dialog.getByRole('button', { name: /Replay Fixture ·/ }).count()).toBe(clipsBefore);
 
   // Enter on a focused word plays it too.
   before = harness.plays.length;
@@ -152,8 +148,8 @@ test('Mimic play into game: a newer word click supersedes the older one, with no
   await expect.poll(() => playsSince(harness, before)).toHaveLength(1);
   await expect(page.locator('.player-track')).toContainText('tone');
   // Both clips were made; only the newer one was heard, and only it was lit.
-  await expect(playButton(page, 'Fixture')).toBeEnabled();
-  await expect(playButton(page, 'tone')).toBeEnabled();
+  await expect(dialog.getByRole('button', { name: /Replay Fixture ·/ }).first()).toBeEnabled();
+  await expect(dialog.getByRole('button', { name: /Replay tone ·/ }).first()).toBeEnabled();
   await page.waitForTimeout(1500);
   expect(playsSince(harness, before)).toHaveLength(1);
   expect(
@@ -279,14 +275,14 @@ test('Mimic play mode for a guest: Play into game needs remote playback, and not
   const hostDialog = await listen(page);
   await firstSentence(hostDialog);
   await page.waitForTimeout(4000); // audio the guest was not there for
-  await page.keyboard.press('Escape');
+  await page.getByRole('button', { name: 'Soundboard', exact: true }).click();
   const guest = await joinGuest(page);
   await page.getByRole('button', { name: 'Access settings' }).click();
   await page.getByLabel('Allow remote playback').uncheck();
   await page.keyboard.press('Escape');
   await guest.evaluate((key) => localStorage.setItem(key, 'game'), MODE_KEY);
   await guest.getByRole('button', { name: 'Mimic', exact: true }).click();
-  const dialog = guest.getByRole('dialog', { name: 'Mimic' });
+  const dialog = guest.getByRole('main', { name: 'Mimic', exact: true });
   // Without remote playback Play into game is not offered, and clicks preview (the remembered choice stays).
   const switcher = mode(dialog);
   await expect(switcher.getByRole('radio', { name: 'Play into game' })).toBeDisabled();

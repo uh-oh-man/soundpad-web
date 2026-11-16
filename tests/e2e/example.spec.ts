@@ -76,7 +76,7 @@ test('example Mimic: rolling history, a Latest phrase draft, preview and play, t
 }) => {
   if (!(await startExample(page))) return;
   await page.getByRole('button', { name: 'Mimic', exact: true }).click();
-  const mimic = page.getByRole('dialog', { name: 'Mimic' });
+  const mimic = page.getByRole('main', { name: 'Mimic', exact: true });
   await mimic.getByRole('button', { name: 'Start listening' }).click();
   // The history view (2.39): words to click arrive a moment after they are said; Latest phrase takes the
   // newest finished phrase.

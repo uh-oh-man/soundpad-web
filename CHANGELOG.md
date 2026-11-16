@@ -8,9 +8,16 @@ Fixes and ideas sent from the Feedback button on 2026-11-15, by the host and a g
 
 ### Added
 
-- **Mimic's live transcript follows the newest words** (from the Feedback button: "cant … get to the word they said imeeditly"). The list stays at its newest word as words come in. Scrolling back stops it following, and **Jump to latest** above the list (or the End key while you are in the Mimic panel) goes back to the newest word in one press. While your mouse moves over the list it holds still for a moment, so a word doesn't slide away from under the pointer.
-- **One-press Delete with Undo in Mimic** (from the Feedback button: "have easy delete button"). Each clip in **Just mimicked** has a Delete button, and the open draft's **Discard** is now **Delete**. The item goes at once and the notice offers **Undo**. The host can delete any clip; a guest can delete their own, when the host allows guest uploads. The clip is really removed when the notice goes, so until then it is still in Soundpad's Temp.
-- **Mimic full screen** on wide screens (from the Feedback button: "i was hoping for the mimic system be a full screen thing"). **Full screen** in the Mimic panel's header makes Mimic fill the space next to the sidebar, with a taller transcript and waveform. Your browser remembers the choice. Escape or **Exit full screen** goes back; picking Soundboard, Voices or Sentences shows them beside Mimic again. Phones keep the Mimic sheet.
+- **Live transcript.** New words keep arriving while you select a clip or move the waveform. Scroll up to read earlier words, or press **Jump to latest** or **End** to resume following.
+- **One-press Delete with Undo in Mimic** (from the Feedback button: "have easy delete button"). Each clip in **Just mimicked** has a Delete button, and the open draft's **Discard** is now **Delete**. The item goes at once and the notice offers **Undo**. The host can delete any clip; a guest can delete their own, when the host allows guest uploads or Mimic. The clip is really removed when the notice goes, so until then it is still in Soundpad's Temp.
+- **Mimic has its own page.** The waveform, transcript and clip actions share the main area. **Fill window** hides the sidebar and the player stays visible. Phones have **Live transcript** and **Clips** tabs. **Just mimicked** keeps up to 100 clips and can filter by clip name or participant.
+- **One-press Save** sends a Mimic selection, draft or Temp clip into Voices with an automatic name. The save notice offers Undo and Rename where permitted.
+- **Preview here or Play into game.** Word and waveform clicks use your selected playback destination. Dragging selects a range. The current word lights up as it plays.
+- **Recover previous session** handles Temp, recording history and drafts together.
+- **Sentence building** adds voice slots, reusable phrase blocks and **Add to sentence** from the palette.
+- **Technical details** are available on error notices. Hosts can see the companion log in Settings and recent Activity after reloading.
+- **Player waveform** can zoom with buttons, wheel or keyboard and restart a finished sound at the point you click.
+- The **Minimal orbit** icon appears in the browser tab and on the Windows companion.
 - **Undo after removing Temp audio**, on the notice, for the host and guests (while the companion runs and Temp hasn't been cleared). With Undo there is no question first.
 - **Remove all my Temp clips** for guests (from the Feedback button: "add a button to remove all temps for guest side"). One question, then the guest's own clips go (never anyone else's, nor kept ones), with Undo.
 
@@ -29,7 +36,7 @@ Fixes and ideas sent from the Feedback button on 2026-11-15, by the host and a g
 ### Tests
 
 - Companion: 5 new tests for Temp removal (`TempRemovalTests`) on a pipe that, like the real Soundpad, can't remove one entry, and 3 for Spotify (a guest's press during a status read waits and presses, a status read during another answers with the last state, a guest with Spotify controls off is refused without pressing). The browser-test harness has `--real-removal` for the real-Soundpad removal rule, and now always uses a fixture Spotify, never the PC's real one.
-- Browser: new tests for the transcript following, Delete with Undo and Full screen in Mimic; a guest removing one clip and all of theirs, the host removing one, and Undo; and three Spotify tests (a guest presses while their status check is held on its way, a press while the companion's status reads are slow, a guest with Spotify controls off).
+- Browser: new tests for the transcript following, Delete with Undo and Fill window in Mimic; a guest removing one clip and all of theirs, the host removing one, and Undo; and three Spotify tests (a guest presses while their status check is held on its way, a press while the companion's status reads are slow, a guest with Spotify controls off).
 - Unit tests for the transcript follow logic, the delayed delete and the Temp list's at-once removal.
 
 ## 2.45.0 — Feedback, and fixes from the real Soundpad

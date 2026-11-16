@@ -21,7 +21,7 @@ import {
   openTemp,
   isTempOpen,
   editCopyForm,
-  closeEditor,
+  setMimicTranscription,
   sectionNav,
 } from './helpers/shell';
 import { kickDetail } from './helpers/playback';
@@ -455,6 +455,32 @@ test('V2: real waveform, pause, epoch seek, cue and region metadata, named stati
   await wave.getByRole('button', { name: 'Cues & regions', exact: true }).click();
   await expect(page.getByLabel('Move cue Opening seconds')).toHaveValue('0.7');
   await expect(page.getByLabel('Repeat region Middle', { exact: true })).toBeChecked();
+});
+
+test('the compact player zooms and a finished sound can play again from the waveform', async ({
+  page,
+  harness,
+}) => {
+  await host(page, harness);
+  await playButton(page, 'Airhorn').click();
+  const player = page.locator('.player');
+  const waveform = player.getByRole('slider', { name: 'Seek Airhorn', exact: true });
+  await expect(waveform).toBeVisible();
+  await player.getByRole('button', { name: 'Zoom waveform in' }).click();
+  await expect(player.getByRole('button', { name: 'Fit waveform Airhorn' })).toBeVisible();
+  await player.getByRole('button', { name: 'Zoom waveform out' }).click();
+  await expect(player.getByRole('button', { name: 'Fit waveform Airhorn' })).toHaveCount(0);
+  await player.getByRole('button', { name: 'Stop', exact: true }).click();
+  await expect(player.locator('.player-track')).toContainText('Last selection: Airhorn');
+  await expect(waveform).toBeEnabled();
+  const before = harness.plays.length;
+  const box = await waveform.boundingBox();
+  if (!box) throw new Error('The player waveform has no layout box.');
+  await waveform.click({ position: { x: box.width * 0.45, y: box.height / 2 } });
+  await expect
+    .poll(() => harness.plays.slice(before).filter((command) => command.startsWith('DoPlaySound(')))
+    .toHaveLength(1);
+  await expect(player.locator('.player-track')).toContainText('playing');
 });
 
 test('V2: nested personal categories, multiple membership, export, end and resume', async ({
@@ -1278,7 +1304,7 @@ test('Mimic: host listens, everyone sees it, and a selection becomes a playable 
   await expect(page.locator('.mimic-badge')).toHaveCount(0);
   const opener = page.getByRole('button', { name: 'Mimic', exact: true });
   await opener.click();
-  const dialog = page.getByRole('dialog', { name: 'Mimic' });
+  const dialog = page.getByRole('main', { name: 'Mimic', exact: true });
   await expect(dialog.getByLabel('Mimic source', { exact: true })).toHaveValue('fixture:tone');
   await dialog.getByRole('button', { name: 'Start listening' }).click();
   await expect(dialog.getByRole('status').first()).toContainText(
@@ -1420,12 +1446,16 @@ test('Mimic: host listens, everyone sees it, and a selection becomes a playable 
     page.getByText('Pick another key next to Hotkey', { exact: false }).first(),
   ).toBeVisible();
   // The F6 hotkey is host-only and reports its state (the harness uses a fixture key, never real F6).
+  if (!(await dialog.locator('.mimic-page-settings[open]').count()))
+    await dialog.getByText('Mimic settings', { exact: true }).click();
   await dialog.getByLabel('F6 hotkey').check();
   await expect(dialog.getByText('Press F6 in any app to save the last 10 s')).toBeVisible();
   await dialog.getByLabel('F6 saves the last').selectOption('5');
   await expect(dialog.getByText('Press F6 in any app to save the last 5 s')).toBeVisible();
   // When a game already uses F6, the host picks another key; the hotkey moves while it stays on.
   await dialog.getByLabel('Hotkey key', { exact: true }).selectOption('F8');
+  if (!(await dialog.locator('.mimic-page-settings[open]').count()))
+    await dialog.getByText('Mimic settings', { exact: true }).click();
   await expect(dialog.getByLabel('F8 hotkey')).toBeChecked();
   await expect(dialog.getByText('Press F8 in any app to save the last 5 s')).toBeVisible();
   // A key another app owns (the harness pretends F9 is) is refused, and F8 keeps working.
@@ -1433,7 +1463,11 @@ test('Mimic: host listens, everyone sees it, and a selection becomes a playable 
   await expect(page.getByText('F9 is already used by another app', { exact: false })).toBeVisible();
   await expect(dialog.getByLabel('Hotkey key', { exact: true })).toHaveValue('F8');
   await expect(dialog.getByText('Press F8 in any app to save the last 5 s')).toBeVisible();
+  if (!(await dialog.locator('.mimic-page-settings[open]').count()))
+    await dialog.getByText('Mimic settings', { exact: true }).click();
   await dialog.getByLabel('F8 hotkey').uncheck();
+  if (!(await dialog.locator('.mimic-page-settings[open]').count()))
+    await dialog.getByText('Mimic settings', { exact: true }).click();
   await expect(dialog.getByLabel('F8 hotkey')).not.toBeChecked();
   await dialog.getByRole('button', { name: 'Stop listening' }).click();
   await expect(page.locator('.mimic-badge')).toHaveCount(0);
@@ -1449,9 +1483,9 @@ test('Mimic transcript: words appear, a click and a Shift-click select them, and
 }) => {
   await host(page, harness);
   await page.getByRole('button', { name: 'Mimic', exact: true }).click();
-  const dialog = page.getByRole('dialog', { name: 'Mimic' });
+  const dialog = page.getByRole('main', { name: 'Mimic', exact: true });
   await dialog.getByRole('button', { name: 'Start listening' }).click();
-  await dialog.getByLabel('Transcribe Mimic audio').check();
+  await setMimicTranscription(dialog);
   const transcript = dialog.getByRole('list', { name: 'Transcript' });
   // Each sentence is a row of word buttons (2.39): "Fixture" "tone" "N".
   const sentence = transcript
@@ -1477,7 +1511,7 @@ test('Mimic transcript: words appear, a click and a Shift-click select them, and
     page.getByRole('button', { name: `Play from start: ${words}`, exact: true }),
   ).toBeEnabled();
   // Turning transcripts off stops recognising; the words already recognised stay with the history.
-  await dialog.getByLabel('Transcribe Mimic audio').uncheck();
+  await setMimicTranscription(dialog, false);
   await expect(
     transcript.getByRole('button', { name: 'Fixture', exact: true }).first(),
   ).toBeVisible();
@@ -1489,13 +1523,17 @@ test('Mimic keyboard: number keys grab recent audio, Enter captures and keeps, E
 }) => {
   await host(page, harness);
   await page.getByRole('button', { name: 'Mimic', exact: true }).click();
-  const dialog = page.getByRole('dialog', { name: 'Mimic' });
+  const dialog = page.getByRole('main', { name: 'Mimic', exact: true });
   await dialog.getByRole('button', { name: 'Start listening' }).click();
   await page.waitForTimeout(2600);
   // Shortcuts still work right after ticking a checkbox (focus stays on it). Safari doesn't focus a
   // checkbox on click, so focus it the way a keyboard user would.
+  if (!(await dialog.locator('.mimic-page-settings[open]').count()))
+    await dialog.getByText('Mimic settings', { exact: true }).click();
   await dialog.getByLabel('F6 hotkey').focus();
   await page.keyboard.press('Space');
+  if (!(await dialog.locator('.mimic-page-settings[open]').count()))
+    await dialog.getByText('Mimic settings', { exact: true }).click();
   await expect(dialog.getByLabel('F6 hotkey')).toBeFocused();
   await page.keyboard.press('5');
   await expect(dialog.locator('.mimic-range')).toContainText('5.0 s');
@@ -1531,7 +1569,7 @@ test('Mimic history: a selection and an open draft never carry over to a new rec
   // Review of 2026-11-14 (2.41): frame numbers of one recording mean other audio in the next one.
   await host(page, harness);
   await page.getByRole('button', { name: 'Mimic', exact: true }).click();
-  const dialog = page.getByRole('dialog', { name: 'Mimic' });
+  const dialog = page.getByRole('main', { name: 'Mimic', exact: true });
   await dialog.getByRole('button', { name: 'Start listening' }).click();
   const wave = dialog.getByRole('slider', { name: /^Mimic buffer, showing/ });
   await expect(wave).toBeVisible();
@@ -1572,9 +1610,9 @@ test('Mimic history: go back, select words in older audio, clip them, and see ga
   test.slow(); // it needs some real history: the fixture source speaks in real time
   await host(page, harness);
   await page.getByRole('button', { name: 'Mimic', exact: true }).click();
-  const dialog = page.getByRole('dialog', { name: 'Mimic' });
+  const dialog = page.getByRole('main', { name: 'Mimic', exact: true });
   await dialog.getByRole('button', { name: 'Start listening' }).click();
-  await dialog.getByLabel('Transcribe Mimic audio').check();
+  await setMimicTranscription(dialog);
   // The main waveform starts at the newest 10 s; the overview holds the whole history.
   const wave = dialog.getByRole('slider', { name: /^Mimic buffer, showing/ });
   await expect(wave).toHaveAccessibleName(/showing the last 10 seconds/);
@@ -1644,7 +1682,7 @@ test('Mimic history: a guest sees only what was recorded since they joined, unle
   await page.getByLabel('Allow guest Mimic').check();
   await page.keyboard.press('Escape');
   await page.getByRole('button', { name: 'Mimic', exact: true }).click();
-  const dialog = page.getByRole('dialog', { name: 'Mimic' });
+  const dialog = page.getByRole('main', { name: 'Mimic', exact: true });
   await dialog.getByRole('button', { name: 'Start listening' }).click();
   await expect(dialog.getByRole('status').first()).toContainText('Listening to Fixture');
   await page.waitForTimeout(6000); // six seconds the guest was not there for
@@ -1671,7 +1709,7 @@ test('Mimic history: a guest sees only what was recorded since they joined, unle
   expect(hosts.levels.some((v) => v !== 0)).toBe(true);
   // The guest's window says so, and clipping what was said since the join works.
   await guest.getByRole('button', { name: 'Mimic', exact: true }).click();
-  const guestDialog = guest.getByRole('dialog', { name: 'Mimic' });
+  const guestDialog = guest.getByRole('main', { name: 'Mimic', exact: true });
   await expect(guestDialog.getByText('You see what was recorded since you joined')).toBeVisible();
   await guest.waitForTimeout(6000); // "Last 3 s" must lie wholly after the join
   await guestDialog.getByRole('button', { name: 'Last 3 s' }).click();
@@ -1715,7 +1753,7 @@ test('Mimic drafts: Capture opens a draft, an edge drags into the audio around i
 }) => {
   await host(page, harness);
   await page.getByRole('button', { name: 'Mimic', exact: true }).click();
-  const dialog = page.getByRole('dialog', { name: 'Mimic' });
+  const dialog = page.getByRole('main', { name: 'Mimic', exact: true });
   await dialog.getByRole('button', { name: 'Start listening' }).click();
   await page.waitForTimeout(2600);
   await dialog.getByRole('button', { name: 'Last 3 s', exact: true }).click();
@@ -1755,9 +1793,11 @@ test('Mimic drafts: Capture opens a draft, an edge drags into the audio around i
     expect(harness.plays.length).toBe(playsBefore);
   }
   await draft.getByRole('button', { name: 'Keep in Temp', exact: true }).click();
-  await expect(playButton(page, 'Draft one')).toBeEnabled({ timeout: TEMP_READY });
+  await expect(dialog.getByRole('button', { name: /Replay Draft one/ })).toBeEnabled({
+    timeout: TEMP_READY,
+  });
   // Closing Mimic and playing a Soundboard tile keep the draft: Mimic opens on it again.
-  await closeEditor(page);
+  await closeSection(page, 'Mimic');
   await playButton(page, 'Airhorn').click();
   await expect.poll(() => harness.plays.length).toBeGreaterThan(playsBefore);
   await page.getByRole('button', { name: 'Mimic', exact: true }).click();
@@ -1768,7 +1808,7 @@ test('Mimic drafts: Capture opens a draft, an edge drags into the audio around i
   await draft.getByRole('button', { name: 'Keep in Temp and close draft' }).click();
   await expect(draft).toHaveCount(0);
   await expect(dialog.getByLabel('Draft history')).toHaveCount(0);
-  await expect(playButton(page, 'Draft one')).toHaveCount(1);
+  await expect(dialog.getByRole('button', { name: /Replay Draft one/ })).toHaveCount(1);
   expect(((await sendCommand(page, 'draftList')).data as DraftReply).drafts).toHaveLength(0);
 });
 
@@ -1779,7 +1819,7 @@ test('Mimic drafts: Last N s with a draft open puts the draft away and never mov
   // Review of 2.41: the quick select (like Jump and a search result) picked the new range for the open draft.
   await host(page, harness);
   await page.getByRole('button', { name: 'Mimic', exact: true }).click();
-  const dialog = page.getByRole('dialog', { name: 'Mimic' });
+  const dialog = page.getByRole('main', { name: 'Mimic', exact: true });
   await dialog.getByRole('button', { name: 'Start listening' }).click();
   await page.waitForTimeout(5600);
   await dialog.getByRole('button', { name: 'Last 3 s', exact: true }).click();
@@ -1810,7 +1850,7 @@ test('Mimic drafts: a guest previews privately only what was recorded since join
   await page.getByLabel('Allow guest Mimic').check();
   await page.keyboard.press('Escape');
   await page.getByRole('button', { name: 'Mimic', exact: true }).click();
-  const dialog = page.getByRole('dialog', { name: 'Mimic' });
+  const dialog = page.getByRole('main', { name: 'Mimic', exact: true });
   await dialog.getByRole('button', { name: 'Start listening' }).click();
   await expect(dialog.getByRole('status').first()).toContainText('Listening to Fixture');
   await page.waitForTimeout(5000); // five seconds the guest was not there for
@@ -1838,7 +1878,7 @@ test('Mimic drafts: a guest previews privately only what was recorded since join
   expect(wav.length).toBeLessThan(2 * 16000 * 2 + 100);
   // In the window: Preview is there for a guest, and plays nothing in the game.
   await guest.getByRole('button', { name: 'Mimic', exact: true }).click();
-  const guestDialog = guest.getByRole('dialog', { name: 'Mimic' });
+  const guestDialog = guest.getByRole('main', { name: 'Mimic', exact: true });
   await guestDialog.getByRole('button', { name: 'Last 3 s', exact: true }).click();
   const plays = harness.plays.length;
   if (browserName !== 'webkit') {
@@ -1887,7 +1927,7 @@ test('guest storage: there is no limit (2.45), so guest clips never wait, the ho
   await expect(storage.getByLabel('Temp per guest (MB)')).toHaveCount(0);
   await page.keyboard.press('Escape');
   await page.getByRole('button', { name: 'Mimic', exact: true }).click();
-  const dialog = page.getByRole('dialog', { name: 'Mimic' });
+  const dialog = page.getByRole('main', { name: 'Mimic', exact: true });
   await dialog.getByRole('button', { name: 'Start listening' }).click();
   await expect(dialog.getByRole('status').first()).toContainText('Listening to Fixture');
   await page.keyboard.press('Escape');
@@ -1932,7 +1972,7 @@ test('live Nostr/WebRTC: guests see Mimic only when allowed and can clip from it
   await host(page, harness);
   await page.getByRole('button', { name: 'Mimic', exact: true }).click();
   await page.getByRole('button', { name: 'Start listening' }).click();
-  await page.getByLabel('Transcribe Mimic audio').check();
+  await setMimicTranscription(page);
   await page.keyboard.press('Escape');
   const url = await invite(page);
   const context = await browser.newContext();
@@ -1955,9 +1995,11 @@ test('live Nostr/WebRTC: guests see Mimic only when allowed and can clip from it
     await page.getByLabel('Allow guest Mimic').check();
     await page.keyboard.press('Escape');
     await guest.getByRole('button', { name: 'Mimic', exact: true }).click();
-    const dialog = guest.getByRole('dialog', { name: 'Mimic' });
+    const dialog = guest.getByRole('main', { name: 'Mimic', exact: true });
     await expect(dialog.getByLabel('Mimic source', { exact: true })).toHaveCount(0);
     await expect(dialog.getByLabel('Transcribe Mimic audio')).toHaveCount(0);
+    if (!(await dialog.locator('.mimic-page-settings[open]').count()))
+      await dialog.getByText('Mimic settings', { exact: true }).click();
     await expect(dialog.getByLabel('F6 hotkey')).toHaveCount(0);
     await expect(dialog.getByText('From Voice Replay Studio')).toHaveCount(0); // host only
     // The host's transcript reaches the guest as text; clicking a line selects that audio.
@@ -2634,7 +2676,7 @@ test('accessibility: no serious or critical axe violations on the main screens',
   await page.keyboard.press('Escape');
   await page.getByRole('button', { name: 'Mimic', exact: true }).click();
   await page.getByRole('button', { name: 'Start listening' }).click();
-  await page.getByLabel('Transcribe Mimic audio').check();
+  await setMimicTranscription(page);
   await expect(
     page.getByRole('list', { name: 'Transcript' }).getByRole('button').first(),
   ).toBeVisible({ timeout: 15000 });
@@ -2738,9 +2780,11 @@ test('slow connection: busy buttons, Temp and Mimic toggles keep keyboard focus 
     await expect(button).toBeFocused();
   }
   await page.getByRole('button', { name: 'Mimic', exact: true }).click();
-  const dialog = page.getByRole('dialog', { name: 'Mimic' });
+  const dialog = page.getByRole('main', { name: 'Mimic', exact: true });
   await dialog.getByRole('button', { name: 'Start listening' }).click();
   await expect(dialog.getByRole('button', { name: 'Stop listening' })).toBeVisible();
+  if (!(await dialog.locator('.mimic-page-settings[open]').count()))
+    await dialog.getByText('Mimic settings', { exact: true }).click();
   const f6 = dialog.getByLabel('F6 hotkey');
   await f6.focus();
   await page.keyboard.press('Space');
@@ -2761,16 +2805,22 @@ test('Mimic hotkey: the host browser remembers its key and length across compani
   );
   await host(page, harness);
   await page.getByRole('button', { name: 'Mimic', exact: true }).click();
-  const dialog = page.getByRole('dialog', { name: 'Mimic' });
+  const dialog = page.getByRole('main', { name: 'Mimic', exact: true });
   await dialog.getByRole('button', { name: 'Start listening' }).click();
   await expect(dialog.getByLabel('Hotkey key', { exact: true })).toHaveValue('F6');
+  if (!(await dialog.locator('.mimic-page-settings[open]').count()))
+    await dialog.getByText('Mimic settings', { exact: true }).click();
   await dialog.getByLabel('F6 hotkey').check();
   await expect(dialog.getByText('Press F7 in any app to save the last 15 s')).toBeVisible();
   await expect(dialog.getByLabel('Hotkey key', { exact: true })).toHaveValue('F7');
+  if (!(await dialog.locator('.mimic-page-settings[open]').count()))
+    await dialog.getByText('Mimic settings', { exact: true }).click();
   await expect(dialog.getByLabel('F7 hotkey')).toBeChecked();
   // A remembered key that another app now owns (the harness pretends F9 is) is reported, and the
   // hotkey still turns on with the current key.
   // Each toggle runs a command; a press while it runs is ignored (aria-disabled), so wait it out.
+  if (!(await dialog.locator('.mimic-page-settings[open]').count()))
+    await dialog.getByText('Mimic settings', { exact: true }).click();
   const f7 = dialog.getByLabel('F7 hotkey');
   await expect(f7).not.toHaveAttribute('aria-disabled');
   await f7.uncheck();
@@ -2778,6 +2828,8 @@ test('Mimic hotkey: the host browser remembers its key and length across compani
   await page.evaluate(() =>
     localStorage.setItem('soundpad-mimic-hotkey', JSON.stringify({ key: 'F9', seconds: 15 })),
   );
+  if (!(await dialog.locator('.mimic-page-settings[open]').count()))
+    await dialog.getByText('Mimic settings', { exact: true }).click();
   await dialog.getByLabel('F7 hotkey').check();
   await expect(page.getByText('F9 is already used by another app', { exact: false })).toBeVisible();
   await expect(dialog.getByText('Press F7 in any app to save the last 15 s')).toBeVisible();
@@ -2790,7 +2842,7 @@ test('Mimic: the host imports a clip from Voice Replay Studio into Temp', async 
   // The harness points at a fixture Voice Replay Studio library with two clips, never the real one.
   await host(page, harness);
   await page.getByRole('button', { name: 'Mimic', exact: true }).click();
-  const dialog = page.getByRole('dialog', { name: 'Mimic' });
+  const dialog = page.getByRole('main', { name: 'Mimic', exact: true });
   await dialog.getByText('From Voice Replay Studio').click();
   const list = dialog.getByRole('list', { name: 'Voice Replay Studio clips' });
   await expect(list.getByRole('listitem')).toHaveCount(2);
@@ -2863,7 +2915,9 @@ test('an older companion: Settings names what an update adds, and those controls
   );
   await page.keyboard.press('Escape');
   await page.getByRole('button', { name: 'Mimic', exact: true }).click();
-  const dialog = page.getByRole('dialog', { name: 'Mimic' });
+  const dialog = page.getByRole('main', { name: 'Mimic', exact: true });
+  if (!(await dialog.locator('.mimic-page-settings[open]').count()))
+    await dialog.getByText('Mimic settings', { exact: true }).click();
   await expect(dialog.getByLabel('F6 hotkey')).toBeVisible();
   await expect(dialog.getByLabel('Hotkey key', { exact: true })).toHaveCount(0);
   await expect(dialog.getByText('From Voice Replay Studio')).toHaveCount(0);
@@ -2879,7 +2933,7 @@ test('the current companion gets no update note', async ({ page, harness }) => {
 test('Mimic help shows keyboard shortcuts with a mouse', async ({ page, harness }) => {
   await host(page, harness);
   await page.getByRole('button', { name: 'Mimic', exact: true }).click();
-  const dialog = page.getByRole('dialog', { name: 'Mimic' });
+  const dialog = page.getByRole('main', { name: 'Mimic', exact: true });
   await dialog.getByRole('button', { name: 'Start listening' }).click();
   await expect(dialog.getByText('or press', { exact: false })).toBeVisible();
   await expect(dialog.getByText('tap a transcript line', { exact: false })).toBeHidden();
@@ -2890,7 +2944,7 @@ test.describe('on a touch phone', () => {
   test('Mimic help speaks touch instead of keys', async ({ page, harness }) => {
     await host(page, harness);
     await page.getByRole('button', { name: 'Mimic', exact: true }).click();
-    const dialog = page.getByRole('dialog', { name: 'Mimic' });
+    const dialog = page.getByRole('main', { name: 'Mimic', exact: true });
     await dialog.getByRole('button', { name: 'Start listening' }).click();
     await expect(dialog.getByText('tap a transcript line', { exact: false })).toBeVisible();
     await expect(dialog.getByText('or press', { exact: false })).toBeHidden();
@@ -2900,7 +2954,7 @@ test.describe('on a touch phone', () => {
 test('Mimic: a fresh clip can be played with a quick effect', async ({ page, harness }) => {
   await host(page, harness);
   await page.getByRole('button', { name: 'Mimic', exact: true }).click();
-  const dialog = page.getByRole('dialog', { name: 'Mimic' });
+  const dialog = page.getByRole('main', { name: 'Mimic', exact: true });
   await dialog.getByRole('button', { name: 'Start listening' }).click();
   await page.waitForTimeout(2600);
   await page.keyboard.press('5');
@@ -2927,7 +2981,7 @@ test('Mimic: a fresh clip can be played with a quick effect', async ({ page, har
 test('Mimic: Edit on a fresh clip opens its Edit copy in Temp', async ({ page, harness }) => {
   await host(page, harness);
   await page.getByRole('button', { name: 'Mimic', exact: true }).click();
-  const dialog = page.getByRole('dialog', { name: 'Mimic' });
+  const dialog = page.getByRole('main', { name: 'Mimic', exact: true });
   await dialog.getByRole('button', { name: 'Start listening' }).click();
   await page.waitForTimeout(2600);
   await page.keyboard.press('5');
@@ -2941,13 +2995,14 @@ test('Mimic: Edit on a fresh clip opens its Edit copy in Temp', async ({ page, h
   // Like Voice Replay Studio opening a new capture in its editor: one press, Mimic closes, Temp opens
   // with Edit copy for this clip, and Start has the keyboard focus.
   await recent.getByRole('button', { name: 'Edit a copy of Trim me' }).click();
-  await expect(dialog).toBeHidden();
+  await expect(dialog).toBeVisible();
   const form = editCopyForm(page, 'Trim me');
   await expect(form).toBeVisible({ timeout: 15000 });
   await expect(form.getByLabel('Start (s)')).toBeFocused();
   await expect(form.getByLabel('Start (s)')).toHaveValue('0');
   await form.getByLabel('Start (s)').fill('1');
   await form.getByRole('button', { name: 'Save copy' }).click();
+  await closeSection(page, 'Mimic');
   await expect(
     page.getByRole('button', { name: 'Play from start: Trim me (trimmed)', exact: true }),
   ).toBeEnabled({ timeout: TEMP_READY });
@@ -2959,7 +3014,7 @@ test('Mimic: Undo on the clip notice takes a clip made by mistake back out (host
 }) => {
   await host(page, harness);
   await page.getByRole('button', { name: 'Mimic', exact: true }).click();
-  const dialog = page.getByRole('dialog', { name: 'Mimic' });
+  const dialog = page.getByRole('main', { name: 'Mimic', exact: true });
   await dialog.getByRole('button', { name: 'Start listening' }).click();
   await page.waitForTimeout(2600);
   await page.keyboard.press('5');
@@ -2983,7 +3038,7 @@ test('Mimic: Keep on a fresh clip opens Keep permanently for it in Temp (host)',
   await host(page, harness);
   const openMimic = async () => {
     await page.getByRole('button', { name: 'Mimic', exact: true }).click();
-    return page.getByRole('dialog', { name: 'Mimic' });
+    return page.getByRole('main', { name: 'Mimic', exact: true });
   };
   let dialog = await openMimic();
   await dialog.getByRole('button', { name: 'Start listening' }).click();
@@ -3024,9 +3079,9 @@ test('Edit copy: with transcripts on, a plain trim is named after its words', as
   // The harness's stand-in speech engine calls each burst of sound "Fixture tone N"; never real Whisper.
   await host(page, harness);
   await page.getByRole('button', { name: 'Mimic', exact: true }).click();
-  const dialog = page.getByRole('dialog', { name: 'Mimic' });
+  const dialog = page.getByRole('main', { name: 'Mimic', exact: true });
   await dialog.getByRole('button', { name: 'Start listening' }).click();
-  await dialog.getByLabel('Transcribe Mimic audio').check();
+  await setMimicTranscription(dialog);
   await page.waitForTimeout(2600);
   await page.keyboard.press('5');
   await dialog.getByLabel('Clip name').fill('Words test');
@@ -3092,7 +3147,7 @@ test('accessibility: no serious or critical axe violations in the newer controls
   await page.setViewportSize({ width: 1280, height: 720 });
   await form.getByRole('button', { name: 'Cancel' }).click();
   await page.getByRole('button', { name: 'Mimic', exact: true }).click();
-  const dialog = page.getByRole('dialog', { name: 'Mimic' });
+  const dialog = page.getByRole('main', { name: 'Mimic', exact: true });
   await dialog.getByRole('button', { name: 'Start listening' }).click();
   await page.waitForTimeout(2600);
   await page.keyboard.press('5');
@@ -3121,7 +3176,7 @@ test('Mimic on a phone: a fresh clip keeps its name readable beside Edit, Keep a
   await page.setViewportSize({ width: 390, height: 844 });
   await host(page, harness);
   await page.getByRole('button', { name: 'Mimic', exact: true }).click();
-  const dialog = page.getByRole('dialog', { name: 'Mimic' });
+  const dialog = page.getByRole('main', { name: 'Mimic', exact: true });
   await dialog.getByRole('button', { name: 'Start listening' }).click();
   await page.waitForTimeout(2600);
   await page.keyboard.press('5');
@@ -3306,11 +3361,11 @@ test('Mimic fits a phone: header keeps Settings on screen and long clip names do
   await page.setViewportSize({ width: 390, height: 844 });
   await host(page, harness);
   await page.getByRole('button', { name: 'Mimic', exact: true }).click();
-  const dialog = page.getByRole('dialog', { name: 'Mimic' });
+  const dialog = page.getByRole('main', { name: 'Mimic', exact: true });
   await dialog.getByRole('button', { name: 'Start listening' }).click();
   // The "Mimic is listening" notice must not cover the dialog's close button (the only way out on a phone).
   await expect(page.locator('.notification-stack .toast').first()).toBeVisible();
-  const closeBox = (await dialog.getByRole('button', { name: 'Close dialog' }).boundingBox())!;
+  const closeBox = (await dialog.getByRole('heading', { name: 'Mimic' }).boundingBox())!;
   const noticeBox = (await page.locator('.notification-stack').boundingBox())!;
   expect(noticeBox.y).toBeGreaterThan(closeBox.y + closeBox.height);
   await page.waitForTimeout(2600);
@@ -3735,7 +3790,7 @@ test.describe('with a Soundpad that takes 1.5 s to import a file', () => {
     const hostErrors = await recordErrors(page),
       guestErrors = await recordErrors(guest);
     await page.getByRole('button', { name: 'Mimic', exact: true }).click();
-    const dialog = page.getByRole('dialog', { name: 'Mimic' });
+    const dialog = page.getByRole('main', { name: 'Mimic', exact: true });
     await dialog.getByRole('button', { name: 'Start listening' }).click();
     await expect(dialog.getByRole('status').first()).toContainText(
       'Listening to Fixture: tone every 2 s',
@@ -4304,11 +4359,12 @@ test('example session: plays example sounds in this browser, edits a copy, and l
   // Mimic in the example (Stage G: the 2.40 history and drafts) says what it listens to, and its hotkey
   // promises nothing outside this page.
   await page.getByRole('button', { name: 'Mimic', exact: true }).click();
-  const mimic = page.getByRole('dialog', { name: 'Mimic' });
+  const mimic = page.getByRole('main', { name: 'Mimic', exact: true });
   await expect(mimic.locator('.mimic-intro')).toContainText('loop of Apollo 11 clips');
+  await mimic.getByText('Mimic settings', { exact: true }).click();
   await expect(mimic).toContainText("Host's PC only: there, pressing F6 in any app saves the last");
   await expect(mimic).not.toContainText('Press F6 in any app on this PC');
-  await closeEditor(page);
+  await closeSection(page, 'Mimic');
   // There is no companion to update (the example stands in for one, and never says it is out of date).
   await page.getByRole('button', { name: 'Access settings' }).click();
   await expect(page.getByRole('dialog').first()).toBeVisible();
@@ -4403,7 +4459,7 @@ test('notices never cover Mimic’s close button, Leave example, Stop, Panic or 
     await page.goto('/');
     await page.getByRole('button', { name: 'Try the example' }).click();
     await page.getByRole('button', { name: 'Mimic', exact: true }).click();
-    const dialog = page.getByRole('dialog', { name: 'Mimic' });
+    const dialog = page.getByRole('main', { name: 'Mimic', exact: true });
     await dialog.getByRole('button', { name: 'Start listening' }).click();
     await expect(dialog.getByRole('button', { name: 'Last 3 s' })).toBeVisible({ timeout: 15000 });
     await page.waitForTimeout(3200);
@@ -4416,7 +4472,7 @@ test('notices never cover Mimic’s close button, Leave example, Stop, Panic or 
     await expect(undo).toBeVisible();
     // The notices are never part of the panel, and its close button is never under them.
     await expect(dialog.locator('.notification-stack')).toHaveCount(0);
-    const close = dialog.getByRole('button', { name: 'Close dialog' });
+    const close = sectionNav(page).getByRole('button', { name: 'Soundboard' });
     expect(await onTop(close), `close at ${size.width}`).toBe(true);
     expect(await onTop(undo), `Undo at ${size.width}`).toBe(true);
     // Keyboard: no trap; Shift+Tab from Close goes back through the page and reaches a notice's Undo.
@@ -4451,7 +4507,7 @@ test('notices never cover Mimic’s close button, Leave example, Stop, Panic or 
       expect(await onTop(control), `${await control.textContent()} at ${size.width}`).toBe(true);
     // Reopen, close, and leave, all with the pointer.
     await sectionNav(page).getByRole('button', { name: 'Mimic', exact: true }).click();
-    await closeEditor(page);
+    await closeSection(page, 'Mimic');
     await page.getByRole('button', { name: 'Leave example' }).click();
     await expect(page.getByRole('button', { name: 'Try the example' })).toBeVisible();
   }
@@ -4494,9 +4550,9 @@ test('Mimic history: dragging the overview keeps one request of a kind in flight
   await playButton(page, 'Airhorn').click();
   await expect.poll(() => harness.soundpad.at(-1)).toBe('DoPlaySound(1)');
   await page.getByRole('button', { name: 'Mimic', exact: true }).click();
-  const dialog = page.getByRole('dialog', { name: 'Mimic' });
+  const dialog = page.getByRole('main', { name: 'Mimic', exact: true });
   await dialog.getByRole('button', { name: 'Start listening' }).click();
-  await dialog.getByLabel('Transcribe Mimic audio').check();
+  await setMimicTranscription(dialog);
   const overview = dialog.getByRole('slider', { name: /Recording history overview/ });
   await expect(overview).toBeVisible();
   await page.waitForTimeout(8000);
@@ -4550,7 +4606,7 @@ async function keepRecentInLibrary(page: Page, name: string) {
 }
 async function startListening(page: Page) {
   await page.getByRole('button', { name: 'Mimic', exact: true }).click();
-  const dialog = page.getByRole('dialog', { name: 'Mimic' });
+  const dialog = page.getByRole('main', { name: 'Mimic', exact: true });
   await dialog.getByRole('button', { name: 'Start listening' }).click();
   await expect(dialog.getByRole('status').first()).toContainText('Listening to Fixture');
   return dialog;
@@ -4562,7 +4618,7 @@ test('voice library: a kept draft appears in Voices with its words, a word searc
 }) => {
   await host(page, harness);
   const dialog = await startListening(page);
-  await dialog.getByLabel('Transcribe Mimic audio').check();
+  await setMimicTranscription(dialog);
   await expect(
     dialog
       .getByRole('list', { name: 'Transcript' })
@@ -4574,11 +4630,14 @@ test('voice library: a kept draft appears in Voices with its words, a word searc
   await dialog.getByRole('button', { name: 'Capture', exact: true }).click();
   const draft = dialog.getByRole('region', { name: 'Draft' });
   await draft.getByRole('button', { name: 'Keep in voice library' }).click();
-  await expect(page.getByText('“Library line” is in the voice library.')).toBeVisible({
+  // 2.46: the notice says where it went (the voice library and Soundpad's Saved category), with Undo and Rename.
+  await expect(
+    page.getByText(/^Saved “Library line” to the voice library and Soundpad’s/),
+  ).toBeVisible({
     timeout: TEMP_READY,
   });
   await expect(draft).toHaveCount(0); // kept: the draft is done
-  await closeEditor(page);
+  await closeSection(page, 'Mimic');
   await page.getByRole('button', { name: 'Voices', exact: true }).click();
   const voices = section(page, 'Voices');
   const recordings = voices.getByRole('list', { name: 'Recordings' });
@@ -4710,14 +4769,14 @@ test('voice library: the review queue labels and keeps new recordings from the k
 /** Kept recordings whose words (from the transcript fixture) are "Fixture tone N". */
 async function recordingsWithWords(page: Page, count = 2) {
   const dialog = await startListening(page);
-  await dialog.getByLabel('Transcribe Mimic audio').check();
+  await setMimicTranscription(dialog);
   await expect(
     dialog
       .getByRole('list', { name: 'Transcript' })
       .getByRole('button', { name: 'Fixture', exact: true })
       .first(),
   ).toBeVisible({ timeout: 15000 });
-  await closeEditor(page);
+  await closeSection(page, 'Mimic');
   for (let i = 1; i <= count; i++) await keepRecentInLibrary(page, `Take ${i}`);
   await expect
     .poll(

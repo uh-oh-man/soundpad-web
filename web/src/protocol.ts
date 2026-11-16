@@ -85,6 +85,8 @@ export const commandSchema = z
       'libraryVoice',
       'libraryWanted',
       'libraryAdd',
+      // One-press Save (2.46): a Temp clip kept into the voice library where Keep puts files.
+      'libraryKeep',
       'libraryRetry',
       'libraryPreview',
       'librarySettings',
@@ -508,6 +510,13 @@ const category: z.ZodType<Category> = z.object({
   soundIds: z.array(z.string().max(64)).max(50000),
   children: z.lazy(() => z.array(category).max(5000)),
 });
+const mimicClipSchema = z.object({
+  assetId: z.string().max(64),
+  name: z.string().max(200),
+  by: z.string().max(80),
+  at: z.number(),
+});
+
 export const snapshotSchema = z.object({
   v: z.literal(1),
   revision: z.number().int().nonnegative(),
@@ -623,17 +632,8 @@ export const snapshotSchema = z.object({
       hotkeyStatus: z.string().max(600).optional(),
       hotkeySeconds: z.number().int().positive().max(60).optional(),
       hotkeyKey: z.string().max(8).optional(),
-      recent: z
-        .array(
-          z.object({
-            assetId: z.string().max(64),
-            name: z.string().max(200),
-            by: z.string().max(80),
-            at: z.number(),
-          }),
-        )
-        .max(20)
-        .nullish(),
+      recent: mimicClipSchema.array().max(20).nullish(),
+      moreRecent: mimicClipSchema.array().max(80).nullish(),
       // The rolling recording history (2.39). Older companions omit it.
       history: z
         .object({
@@ -728,6 +728,7 @@ export const slowOps: readonly Command['op'][] = [
   'sessionRecover',
   'libraryPreview',
   'libraryAdd',
+  'libraryKeep',
   'sentencePreview',
   'sentenceKeep',
   'sentencePlay',
@@ -771,6 +772,14 @@ export function isGuestAllowed(c: Command, s: Snapshot) {
     return s.permissions.guestMimic === true && s.permissions.guestKeep === true;
   if (c.op.startsWith('draft') || c.op === 'mimicPreview') return s.permissions.guestMimic === true;
   // Keep (2.40): into the host's destination, within their budget; never a path of their own.
+  // One-press Save (2.46): the same as keeping it; the companion ignores any folder or category in it.
+  if (c.op === 'libraryKeep')
+    return (
+      s.permissions.guestKeep === true &&
+      c.destinationDirectory === undefined &&
+      c.categoryId === undefined &&
+      c.categoryName === undefined
+    );
   if (c.op === 'keepAudio')
     return (
       s.permissions.guestKeep === true &&

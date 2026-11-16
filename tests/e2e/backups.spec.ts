@@ -108,7 +108,7 @@ test('a removed recording is restored from the backup, and Undo takes it back ou
   await asCompanion(page, '2.44.0');
   await host(page, harness);
   await page.getByRole('button', { name: 'Mimic', exact: true }).click();
-  const mimic = page.getByRole('dialog', { name: 'Mimic' });
+  const mimic = page.getByRole('main', { name: 'Mimic', exact: true });
   await mimic.getByRole('button', { name: 'Start listening' }).click();
   await expect(mimic.getByRole('status').first()).toContainText('Listening to Fixture');
   await page.keyboard.press('Escape');
