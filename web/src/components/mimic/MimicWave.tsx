@@ -8,6 +8,7 @@ import {
   visibleRange,
   type Selection,
 } from '../../mimic/selection';
+import { isClick } from './playMode';
 
 const VIEW_KEY = 'soundpad-web:mimic-view';
 
@@ -44,6 +45,14 @@ export type WaveExtras = {
   bands?: (Selection & { color: string; label: string })[];
   /** Called when a drag starts, so a view that follows live can hold still under the pointer. */
   onGrab?: () => void;
+  /**
+   * A click (press and release without a drag, not on an edge handle) plays from that point (2.45): it gets the
+   * position in ms of the window and the selection stays as it was. Without it a click clears the selection, as
+   * the 30 s view always did. Releasing a drag only ever selects.
+   */
+  onPlayAt?: (ms: number) => void;
+  /** Where the audio playing from this view is (ms of the window): a thin line; null or absent for none. */
+  playhead?: number | null;
 };
 
 function useCanvasColors() {
@@ -53,6 +62,7 @@ function useCanvasColors() {
     accent: style.getPropertyValue('--accent').trim() || '#7cb5ff',
     line: style.getPropertyValue('--line').trim() || '#303b4a',
     muted: style.getPropertyValue('--text-dim').trim() || '#8a94a6',
+    text: style.getPropertyValue('--text-primary').trim() || '#eaf1ff',
   };
 }
 
@@ -70,6 +80,8 @@ export function MimicWave({
 }) {
   const canvas = useRef<HTMLCanvasElement>(null);
   const drag = useRef<number | null>(null);
+  // Where the press was, and whether it took an edge handle: a release close by is a click, not a drag.
+  const press = useRef<{ x: number; y: number; edge: boolean } | null>(null);
   const [draft, setDraft] = useState<Selection | null>(null);
   const colors = useCanvasColors();
   const storageKey = extras.storageKey ?? VIEW_KEY;
@@ -81,7 +93,7 @@ export function MimicWave({
   const shown = draft ?? selection;
   const { start, end } = dragRange ?? visibleRange(peek.windowMs, viewSeconds * 1000, selection);
   const span = end - start;
-  const { marks, hidden, highlight, bands } = extras;
+  const { marks, hidden, highlight, bands, playhead } = extras;
   useEffect(() => {
     const el = canvas.current;
     const ctx = el?.getContext('2d');
@@ -179,6 +191,11 @@ export function MimicWave({
       ctx.fillRect(x - ratio, 0, 2 * ratio, height);
       ctx.fillRect(x - 4 * ratio, height / 2 - 12 * ratio, 8 * ratio, 24 * ratio);
     }
+    // What is playing from this view (2.45): a thin line in the text colour, apart from the accent edges.
+    if (playhead != null && playhead >= start && playhead <= end) {
+      ctx.fillStyle = colors.text;
+      ctx.fillRect(x(playhead) - ratio / 2, 0, ratio, height);
+    }
   }, [
     peek,
     shown,
@@ -189,10 +206,12 @@ export function MimicWave({
     colors.wave,
     colors.line,
     colors.muted,
+    colors.text,
     marks,
     hidden,
     highlight,
     bands,
+    playhead,
   ]);
   const at = (e: PointerEvent<HTMLCanvasElement>) => {
     const box = e.currentTarget.getBoundingClientRect();
@@ -213,7 +232,7 @@ export function MimicWave({
         ref={canvas}
         role="slider"
         tabIndex={0}
-        aria-label={`Mimic buffer, showing ${extras.where ? `${span / 1000} seconds ${extras.where}` : `the last ${span / 1000} seconds`}. Drag to select; drag an edge to adjust it. Arrow keys move the end, Shift+arrows the start, Ctrl for 1 second steps.`}
+        aria-label={`Mimic buffer, showing ${extras.where ? `${span / 1000} seconds ${extras.where}` : `the last ${span / 1000} seconds`}. ${extras.onPlayAt ? 'Click to play from a point; drag' : 'Drag'} to select; drag an edge to adjust it. Arrow keys move the end, Shift+arrows the start, Ctrl for 1 second steps.`}
         aria-valuemin={0}
         aria-valuemax={peek.windowMs}
         aria-valuenow={selection?.to ?? peek.windowMs}
@@ -238,7 +257,9 @@ export function MimicWave({
         onPointerDown={(e) => {
           e.currentTarget.setPointerCapture(e.pointerId);
           extras.onGrab?.();
-          drag.current = anchorFor(e) ?? at(e);
+          const edge = anchorFor(e);
+          press.current = { x: e.clientX, y: e.clientY, edge: edge !== null };
+          drag.current = edge ?? at(e);
           setDragRange({ start, end });
           setDraft(null);
         }}
@@ -249,15 +270,26 @@ export function MimicWave({
         }}
         onPointerCancel={() => {
           drag.current = null;
+          press.current = null;
           setDragRange(null);
           setDraft(null);
         }}
         onPointerUp={(e) => {
           if (drag.current === null) return;
+          const pressed = press.current;
           const next = normalizeSelection(drag.current, at(e), peek.windowMs);
           drag.current = null;
+          press.current = null;
           setDragRange(null);
           setDraft(null);
+          if (
+            extras.onPlayAt &&
+            pressed &&
+            isClick(e.clientX - pressed.x, e.clientY - pressed.y, pressed.edge)
+          ) {
+            extras.onPlayAt(at(e));
+            return;
+          }
           onSelect(next);
         }}
       />

@@ -13,6 +13,7 @@ import {
   Scissors,
   Search,
   Share2,
+  Square,
   Trash2,
   X,
 } from 'lucide-react';
@@ -34,6 +35,7 @@ import {
   hiddenParts,
   jump,
   levelsSchema,
+  msToFrames,
   ofSession,
   oldestFrame,
   selectionFields,
@@ -82,6 +84,21 @@ import { MimicWave } from './MimicWave';
 import { MimicOverview } from './MimicOverview';
 import { historyPoller } from '../../mimic/history-poll';
 import { mimicKeysApply } from './keys';
+import { useReducedMotion } from '../../motion';
+import { tempAssetsSnapshot } from '../../temp-assets';
+import {
+  clipKey,
+  effectiveMode,
+  gameBlocked,
+  gamePlayEnded,
+  playFrom,
+  playheadFrame,
+  playingWordIds,
+  readPlayMode,
+  reusableClip,
+  writePlayMode,
+  type PlayMode,
+} from './playMode';
 
 // Guests refresh half as often: their requests share the host page's and the companion's request budgets.
 const POLL_MS = 500,
@@ -95,12 +112,38 @@ const VIEW_KEY = 'soundpad-web:mimic-history-view';
 const SAVE_EDGES_MS = 250;
 const NO_WORDS: Word[] = [];
 const NO_RANGES: FrameRange[] = [];
+/** How often the playing word is worked out while something plays (less often with reduced motion). */
+const PLAYING_TICK_MS = 50,
+  PLAYING_TICK_REDUCED_MS = 250;
+
+/**
+ * Something this window is playing (2.45): a word, a stretch from a waveform click, the selection's preview or a
+ * draft played into the game. `startedAt` and `epoch` are set once a play into the game has started.
+ */
+type Playing = {
+  token: number;
+  sessionId: string;
+  range: FrameRange;
+  mode: PlayMode;
+  lengthMs: number;
+  startedAt: number | null;
+  epoch: string | null;
+};
+const field = (data: unknown, key: string) => {
+  const value =
+    data && typeof data === 'object' ? (data as Record<string, unknown>)[key] : undefined;
+  return typeof value === 'string' ? value : null;
+};
 
 /**
  * The Mimic window on a 2.39 companion: the rolling recording history. The main waveform shows the newest 10 s
  * (zoom 5/10/30 s), the overview the whole history; Back/Forward, dragging the overview and Go live move the view
  * while recording carries on. The transcript shows sentences of clickable words (click selects a word, Shift-click
  * a range to it). Guests see the history from when they joined, plus what the host shared.
+ *
+ * Since 2.45 a word click also plays that word, and a click on the waveform plays from that point, in the
+ * person's own Preview here / Play into game mode (remembered in this browser, Preview by default); a drag only
+ * selects. The words being heard carry the `playing` class.
  *
  * With a 2.40 companion, Capture opens a draft for the person who captured it instead of making a clip at once:
  * one draft is shown at a time (the others are in the draft history), its edges can be dragged into the
@@ -471,7 +514,12 @@ export function MimicHistory({
   const fields = () => selectionFields(picked, sessionId);
 
   // Private preview: heard in this browser only, never through Soundpad. Guests have it with a 2.40 companion.
-  const { previewing, play: preview, stop: stopPreview } = usePreviewAudio();
+  const {
+    previewing,
+    play: preview,
+    stop: stopPreview,
+    elapsedMs: previewElapsed,
+  } = usePreviewAudio();
   // Another recording (Mimic restarted, the companion restarted): nothing made on the old one may act on this one
   // (2.41). Its waveform, words and selection are already hidden (they carry their recording); here the edit being
   // saved, a preview on its way, the open draft and the held view go too.
@@ -483,6 +531,7 @@ export function MimicHistory({
     if (!was || was === sessionId) return;
     clearTimeout(saveTimer.current);
     stopPreview();
+    setPlaying(null);
     setPicked(null);
     setOpenId(null);
     setAnchor(null);
@@ -492,6 +541,157 @@ export function MimicHistory({
     setFollow(true);
   }, [sessionId, stopPreview]);
   const canPreview = (host && supports(state.companionVersion, 'preview')) || draftsOn;
+
+  // ---- Playing from the history (2.45): word clicks, waveform clicks and the playing word ------------------
+  const [chosenMode, setChosenMode] = useState<PlayMode>(readPlayMode);
+  const gameWhy = gameBlocked({
+    host,
+    canPlay,
+    guestMimic: state.permissions.guestMimic === true,
+    held,
+  });
+  const playMode = effectiveMode(chosenMode, gameWhy);
+  const chooseMode = (next: PlayMode) => {
+    setChosenMode(next);
+    writePlayMode(next);
+  };
+  const reduced = useReducedMotion();
+  const [playing, setPlaying] = useState<Playing | null>(null);
+  const [elapsed, setElapsed] = useState<number | null>(null);
+  const playToken = useRef(0);
+  /** Clips this page made for plays into the game, so the same word again replays its clip (2.45). */
+  const clips = useRef(new Map<string, string>());
+  // The interval below reads the newest of these, never those of the render it was started in.
+  const latest = useRef({ playing, report: state.playback, suspended: !!state.playbackSuspended });
+  latest.current = { playing, report: state.playback, suspended: !!state.playbackSuspended };
+  const seenEpoch = useRef(false);
+  // A preview's highlight goes when the preview does (it ended, was stopped or failed).
+  useEffect(() => {
+    if (!previewing) setPlaying((p) => (p?.mode === 'preview' ? null : p));
+  }, [previewing]);
+  useEffect(() => {
+    setElapsed(null);
+    seenEpoch.current = false;
+    if (!playing) return;
+    const token = playing.token;
+    const tick = () => {
+      const p = latest.current.playing;
+      if (!p || p.token !== token) return;
+      if (p.mode === 'preview') return setElapsed(previewElapsed());
+      if (p.startedAt === null || p.epoch === null) return;
+      const check = gamePlayEnded(
+        { epoch: p.epoch, startedAt: p.startedAt, lengthMs: p.lengthMs },
+        latest.current.report,
+        latest.current.suspended,
+        seenEpoch.current,
+        Date.now(),
+      );
+      seenEpoch.current = check.seen;
+      if (check.ended) setPlaying((q) => (q?.token === token ? null : q));
+      else setElapsed(Date.now() - p.startedAt);
+    };
+    tick();
+    const timer = setInterval(tick, reduced ? PLAYING_TICK_REDUCED_MS : PLAYING_TICK_MS);
+    return () => clearInterval(timer);
+  }, [playing?.token, playing?.startedAt, reduced, previewElapsed]);
+
+  /** Starts showing a play: a newer one replaces whatever this window showed as playing. */
+  function startPlaying(range: FrameRange, mode: PlayMode) {
+    const token = ++playToken.current;
+    if (!sessionId) return token;
+    setPlaying({
+      token,
+      sessionId,
+      range: { startFrame: range.startFrame, endFrame: range.endFrame },
+      mode,
+      lengthMs: framesToMs(range.endFrame - range.startFrame, rate),
+      startedAt: null,
+      epoch: null,
+    });
+    return token;
+  }
+  /** A play into the game was answered: it shows as playing from now, or goes when it did not start. */
+  function gameAnswered(token: number, played: boolean, data: unknown) {
+    const epoch = field(data, 'epoch');
+    setPlaying((p) =>
+      p?.token !== token ? p : played && epoch ? { ...p, epoch, startedAt: Date.now() } : null,
+    );
+  }
+  /**
+   * Plays a range of this recording in the person's mode: a private preview, or into the game. Into the game it
+   * is made into a Temp clip and played as one command, so the companion plays it only if nothing newer was
+   * asked for by anyone meanwhile (a newer click wins, and nothing obsolete plays); the same range again replays
+   * that clip while it is in Temp.
+   */
+  function playRange(range: FrameRange) {
+    if (!sessionId) return;
+    const fields = {
+      startFrame: Math.round(range.startFrame),
+      endFrame: Math.round(range.endFrame),
+      sourceId: sessionId,
+    };
+    if (playMode === 'preview') {
+      if (!canPreview) {
+        controller.notify('Preview needs a newer companion on the host.', 'error');
+        return;
+      }
+      startPlaying(fields, 'preview');
+      void preview('mimicPreview', fields);
+      return;
+    }
+    if (waiting) {
+      controller.notify('Waiting for the host to allow more Temp space.', 'error');
+      return;
+    }
+    // A play into the game replaces a preview of this window too: the newest click is what is heard.
+    stopPreview();
+    const token = startPlaying(fields, 'game');
+    const key = clipKey(sessionId, fields);
+    const made = clips.current.get(key);
+    void (async () => {
+      try {
+        if (made && reusableClip(tempAssetsSnapshot().data?.manager.assets, made)) {
+          const outcome = await playback.audioPlay(made);
+          gameAnswered(token, outcome.result === 'played', outcome.data);
+          return;
+        }
+        const name = wordsText(words, fields);
+        const { data, played } = await playback.make(
+          'mimicClip',
+          { ...fields, ...(name && { name }) },
+          'make:mimic',
+        );
+        const assetId = field(data, 'assetId');
+        if (assetId) clips.current.set(key, assetId);
+        gameAnswered(token, played, data);
+      } catch {
+        // The controller shows the refusal.
+        setPlaying((p) => (p?.token === token ? null : p));
+      }
+    })();
+  }
+  /** Stop beside the mode switch: this window's preview, or what plays in the game (as the player's Stop). */
+  function stopPlaying() {
+    const p = playing;
+    setPlaying(null);
+    if (p?.mode === 'game') void playback.stop();
+    else stopPreview();
+  }
+  /** A click on the waveform (ms of its window): plays from there to the end of the audio there. */
+  function playAt(ms: number) {
+    if (!timeline) return;
+    const cut = playFrom(start + msToFrames(ms, rate), timeline);
+    // The press held a live view still; with nothing selected it follows live again.
+    if (!selection && frozenBySelection.current) {
+      frozenBySelection.current = false;
+      setFollow(true);
+    }
+    if ('reason' in cut) {
+      controller.notify(cut.reason, 'error');
+      return;
+    }
+    playRange(cut.range);
+  }
   async function clip(play: boolean) {
     const chosen = fields();
     if (!chosen || busy) return;
@@ -501,8 +701,17 @@ export function MimicHistory({
         ...chosen,
         ...((name.trim() || suggestion) && { name: name.trim() || suggestion }),
       };
-      if (play) await playback.make('mimicClip', named, 'make:mimic');
-      else await controller.run('mimicClip', named);
+      if (play) {
+        stopPreview();
+        const token = startPlaying(chosen, 'game');
+        try {
+          const { data, played } = await playback.make('mimicClip', named, 'make:mimic');
+          gameAnswered(token, played, data);
+        } catch (e) {
+          setPlaying((p) => (p?.token === token ? null : p));
+          throw e;
+        }
+      } else await controller.run('mimicClip', named);
       select(null);
       setName('');
     } catch {
@@ -619,11 +828,19 @@ export function MimicHistory({
     setBusy(true);
     try {
       await saveName(draft);
-      await playback.make(
-        'draftPlay',
-        { draftId: draft.id, sourceId: draft.sessionId },
-        'make:mimic',
-      );
+      stopPreview();
+      const token = startPlaying(draft, 'game');
+      try {
+        const { data, played } = await playback.make(
+          'draftPlay',
+          { draftId: draft.id, sourceId: draft.sessionId },
+          'make:mimic',
+        );
+        gameAnswered(token, played, data);
+      } catch (e) {
+        setPlaying((p) => (p?.token === token ? null : p));
+        throw e;
+      }
       await refreshDrafts();
     } catch {
       /* Controller shows the error. */
@@ -699,8 +916,13 @@ export function MimicHistory({
     }
   }
   function previewNow() {
-    if (previewing) stopPreview();
-    else if (open && !sameRange(open, selection)) {
+    if (previewing) {
+      stopPreview();
+      return;
+    }
+    // The selection's words light up as they are heard (2.45).
+    if (selection) startPlaying(selection, 'preview');
+    if (open && !sameRange(open, selection)) {
       // Edges still being saved: hear what is selected now.
       const chosen = fields();
       if (chosen) void preview('mimicPreview', chosen);
@@ -842,6 +1064,12 @@ export function MimicHistory({
   const highlight = hover
     ? selectionMs({ startFrame: hover.start, endFrame: hover.end }, start, rate)
     : null;
+  // What plays from this window now (2.45): the word being heard, and a line on the waveform where it is.
+  const shownPlay = playing && playing.sessionId === sessionId ? playing : null;
+  const playFrame =
+    shownPlay && elapsed !== null ? playheadFrame(shownPlay.range, elapsed, rate) : null;
+  const playingIds = playingWordIds(words, shownPlay?.range ?? null, playFrame, reduced);
+  const playhead = playFrame !== null && !reduced ? framesToMs(playFrame - start, rate) : null;
   const bands = others.map((band) => ({
     ...bandSelection(band, start, rate),
     color: bandColor(band.tag),
@@ -926,6 +1154,13 @@ export function MimicHistory({
           onMove={moveTo}
         />
       )}
+      <PlayModeSwitch
+        mode={playMode}
+        set={chooseMode}
+        blocked={gameWhy}
+        playing={shownPlay?.mode ?? null}
+        onStop={stopPlaying}
+      />
       {main && (
         <MimicWave
           peek={{ windowMs: WINDOW_MS, levels: main.peaks }}
@@ -940,6 +1175,8 @@ export function MimicHistory({
             hidden,
             highlight,
             bands,
+            playhead,
+            onPlayAt: playAt,
             onGrab: () => {
               // Hold the view still under the pointer; letting go without a selection follows live again.
               if (!follow) return;
@@ -1084,7 +1321,7 @@ export function MimicHistory({
                     <button
                       key={w.id}
                       type="button"
-                      className={`mimic-word${w.status === 'uncertain' ? ' uncertain' : ''}${hover?.id === w.id ? ' hover' : ''}`}
+                      className={`mimic-word${w.status === 'uncertain' ? ' uncertain' : ''}${hover?.id === w.id ? ' hover' : ''}${playingIds.has(w.id) ? (reduced ? ' playing playing-static' : ' playing') : ''}`}
                       aria-pressed={wordSelected(w, selection)}
                       title={
                         w.status === 'uncertain'
@@ -1106,6 +1343,8 @@ export function MimicHistory({
                         }
                         select(cut.range);
                         if (!e.shiftKey || anchor === null) setAnchor(w.id);
+                        // A click (or Enter) plays the word in the person's mode; Shift-click only selects (2.45).
+                        if (!e.shiftKey && cut.range) playRange(cut.range);
                       }}
                     >
                       {w.text}
@@ -1304,18 +1543,73 @@ export function MimicHistory({
       ) : (
         <>
           <p className="muted mimic-help-keys">
-            Drag across the waveform, click a word (Shift-click another to select everything
-            between), or press <kbd>3</kbd> <kbd>5</kbd> <kbd>0</kbd> for the last 3, 5 or 10
-            seconds. Then <kbd>Enter</kbd> {draftsOn ? 'captures a draft' : 'mimics'},{' '}
-            <kbd>Shift</kbd>+<kbd>Enter</kbd> mimics and plays, <kbd>Esc</kbd> clears. Back, Forward
-            and the overview move through the last{' '}
-            {formatSpan((history?.seconds ?? timeline.windowSeconds) * 1000)}; recording carries on.
+            Click a word to hear it, or the waveform to hear from there (
+            {playMode === 'game' ? 'into the game' : 'here only'}, as chosen above). Drag across the
+            waveform, click a word (Shift-click another to select everything between), or press{' '}
+            <kbd>3</kbd> <kbd>5</kbd> <kbd>0</kbd> for the last 3, 5 or 10 seconds. Then{' '}
+            <kbd>Enter</kbd> {draftsOn ? 'captures a draft' : 'mimics'}, <kbd>Shift</kbd>+
+            <kbd>Enter</kbd> mimics and plays, <kbd>Esc</kbd> clears. Back, Forward and the overview
+            move through the last {formatSpan((history?.seconds ?? timeline.windowSeconds) * 1000)};
+            recording carries on.
           </p>
           <p className="muted mimic-help-touch">
-            Drag across the waveform, tap a transcript line's word, or tap Last 3 s, 5 s or 10 s.
-            Then {draftsOn ? 'Capture' : 'Mimic it'}. Drag the overview to go back in time.
+            Tap a word or the waveform to hear it (
+            {playMode === 'game' ? 'into the game' : 'here only'}). Drag across the waveform, tap a
+            transcript line's word, or tap Last 3 s, 5 s or 10 s. Then{' '}
+            {draftsOn ? 'Capture' : 'Mimic it'}. Drag the overview to go back in time.
           </p>
         </>
+      )}
+    </div>
+  );
+}
+
+/**
+ * Where clicks on words and the waveform play (2.45): Preview here (this browser only) or Play into game, as in
+ * the Voices window. Play into game is offered only while this person may play; Stop ends what this window plays.
+ */
+function PlayModeSwitch({
+  mode,
+  set,
+  blocked,
+  playing,
+  onStop,
+}: {
+  mode: PlayMode;
+  set: (mode: PlayMode) => void;
+  blocked: string | null;
+  playing: PlayMode | null;
+  onStop: () => void;
+}) {
+  return (
+    <div className="mimic-play-mode">
+      <div role="radiogroup" aria-label="Word and waveform clicks">
+        <span>Clicks play:</span>
+        <label title="Heard in this browser only; nobody else hears it and nothing plays in the game">
+          <input
+            type="radio"
+            name="mimic-play-mode"
+            checked={mode === 'preview'}
+            onChange={() => set('preview')}
+          />
+          <Headphones size={13} aria-hidden="true" /> Preview here
+        </label>
+        <label title={blocked ?? 'Played through Soundpad, so everyone in the game hears it'}>
+          <input
+            type="radio"
+            name="mimic-play-mode"
+            checked={mode === 'game'}
+            disabled={!!blocked}
+            onChange={() => set('game')}
+          />
+          <Play size={13} aria-hidden="true" /> Play into game
+        </label>
+        {blocked && <span className="muted">{blocked}.</span>}
+      </div>
+      {playing && (
+        <button type="button" onClick={onStop}>
+          <Square size={13} aria-hidden="true" /> Stop playing
+        </button>
       )}
     </div>
   );
