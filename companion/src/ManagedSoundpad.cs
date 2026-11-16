@@ -138,6 +138,8 @@ internal static class ManagedSoundpad
         }
         throw new InvalidDataException("Soundpad did not confirm removing the Temp category. Nothing else was changed; cleanup retries later.");
     }
+    /// <summary>How many reads (100 ms apart) <see cref="Import"/> gives Soundpad to list a file it just added: up to about 2 s.</summary>
+    internal const int ImportSettleReads = 20;
     public static async Task<NativeAudioReference> Import(ISoundpad pipe, string path, int category, string expectedName)
     {
         var before = await Read(pipe);
@@ -145,8 +147,19 @@ internal static class ManagedSoundpad
         var existing = before.Entries.Where(e => string.Equals(e.Path, path, StringComparison.OrdinalIgnoreCase)).ToArray();
         if (existing.Length > 1) throw new InvalidDataException("Multiple native entries reference this managed file. Resolve duplicates in Soundpad before retrying.");
         if (existing.Length == 0) await Ok(pipe, $"DoAddSound({Quote(path)}, {category}, 1)");
-        var after = await Read(pipe); var matches = after.Entries.Where(e => string.Equals(e.Path, path, StringComparison.OrdinalIgnoreCase)).ToArray();
-        if (matches.Length != 1 || !after.Categories.Any(c => c.Index == target.Index && c.Name == target.Name && c.Paths.Contains(path, StringComparer.OrdinalIgnoreCase))) throw new InvalidDataException("Soundpad has not confirmed the file in its intended category. The source is preserved; check the category and retry.");
+        // Soundpad lists a new file a moment later, on its own thread (2.44 real-hardware proof, Soundpad 4.0.35): the
+        // first file added to a new category was missing from the main list in the read straight after the add, every
+        // time (3 of 3), and listed about 100 ms later, so exact slots never registered in a new session. Re-read until
+        // it shows, as removals do; a second entry for the file still fails at once.
+        bool Confirmed(NativeCatalog c, NativeEntry[] m) => m.Length == 1 && c.Categories.Any(x => x.Index == target.Index && x.Name == target.Name && x.Paths.Contains(path, StringComparer.OrdinalIgnoreCase));
+        NativeCatalog after = before; NativeEntry[] matches = [];
+        for (int attempt = 0; attempt < ImportSettleReads; attempt++)
+        {
+            if (attempt > 0) await Task.Delay(100);
+            after = await Read(pipe); matches = after.Entries.Where(e => string.Equals(e.Path, path, StringComparison.OrdinalIgnoreCase)).ToArray();
+            if (matches.Length > 1 || Confirmed(after, matches)) break;
+        }
+        if (!Confirmed(after, matches)) throw new InvalidDataException("Soundpad has not confirmed the file in its intended category. The source is preserved; check the category and retry.");
         return new() { Path = path, ObservedIndex = matches[0].Index, CategoryId = category, LibraryFingerprint = after.Fingerprint, VerifiedAt = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() };
     }
 }

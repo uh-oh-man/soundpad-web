@@ -14,8 +14,6 @@ internal static class RealSliceAudioProbe
 {
     private const int Rate = 48000;
     private const float Level = 0.004f;
-    [System.Runtime.InteropServices.DllImport("kernel32.dll", CharSet = System.Runtime.InteropServices.CharSet.Unicode)] private static extern uint GetLongPathName(string shortPath, System.Text.StringBuilder longPath, uint size);
-    private static string LongPath(string path) { var buffer = new System.Text.StringBuilder(1024); uint n = GetLongPathName(path, buffer, 1024); return n > 0 && n < 1024 ? buffer.ToString() : path; }
 
     /// <summary>Tone segments (frequency Hz, length ms) back to back, stereo 16-bit, with no fades: edges are exact.</summary>
     private static byte[] Tones(params (double Hz, int Ms)[] parts)
@@ -50,7 +48,8 @@ internal static class RealSliceAudioProbe
     }
     private static string Ms(int frames) => (frames * 1000.0 / Rate).ToString("0.0");
 
-    public static async Task<int> Run()
+    /// <param name="root">Where its files go, in long form (<see cref="SoundpadWeb.Testing.RealProbes.Root"/>).</param>
+    public static async Task<int> Run(string root)
     {
         if (Process.GetProcessesByName("SoundpadWeb").Length > 0) { Console.WriteLine("ABORT: the companion is running. Close it first."); return 2; }
         if (Process.GetProcessesByName("VRChat").Length > 0) { Console.WriteLine("ABORT: VRChat is running; this probe waits for a quiet moment."); return 2; }
@@ -64,7 +63,7 @@ internal static class RealSliceAudioProbe
 
         async Task<NativeCatalog> Settle(Func<NativeCatalog, bool> done) { var c = await ManagedSoundpad.Read(real); for (int i = 0; i < 100 && !done(c); i++) { await Task.Delay(150); c = await ManagedSoundpad.Read(real); } return c; }
         var tag = Guid.NewGuid().ToString("N")[..8];
-        var folder = Path.Combine(LongPath(Path.GetTempPath()), "soundpad-web-slot-probe-" + tag);
+        var folder = Path.Combine(root, "soundpad-web-slot-probe-" + tag);
         var name = "Soundpad Web slot probe [" + tag + "]";
         var files = new[] { Path.Combine(folder, "slot-1.wav"), Path.Combine(folder, "slot-2.wav"), Path.Combine(folder, "slot-3.wav") };
         var before = await ManagedSoundpad.Read(real);
@@ -176,8 +175,11 @@ internal static class RealSliceAudioProbe
             try { capture.Stop(); } catch (Exception) { }
             try
             {
-                if (await real.Request("GetPlayStatus()") != "STOPPED") await real.Request("DoStopSound()");
-                if (added)
+                // Never remove a category straight after one of its sounds played (Soundpad exited once that way, in
+                // this very probe on 2026-11-11): stopped, and still stopped 2 s later.
+                bool quiet = await SoundpadWeb.Testing.RealProbes.StoppedAndQuiet(real);
+                if (added && !quiet) Console.WriteLine("CLEANUP PROBLEM: Soundpad did not stay stopped; the probe category was left in place: " + name);
+                if (added && quiet)
                 {
                     var now = await Settle(c => c.Categories.Any(x => x.Name == name));
                     var mine = now.Categories.SingleOrDefault(c => c.Name == name);

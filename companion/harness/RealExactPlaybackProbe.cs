@@ -18,7 +18,7 @@ namespace SoundpadWeb.Testing;
 /// [1.0 s, 2.0 s) and a cue start at 2.0 s, three times each, exactly as a click on the website would. Exact means:
 /// the wanted tone for its full second, and nothing at all of a tone before it (a leaked beginning) or after it
 /// (an overrun). For comparison it plays the same cue start once the 2.36 way (play, then seek) and reports how
-/// much of the beginning that let through. Then it stops, waits until Soundpad has been stopped for a second
+/// much of the beginning that let through. Then it stops, waits until Soundpad has been stopped for two seconds
 /// (Soundpad 4.0.35 exited once when a category was removed right after one of its sounds played), ends the
 /// Bridge's session (which removes its Temp category with the slots), removes its own category the same careful
 /// way, and checks that Soundpad's library is exactly as before. Exit code 0: exact and restored; 1: not exact;
@@ -29,14 +29,15 @@ internal static class RealExactPlaybackProbe
     /// <summary>What the probe needs from the PC, so its refusals can be tested with stand-ins.</summary>
     internal sealed record Host(Func<string, bool> Running, Func<int?> SoundpadProcess, Func<ISoundpad> Pipe, Func<IMimicCapture> Capture, string TempFolder);
 
-    private static Host Real() => new(
+    private static Host Real(string root) => new(
         name => Process.GetProcessesByName(name).Length > 0,
         () => Process.GetProcessesByName("Soundpad").FirstOrDefault()?.Id,
         () => new SoundpadPipe(),
         () => new WasapiMimicCapture(),
-        SlotFiles.LongPath(Path.GetTempPath()));
+        root);
 
-    public static Task<int> Run() => Run(Real(), Console.Out);
+    /// <param name="root">Where its files go, in long form (<see cref="RealProbes.Root"/>).</param>
+    public static Task<int> Run(string root) => Run(Real(root), Console.Out);
 
     private const int Rate = 48000;
     internal static async Task<int> Run(Host host, TextWriter log)
@@ -61,11 +62,11 @@ internal static class RealExactPlaybackProbe
         async Task<NativeCatalog> Settle(Func<NativeCatalog, bool> done) { var c = await ManagedSoundpad.Read(real); for (int i = 0; i < 100 && !done(c); i++) { await Task.Delay(150); c = await ManagedSoundpad.Read(real); } return c; }
         async Task<bool> StoppedAndQuiet()
         {
-            // Stopped, a second later still stopped: only then is a category removed (see the class note).
+            // Stopped, and still stopped 2 s later: only then is a category removed (see the class note).
             for (int i = 0; i < 20; i++)
             {
                 if (await real.Request("GetPlayStatus()") != "STOPPED") { await real.Request("DoStopSound()"); await Task.Delay(300); continue; }
-                await Task.Delay(1000);
+                await Task.Delay(RealProbes.QuietMs);
                 if (await real.Request("GetPlayStatus()") == "STOPPED") return true;
             }
             return false;
@@ -92,6 +93,7 @@ internal static class RealExactPlaybackProbe
             // The real Bridge on a throwaway data folder, with no capture device, hotkey or speech model of its own.
             bridge = new Bridge(real, new StateStore(Path.Combine(folder, "data")));
             bridge.UseMimicCapture(new MimicFixture()); bridge.UseTranscriptEngine(new TranscriptFixture()); bridge.UseHotkey(new HotkeyFixture());
+            bridge.MimicLog += message => log.WriteLine("  companion log: " + message);
             await bridge.Poll(true);
             if (bridge.SoundIdOf(fixture) is not string sound) { log.WriteLine("ABORT: the Bridge does not see the fixture."); return 2; }
             if (!await bridge.RegisterSlotsNow()) { log.WriteLine("ABORT: the slots could not be registered (see the lines above)."); return 2; }

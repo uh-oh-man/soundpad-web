@@ -10,9 +10,8 @@ using SoundpadWeb;
 /// </summary>
 internal static class RealSlotProbe
 {
-    [System.Runtime.InteropServices.DllImport("kernel32.dll", CharSet = System.Runtime.InteropServices.CharSet.Unicode)] private static extern uint GetLongPathName(string shortPath, System.Text.StringBuilder longPath, uint size);
-    private static string LongPath(string path) { var buffer = new System.Text.StringBuilder(1024); uint n = GetLongPathName(path, buffer, 1024); return n > 0 && n < 1024 ? buffer.ToString() : path; }
-    public static async Task<int> Run()
+    /// <param name="root">Where its files go, in long form (<see cref="SoundpadWeb.Testing.RealProbes.Root"/>).</param>
+    public static async Task<int> Run(string root)
     {
         if (Process.GetProcessesByName("SoundpadWeb").Length > 0) { Console.WriteLine("ABORT: the companion is running. Close it first."); return 2; }
         if (Process.GetProcessesByName("VRChat").Length > 0) { Console.WriteLine("ABORT: VRChat is running; this probe waits for a quiet moment."); return 2; }
@@ -25,7 +24,7 @@ internal static class RealSlotProbe
         async Task<NativeCatalog> Settle(Func<NativeCatalog, bool> done) { var c = await ManagedSoundpad.Read(real); for (int i = 0; i < 100 && !done(c); i++) { await Task.Delay(150); c = await ManagedSoundpad.Read(real); } return c; }
         var tag = Guid.NewGuid().ToString("N")[..8];
         // Windows can hand out TEMP in its short 8.3 form, which Soundpad reports back expanded: use the long form.
-        var folder = Path.Combine(LongPath(Path.GetTempPath()), "soundpad-web-slot-probe-" + tag);
+        var folder = Path.Combine(root, "soundpad-web-slot-probe-" + tag);
         var name = "Soundpad Web slot probe [" + tag + "]";
         var slots = new[] { Path.Combine(folder, "slot-1.wav"), Path.Combine(folder, "slot-2.wav") };
         var before = await ManagedSoundpad.Read(real);
@@ -108,8 +107,10 @@ internal static class RealSlotProbe
         {
             try
             {
-                if (await real.Request("GetPlayStatus()") != "STOPPED") await real.Request("DoStopSound()");
-                if (added)
+                // Never remove a category straight after one of its sounds played: stopped, and still stopped 2 s later.
+                bool quiet = await SoundpadWeb.Testing.RealProbes.StoppedAndQuiet(real);
+                if (added && !quiet) Console.WriteLine("CLEANUP PROBLEM: Soundpad did not stay stopped; the probe category was left in place: " + name);
+                if (added && quiet)
                 {
                     var now = await Settle(c => c.Categories.Any(x => x.Name == name));
                     var mine = now.Categories.SingleOrDefault(c => c.Name == name);

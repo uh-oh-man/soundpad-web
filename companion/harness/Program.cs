@@ -1,9 +1,16 @@
 using SoundpadWeb;
 using SoundpadWeb.Testing;
-if (args.FirstOrDefault() == "--real-slice-audio-probe") { Environment.ExitCode = await RealSliceAudioProbe.Run(); return; }
+// Real-Soundpad probes take "--data-dir <folder in the temp folder>" for their files and throwaway data (RealProbes.cs).
+if (args.FirstOrDefault() == "--real-slice-audio-probe") { Environment.ExitCode = await RealSliceAudioProbe.Run(RealProbes.Root(args)); return; }
 // Exact cue starts and regions on the real Soundpad (2.37); see RealExactPlaybackProbe.cs before running it.
-if (args.FirstOrDefault() == "--real-exact-playback-probe") { Environment.ExitCode = await RealExactPlaybackProbe.Run(); return; }
-if (args.FirstOrDefault() == "--real-slot-probe") { Environment.ExitCode = await RealSlotProbe.Run(); return; }
+if (args.FirstOrDefault() == "--real-exact-playback-probe") { Environment.ExitCode = await RealExactPlaybackProbe.Run(RealProbes.Root(args)); return; }
+if (args.FirstOrDefault() == "--real-slot-probe") { Environment.ExitCode = await RealSlotProbe.Run(RealProbes.Root(args)); return; }
+// Session-end cleanup on the real Soundpad with a throwaway data folder (2.44 proof); see RealSessionCleanupProbe.cs.
+if (args.FirstOrDefault() == "--real-session-cleanup-probe") { Environment.ExitCode = await RealSessionCleanupProbe.Run(RealProbes.Root(args)); return; }
+// Play, Stop and Panic during slow audio work on the real Soundpad (2.44 proof); see RealResponsivenessProbe.cs.
+if (args.FirstOrDefault() == "--real-responsiveness-probe") { Environment.ExitCode = await RealResponsivenessProbe.Run(args, RealProbes.Root(args)); return; }
+// How soon the real Soundpad lists a file after DoAddSound (2.44 proof); see RealImportTimingProbe.cs.
+if (args.FirstOrDefault() == "--real-import-timing-probe") { Environment.ExitCode = await RealImportTimingProbe.Run(RealProbes.Root(args)); return; }
 if (args.FirstOrDefault() == "--word-timing-eval" && args.Length >= 2) { await WordTimingEval.Run(args); return; } // see WordTimingEval.cs
 if (args.FirstOrDefault() == "--word-pipeline-eval" && args.Length >= 2) { Environment.ExitCode = await WordPipelineEval.Run(args); return; } // see WordPipelineEval.cs (2.39)
 if (args.FirstOrDefault() == "--speaker-eval" && args.Length >= 2) { Environment.ExitCode = SpeakerGroupingEval.Run(args); return; } // see SpeakerGroupingEval.cs (2.41)
@@ -178,8 +185,12 @@ if (args.FirstOrDefault() == "--real-edit-copy-probe")
     // Owner-approved check (2.27) of Edit copy on this PC's real Soundpad, run with the companion closed: upload a
     // tone, make a chipmunk copy, preview, then End hosting. It uses a throwaway data folder (never the companion's),
     // so its Temp category is its own; nothing is played aloud. It reports whether Soundpad ends exactly as before.
-    var scratch = Path.Combine(Path.GetTempPath(), "soundpad-web-edit-probe-" + Guid.NewGuid().ToString("N"));
+    // In long form inside --data-dir (2.44): Soundpad lists every path in long form. Short names: Soundpad refuses a
+    // path of 260 characters or more, and the probes' --data-dir can be deep.
+    var scratch = Path.Combine(RealProbes.Root(args), "e" + Guid.NewGuid().ToString("N")[..4]);
     using var real = new SoundpadPipe();
+    if (await RealProbes.Refusal(real) is string refused) { Console.WriteLine("ABORT: " + refused); Environment.ExitCode = 2; return; }
+    HostHotkeys.ForbidWindowsHotkeys = true;
     async Task<NativeCatalog> Settle(Func<NativeCatalog, bool> done) { NativeCatalog c = await ManagedSoundpad.Read(real); for (int i = 0; i < 30 && !done(c); i++) { await Task.Delay(200); c = await ManagedSoundpad.Read(real); } return c; }
     Command Cmd(string op) => new(2, Guid.NewGuid().ToString(), DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(), op);
     var before = await ManagedSoundpad.Read(real);
@@ -188,11 +199,31 @@ if (args.FirstOrDefault() == "--real-edit-copy-probe")
     {
         using (var probe = new Bridge(real, new StateStore(scratch)))
         {
+            // No capture device, speech model or hotkey of its own: only Soundpad is real.
+            probe.UseMimicCapture(new MimicFixture()); probe.UseHotkeys(key => new HotkeyFixture(key));
+            probe.MimicLog += message => Console.WriteLine("  companion log: " + message);
+            void JournalState(string when)
+            {
+                var j = System.Text.Json.JsonSerializer.Deserialize<AudioJournal>(File.ReadAllText(Path.Combine(scratch, "managed-audio", "journal.json")), Json.Options)!;
+                Console.WriteLine($"  journal {when}: temp category {(j.TempCategory == null ? "none" : j.TempCategory.Name + " " + j.TempCategory.State + " #" + j.TempCategory.NativeId)}; assets: {string.Join(", ", j.Assets.Select(a => a.Name + "=" + a.State + " [" + string.Join(" ", a.Variants.Select(v => v.Orientation + ":" + v.State + (v.Native == null ? "" : "@" + v.Native.ObservedIndex))) + "]"))}; issues: {string.Join("; ", j.Issues.Select(i => i.Code + ": " + i.Message))}");
+            }
             await probe.Poll(true);
             Console.WriteLine("begin session: " + (await probe.Execute(Cmd("beginSession"), "host")).Ok);
-            var tone = Enumerable.Range(0, 48000 * 2).Select(i => 0.2f * MathF.Sin(i * 2 * MathF.PI * 523 / 48000)).ToArray();
-            var upload = await probe.Upload(MimicRing.Wav(tone, 48000), "Edit probe tone.wav", "Probe");
+            var tone = Enumerable.Range(0, 48000 * 2).Select(i => ExactPlaybackAnalysis.QuietLevel * MathF.Sin(i * 2 * MathF.PI * 523 / 48000)).ToArray();
+            var upload = await probe.Upload(MimicRing.Wav(tone, 48000), "T.wav", "Probe");
             Console.WriteLine($"upload: {upload.Ok} {upload.Error}");
+            JournalState("after upload");
+            {
+                // Diagnosis (2.44 proof): why the import was not verified, by trying it once more directly.
+                var j = System.Text.Json.JsonSerializer.Deserialize<AudioJournal>(File.ReadAllText(Path.Combine(scratch, "managed-audio", "journal.json")), Json.Options)!;
+                var v = j.Assets.Single().Variants.First();
+                Console.WriteLine("  variant path: " + v.Path + " (exists: " + File.Exists(v.Path) + ")");
+                if (j.Assets.Single().State == "waiting-soundpad" && j.TempCategory is { NativeId: int tempIndex } tc)
+                {
+                    try { var r = await ManagedSoundpad.Import(real, v.Path, tempIndex, tc.Name); Console.WriteLine("  direct import: ok at index " + r.ObservedIndex); }
+                    catch (Exception ex) { Console.WriteLine("  direct import: " + ex.GetType().Name + ": " + ex.Message); }
+                }
+            }
             var journal = System.Text.Json.JsonSerializer.Deserialize<AudioJournal>(File.ReadAllText(Path.Combine(scratch, "managed-audio", "journal.json")), Json.Options)!;
             var source = journal.Assets.Single();
             var clock = System.Diagnostics.Stopwatch.StartNew();
@@ -205,7 +236,13 @@ if (args.FirstOrDefault() == "--real-edit-copy-probe")
             if (path != null) using (var wave = new NAudio.Wave.WaveFileReader(path)) Console.WriteLine($"copy length: {wave.TotalTime.TotalSeconds:0.00} s (1.5 s at 1.5x = 1.00 s)");
             var preview = await probe.Execute(Cmd("trimPreview") with { AssetId = source.Id, PositionMs = 0, EndMs = 2000, Action = "echo" }, "host");
             Console.WriteLine($"echo preview: {preview.Ok} {preview.Error} (returned to this tool only, not played)");
+            // Nothing was played, but the Temp category is removed only after the probes' quiet wait all the same.
+            JournalState("before end session");
+            Console.WriteLine("stopped and quiet: " + await RealProbes.StoppedAndQuiet(real));
             Console.WriteLine("end session: " + (await probe.Execute(Cmd("endSession"), "host")).Ok);
+            // Since 2.40 End hosting keeps Temp while the companion runs; quitting clears it (CleanupSession).
+            await probe.CleanupSession();
+            JournalState("after quitting (CleanupSession)");
         }
         var after = await Settle(c => c.Entries.Length == before.Entries.Length && c.Categories.Length == before.Categories.Length);
         bool same = after.Entries.Select(e => e.Path).OrderBy(p => p).SequenceEqual(before.Entries.Select(e => e.Path).OrderBy(p => p))

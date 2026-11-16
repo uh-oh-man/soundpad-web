@@ -2,6 +2,12 @@
 
 Notable changes to Soundpad Web. Versions follow the website's `package.json`; the Windows companion is versioned separately and only needs updating when a release says so.
 
+## Unreleased
+
+### Fixed
+
+- **Exact cue starts and regions work from the start of a session on the real Soundpad.** Soundpad lists the first file added to a new category about 100 ms after it accepts it, and the companion checked only once, straight away. So in a new session the slot files behind exact cue starts never registered (every cue start and region played the older way, start then seek), and the first upload or copy into a new Temp category could be left "not verified". The companion now waits up to 2 seconds for Soundpad to list the file. Found by the first run of the exact-playback check on the owner's Soundpad 4.0.35; after the fix, 17 of 18 measured cue starts and regions played exactly the wanted audio with nothing before or after it.
+
 ## 2.44.0 — Backups, updates, Organize and setup
 
 Backups, updates from inside the app, Organize mode, a guided setup and your own shortcuts. **Update the companion** for all of them except **Settings → Keyboard**, Organize mode in **My Layout** and the **Copy into My Layout** preview: with an older companion the other parts are hidden, and everything else works as in 2.43.

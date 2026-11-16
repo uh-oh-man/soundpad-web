@@ -276,7 +276,12 @@ public static class PlaybackBench
             (long Issued, long Returned, string Command)[] calls; lock (pipe.Calls) calls = pipe.Calls.ToArray();
             Sent[] commands; lock (order) commands = sent.ToArray();
             var intents = commands.Where(x => x.Intent).OrderBy(x => x.Seq).ToArray();
-            for (int i = 0; i + 1 < intents.Length; i++) intents[i].NewerArrived = intents[i + 1].Arrived;
+            // A guest's click while Panic is on is refused at once (guest playback is paused), so it is no newer intent:
+            // the host's own earlier click still stands (2.44 real-hardware proof: it was counted as making that click
+            // obsolete). Only clicks that can win count as "newer".
+            var panicWindows = commands.Where(x => x.Kind == "panic").Select(x => (From: x.Arrived, To: commands.Where(y => y.Kind == "panic-lift" && y.Seq > x.Seq).Select(y => y.Arrived).DefaultIfEmpty(long.MaxValue).First())).ToArray();
+            bool CanWin(Sent x) => !(x.Client == "guest" && panicWindows.Any(w => x.Arrived >= w.From && x.Arrived < w.To));
+            for (int i = 0; i < intents.Length; i++) intents[i].NewerArrived = intents.Skip(i + 1).FirstOrDefault(CanWin)?.Arrived;
 
             // Match each DoPlaySound Soundpad received to the command that caused it: the pipe call that was open
             // at that moment, then the command that was open around that call and answers first.
