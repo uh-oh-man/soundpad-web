@@ -8,7 +8,7 @@ A **Feedback** button for you and your guests, no more storage limits for guests
 
 ### Added
 
-- **Feedback.** The header has a **Feedback** button for the host and every guest. Choose **Bug**, **Idea** or **Opinion**, write a note and press **Send** (or Ctrl+Enter). The host's companion adds each note, with who sent it, when, and which part of the app they were in, to one file on the host's desktop that always has the same name: **`Soundpad Web feedback.md`**. Notes are only ever added to the end of that file. Guests are never told where it is, can send up to 10 notes in 10 minutes, and a note can be up to 4000 characters. If the file grows past 8 MB it stops taking notes until you move or rename it.
+- **Feedback.** The header has a **Feedback** button for the host and every guest. Choose **Bug**, **Idea** or **Opinion**, write a note and press **Send** (or Ctrl+Enter). The host's companion adds each note, with who sent it, when, and which part of the app they were in, to one file on the host's desktop that always has the same name: **`Soundpad Web feedback.md`**. Notes are only ever added to the end of that file. Guests are never told where it is, can send up to 10 notes in 10 minutes, and a note can be up to 4000 characters. If the file grows past 8 MB it stops taking notes until you move or rename it. On a phone the button is at the top of **Session & access** instead of the header, which has no room for it.
 
 ### Changed
 

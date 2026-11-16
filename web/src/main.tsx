@@ -1351,6 +1351,21 @@ function App() {
       )}
       {settings && (
         <Modal label="Session & access" onClose={() => setSettings(false)}>
+          {/* Feedback (2.45): on phones the header has no room for its button, so it is here for everyone. */}
+          {connected && !view.demo && supports(state.companionVersion, 'feedback') && (
+            <div className="feedback-settings-entry">
+              <button
+                type="button"
+                className="feedback-button"
+                onClick={() => {
+                  setSettings(false);
+                  setFeedbackOpen(true);
+                }}
+              >
+                Send feedback
+              </button>
+            </div>
+          )}
           <SettingsDialog
             view={view}
             connected={connected}

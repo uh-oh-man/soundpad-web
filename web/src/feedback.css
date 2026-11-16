@@ -21,19 +21,20 @@
   border-color: color-mix(in srgb, var(--accent) 55%, var(--line-strong));
   background: var(--accent-soft);
 }
-/* On narrow headers the button keeps its icon and its name, but not its word. */
-@media (max-width: 700px) {
-  .feedback-button {
-    padding: 0 9px;
+/* On phones the header has no room for it (Mimic's badges already fill it): Feedback moves to the top of
+   Session & access, which is always one press away. */
+@media (max-width: 600px) {
+  .topbar .feedback-button {
+    display: none;
   }
-  .feedback-button .feedback-label {
-    position: absolute;
-    width: 1px;
-    height: 1px;
-    overflow: hidden;
-    clip-path: inset(50%);
-    white-space: nowrap;
-  }
+}
+.feedback-settings-entry {
+  display: flex;
+  justify-content: flex-end;
+  margin: 0 0 var(--space-2);
+}
+.feedback-settings-entry .feedback-button {
+  display: inline-flex;
 }
 
 .feedback-form {
