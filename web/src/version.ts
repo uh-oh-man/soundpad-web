@@ -77,6 +77,9 @@ export const FEATURES = {
   feedback: [2, 45],
   // Guests have no Temp or Keep storage limits (the owner's choice).
   noLimits: [2, 45],
+  // 2.46: a guest's "Remove all my Temp clips", and Undo of a Temp removal (ops tempRemoveMine, tempRestore).
+  guestTempClear: [2, 46],
+  tempUndo: [2, 46],
 } as const satisfies Record<string, readonly [number, number]>;
 
 /** True when the website changed version since this browser last used it (and it had used it before). */
@@ -131,6 +134,8 @@ const FEATURE_NAMES: Record<keyof typeof FEATURES, string> = {
     'host-wide hotkeys for Capture, Panic and (optionally) Stop, with conflicts reported',
   feedback: "the Feedback button (notes saved on the host's desktop)",
   noLimits: 'no storage limits for guests',
+  guestTempClear: 'a Remove all my Temp clips button for guests',
+  tempUndo: 'Undo after removing Temp audio',
 };
 
 /**

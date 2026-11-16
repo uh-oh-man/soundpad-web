@@ -113,6 +113,9 @@ const STAGE_H = [
   // 2.45, after Stage H.
   "the Feedback button (notes saved on the host's desktop)",
   'no storage limits for guests',
+  // 2.46.
+  'a Remove all my Temp clips button for guests',
+  'Undo after removing Temp audio',
 ];
 describe('feature gates for older companions', () => {
   it('hides each feature until the companion that added it', () => {
@@ -426,8 +429,14 @@ describe('feature gates for older companions', () => {
     expect(missingFeatures('2.44.0')).toEqual([
       "the Feedback button (notes saved on the host's desktop)",
       'no storage limits for guests',
+      'a Remove all my Temp clips button for guests',
+      'Undo after removing Temp audio',
     ]);
-    expect(missingFeatures('2.45.0')).toEqual([]);
+    expect(missingFeatures('2.45.0')).toEqual([
+      'a Remove all my Temp clips button for guests',
+      'Undo after removing Temp audio',
+    ]);
+    expect(missingFeatures('2.46.0')).toEqual([]);
     expect(supports('2.39.0', 'drafts')).toBe(false);
     expect(supports('2.40.0', 'drafts')).toBe(true);
     expect(supports('2.40.0', 'reviewFixes')).toBe(false);

@@ -6,11 +6,12 @@ public sealed partial class Bridge
     private long sampledTick;
     private long seekSettlesUntil;
     private long? regionStart;
-    private async Task<Reply?> Query(Command c, string actor)
+    private async Task<Reply?> Query(Command c, string actor, Participant? participant = null, string? requester = null)
     {
         long now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
         if (c.V is not (1 or 2) || !Guid.TryParseExact(c.Id, "D", out _) || c.At < now - 30000 || c.At > now + 30000) return new("ack", c.Id, false, "Invalid or expired command.");
-        if (c.Op == "audioAssets") return new("ack", c.Id, true, Data: new { manager = Audio.Public, locations = actor == "host" ? Audio.HostLocations() : null });
+        // A guest is also told which sources are theirs to remove (2.46, "mine"): their page no longer guesses from names.
+        if (c.Op == "audioAssets") return new("ack", c.Id, true, Data: new { manager = Audio.Public, locations = actor == "host" ? Audio.HostLocations() : null, mine = actor == "host" ? null : GuestOwnTemp(actor, participant, requester) });
         if (c.Op == "waveform")
         {
             var catalog = parsed; if (c.SoundId == null || !catalog.Paths.TryGetValue(c.SoundId, out var path)) return new("ack", c.Id, false, "Unknown sound.");

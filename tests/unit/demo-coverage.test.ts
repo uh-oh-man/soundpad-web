@@ -204,6 +204,8 @@ const FEATURE_OPS: Record<Feature, Op[]> = {
   hostHotkeys: ['hotkeysGet', 'hotkeysSet'],
   feedback: ['feedbackSend'],
   noLimits: ['budgetStatus'],
+  guestTempClear: ['tempRemoveMine'],
+  tempUndo: ['tempRestore', 'removeAudio'],
 };
 
 /** What the example honestly cannot do, and the reason it gives. Each must be refused with exactly that. */

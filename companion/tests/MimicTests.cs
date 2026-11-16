@@ -541,7 +541,8 @@ public sealed class MimicTests : IDisposable
     public async Task UndoStopsOnlyItsOwnPlayingSource()
     {
         // 2.30: removeAudio with "stopIfPlaying" stops playback only when the companion itself started this
-        // source; another sound keeps playing and the removal is refused as before.
+        // source; another sound keeps playing. Since 2.46 the removal of that other source goes ahead (its files go
+        // once Soundpad is quiet) instead of being refused.
         await using var mock = new MockSoundpad { DurationMs = 60000 }; using var pipe = new SoundpadPipe(mock.Name, true); using var bridge = new Bridge(pipe, new StateStore(folder)); await bridge.Poll(true);
         Assert.True((await bridge.Execute(Cmd("beginSession"), "host")).Ok);
         float[] Tone(float step) => Enumerable.Range(0, 16000).Select(i => 0.3f * MathF.Sin(i * step)).ToArray();
@@ -555,7 +556,11 @@ public sealed class MimicTests : IDisposable
         Assert.Equal("PLAYING", await pipe.Request("GetPlayStatus()"));
         // Undo of a different source never stops what is playing.
         var other = await bridge.Execute(Cmd("removeAudio") with { AssetId = otherOne.Id, Action = "stopIfPlaying" }, "host");
-        Assert.False(other.Ok); Assert.Contains("Stop playback", other.Error);
+        Assert.True(other.Ok, other.Error);
+        Assert.Equal("PLAYING", await pipe.Request("GetPlayStatus()"));
+        // Without "stopIfPlaying", the playing source itself is refused and keeps playing.
+        var plain = await bridge.Execute(Cmd("removeAudio") with { AssetId = playingOne.Id }, "host");
+        Assert.False(plain.Ok); Assert.Contains("Stop playback", plain.Error);
         Assert.Equal("PLAYING", await pipe.Request("GetPlayStatus()"));
         // Guests can't remove, and their request stops nothing.
         Assert.False((await bridge.Execute(Cmd("removeAudio") with { AssetId = playingOne.Id, Action = "stopIfPlaying" }, "guest")).Ok);
@@ -566,7 +571,7 @@ public sealed class MimicTests : IDisposable
         Assert.Equal("STOPPED", await pipe.Request("GetPlayStatus()"));
         await bridge.Poll(true);
         Assert.DoesNotContain(bridge.Snapshot.Library.Sounds, s => s.AssetId == playingOne.Id);
-        Assert.Contains(bridge.Snapshot.Library.Sounds, s => s.AssetId == otherOne.Id);
+        Assert.DoesNotContain(bridge.Snapshot.Library.Sounds, s => s.AssetId == otherOne.Id); // removed once quiet
     }
 
     [Fact]

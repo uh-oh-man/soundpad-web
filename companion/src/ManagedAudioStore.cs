@@ -158,7 +158,9 @@ public sealed partial class ManagedAudioStore
                 map[id] = new(asset.Id, asset.Name + (variant.Orientation == "reversed" ? " (reversed)" : ""), asset.Uploader, variant.Orientation, variant.OwnsFile && !variant.Permanent && !variant.LegacyApproval, variant.OwnsFile ? variant.Permanent || variant.LegacyApproval ? "accepted" : variant.Orientation == "reversed" || asset.Origin == "native" ? "generated" : "upload" : "native", canonical != variant && variant.OwnsFile, canonical?.Native?.SoundId, metadataKey, aliases, variant.Retired && !variant.Permanent && !variant.LegacyApproval);
             }
             AudioVariantView View(AudioVariant v) => new(v.Id, v.Native?.SoundId, v.Orientation, v.Retired ? "cleanup-pending" : v.State, v.State == "ready" && v.Native is { VerifiedAt: > 0 } && !v.Retired, v.Permanent, v.OwnsFile ? Path.GetFileNameWithoutExtension(v.Path) : null, v.Current, v.LegacyApproval);
-            assets.Add(new(asset.Id, asset.Name, asset.Origin, asset.Uploader, asset.State, asset.CreatedAt, normal == null ? null : View(normal), reversed == null ? null : View(reversed), asset.Variants.Where(v => v.State != "removed").Select(View).ToArray(), asset.Variants.Any(v => v.OwnsFile && !v.Permanent && !v.LegacyApproval && v.State != "removed")));
+            assets.Add(new(asset.Id, asset.Name, asset.Origin, asset.Uploader, asset.State, asset.CreatedAt, normal == null ? null : View(normal), reversed == null ? null : View(reversed), asset.Variants.Where(v => v.State != "removed").Select(View).ToArray(),
+                // A removed file that waits for cleanup is no longer Temp audio of the source (2.46).
+                asset.Variants.Any(v => v.OwnsFile && !v.Permanent && !v.LegacyApproval && v.State != "removed" && !v.Retired)));
         }
         // What Prepare would hand back without generating anything: per source and direction, the current ready
         // variant made from the current source. Only one that is in Soundpad and not retired can be played at once.
@@ -176,8 +178,20 @@ public sealed partial class ManagedAudioStore
         var view = new AudioManagerView(journal.Revision, assets.ToArray(), issues.ToArray(), journal.TempCategory?.NativeId, journal.TempCategory?.Name, blocked || writeFailed, TemporaryBytes());
         Volatile.Write(ref hostLocations, journal.Assets.SelectMany(a => a.Variants.Where(v => v.OwnsFile && v.State != "removed").Select(v => (object)new { assetId = a.Id, variantId = v.Id, v.Path, v.Storage })).ToArray());
         Volatile.Write(ref ready, playable);
+        // What the companion's poll retries every few seconds: a removal waiting for the Temp category is not (2.46).
+        Volatile.Write(ref owners, journal.Assets.ToDictionary(a => a.Id, a => new AssetOwner(a.UploaderId, a.State != "permanent" && a.Promotion == null && !a.Variants.Any(v => v.Permanent || v.LegacyApproval)), StringComparer.Ordinal));
+        recoveryDue = journal.Assets.Any(a => a.State is "waiting-soundpad" or "promotion-pending" || a.State == "cleanup-pending" && (a.Input is { State: "retired" } || a.Variants.Any(v => v.Retired && v.State != "removed" && !v.Permanent && !Deferred(v))));
         Volatile.Write(ref annotations, map); Volatile.Write(ref published, view); Changed?.Invoke();
     }
+    private volatile bool recoveryDue;
+    private Dictionary<string, AssetOwner> owners = new(StringComparer.Ordinal);
+    /// <summary>
+    /// Who added a source (its uploader's connection id) and whether it is only temporary audio (never kept, nor being
+    /// kept), as last published (2.46). Safe to call from any thread, unlike <see cref="AssetById"/>.
+    /// </summary>
+    public AssetOwner? OwnerOf(string assetId) => Volatile.Read(ref owners).GetValueOrDefault(assetId);
+    /// <summary>Whether recovery or cleanup has something to retry (2.46; until then, any source in one of these states).</summary>
+    public bool RecoveryDue => recoveryDue;
     public AudioAnnotation? Annotation(string soundId) => Volatile.Read(ref annotations).GetValueOrDefault(soundId);
     /// <summary>
     /// The variant a play of this source and direction would use, if it can be played right now without any
@@ -359,4 +373,5 @@ internal readonly record struct FileStamp(long Bytes, long Written, long SourceB
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException) { return null; }
     }
 }
+public record AssetOwner(string UploaderId, bool OnlyTemporary);
 public record AudioAnnotation(string AssetId, string Name, string Uploader, string Orientation, bool Temporary, string Kind, bool InternalVariant, string? AliasOf, string WorkspaceId, string[] Aliases, bool Retired);

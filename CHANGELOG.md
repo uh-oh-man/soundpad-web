@@ -2,6 +2,25 @@
 
 Notable changes to Soundpad Web. Versions follow the website's `package.json`; the Windows companion is versioned separately and only needs updating when a release says so.
 
+## Unreleased (2.46) — Removing Temp audio
+
+From the 2.45 feedback ("It did not let me delete temp files", "there should be no pending", "add a button to remove all temps for guest side"). **Update the companion** for Undo, **Remove all my Temp clips** and removing while something plays; the list itself already updates at once with a 2.45 companion.
+
+### Fixed
+
+- **Removing Temp audio takes it off the list at once, with nothing left "pending".** With the real Soundpad a removed clip used to stay in Temp as "cleanup-pending", with a warning to remove its entry in Soundpad by hand, until the companion quit. Soundpad can't remove one entry safely, so the companion still keeps the file until the app's Temp category goes (when it quits, or on **Clear all temporary audio**), but that is its own business now: the clip is gone from Temp and the board, nothing is reported, and the companion no longer re-reads Soundpad's list every 5 seconds for it. If the companion refuses, the clip comes back with the reason.
+- **Removing no longer waits for silence.** Every removal was refused while any sound played ("Stop playback before removing temporary audio"), which in a live session is most of the time. Now the files go once Soundpad is quiet. Only the clip that is itself playing is stopped first (as Undo always did).
+- **A guest allowed only Mimic can remove their own clips.** Removing followed the guest-uploads permission, so such a guest could make clips but never remove them. **Remove my clip** now also follows the companion's own record of whose clip it is, not the guest's name.
+
+### Added
+
+- **Undo after removing Temp audio**, on the notice, for the host and guests (while the companion runs and Temp wasn't cleared). With Undo there is no question first.
+- **Remove all my Temp clips** for guests: one question, then their own clips go (never anyone else's, nor kept ones), with Undo.
+
+### Tests
+
+- 5 new companion tests (`TempRemovalTests`) on a pipe that, like the real Soundpad, can't remove one entry; the browser-test harness has `--real-removal` for the same. A new browser test covers a guest removing one clip and all of theirs, the host removing one, and Undo. Unit tests for the list's optimistic removal.
+
 ## 2.45.0 — Feedback, and fixes from the real Soundpad
 
 A **Feedback** button for you and your guests, no more storage limits for guests, and two fixes found by testing on a real Soundpad. **Update the companion** for the Feedback button and for the limits to go; with an older companion the button is hidden, the old limits apply and everything else works as in 2.44.

@@ -151,6 +151,10 @@ export const commandSchema = z
       // Feedback (2.45, gate feedback): a note from the header's Feedback button, saved by the host's companion in
       // one file on the host's desktop. Host and guests; body { kind, text, where?, version? }.
       'feedbackSend',
+      // Temp (2.46): a guest removes all their own temporary sources (gate guestTempClear); Undo of a removal
+      // in this launch while its files are still there (gate tempUndo; assetId or assetIds).
+      'tempRemoveMine',
+      'tempRestore',
     ]),
     // Stage H (2.44): the one payload field of every Stage H op (any JSON; each op's module checks it).
     body: z.json().optional(),
@@ -201,6 +205,8 @@ export const commandSchema = z
     groupSpeakers: z.boolean().optional(),
     guestLibraryEdit: z.boolean().optional(),
     assetId: z.uuid().optional(),
+    // tempRestore (2.46): the sources whose removal is undone.
+    assetIds: z.array(z.uuid()).max(256).optional(),
     variantId: z.uuid().optional(),
     orientation: z.enum(['normal', 'reversed']).optional(),
     destinationDirectory: z.string().max(1024).optional(),
@@ -678,6 +684,8 @@ export const slowOps: readonly Command['op'][] = [
   'audioPlay',
   'keepAudio',
   'removeAudio',
+  'tempRemoveMine',
+  'tempRestore',
   'retryAudio',
   'retryCleanup',
   'cleanupCategories',
@@ -805,8 +813,10 @@ export function isGuestAllowed(c: Command, s: Snapshot) {
   )
     return s.permissions.guestLibraryEdit !== false;
   if (c.op === 'trimAudio') return s.permissions.guestUploads !== false;
-  // Undo of a guest's own clip or copy (2.32): the companion checks the guest added it.
-  if (c.op === 'removeAudio') return s.permissions.guestUploads !== false;
+  // Undo of a guest's own clip or copy (2.32): the companion checks the guest added it. Since 2.46 also
+  // for a guest allowed only Mimic (they make clips too), and "Remove all my Temp clips" and Undo of it.
+  if (c.op === 'removeAudio' || c.op === 'tempRemoveMine' || c.op === 'tempRestore')
+    return s.permissions.guestUploads !== false || s.permissions.guestMimic === true;
   if (c.op === 'spotify')
     return (
       c.action !== 'enable' &&

@@ -510,7 +510,9 @@ HarnessStageH.MockReady(args, mock, directory);
 // Soundpad request take N ms; --slow-add-ms N makes only an import into Soundpad (DoAddSound) take N ms longer.
 int Option(string name) { int at = Array.IndexOf(args, name); return at >= 0 && at + 1 < args.Length && int.TryParse(args[at + 1], out int value) && value is >= 0 and <= 3000 ? value : 0; }
 mock.LatencyMs = Option("--latency-ms"); mock.SlowMs = Option("--slow-add-ms"); mock.SlowPrefix = "DoAddSound(";
-using var pipe = new SoundpadPipe(mock.Name, true);
+// --real-removal (2.46): no test-only removal of one Soundpad entry, as with the real Soundpad, so a removed Temp file
+// waits for the Temp category to go (at quit or Clear Temp) and Undo can bring it back.
+using var pipe = new SoundpadPipe(mock.Name, !args.Contains("--real-removal"));
 HarnessStageH.BeforeBridge(args, directory);
 using var bridge = new Bridge(pipe, new StateStore(directory));
 // Stage H (2.44): test seams that must be in place before anything starts (also before an update resume).
