@@ -337,13 +337,14 @@ public sealed class SentenceStore
             }
         }
         var named = new HashSet<string>(StringComparer.Ordinal);
-        foreach (var n in f.Named)
+        // The section checks above compare with null, so the compiler treats these lists as maybe-null after them.
+        foreach (var n in f.Named!)
         {
             Require(n != null && ValidId(n.Id) && named.Add(n.Id) && NamePattern.IsMatch(n.Name ?? "") && ValidId(n.RecordingId), "bad named piece");
             Require(n!.StartMs >= 0 && n.EndMs > n.StartMs && n.EndMs - n.StartMs <= 30000 && n.By is { Length: > 0 and <= 128 } && Clean(n.ByName, 40) && n.Created >= 0, "bad named piece");
         }
         var owners = new HashSet<string>(StringComparer.Ordinal);
-        foreach (var p in f.People)
+        foreach (var p in f.People!)
         {
             Require(p != null && p.Owner is { Length: > 0 and <= 128 } && owners.Add(p.Owner) && p.Sets != null && p.Sets.Count is >= 1 and <= MaxSets, "bad performance sets");
             var sets = new HashSet<string>(StringComparer.Ordinal);
