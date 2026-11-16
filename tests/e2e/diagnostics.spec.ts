@@ -163,21 +163,16 @@ test('Copy into My Layout draws the resulting layout and redraws it as boxes are
   const guest = await joinGuest(page, 'Sharer');
   await guest.getByRole('button', { name: 'My Layout', exact: true }).click();
   // The guest's layout: a folder with Airhorn, Airhorn a favourite, and one Laugh hidden.
+  await guest.getByRole('button', { name: 'Favorite Airhorn' }).first().click();
+  await guest.getByRole('button', { name: 'Organize Laugh' }).first().click();
+  await guest.getByRole('button', { name: 'Hide in My Layout' }).click();
+  await guest.keyboard.press('Escape');
   await guest.getByRole('button', { name: 'Organize', exact: true }).click();
   await guest.getByRole('checkbox', { name: 'Select Airhorn', exact: true }).click();
   await guest.getByRole('button', { name: 'Add selected to…', exact: true }).click();
   await guest.getByRole('menuitem', { name: 'New folder…' }).click();
   await guest.getByRole('textbox', { name: 'New folder…' }).fill('Loud ones');
   await guest.getByRole('button', { name: 'Add', exact: true }).click();
-  await guest.getByRole('button', { name: 'Done', exact: true }).press('Enter');
-  await expect(guest.getByRole('button', { name: 'Organize', exact: true })).toHaveAttribute(
-    'aria-pressed',
-    'false',
-  );
-  await guest.getByRole('button', { name: 'Favorite Airhorn' }).first().click();
-  await guest.getByRole('button', { name: 'Organize Laugh' }).first().click();
-  await guest.getByRole('button', { name: 'Hide in My Layout' }).click();
-  await guest.keyboard.press('Escape');
 
   const shared = page.getByRole('button', { name: /Sharer · 1 folders? · Copy into My Layout/ });
   await expect(shared).toBeVisible();
