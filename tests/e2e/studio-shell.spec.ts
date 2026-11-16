@@ -300,7 +300,7 @@ test('fast switching between editors: each kind shows its own content and title'
   await nav(page, 'Mimic').click();
   await expect(mimicPanel(page).getByRole('button', { name: 'Start listening' })).toBeVisible();
   expect(Date.now() - started).toBeLessThan(15000);
-  await expect(page.getByRole('dialog')).toHaveCount(1);
+  await expect(title).toHaveText('Activity');
   await expect(editorPanel(page).locator('form.temp-trim')).toHaveCount(0);
 });
 
@@ -530,7 +530,7 @@ test('keyboard order: skip links, topbar, nav, search, tiles, then the player; S
   ])
     expect(first(a), `${a} before ${b}: ${order.join(' ')}`).toBeLessThan(first(b));
   // With the panel open, the second skip link goes to its heading.
-  await nav(page, 'Mimic').click();
+  await page.getByRole('button', { name: 'Activity' }).click();
   if (linksTab) {
     await page.getByRole('link', { name: 'Skip to sounds' }).focus();
     await page.keyboard.press('Tab');
@@ -559,15 +559,16 @@ test('accessibility: axe finds nothing serious in either nav style, the docked p
   await host(page, harness);
   await scan('sidebar style');
   await nav(page, 'Mimic').click();
-  await scan('panel docked');
+  await scan('Mimic');
+  await nav(page, 'Soundboard').click();
   await page.getByRole('button', { name: 'Activity' }).click();
-  await scan('activity');
+  await scan('activity docked');
   await chooseNav(page, 'Top tabs');
   await scan('tabs style');
   await chooseNav(page, 'Sidebar');
   await page.setViewportSize({ width: 412, height: 860 });
-  await nav(page, 'Mimic').click();
-  await scan('sheet');
+  await expect(editorPanel(page)).toBeVisible();
+  await scan('activity sheet');
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.evaluate(() => (document.documentElement.dataset.contrast = 'high'));
   await scan('high contrast');
@@ -682,16 +683,19 @@ test('example: the ribbon follows a draft played into the game, with a new key f
   await expect(
     mimic.getByRole('list', { name: 'Transcript' }).getByRole('button', { name: 'man,' }).first(),
   ).toBeVisible({ timeout: 15000 });
-  await mimic.getByRole('button', { name: 'Latest phrase' }).click();
+  await mimic.getByRole('button', { name: 'Latest phrase', exact: true }).click();
   const draft = mimic.getByRole('region', { name: 'Draft' });
   await expect(draft).toBeVisible();
   await draft.getByRole('button', { name: 'Play into game' }).click();
+  await nav(page, 'Soundboard').click();
   await expect(boardRibbon(page)).toHaveAttribute('data-ribbon-state', /live|waiting/);
   await expect(boardRibbon(page)).toHaveAttribute('data-ribbon-key', /\S/);
   const first = await boardRibbon(page).getAttribute('data-ribbon-key');
   // The key is host:sound:epoch, and a second play of the same draft is a new epoch.
   expect(first!.split(':')).toHaveLength(3);
+  await nav(page, 'Mimic').click();
   await draft.getByRole('button', { name: 'Play into game' }).click();
+  await nav(page, 'Soundboard').click();
   await expect.poll(() => boardRibbon(page).getAttribute('data-ribbon-key')).not.toBe(first);
   await expect(boardRibbon(page)).toHaveAttribute('data-ribbon-key', /\S/);
   await page.getByRole('button', { name: 'Stop', exact: true }).click();
@@ -946,7 +950,7 @@ test('a panel brought back by a reload leaves focus where it was', async ({ page
   await page.reload();
   await expect(mimicPanel(page)).toBeVisible();
   await page.waitForTimeout(300);
-  await expect(page.locator('#editor-title')).not.toBeFocused();
+  await expect(mimicPanel(page).getByRole('heading', { name: 'Mimic' })).not.toBeFocused();
   // So the first Tab starts at the top of the page (in Safari, whose Tab skips links, at the topbar).
   await page.keyboard.press('Tab');
   expect(
@@ -1062,7 +1066,7 @@ test('the companion window with an editor docked keeps Spotify’s Play/Pause an
   const player = page.getByRole('region', { name: 'Spotify player' });
   await player.getByLabel('Enable Spotify desktop integration').check();
   await expect(player.getByRole('button', { name: 'Play or pause Spotify' })).toBeVisible();
-  await nav(page, 'Mimic').click();
+  await page.getByRole('button', { name: 'Activity' }).click();
   await expect(page.locator('.app-shell')).toHaveAttribute('data-rail', 'true');
   for (const name of ['Play or pause Spotify', 'Next Spotify track']) {
     const button = player.getByRole('button', { name });

@@ -84,7 +84,7 @@ test('example Mimic: rolling history, a Latest phrase draft, preview and play, t
     mimic.getByRole('list', { name: 'Transcript' }).getByRole('button', { name: 'man,' }).first(),
   ).toBeVisible({ timeout: 15000 });
   await expect(mimic.getByRole('button', { name: 'Back 10 s' })).toBeVisible();
-  await mimic.getByRole('button', { name: 'Latest phrase' }).click();
+  await mimic.getByRole('button', { name: 'Latest phrase', exact: true }).click();
   const draft = mimic.getByRole('region', { name: 'Draft' });
   await expect(draft).toBeVisible();
   const name = await draft.getByLabel('Clip name').inputValue();
@@ -107,7 +107,7 @@ test('example Mimic: rolling history, a Latest phrase draft, preview and play, t
   await mimic.getByRole('button', { name: 'Keep in Temp and close draft' }).click();
   await expect(page.locator('.notification-stack')).toContainText('is in Temp');
   await expect(draft).toHaveCount(0);
-  await page.getByRole('button', { name: 'Close dialog' }).click();
+  await closeSection(page, 'Mimic');
   await page.locator('#temp-manager > summary').click();
   const source = page.locator('.temp-source').first();
   await source

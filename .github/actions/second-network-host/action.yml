@@ -1,0 +1,5 @@
+name: Second-network mock host
+description: Keep the mock host alive while publishing its encrypted invitation
+runs:
+  using: node24
+  main: index.mjs

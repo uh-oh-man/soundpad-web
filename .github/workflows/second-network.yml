@@ -33,37 +33,12 @@ jobs:
       - run: npm ci
       - run: dotnet build companion/harness/SoundpadWeb.Harness.csproj -c Release
       - run: npx playwright install chromium
-      - name: Start the mock host
-        shell: pwsh
-        run: |
-          $dir = 'artifacts/second-network'
-          New-Item -ItemType Directory -Path $dir -Force | Out-Null
-          $test = Start-Process node -ArgumentList @('node_modules/@playwright/test/cli.js', 'test', 'tests/e2e/second-network.spec.ts') -PassThru -WindowStyle Hidden -RedirectStandardOutput "$dir/probe.log" -RedirectStandardError "$dir/probe.err"
-          $test.Id | Set-Content "$dir/probe.pid"
-          $deadline = (Get-Date).AddSeconds(90)
-          while (!(Test-Path "$dir/invite.sealed") -and !$test.HasExited -and (Get-Date) -lt $deadline) {
-            Start-Sleep -Milliseconds 500
-          }
-          if (!(Test-Path "$dir/invite.sealed")) { throw 'The fixture host did not issue an invitation.' }
-      - uses: actions/upload-artifact@v7
-        with:
-          name: second-network-invitation
-          path: artifacts/second-network/invite.sealed
-          if-no-files-found: error
-          retention-days: 1
-      - name: Verify the guest command reached the mock
-        shell: pwsh
-        run: |
-          $dir = 'artifacts/second-network'
-          $testPid = [int](Get-Content "$dir/probe.pid")
-          Wait-Process -Id $testPid -Timeout 460 -ErrorAction SilentlyContinue
-          if (!(Test-Path "$dir/result.json")) { throw 'The second-network guest did not play the fixture sound.' }
+      - run: npm install --no-save --package-lock=false --no-audit @actions/artifact@6.3.1
+      - uses: ./.github/actions/second-network-host
       - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: second-network-result
-          path: |
-            artifacts/second-network/result.json
-            artifacts/second-network/probe.log
-            artifacts/second-network/probe.err
+          path: artifacts/second-network/result.json
+          if-no-files-found: ignore
           retention-days: 1
