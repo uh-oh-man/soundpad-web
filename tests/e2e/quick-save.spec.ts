@@ -133,8 +133,10 @@ test('one-press Save: a guest saves a Temp clip from Voices into the host’s li
   await page.keyboard.press('Escape');
   const dialog = await startListening(page);
   await page.waitForTimeout(3500);
-  await dialog.getByRole('button', { name: 'Last 3 s', exact: true }).click();
-  await dialog.getByRole('button', { name: /Mimic & play/ }).click();
+  await dialog.getByRole('button', { name: 'Last 3 s', exact: true }).press('Enter');
+  await dialog.getByRole('button', { name: 'Capture', exact: true }).press('Enter');
+  const draft = dialog.getByRole('region', { name: 'Draft' });
+  await draft.getByRole('button', { name: 'Keep in Temp', exact: true }).press('Enter');
   await expect(
     dialog.getByRole('region', { name: 'Just mimicked' }).getByRole('button', { name: /^Save / }),
   ).toBeVisible({ timeout: TEMP_READY });
