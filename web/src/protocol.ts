@@ -431,12 +431,25 @@ export const sentenceInputSchema = z
     variant: z.enum(['original', 'cleaned']).optional(),
     item: paletteRefSchema.optional(),
     origin: z.enum(['typed', 'template']).optional(),
+    // 2.45 (gate sentenceCompose): where `insert` puts a palette item or a phrase block's words in the
+    // text, as a character position (inside a word or a recorded phrase: after it).
+    caret: z.number().int().min(0).max(4000).optional(),
   })
   .strict();
 export type SentenceInput = z.infer<typeof sentenceInputSchema>;
 export const templateSchema = z
   .object({ id: z.string().max(32), name: z.string().max(40), text: z.string().max(400) })
   .strict();
+/** A phrase block (2.45, gate sentenceCompose): a name unique in its set, words and an optional voice. */
+export const phraseBlockSchema = z
+  .object({
+    id: z.string().max(32),
+    name: z.string().max(40),
+    text: z.string().max(400),
+    voiceId: recordingIdSchema.nullish(),
+  })
+  .strict();
+export type PhraseBlock = z.infer<typeof phraseBlockSchema>;
 /** A performance set to create or change (2.42): references to library items only. */
 export const setInputSchema = z
   .object({
@@ -448,6 +461,8 @@ export const setInputSchema = z
     voiceIds: z.array(recordingIdSchema).max(256).optional(),
     favorites: z.array(paletteRefSchema).max(200).optional(),
     templates: z.array(templateSchema).max(100).optional(),
+    // 2.45 (gate sentenceCompose): the set's phrase blocks, the whole list.
+    blocks: z.array(phraseBlockSchema).max(100).optional(),
   })
   .strict();
 export type Sound = {

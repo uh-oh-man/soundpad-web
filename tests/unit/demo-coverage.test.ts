@@ -209,6 +209,15 @@ const FEATURE_OPS: Record<Feature, Op[]> = {
   // 2.45 (WP2; the example answers neither until DEMO_COMPANION is raised).
   sessionRecovery: ['sessionRecover'],
   budgetActions: ['budgetActions'],
+  // 2.45 (WP3): Add to sentence (sentenceEdit insert at a caret, sentenceCreate), phrase blocks
+  // (performanceSets), voice slots (sentenceCreate), guests' unkept sentences (sentenceList, sentenceDiscard).
+  sentenceCompose: [
+    'sentenceCreate',
+    'sentenceEdit',
+    'performanceSets',
+    'sentenceList',
+    'sentenceDiscard',
+  ],
 };
 
 /** What the example honestly cannot do, and the reason it gives. Each must be refused with exactly that. */

@@ -431,3 +431,39 @@ html[data-motion='reduce'] .missing-pulse {
   flex: 1 1 280px;
   max-width: 640px;
 }
+
+/* ---- Add to sentence, phrase blocks, guests' sentences (2.45) ---------------------------------------- */
+
+.sentence-target {
+  flex-wrap: wrap;
+  align-items: center;
+  font-size: 13px;
+}
+.phrase-blocks {
+  display: grid;
+  gap: 6px;
+}
+.phrase-blocks h3 {
+  margin: 0;
+}
+.phrase-blocks input,
+.sentence-sets .sentence-takes select {
+  min-width: 0;
+  max-width: 100%;
+}
+.guest-sentences {
+  display: grid;
+  gap: 6px;
+  margin-top: 6px;
+}
+.guest-sentences-group {
+  display: grid;
+  gap: 4px;
+}
+.guest-sentences-group > .voices-inline {
+  flex-wrap: wrap;
+  align-items: center;
+}
+.guest-sentences-group > .sentence-rows {
+  margin-left: 12px;
+}

@@ -47,22 +47,32 @@ public static class SentenceComposer
     // ---- Text --------------------------------------------------------------------------------------------------
 
     /// <summary>The sentence text as words. "[laugh]" (any [name]) is a nonverbal piece; punctuation around words is dropped.</summary>
-    public static List<SentenceToken> Tokens(string? text)
+    public static List<SentenceToken> Tokens(string? text) => [.. Words(text).Select(w => w.Token)];
+
+    /// <summary>
+    /// The words of the text with where each stands in it, [Start, End) in characters (2.45, for inserting at a caret).
+    /// The one place text becomes words: <see cref="Tokens"/> is these without the positions.
+    /// </summary>
+    public static IEnumerable<(SentenceToken Token, int Start, int End)> Words(string? text)
     {
-        var result = new List<SentenceToken>();
-        if (string.IsNullOrWhiteSpace(text)) return result;
-        foreach (var raw in text.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries))
+        if (string.IsNullOrWhiteSpace(text)) yield break;
+        int count = 0, i = 0;
+        while (i < text.Length)
         {
-            if (result.Count >= SentenceStore.MaxTokens) break;
+            while (i < text.Length && char.IsWhiteSpace(text[i])) i++;
+            if (i >= text.Length) yield break;
+            int start = i;
+            while (i < text.Length && !char.IsWhiteSpace(text[i])) i++;
+            if (count >= SentenceStore.MaxTokens) yield break;
+            var raw = text[start..i];
             if (raw.Length >= 3 && raw[0] == '[' && raw.TrimEnd('.', ',', '!', '?', ';', ':').EndsWith(']'))
             {
                 var name = raw.TrimEnd('.', ',', '!', '?', ';', ':')[1..^1].Trim().ToLowerInvariant();
-                if (SentenceStore.NamePattern.IsMatch(name)) { result.Add(new("[" + name + "]", raw)); continue; }
+                if (SentenceStore.NamePattern.IsMatch(name)) { count++; yield return (new("[" + name + "]", raw), start, i); continue; }
             }
             var key = WordIndex.Token(raw);
-            if (key.Length > 0) result.Add(new(key, raw));
+            if (key.Length > 0) { count++; yield return (new(key, raw), start, i); }
         }
-        return result;
     }
 
     private static string Display(IReadOnlyList<SentenceToken> tokens, int start, int end) => string.Join(' ', tokens.Skip(start).Take(end - start).Select(t => t.Display));
@@ -240,22 +250,130 @@ public static class SentenceComposer
                 if (touches && (s < lo || e > hi)) { lo = Math.Min(lo, s); hi = Math.Max(hi, e); changed = true; }
             }
         } while (changed);
-        var kept = new List<SentencePiece>();
+        var kept = new List<SentencePiece>(); var gone = new List<SentencePiece>();
+        SentencePiece? left = null, right = null;
         foreach (var p in project.Pieces)
         {
             if (p.TokenStart is not int s || p.TokenEnd is not int e) { kept.Add(p); continue; }
-            if (e <= lo) kept.Add(p);
-            else if (s >= hi) { p.TokenStart = s + delta; p.TokenEnd = e + delta; kept.Add(p); }
-            // otherwise its words changed: it goes
+            if (e <= lo) { kept.Add(p); if (e == lo) left = p; }
+            else if (s >= hi) { if (s == hi) right = p; p.TokenStart = s + delta; p.TokenEnd = e + delta; kept.Add(p); }
+            else gone.Add(p); // its words changed: it goes
         }
         // Keep the text as typed for unchanged pieces (capitalisation and punctuation may have changed there).
         foreach (var p in kept) if (p.TokenStart is int s && p.TokenEnd is int e && e <= newTokens.Count && p.Kind != "pause") p.Text = Display(newTokens, s, e);
         int newLo = lo, newHi = hi + delta;
         string? before = kept.Where(p => p.TokenEnd <= newLo && p.Source != null).OrderBy(p => p.TokenEnd).LastOrDefault()?.Source?.VoiceId;
-        var fresh = Match(newTokens, newLo, newHi, project.Settings, corpus, before);
+        // Words typed into a voice slot's or a phrase block's words stay in that voice (2.45): when every piece the
+        // change replaced was kept to one voice, or (a pure insertion) the pieces on both sides are.
+        string? voiceLock = gone.Count > 0
+            ? gone.All(p => p.VoiceLock != null && p.VoiceLock == gone[0].VoiceLock) ? gone[0].VoiceLock : null
+            : left?.VoiceLock is { } l && l == right?.VoiceLock ? l : null;
+        var fresh = Match(newTokens, newLo, newHi, voiceLock == null ? project.Settings : Locked(project.Settings, voiceLock), corpus, before);
+        foreach (var p in fresh) p.VoiceLock = voiceLock;
         project.Pieces = [.. kept, .. fresh];
         project.Text = newText;
         Layout(project);
+    }
+
+    // ---- Voice slots, phrase blocks and the caret (2.45) -----------------------------------------------------------
+
+    /// <summary>The settings with only one voice allowed (a voice slot's or a phrase block's).</summary>
+    public static SentenceSettings Locked(SentenceSettings settings, string voice)
+    {
+        var copy = SentenceStore.Copy(settings);
+        copy.VoiceIds = [voice];
+        return copy;
+    }
+    /// <summary>Which takes may play a piece: its voice slot's voice when it has one, otherwise the sentence's mix.</summary>
+    public static TakeFilter FilterFor(SentenceProject project, SentencePiece piece) =>
+        piece.VoiceLock is { } voice ? new(new HashSet<string>(StringComparer.Ordinal) { voice }, project.Settings.Altered) : TakeFilter.Of(project.Settings);
+
+    private static readonly System.Text.RegularExpressions.Regex VoiceMark = new(@"\{@([a-f0-9]{32})?\}", System.Text.RegularExpressions.RegexOptions.CultureInvariant);
+
+    /// <summary>
+    /// A filled template's text with voice marks: {@&lt;voice id&gt;} says the words after it are that voice's (a voice
+    /// slot, or a phrase block's voice), {@} gives them back to the sentence's mix. Returns the text without the marks
+    /// and its words in runs, each with its voice (null: the mix). Marks are only read in a template's text.
+    /// </summary>
+    public static (string Text, List<(int Start, int End, string? Voice)> Runs) VoiceMarked(string marked)
+    {
+        var parts = new List<(string Text, string? Voice)>(); string? voice = null; int at = 0;
+        foreach (System.Text.RegularExpressions.Match m in VoiceMark.Matches(marked))
+        {
+            parts.Add((marked[at..m.Index], voice));
+            voice = m.Groups[1].Success ? m.Groups[1].Value : null;
+            at = m.Index + m.Length;
+        }
+        parts.Add((marked[at..], voice));
+        var text = new System.Text.StringBuilder(); var runs = new List<(int Start, int End, string? Voice)>(); int words = 0;
+        foreach (var (part, partVoice) in parts)
+        {
+            var clean = part.Trim();
+            if (clean.Length == 0) continue;
+            if (text.Length > 0) text.Append(' ');
+            text.Append(clean);
+            int count = Tokens(text.ToString()).Count - words;
+            if (count <= 0) continue;
+            if (runs.Count > 0 && runs[^1].End == words && runs[^1].Voice == partVoice) runs[^1] = (runs[^1].Start, words + count, partVoice);
+            else runs.Add((words, words + count, partVoice));
+            words += count;
+        }
+        return (text.ToString(), runs);
+    }
+
+    /// <summary>
+    /// A new sentence from runs of words, each matched within its own voice (a voice slot's) or the sentence's mix.
+    /// Pieces of a run with a voice are kept to it (<see cref="SentencePiece.VoiceLock"/>).
+    /// </summary>
+    public static void Compose(SentenceProject project, string text, IReadOnlyList<(int Start, int End, string? Voice)> runs, ISentenceCorpus corpus)
+    {
+        var tokens = Tokens(text); var pieces = new List<SentencePiece>(); string? before = null;
+        foreach (var (start, end, voice) in runs)
+        {
+            int stop = Math.Min(end, tokens.Count);
+            if (stop <= start) continue;
+            var fresh = Match(tokens, start, stop, voice == null ? project.Settings : Locked(project.Settings, voice), corpus, before);
+            foreach (var p in fresh) p.VoiceLock = voice;
+            pieces.AddRange(fresh);
+            before = fresh.LastOrDefault(p => p.Source != null)?.Source?.VoiceId ?? before;
+        }
+        project.Text = text; project.Pieces = pieces;
+        Layout(project);
+    }
+
+    /// <summary>
+    /// Puts words into the text at a caret, a character position (2.45: palette "Add to sentence" and phrase blocks).
+    /// A caret inside a word puts them after that word, and one inside a recorded phrase after the phrase, so no piece
+    /// is split. Nothing is matched or played here: later pieces only move along, and the caller adds the piece(s) for
+    /// the new words, [Token, Token + Count). Caret: the character position just after them (for the next insert).
+    /// Refused when the text would grow past its limits.
+    /// </summary>
+    public static (int Token, int Count, int Caret) InsertText(SentenceProject project, int caret, string words)
+    {
+        int count = Tokens(words).Count;
+        if (count == 0) throw new InvalidDataException("There is nothing to add.");
+        var text = project.Text ?? "";
+        var existing = Words(text).ToList();
+        if (existing.Count + count > SentenceStore.MaxTokens) throw new InvalidDataException($"A sentence has at most {SentenceStore.MaxTokens} words.");
+        caret = Math.Clamp(caret, 0, text.Length);
+        int at = existing.Count(w => w.Start < caret);
+        for (bool moved = true; moved;)
+        {
+            moved = false;
+            foreach (var p in project.Pieces)
+                if (p.TokenStart is int s && p.TokenEnd is int e && s < at && at < e) { at = e; moved = true; }
+        }
+        at = Math.Min(at, existing.Count);
+        words = words.Trim();
+        int place = at == 0 ? 0 : existing[at - 1].End + 1;
+        string next = at == 0 ? (text.Trim().Length == 0 ? words : words + " " + text) : text[..existing[at - 1].End] + " " + words + text[existing[at - 1].End..];
+        if (next.Length > SentenceStore.MaxText) throw new InvalidDataException($"A sentence is at most {SentenceStore.MaxText} characters.");
+        var after = Tokens(next);
+        if (after.Count != existing.Count + count) throw new InvalidDataException("Those words could not be added there.");
+        foreach (var p in project.Pieces)
+            if (p.TokenStart is int s && p.TokenEnd is int e && s >= at) { p.TokenStart = s + count; p.TokenEnd = e + count; }
+        project.Text = next;
+        return (at, count, place + words.Length);
     }
 
     /// <summary>
@@ -266,7 +384,8 @@ public static class SentenceComposer
     public static void Recompose(SentenceProject project, ISentenceCorpus corpus)
     {
         var tokens = Tokens(project.Text);
-        static bool Decided(SentencePiece p) => p.TokenStart is not int || p.Manual || p.Chosen || p.Kind is "pause" or "splice" || p.Substitute != null;
+        // 2.45: words a voice slot or a phrase block kept to one voice are decided too (the mix does not reach them).
+        static bool Decided(SentencePiece p) => p.TokenStart is not int || p.Manual || p.Chosen || p.Kind is "pause" or "splice" || p.Substitute != null || p.VoiceLock != null;
         var kept = project.Pieces.Where(Decided).ToList();
         var missing = project.Pieces.Where(p => p.Kind == "missing" && p.TokenStart is int).ToDictionary(p => p.TokenStart!.Value);
         var covered = new bool[tokens.Count];
@@ -298,8 +417,10 @@ public static class SentenceComposer
         {
             int a = run[0].TokenStart!.Value, b = run[^1].TokenEnd!.Value;
             if (b > tokens.Count) continue;
-            var fresh = Match(tokens, a, b, project.Settings, corpus);
+            var voiceLock = run[0].VoiceLock;
+            var fresh = Match(tokens, a, b, voiceLock == null ? project.Settings : Locked(project.Settings, voiceLock), corpus);
             if (fresh.All(p => p.Kind == "missing")) continue;
+            foreach (var p in fresh) p.VoiceLock = voiceLock;
             // Keep each still-missing word's Gap or Bleep choice.
             foreach (var p in fresh.Where(p => p.Kind == "missing")) if (run.FirstOrDefault(r => r.TokenStart == p.TokenStart) is { } old) { p.Missing = old.Missing; p.DurationMs = old.DurationMs; p.Id = old.Id; }
             found += fresh.Count(p => p.Kind != "missing");
@@ -314,7 +435,7 @@ public static class SentenceComposer
         var run = new List<SentencePiece>();
         foreach (var p in missing)
         {
-            if (run.Count > 0 && run[^1].TokenEnd != p.TokenStart) { yield return run; run = []; }
+            if (run.Count > 0 && (run[^1].TokenEnd != p.TokenStart || run[^1].VoiceLock != p.VoiceLock)) { yield return run; run = []; }
             run.Add(p);
         }
         if (run.Count > 0) yield return run;
@@ -353,7 +474,7 @@ public static class SentenceComposer
     /// <summary>Other recorded takes of exactly the same words (or other pieces with the same name), best first.</summary>
     public static List<CorpusTake> Alternatives(SentenceProject project, SentencePiece piece, ISentenceCorpus corpus)
     {
-        var filter = TakeFilter.Of(project.Settings);
+        var filter = FilterFor(project, piece);
         if (piece.Kind == "named")
         {
             var name = Tokens(piece.Text).FirstOrDefault().Key ?? "";
@@ -514,7 +635,7 @@ public static class SentenceComposer
     public static void UseSimilar(SentenceProject project, SentencePiece piece, string word, ISentenceCorpus corpus)
     {
         var token = WordIndex.Token(word);
-        var take = Rank(corpus.Find([token], TakeFilter.Of(project.Settings), 50)).FirstOrDefault() ?? throw new InvalidDataException("That word is no longer in the voice library.");
+        var take = Rank(corpus.Find([token], FilterFor(project, piece), 50)).FirstOrDefault() ?? throw new InvalidDataException("That word is no longer in the voice library.");
         piece.Kind = "word"; piece.Missing = null; piece.Substitute = token; piece.Parts = null; piece.Chosen = true;
         UseTake(piece, take);
         if (!piece.Manual) Layout(project);

@@ -4,6 +4,7 @@ import {
   NUDGE_MS,
   SNAP_MS,
   changedSchema,
+  blockNamed,
   fillTemplate,
   itemRef,
   listSchema,
@@ -18,6 +19,8 @@ import {
   sentenceRights,
   sentenceSchema,
   sourceProblem,
+  setSchema,
+  templateFields,
   templateSlots,
   timelineKey,
   wordMarks,
@@ -29,10 +32,16 @@ import { missingFeatures, siteRelaysSentences, supports } from '../../web/src/ve
 import { controller } from '../../web/src/controller';
 import { combineResults, type ResultType } from '../../web/src/library/voices';
 import {
+  composeTarget,
+  noteTextSending,
   refreshSentences,
   resetSentenceStore,
   sentenceStoreSnapshot,
+  setComposeTarget,
+  textSent,
 } from '../../web/src/library/sentence-store';
+import { DemoSentences, voiceRuns } from '../../web/src/demo/sentences';
+import { DemoVoices } from '../../web/src/demo/voices';
 
 const hex = (n: number, length = 32) => n.toString(16).padStart(length, '0');
 const piece = (n: number, extra: Partial<Piece> = {}): Piece => ({
@@ -407,5 +416,165 @@ describe('the sentence store (2.42)', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+});
+
+describe('voice slots, phrase blocks and Add to sentence (2.45)', () => {
+  const A = 'a'.repeat(32),
+    B = 'b'.repeat(32);
+  const blocks = [
+    { id: hex(1), name: 'Greeting', text: 'hello there', voiceId: B },
+    { id: hex(2), name: 'Plain', text: 'over here', voiceId: null },
+  ];
+  afterEach(() => resetSentenceStore());
+
+  it('reads the slots of a template by kind', () => {
+    expect(templateFields('{who:voice} hi {name}, {Greeting:block} {name} {Who:Voice}')).toEqual([
+      { key: 'who:voice', name: 'who', kind: 'voice' },
+      { key: 'name', name: 'name', kind: 'text' },
+      { key: 'Greeting:block', name: 'Greeting', kind: 'block' },
+      { key: 'Who:Voice', name: 'Who', kind: 'voice' },
+    ]);
+    // Older templates read as before.
+    expect(templateFields('Hello {name}')).toEqual([{ key: 'name', name: 'name', kind: 'text' }]);
+    expect(blockNamed(blocks, ' greeting ')?.id).toBe(hex(1));
+    expect(blockNamed(blocks, 'nope')).toBeNull();
+  });
+
+  it('fills voice slots and blocks as voice marks for a 2.45 companion, and leaves them out before', () => {
+    const template =
+      '{who:voice} hi {name}, {Greeting:block} now {Plain:block} {Missing:block} end';
+    expect(
+      fillTemplate(template, { name: 'Sam' }, { voices: { 'who:voice': A }, blocks, marks: true }),
+    ).toBe(`{@${A}} hi Sam, {@${B}} hello there {@${A}} now over here end`);
+    // The mix when no voice is chosen; the words after a block go back to the voice before it.
+    expect(fillTemplate('{Greeting:block} bye', {}, { blocks, marks: true })).toBe(
+      `{@${B}} hello there {@} bye`,
+    );
+    // Without marks: voice slots go, blocks are their words.
+    expect(fillTemplate(template, { name: 'Sam' }, { blocks })).toBe(
+      'hi Sam, hello there now over here end',
+    );
+    // The demo reads the marks into runs like the companion.
+    expect(voiceRuns(`{@${A}} hi Sam, {@${B}} hello there {@} bye`)).toEqual([
+      { text: 'hi Sam,', voice: A },
+      { text: 'hello there', voice: B },
+      { text: 'bye', voice: null },
+    ]);
+  });
+
+  it('accepts sets and sentences with or without the new fields', () => {
+    const set = { id: 'default', name: 'Default', voiceIds: [], favorites: [], templates: [] };
+    expect(setSchema.parse(set).blocks).toBeUndefined();
+    expect(setSchema.parse({ ...set, blocks }).blocks).toHaveLength(2);
+    expect(
+      listSchema.parse({ revision: 1, canBuild: true, canKeep: true, sentences: [], named: [] })
+        .guestUnkept,
+    ).toBeUndefined();
+    const guestUnkept = [
+      {
+        guestId: 'g1',
+        ownerName: 'Alice',
+        count: 1,
+        updated: 1,
+        sentences: [{ id: hex(5), title: '', text: 'hi', updated: 1, origin: 'typed', missing: 0 }],
+      },
+    ];
+    expect(
+      listSchema.parse({
+        revision: 1,
+        canBuild: true,
+        canKeep: true,
+        sentences: [],
+        named: [],
+        guestUnkept,
+      }).guestUnkept,
+    ).toHaveLength(1);
+    // The commands that carry them are allowed by the protocol.
+    expect(() =>
+      commandSchema.parse({
+        v: 2,
+        id: crypto.randomUUID(),
+        at: Date.now(),
+        op: 'sentenceEdit',
+        sentenceId: hex(5),
+        sentence: { do: 'insert', text: 'hello there', voiceIds: [B], caret: 12 },
+      }),
+    ).not.toThrow();
+    expect(() =>
+      commandSchema.parse({
+        v: 2,
+        id: crypto.randomUUID(),
+        at: Date.now(),
+        op: 'performanceSets',
+        action: 'update',
+        set: { id: 'default', blocks },
+      }),
+    ).not.toThrow();
+    expect(() =>
+      commandSchema.parse({
+        v: 2,
+        id: crypto.randomUUID(),
+        at: Date.now(),
+        op: 'sentenceDiscard',
+        guestId: 'g1',
+      }),
+    ).not.toThrow();
+    expect(supports('2.44.0', 'sentenceCompose')).toBe(false);
+    expect(supports('2.45.0', 'sentenceCompose')).toBe(true);
+    expect(missingFeatures('2.44.0').join(' ')).toContain('Add to sentence');
+  });
+
+  it('remembers where Add to sentence goes, and waits for text on its way', async () => {
+    expect(composeTarget()).toBeNull();
+    setComposeTarget({ sentenceId: hex(7), caret: 3, title: 'Hi' });
+    expect(composeTarget()).toEqual({ sentenceId: hex(7), caret: 3, title: 'Hi' });
+    let release = () => {};
+    noteTextSending(new Promise<void>((resolve) => (release = resolve)));
+    let done = false;
+    const waiting = textSent().then(() => (done = true));
+    await Promise.resolve();
+    expect(done).toBe(false);
+    release();
+    await waiting;
+    expect(done).toBe(true);
+    // A refused send does not block adds.
+    noteTextSending(Promise.reject(new Error('no')));
+    await expect(textSent()).resolves.toBeUndefined();
+    setComposeTarget(null);
+    expect(composeTarget()).toBeNull();
+  });
+
+  it('adds at the caret in the example without playing, after the phrase the caret is in', () => {
+    const demo = new DemoSentences(
+      new DemoVoices(
+        (key) => key,
+        () => 0,
+        Date.now(),
+      ),
+    );
+    const made = demo.create({ text: '' }, 'You');
+    expect(made.text).toBe('');
+    const id = made.id;
+    const edit = (sentence: Record<string, unknown>) =>
+      demo.edit({
+        v: 2,
+        id: crypto.randomUUID(),
+        at: Date.now(),
+        op: 'sentenceEdit',
+        sentenceId: id,
+        sentence,
+      } as never) as unknown as {
+        sentence: Sentence;
+        result: { caret: number };
+      };
+    const first = edit({ do: 'insert', text: 'one two', caret: 0 });
+    expect(first.sentence.text).toBe('one two');
+    expect(first.result.caret).toBe(7);
+    const second = edit({ do: 'insert', text: 'three', caret: 3 });
+    expect(second.sentence.text).toBe('one three two');
+    expect(second.result.caret).toBe(9);
+    const end = edit({ do: 'insert', text: 'four', caret: 4000 });
+    expect(end.sentence.text).toBe('one three two four');
   });
 });

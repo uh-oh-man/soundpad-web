@@ -28,7 +28,7 @@ public sealed partial class Bridge
     internal void UseSentenceWriteLimit(RateWindow limit) => sentenceWriteRate = limit;
     /// <summary>Room in the shared lists that guests' changes leave for the host's own (review, 2.42).</summary>
     public const int HostReserveSentences = 400, HostReserveNamed = 1000;
-    /// <summary>A guest's sentence nobody kept is removed once untouched this long (review, 2.42): the host cannot see it.</summary>
+    /// <summary>A guest's sentence nobody kept is removed once untouched this long (review, 2.42). Since 2.45 the host also sees and can clear them.</summary>
     public const long GuestUnkeptMs = 14L * 24 * 3600 * 1000;
     /// <summary>One sentence or palette render for the game at a time (review, 2.42), like exact slices' render slot.</summary>
     private readonly SemaphoreSlim sentenceRenderSlot = new(1, 1);
@@ -118,7 +118,7 @@ public sealed partial class Bridge
                 case "sentenceText": return Ok(c, ChangeSentence(c.SentenceId, key, host, canBuild, s => SentenceComposer.Rematch(s, Text(input.Text), Corpus())));
                 case "sentenceEdit": return Ok(c, EditSentence(c, input, key, host, canBuild));
                 case "sentenceAlternatives": return Ok(c, SentenceAlternatives(c.SentenceId, c.Sentence?.Pieces?.FirstOrDefault(), key, host, canBuild));
-                case "sentenceDiscard": return Ok(c, DiscardSentence(c.SentenceId, key, host));
+                case "sentenceDiscard": return Ok(c, c.SentenceId == null && c.GuestId != null ? ClearGuestUnkept(c.GuestId, host) : DiscardSentence(c.SentenceId, key, host));
                 case "sentencePreview": return Ok(c, await PreviewSentence(c, input, actor, participant, requester, key, host, canBuild));
                 case "sentenceKeep": return Ok(c, await KeepSentence(c.SentenceId, key, host, canBuild, person));
                 case "sentencePlay": return await PlaySentence(c, input, actor, participant, requester, audience, intent, key, host);
@@ -159,7 +159,10 @@ public sealed partial class Bridge
     }
 
     private static SentenceProject FindSentence(SentenceFile f, string? id) => f.Sentences.FirstOrDefault(s => s.Id == id) ?? throw new InvalidDataException("That sentence is no longer there.");
-    private static bool CanSee(SentenceProject s, string key, bool host) => s.Owner == key || s.Kept || host && s.Owner == "host";
+    /// <summary>Who may open a sentence: its maker, everyone once it is kept, and (2.45, D10) the host, who also sees guests' unkept ones.</summary>
+    private static bool CanSee(SentenceProject s, string key, bool host) => s.Owner == key || s.Kept || host;
+    /// <summary>What the list shows a person: their own and the kept ones. Guests' unkept sentences are listed to the host apart (guestUnkept).</summary>
+    private static bool Listed(SentenceProject s, string key) => s.Owner == key || s.Kept;
     /// <summary>Its maker may change it (while the host lets guests build); the host may change any kept sentence.</summary>
     private static bool CanChange(SentenceProject s, string key, bool host, bool canBuild) => s.Owner == key && (host || canBuild) || host && s.Kept;
     /// <summary>
@@ -191,14 +194,23 @@ public sealed partial class Bridge
         canBuild,
         canKeep = host || Keep.GuestKeep,
         problem = SentenceData.Problem,
-        sentences = f.Sentences.Where(s => CanSee(s, key, host)).Select(s => Visible(s, key, host, canBuild)).OrderByDescending(s => s.Updated).Select(s => new
+        sentences = f.Sentences.Where(s => Listed(s, key)).Select(s => Visible(s, key, host, canBuild)).OrderByDescending(s => s.Updated).Select(s => new
         {
             s.Id, s.Title, text = s.Text.Length > 300 ? s.Text[..299] + "…" : s.Text, s.OwnerName, mine = s.Owner == key, s.Kept, s.Pinned, s.Updated, s.Origin,
             versions = s.Versions.Count, durationMs = s.Versions.Count > 0 ? s.Versions[^1].DurationMs : 0,
             missing = s.Pieces.Count(p => p.Kind == "missing"), canEdit = CanChange(s, key, host, canBuild),
         }).ToArray(),
         named = f.Named.OrderBy(n => n.Name, StringComparer.Ordinal).Select(n => new { n.Id, n.Name, n.RecordingId, n.StartMs, n.EndMs, n.ByName }).ToArray(),
+        // 2.45 (D10): each guest's unkept sentences, for the host only (guests never see one another's), newest first.
+        guestUnkept = host ? GuestUnkept(f) : null,
     });
+    private static object[] GuestUnkept(SentenceFile f) => [.. f.Sentences.Where(s => !s.Kept && s.Owner != "host").GroupBy(s => s.Owner, StringComparer.Ordinal)
+        .Select(g => (g.Key, List: g.OrderByDescending(s => s.Updated).ToList())).OrderByDescending(g => g.List[0].Updated).Take(512)
+        .Select(g => (object)new
+        {
+            guestId = g.Key, ownerName = g.List[0].OwnerName, count = g.List.Count, updated = g.List[0].Updated,
+            sentences = g.List.Take(MaxSentencesPerPerson).Select(s => new { s.Id, s.Title, text = s.Text.Length > 300 ? s.Text[..299] + "…" : s.Text, s.Updated, s.Origin, missing = s.Pieces.Count(p => p.Kind == "missing") }).ToArray(),
+        })];
 
     private object CreateSentence(Command c, SentenceInput input, string key, Participant person, bool canBuild)
     {
@@ -212,7 +224,14 @@ public sealed partial class Bridge
             Title = Clip(c.Title ?? "", 200), Origin = input.Origin is "template" ? "template" : "typed",
             Settings = new SentenceSettings { Seed = RandomNumberGenerator.GetInt32(int.MaxValue), Chaos = Math.Clamp(input.Chaos ?? 45, 0, 100), VoiceIds = [.. (input.VoiceIds ?? [.. active.VoiceIds]).Where(SentenceStore.ValidId).Distinct().Take(256)] },
         };
-        SentenceComposer.Rematch(project, text, Corpus());
+        // A template's voice slots and phrase blocks (2.45) arrive as voice marks in its text: each run of words is
+        // matched within its voice. Typed text is never read for marks.
+        if (project.Origin == "template" && text.Contains("{@", StringComparison.Ordinal))
+        {
+            var (clean, runs) = SentenceComposer.VoiceMarked(text);
+            SentenceComposer.Compose(project, clean, runs, Corpus());
+        }
+        else SentenceComposer.Rematch(project, text, Corpus());
         bool host = key == "host";
         SentenceData.Change(f =>
         {
@@ -357,12 +376,12 @@ public sealed partial class Bridge
                         if (input.Word is { } similar)
                         {
                             // Only one of the similar words offered for it, chosen on purpose.
-                            if (!SentenceComposer.Similar(word, corpus, TakeFilter.Of(s.Settings), 50).Any(x => x.Word == WordIndex.Token(similar))) throw new InvalidDataException("That word is not one of the similar recorded words.");
+                            if (!SentenceComposer.Similar(word, corpus, SentenceComposer.FilterFor(s, p), 50).Any(x => x.Word == WordIndex.Token(similar))) throw new InvalidDataException("That word is not one of the similar recorded words.");
                             SentenceComposer.UseSimilar(s, p, similar, corpus);
                         }
                         else if (input.Splice is int index)
                         {
-                            var candidates = SentenceComposer.Splices(word, corpus, TakeFilter.Of(s.Settings));
+                            var candidates = SentenceComposer.Splices(word, corpus, SentenceComposer.FilterFor(s, p));
                             if (index < 0 || index >= candidates.Count) throw new InvalidDataException("That splice is no longer offered.");
                             SentenceComposer.UseSplice(s, p, candidates[index]);
                         }
@@ -382,6 +401,38 @@ public sealed partial class Bridge
                     if (!s.Kept) throw new InvalidDataException("Keep the sentence before pinning it to the board.");
                     s.Pinned = input.Pinned ?? !s.Pinned;
                     break;
+                case "insert" when input.Caret is int || input.Item == null:
+                    {
+                        // 2.45 (D09, D08): a palette item, or a phrase block's words, into the text at the caret (the end
+                        // when no caret is given). Nothing plays. The item is that exact take, chosen; a block's words are
+                        // matched like typed text, within its voice when it has one.
+                        if (s.Pieces.Count >= SentenceStore.MaxPieces) throw new InvalidDataException("This sentence has as many pieces as it can hold.");
+                        int caret = input.Caret ?? s.Text.Length;
+                        if (input.Item is { } item)
+                        {
+                            var label = Resolve(item).Label;
+                            var (at, count, after) = SentenceComposer.InsertText(s, caret, label);
+                            var p = PieceFromItem(item, 0, at, at + count);
+                            p.Manual = false;
+                            s.Pieces.Add(p); result = new { pieceId = p.Id, caret = after };
+                        }
+                        else
+                        {
+                            var words = Text(input.Text).Trim();
+                            if (words.Length == 0 || words.Length > 400) throw new InvalidDataException("Add up to 400 characters of words.");
+                            string? voice = input.VoiceIds is [var only] ? only : input.VoiceIds is { Length: > 1 } ? throw new InvalidDataException("A phrase is said by one voice.") : null;
+                            if (voice != null && !SentenceStore.ValidId(voice)) throw new InvalidDataException("Choose a voice from the library.");
+                            var (at, count, after) = SentenceComposer.InsertText(s, caret, words);
+                            var tokens = SentenceComposer.Tokens(s.Text);
+                            string? before = s.Pieces.Where(x => x.TokenEnd <= at && x.Source != null).OrderBy(x => x.TokenEnd).LastOrDefault()?.Source?.VoiceId;
+                            var fresh = SentenceComposer.Match(tokens, at, at + count, voice == null ? s.Settings : SentenceComposer.Locked(s.Settings, voice), corpus, before);
+                            foreach (var p in fresh) p.VoiceLock = voice;
+                            if (s.Pieces.Count + fresh.Count > SentenceStore.MaxPieces) throw new InvalidDataException("This sentence has as many pieces as it can hold.");
+                            s.Pieces.AddRange(fresh); result = new { pieces = fresh.Select(x => x.Id).ToArray(), caret = after };
+                        }
+                        SentenceComposer.Layout(s);
+                        break;
+                    }
                 case "insert":
                     {
                         var item = input.Item ?? throw new InvalidDataException("Choose a palette item.");
@@ -429,15 +480,32 @@ public sealed partial class Bridge
 
     private object DiscardSentence(string? id, string key, bool host)
     {
-        SentenceData.Change(f =>
+        bool kept = SentenceData.Change(f =>
         {
             var s = FindSentence(f, id);
-            // A kept sentence goes from the list only by the host's hand; its audio files stay on disk.
+            // A kept sentence goes from the list only by the host's hand.
             if (s.Kept ? !host : s.Owner != key && !host) throw new InvalidDataException(s.Kept ? "Only the host can remove a kept sentence." : "Only its maker can discard this sentence.");
-            f.Sentences.Remove(s); return 0;
+            f.Sentences.Remove(s); return s.Kept;
         }, !host);
         SentencesChanged();
+        // 2.45 (D10): the removed sentence's rendered audio goes with it, file by file, once no version refers to it.
+        if (kept && id != null)
+        {
+            var (files, bytes) = SentenceData.SweepAudio(id);
+            if (files > 0) Log($"Freed {files} kept sentence audio file{(files == 1 ? "" : "s")} ({bytes / 1024} KB)");
+            return new { removed = true, freedFiles = files, freedBytes = bytes };
+        }
         return new { removed = true };
+    }
+
+    /// <summary>2.45 (D10): the host clears one guest's unkept sentences (kept ones stay, and so does everyone else's).</summary>
+    private object ClearGuestUnkept(string guestId, bool host)
+    {
+        if (!host) throw new InvalidDataException("Only the host can clear a guest's sentences.");
+        if (guestId.Length is 0 or > 128 || guestId == "host") throw new InvalidDataException("Choose a guest.");
+        int removed = SentenceData.Change(f => f.Sentences.RemoveAll(s => !s.Kept && s.Owner == guestId));
+        if (removed > 0) { Log($"The host cleared {removed} unkept sentence{(removed == 1 ? "" : "s")} of a guest"); SentencesChanged(); }
+        return new { removed };
     }
 
     // ---- Views ---------------------------------------------------------------------------------------------------
@@ -490,7 +558,7 @@ public sealed partial class Bridge
             pieces = ordered.Select(p => new
             {
                 p.Id, p.Kind, p.TokenStart, p.TokenEnd, p.Text, offsetMs = Math.Round(p.OffsetMs, 1), durationMs = Math.Round(SentenceComposer.Duration(p), 1), p.Manual, p.Chosen,
-                p.FadeInMs, p.FadeOutMs, p.Gain, p.Missing, p.Substitute, p.NamedId, p.Effect,
+                p.FadeInMs, p.FadeOutMs, p.Gain, p.Missing, p.Substitute, p.NamedId, p.Effect, p.VoiceLock,
                 voiceId = p.Source?.VoiceId ?? p.Parts?.FirstOrDefault()?.VoiceId,
                 source = p.Source == null ? null : PartView(p.Source, p.Id),
                 parts = p.Parts?.Select(x => PartView(x, p.Id)).ToArray(),
@@ -518,7 +586,7 @@ public sealed partial class Bridge
         var tokens = SentenceComposer.Tokens(s.Text);
         string word = p.TokenStart is int t && t < tokens.Count ? tokens[t].Key : WordIndex.Token(p.Text);
         bool missingLike = p.Kind == "missing" || p.Substitute != null || p.Kind == "splice";
-        var filter = TakeFilter.Of(s.Settings);
+        var filter = SentenceComposer.FilterFor(s, p);
         return new
         {
             pieceId = p.Id, current,
@@ -1063,6 +1131,22 @@ public sealed partial class Bridge
         // References only: voice ids, ranges of library recordings and named pieces; never audio.
         if (input.VoiceIds != null) set.VoiceIds = [.. input.VoiceIds.Where(SentenceStore.ValidId).Distinct().Take(256)];
         if (input.Favorites != null) set.Favorites = [.. input.Favorites.Take(SentenceStore.MaxFavorites).Select(f => new PaletteRef { RecordingId = f.NamedId == null ? f.RecordingId : null, NamedId = f.NamedId, StartMs = f.NamedId == null ? f.StartMs : 0, EndMs = f.NamedId == null ? f.EndMs : 0, Text = Clip(f.Text ?? "", 100) })];
+        if (input.Blocks != null)
+        {
+            // Phrase blocks (2.45): words and an optional voice, each with a name unique in the set (a template uses it as {Name:block}).
+            var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase); var ids = new HashSet<string>(StringComparer.Ordinal);
+            var blocks = new List<PhraseBlock>();
+            foreach (var b in input.Blocks.Take(SentenceStore.MaxBlocks + 1))
+            {
+                if (b == null || string.IsNullOrWhiteSpace(b.Text)) continue;
+                if (blocks.Count >= SentenceStore.MaxBlocks) throw new InvalidDataException($"A set holds at most {SentenceStore.MaxBlocks} phrase blocks.");
+                var name = Clip(b.Name ?? "", 40) is { Length: > 0 } n ? n : "Phrase";
+                if (!names.Add(name)) throw new InvalidDataException($"Another phrase block is called “{name}”.");
+                if (b.VoiceId != null && !SentenceStore.ValidId(b.VoiceId)) throw new InvalidDataException("Choose a voice from the library.");
+                blocks.Add(new PhraseBlock { Id = SentenceStore.ValidId(b.Id) && ids.Add(b.Id) ? b.Id : SentenceStore.NewId(), Name = name, Text = Clip(b.Text, 400), VoiceId = b.VoiceId });
+            }
+            set.Blocks = blocks.Count > 0 ? blocks : null;
+        }
         if (input.Templates != null) set.Templates = [.. input.Templates.Where(t => !string.IsNullOrWhiteSpace(t.Text)).Take(SentenceStore.MaxTemplates).Select(t => new SentenceTemplate { Id = SentenceStore.ValidId(t.Id) ? t.Id : SentenceStore.NewId(), Name = Clip(t.Name ?? "", 40) is { Length: > 0 } n ? n : "Template", Text = Clip(t.Text ?? "", 400) })];
     }
 }

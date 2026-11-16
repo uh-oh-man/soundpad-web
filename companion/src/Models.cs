@@ -95,9 +95,13 @@ public record Command(int V, string Id, long At, string Op, string? SoundId = nu
 public sealed record SentenceInput(string? Do = null, string? Text = null, string[]? Pieces = null, double? OffsetMs = null, long? StartMs = null, long? EndMs = null,
     double? FadeInMs = null, double? FadeOutMs = null, double? Gain = null, bool? Balanced = null, double? DurationMs = null, string? Mode = null, PieceEffect? Effect = null,
     int? Chaos = null, string? Timing = null, bool? Balance = null, bool? Cleanup = null, bool? Altered = null, string[]? VoiceIds = null, int? Alternative = null, int? Splice = null,
-    string? Word = null, int? Version = null, bool? Pinned = null, string? Variant = null, PaletteRef? Item = null, string? Origin = null);
+    string? Word = null, int? Version = null, bool? Pinned = null, string? Variant = null, PaletteRef? Item = null, string? Origin = null,
+    // 2.45: where "insert" puts words in the text (a character position; see SentenceComposer.InsertText).
+    int? Caret = null);
 /// <summary>A performance set to create or change (2.42).</summary>
-public sealed record PerformanceSetInput(string? Id = null, string? Name = null, string[]? VoiceIds = null, PaletteRef[]? Favorites = null, SentenceTemplate[]? Templates = null);
+public sealed record PerformanceSetInput(string? Id = null, string? Name = null, string[]? VoiceIds = null, PaletteRef[]? Favorites = null, SentenceTemplate[]? Templates = null,
+    // 2.45: the set's phrase blocks (the whole list).
+    PhraseBlock[]? Blocks = null);
 public record Reply(string Type, string Id, bool Ok, string? Error = null, object? Data = null);
 public static class Json
 {

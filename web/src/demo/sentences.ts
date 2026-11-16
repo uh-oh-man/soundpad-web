@@ -1,4 +1,4 @@
-import type { Command, PaletteRef, SentenceInput } from '../protocol';
+import type { Command, PaletteRef, PhraseBlock, SentenceInput } from '../protocol';
 import { LAUGH, wordKey, type DemoVoices } from './voices';
 import type { MixPart } from './dsp';
 
@@ -45,6 +45,8 @@ export type DemoPiece = {
   namedId: string | null;
   effect: Effect | null;
   source: Source | null;
+  /** 2.45: a voice slot or a phrase block keeps these words to this voice. */
+  voiceLock?: string | null;
 };
 type Settings = {
   chaos: number;
@@ -100,6 +102,7 @@ type PerfSet = {
   voiceIds: string[];
   favorites: PaletteRef[];
   templates: { id: string; name: string; text: string }[];
+  blocks?: PhraseBlock[];
 };
 
 const hex = (bytes: number) =>
@@ -133,6 +136,29 @@ export function tokens(text: string) {
     if (key) result.push({ key, display: raw });
   }
   return result;
+}
+
+/** Each word of the text with where it ends in it (2.45: Add to sentence at a caret). */
+function wordEnds(text: string) {
+  const ends: { start: number; end: number }[] = [];
+  for (const m of text.matchAll(/\S+/g))
+    if (ends.length < 400 && tokens(m[0]).length === 1)
+      ends.push({ start: m.index, end: m.index + m[0].length });
+  return ends;
+}
+
+/** A template's voice marks (2.45): {@<voice id>} before a voice's words, {@} for the mix. */
+export function voiceRuns(marked: string) {
+  const runs: { text: string; voice: string | null }[] = [];
+  let voice: string | null = null,
+    at = 0;
+  for (const m of marked.matchAll(/\{@([a-f0-9]{32})?\}/g)) {
+    runs.push({ text: marked.slice(at, m.index).trim(), voice });
+    voice = m[1] ?? null;
+    at = m.index + m[0].length;
+  }
+  runs.push({ text: marked.slice(at).trim(), voice });
+  return runs.filter((r) => r.text);
 }
 
 export class DemoSentences {
@@ -348,7 +374,26 @@ export class DemoSentences {
   }
 
   private recompose(s: DemoSentence) {
-    const keep = s.pieces.filter((p) => p.tokenStart === null);
+    const keep = s.pieces.filter((p) => p.tokenStart === null || p.voiceLock);
+    if (keep.some((p) => p.voiceLock)) {
+      // Words a voice slot chose a voice for stay; the rest is matched again around them.
+      const toks = tokens(s.text);
+      const covered = new Set(keep.flatMap((p) => range(p.tokenStart ?? 0, p.tokenEnd ?? 0)));
+      const fresh: DemoPiece[] = [];
+      for (let i = 0; i < toks.length;) {
+        if (covered.has(i)) {
+          i++;
+          continue;
+        }
+        let j = i;
+        while (j < toks.length && !covered.has(j)) j++;
+        fresh.push(...this.match(s.id, toks, i, j, s.settings));
+        i = j;
+      }
+      s.pieces = [...keep, ...fresh];
+      this.layout(s);
+      return;
+    }
     s.pieces = [...keep, ...this.match(s.id, tokens(s.text), 0, tokens(s.text).length, s.settings)];
     this.layout(s);
   }
@@ -448,6 +493,7 @@ export class DemoSentences {
         namedId: p.namedId,
         effect: p.effect,
         voiceId: p.source?.voiceId ?? null,
+        voiceLock: p.voiceLock ?? null,
         source: p.source ? this.sourceView(p.source) : null,
         parts: null,
       })),
@@ -490,6 +536,8 @@ export class DemoSentences {
           canEdit: true,
         })),
       named: this.named.map((n) => ({ ...n })),
+      // 2.45: the example has no guests.
+      guestUnkept: [],
     };
   }
 
@@ -506,8 +554,11 @@ export class DemoSentences {
   }
 
   create(input: SentenceInput | undefined, ownerName: string) {
-    const text = (input?.text ?? '').trim().slice(0, 4000);
-    if (!tokens(text).length) throw Error('Type the sentence first.');
+    const marked = (input?.text ?? '').trim().slice(0, 4000);
+    // A template's voice slots and phrase blocks (2.45) arrive as voice marks in its text.
+    const runs = input?.origin === 'template' && marked.includes('{@') ? voiceRuns(marked) : null;
+    const text = runs ? runs.map((r) => r.text).join(' ') : marked;
+    // An empty sentence is allowed: Add to sentence (2.45) starts one and adds to it.
     if (this.sentences.length >= 100)
       throw Error('That is as many sentences as the example keeps.');
     const s: DemoSentence = {
@@ -532,7 +583,18 @@ export class DemoSentences {
       versions: [],
       updated: Date.now(),
     };
-    this.recompose(s);
+    if (runs) {
+      const toks = tokens(text);
+      let at = 0;
+      for (const run of runs) {
+        const count = tokens(run.text).length;
+        const settings = run.voice ? { ...s.settings, voiceIds: [run.voice] } : s.settings;
+        for (const p of this.match(s.id, toks, at, at + count, settings))
+          s.pieces.push({ ...p, voiceLock: run.voice });
+        at += count;
+      }
+      this.layout(s);
+    } else this.recompose(s);
     this.sentences.push(s);
     this.changed();
     return this.view(s);
@@ -547,6 +609,8 @@ export class DemoSentences {
   }
 
   discard(c: Command) {
+    // 2.45: clearing a guest's unkept sentences; the example has no guests.
+    if (!c.sentenceId && c.guestId) return { removed: 0 };
     const s = this.find(c.sentenceId);
     this.sentences = this.sentences.filter((x) => x !== s);
     this.changed();
@@ -831,6 +895,10 @@ export class DemoSentences {
         s.pinned = input.pinned ?? !s.pinned;
         break;
       case 'insert': {
+        if (input.caret !== undefined || !input.item) {
+          result = this.insertAt(s, input);
+          break;
+        }
         if (!input.item) throw Error('Choose a palette item.');
         if (s.pieces.length >= MAX_PIECES)
           throw Error('This sentence has as many pieces as it can hold.');
@@ -852,6 +920,59 @@ export class DemoSentences {
     this.touch(s);
     const view = this.view(s);
     return result ? { sentence: view, result } : view;
+  }
+
+  /**
+   * Add to sentence (2.45): a palette item (that exact take) or a phrase block's words (in its voice)
+   * into the text at the caret, after the word or phrase the caret is in. Nothing plays.
+   */
+  private insertAt(s: DemoSentence, input: SentenceInput) {
+    if (s.pieces.length >= MAX_PIECES)
+      throw Error('This sentence has as many pieces as it can hold.');
+    const label = input.item
+      ? this.resolve(input.item).label
+      : (input.text ?? '').trim().slice(0, 400);
+    const count = tokens(label).length;
+    if (!count) throw Error('There is nothing to add.');
+    const ends = wordEnds(s.text);
+    if (ends.length + count > 400) throw Error('A sentence has at most 400 words.');
+    const caret = Math.max(0, Math.min(s.text.length, input.caret ?? s.text.length));
+    let at = ends.filter((w) => w.start < caret).length;
+    for (let moved = true; moved;) {
+      moved = false;
+      for (const p of s.pieces)
+        if (p.tokenStart !== null && p.tokenEnd !== null && p.tokenStart < at && at < p.tokenEnd) {
+          at = p.tokenEnd;
+          moved = true;
+        }
+    }
+    const place = at === 0 ? 0 : ends[at - 1].end + 1;
+    const next =
+      at === 0
+        ? s.text.trim()
+          ? `${label} ${s.text}`
+          : label
+        : `${s.text.slice(0, ends[at - 1].end)} ${label}${s.text.slice(ends[at - 1].end)}`;
+    if (next.length > 4000) throw Error('A sentence is at most 4000 characters.');
+    for (const p of s.pieces)
+      if (p.tokenStart !== null && p.tokenEnd !== null && p.tokenStart >= at) {
+        p.tokenStart += count;
+        p.tokenEnd += count;
+      }
+    s.text = next;
+    let added: DemoPiece[];
+    if (input.item) added = [{ ...this.fromItem(input.item, 0, at, at + count), manual: false }];
+    else {
+      const voice = input.voiceIds?.[0] ?? null;
+      const settings = voice ? { ...s.settings, voiceIds: [voice] } : s.settings;
+      added = this.match(s.id, tokens(next), at, at + count, settings).map((p) => ({
+        ...p,
+        voiceLock: voice,
+      }));
+    }
+    s.pieces.push(...added);
+    this.layout(s);
+    return { pieces: added.map((p) => p.id), pieceId: added[0]?.id, caret: place + label.length };
   }
 
   // ---- Keep, render ----------------------------------------------------------------------------------------
@@ -1219,6 +1340,25 @@ export class DemoSentences {
             name: t.name.trim() || 'Template',
             text: t.text.slice(0, 400),
           }));
+      if (input.blocks) {
+        const names = new Set<string>();
+        const next: PhraseBlock[] = [];
+        for (const b of input.blocks) {
+          if (!b.text.trim()) continue;
+          const name = b.name.trim().slice(0, 40) || 'Phrase';
+          if (names.has(name.toLocaleLowerCase()))
+            throw Error(`Another phrase block is called “${name}”.`);
+          names.add(name.toLocaleLowerCase());
+          next.push({
+            id: /^[a-f0-9]{32}$/.test(b.id) ? b.id : hex(16),
+            name,
+            text: b.text.trim().slice(0, 400),
+            voiceId: b.voiceId ?? null,
+          });
+        }
+        if (next.length > 100) throw Error('A set holds at most 100 phrase blocks.');
+        set.blocks = next.length ? next : undefined;
+      }
     };
     switch (c.action) {
       case 'create': {
