@@ -586,10 +586,13 @@ function Builder({
   useEffect(
     () => () => {
       const waiting = pendingText.current;
-      if (!waiting) return;
+      // Add to sentence (2.45) waits for the text on its way, so it lands in the text the box showed.
+      if (!waiting) {
+        if (sendingText.current) noteTextSending(sendingText.current);
+        return;
+      }
       window.clearTimeout(waiting.timer);
       pendingText.current = null;
-      // Add to sentence (2.45) waits for this, so it lands in the text the box showed.
       noteTextSending(
         controller.run(
           'sentenceText',
@@ -2100,7 +2103,7 @@ function SetsPanel({
     update({ blocks: next }),
   );
   if (!sets || !active) return <p className="muted">Loading your performance sets…</p>;
-  const startFromTemplate = (t: { id: string; text: string }) => {
+  const startFromTemplate = (t: { name: string; text: string }) => {
     const fields = compose ? templateFields(t.text) : [];
     const value = (key: string) => slots[templateSlotKey(t, key)] ?? '';
     const text = compose
