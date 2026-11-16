@@ -175,6 +175,7 @@ public sealed class MockSoundpad : IAsyncDisposable
         AllXml = all.ToString(); CategoryXml = cats.ToString(); return "R-200";
     }
     private long startedTick, position;
+    public Func<long> PlaybackClock { get; set; } = static () => Environment.TickCount64;
     public long DurationMs { get; set; } = 2500;
     public int SeekLagSamples { get; set; }
     public bool TransientSeekStop { get; set; }
@@ -182,8 +183,8 @@ public sealed class MockSoundpad : IAsyncDisposable
     private long beforeSeek;
     private long ReportPosition() => remainingLag-- > 0 ? beforeSeek : Position;
     private string ReportStatus() => remainingStops-- > 0 ? "STOPPED" : Status;
-    private long Position => position + (Status == "PLAYING" ? Environment.TickCount64 - startedTick : 0);
-    public void BeginFixturePlayback() { position = 0; startedTick = Environment.TickCount64; Status = "PLAYING"; }
+    private long Position => position + (Status == "PLAYING" ? PlaybackClock() - startedTick : 0);
+    public void BeginFixturePlayback() { position = 0; startedTick = PlaybackClock(); Status = "PLAYING"; }
     /// <summary>The person presses Soundpad's own stop (a hotkey or its window): no pipe command is involved (2.37).</summary>
     public void StopFromSoundpad() { Status = "STOPPED"; position = 0; PlayingIndex = null; EndAudio(); }
     /// <summary>The person starts the entry at <paramref name="index"/> from Soundpad itself (a hotkey) (2.37).</summary>
@@ -278,8 +279,8 @@ public sealed class MockSoundpad : IAsyncDisposable
                     if (command.StartsWith("FixtureRemoveOwnedEntry(") || command.StartsWith("DoAdd") || command.StartsWith("DoRemoveCategory(") || command.StartsWith("DoSelectCategory(") || command.StartsWith("DoSelectIndex(") || command.StartsWith("DoRemoveSelectedEntries(")) result = Manage(command);
                     if (Exited) break;
                     if (command.StartsWith("DoPlaySound(")) { BeginFixturePlayback(); PlayingIndex = int.TryParse(command[12..^1], out int playing) ? playing : null; Console.WriteLine("TEST_PLAY " + command); StartAudio(PlayingIndex); }
-                    if (command.StartsWith("DoSeekMs(")) { beforeSeek = Position; remainingLag = SeekLagSamples; remainingStops = TransientSeekStop ? 1 : 0; position = long.Parse(command[9..^1]); startedTick = Environment.TickCount64; Console.WriteLine("TEST_PLAY " + command); }
-                    if (command == "DoTogglePause()") { Console.WriteLine("TEST_PLAY " + command); position = Position; Status = Status == "PLAYING" ? "PAUSED" : "PLAYING"; startedTick = Environment.TickCount64; }
+                    if (command.StartsWith("DoSeekMs(")) { beforeSeek = Position; remainingLag = SeekLagSamples; remainingStops = TransientSeekStop ? 1 : 0; position = long.Parse(command[9..^1]); startedTick = PlaybackClock(); Console.WriteLine("TEST_PLAY " + command); }
+                    if (command == "DoTogglePause()") { Console.WriteLine("TEST_PLAY " + command); position = Position; Status = Status == "PLAYING" ? "PAUSED" : "PLAYING"; startedTick = PlaybackClock(); }
                     // Its own prefix (2.35): e2e tests count TEST_PLAY lines, and a stop must not change those counts.
                     if (command == "DoStopSound()") { Status = "STOPPED"; position = 0; PlayingIndex = null; EndAudio(); Console.WriteLine("TEST_STOP " + command); }
                     await server.WriteAsync(Encoding.UTF8.GetBytes(result), cancel.Token);

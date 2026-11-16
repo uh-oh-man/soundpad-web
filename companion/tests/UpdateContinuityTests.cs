@@ -102,7 +102,8 @@ public sealed class UpdateContinuityTests : IDisposable
         var gap = Assert.Single(timeline.Gaps);
         Assert.Equal(HistoryGapReason.Update, gap.Reason);
         Assert.True(gap.WallFromUtcMs >= exited - 1500 && gap.WallFromUtcMs <= exited + 1500, $"from {gap.WallFromUtcMs - exited} to {gap.WallToUtcMs - exited}");
-        Assert.InRange(gap.WallToUtcMs!.Value - gap.WallFromUtcMs, 6000, 9500);
+        // Compare the resume boundary with the simulated restart clock, independently of the prior packet timestamp.
+        Assert.InRange(gap.WallToUtcMs!.Value, exited + 6500, exited + 8500);
         // Drafts and their pins.
         var drafts = Body(await Ok(bridge.Execute(Cmd("draftList"), "host"))).GetProperty("drafts").EnumerateArray().ToArray();
         Assert.Equal(draft, Assert.Single(drafts).GetProperty("id").GetString());

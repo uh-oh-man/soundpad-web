@@ -97,6 +97,8 @@ public sealed class ExactPlaybackTests : IDisposable
         Assert.DoesNotContain("slot-", File.ReadAllText(Path.Combine(folder, "state.json")));
         Assert.DoesNotContain("slot-", File.ReadAllText(Path.Combine(folder, "managed-audio", "journal.json")));
 
+        long playbackTime = Environment.TickCount64;
+        mock.PlaybackClock = () => Interlocked.Read(ref playbackTime);
         foreach (var (fixture, sound) in new[] { (low, sounds[0]), (high, sounds[1]) })
         {
             int before = SlotPlays(mock).Length; Clear(mock);
@@ -117,7 +119,7 @@ public sealed class ExactPlaybackTests : IDisposable
             Assert.Equal((sound.Id, "PLAYING", Text(region, "epoch")), (now.SoundId, now.Status, now.Epoch));
             Assert.Equal((long)Math.Round(fixture.Frames * 1000.0 / fixture.Rate), now.DurationMs);
             Assert.Equal(700, now.RegionEndMs); Assert.InRange(now.PositionMs!.Value, 300, 700);
-            await Task.Delay(120); await bridge.Poll(false);
+            Interlocked.Add(ref playbackTime, 120); await bridge.Poll(false);
             now = bridge.Snapshot.Playback; Assert.Equal(sound.Id, now.SoundId); Assert.InRange(now.PositionMs!.Value, 360, 700);
             Assert.Equal((long)Math.Round(fixture.Frames * 1000.0 / fixture.Rate), now.DurationMs);
         }

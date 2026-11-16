@@ -353,6 +353,7 @@ export class Session {
   private paceQueue: (() => void)[] = [];
   private paceTimer?: ReturnType<typeof setTimeout>;
   // Guest connection state (2.37).
+  private guestTotals?: { version: string; promise: Promise<unknown> };
   private since = Date.now();
   private connectedAt?: number;
   private everConnected = false;
@@ -1369,11 +1370,8 @@ export class Session {
       }
       try {
         const person = this.people.get(peer);
-        const data = guestReply(
-          c,
-          await this.execute(c, peer, person, person && this.joined.get(person.id)),
-          own,
-        ) as JsonValue;
+        const run = () => this.execute(c, peer, person, person && this.joined.get(person.id));
+        const data = guestReply(c, await this.guestResult(c, own, run), own) as JsonValue;
         this.send({ v: 1, type: 'ack', id: c.id, ok: true, data }, peer);
         this.broadcast();
       } catch (e) {
@@ -1505,6 +1503,18 @@ export class Session {
       }
     }
   }
+  /** Board counters are identical for admitted guests. Share an outstanding read for the same snapshot. */
+  private guestResult(c: Command, state: Snapshot, run: () => Promise<unknown>) {
+    if (c.op !== 'statistics' || c.soundId || state.statisticsVersion === undefined) return run();
+    const version = `${state.statisticsVersion}:${state.library.version}`;
+    if (this.guestTotals?.version === version) return this.guestTotals.promise;
+    const promise = run().finally(() => {
+      if (this.guestTotals?.promise === promise) this.guestTotals = undefined;
+    });
+    this.guestTotals = { version, promise };
+    return promise;
+  }
+
   /** Guest: a welcome that verified with this invitation (2.37: over either transport). */
   private welcomed(peer: string, m: Message) {
     const first = !this.hostPeer;
