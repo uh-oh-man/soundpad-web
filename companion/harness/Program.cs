@@ -523,6 +523,9 @@ bridge.UseMimicCapture(new MimicFixture { PrefillSeconds = 10 });
 bridge.UseTranscriptEngine(new TranscriptFixture());
 bridge.UseHotkeys(key => new HotkeyFixture(key) { Taken = key == "F9" }); // F9 plays a key another app owns
 bridge.UseVoiceReplayLibrary(VoiceReplayFixture.Create(Path.Combine(directory, "voice-replay"))); // never the real library
+// 2.46: never the PC's real Spotify. "spotify-status-delay <ms>" makes its status reads slow.
+var spotifyFixture = new SpotifyFixture(); bridge.UseSpotify(spotifyFixture);
+HarnessVerbs.Register("spotify-status-delay", (_, rest) => spotifyFixture.StatusDelayMs = int.TryParse(rest, out int ms) && ms is >= 0 and <= 10000 ? ms : 0);
 // Exact cue starts and regions (2.37) only with --exact-slices: the browser tests check the play-then-seek commands
 // Soundpad receives for a cue start (DoPlaySound(n), DoSeekMs(t)), which slices replace with DoPlaySound(slot).
 bridge.UseExactSlices(args.Contains("--exact-slices"));

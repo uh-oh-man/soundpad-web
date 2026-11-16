@@ -121,7 +121,9 @@ export function Sidebar({
         </button>
       )}
       {nav}
-      {(state.protocol ?? 1) >= 2 && <SpotifyPanel host={host} />}
+      {(state.protocol ?? 1) >= 2 && (
+        <SpotifyPanel host={host} guestAllowed={state.permissions.guestSpotify !== false} />
+      )}
       {library && (
         <>
           <div className="sidebar-heading">

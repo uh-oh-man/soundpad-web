@@ -2,24 +2,35 @@
 
 Notable changes to Soundpad Web. Versions follow the website's `package.json`; the Windows companion is versioned separately and only needs updating when a release says so.
 
-## Unreleased (2.46) — Removing Temp audio
+## 2.46.0 — Fixes from your feedback
 
-From the 2.45 feedback ("It did not let me delete temp files", "there should be no pending", "add a button to remove all temps for guest side"). **Update the companion** for Undo, **Remove all my Temp clips** and removing while something plays; the list itself already updates at once with a 2.45 companion.
-
-### Fixed
-
-- **Removing Temp audio takes it off the list at once, with nothing left "pending".** With the real Soundpad a removed clip used to stay in Temp as "cleanup-pending", with a warning to remove its entry in Soundpad by hand, until the companion quit. Soundpad can't remove one entry safely, so the companion still keeps the file until the app's Temp category goes (when it quits, or on **Clear all temporary audio**), but that is its own business now: the clip is gone from Temp and the board, nothing is reported, and the companion no longer re-reads Soundpad's list every 5 seconds for it. If the companion refuses, the clip comes back with the reason.
-- **Removing no longer waits for silence.** Every removal was refused while any sound played ("Stop playback before removing temporary audio"), which in a live session is most of the time. Now the files go once Soundpad is quiet. Only the clip that is itself playing is stopped first (as Undo always did).
-- **A guest allowed only Mimic can remove their own clips.** Removing followed the guest-uploads permission, so such a guest could make clips but never remove them. **Remove my clip** now also follows the companion's own record of whose clip it is, not the guest's name.
+Fixes and ideas sent from the Feedback button on 2026-11-15, by the host and a guest. **Update the companion** for Undo after removing Temp audio, **Remove all my Temp clips**, removing while something plays, and Spotify presses that no longer get "busy". With an older companion those parts are hidden or work as before, and everything else in this release works.
 
 ### Added
 
-- **Undo after removing Temp audio**, on the notice, for the host and guests (while the companion runs and Temp wasn't cleared). With Undo there is no question first.
-- **Remove all my Temp clips** for guests: one question, then their own clips go (never anyone else's, nor kept ones), with Undo.
+- **Mimic's live transcript follows the newest words** (from the Feedback button: "cant … get to the word they said imeeditly"). The list stays at its newest word as words come in. Scrolling back stops it following, and **Jump to latest** above the list (or the End key while you are in the Mimic panel) goes back to the newest word in one press. While your mouse moves over the list it holds still for a moment, so a word doesn't slide away from under the pointer.
+- **One-press Delete with Undo in Mimic** (from the Feedback button: "have easy delete button"). Each clip in **Just mimicked** has a Delete button, and the open draft's **Discard** is now **Delete**. The item goes at once and the notice offers **Undo**. The host can delete any clip; a guest can delete their own, when the host allows guest uploads. The clip is really removed when the notice goes, so until then it is still in Soundpad's Temp.
+- **Mimic full screen** on wide screens (from the Feedback button: "i was hoping for the mimic system be a full screen thing"). **Full screen** in the Mimic panel's header makes Mimic fill the space next to the sidebar, with a taller transcript and waveform. Your browser remembers the choice. Escape or **Exit full screen** goes back; picking Soundboard, Voices or Sentences shows them beside Mimic again. Phones keep the Mimic sheet.
+- **Undo after removing Temp audio**, on the notice, for the host and guests (while the companion runs and Temp hasn't been cleared). With Undo there is no question first.
+- **Remove all my Temp clips** for guests (from the Feedback button: "add a button to remove all temps for guest side"). One question, then the guest's own clips go (never anyone else's, nor kept ones), with Undo.
+
+### Changed
+
+- A guest's Spotify buttons say that they play on the host's PC, and a guest's Spotify row says it is the host's Spotify.
+
+### Fixed
+
+- **Removing Temp audio takes it off the list at once, with nothing left "pending"** (from the Feedback button: "there should be no pending"). With the real Soundpad a removed clip used to stay in Temp as "cleanup-pending", with a warning to remove its entry in Soundpad by hand, until the companion quit. Soundpad can't remove one entry safely, so the companion still keeps the file until the app's Temp category goes (when it quits, or on **Clear all temporary audio**), but that is its own business now: the clip is gone from Temp and the board, nothing is reported, and the companion no longer re-reads Soundpad's list every 5 seconds for it. If the companion refuses, the clip comes back with the reason.
+- **Guests can remove their own Temp clips** (from the Feedback button: "It did not let me delete temp files"). Every removal was refused while any sound played ("Stop playback before removing temporary audio"), which in a live session is most of the time. Now the files go once Soundpad is quiet, and only the clip that is itself playing is stopped first. A guest allowed only Mimic can now remove their clips too (removing used to follow the guest-uploads permission only), and **Remove my clip** follows the companion's own record of whose clip it is, not the guest's name.
+- **A guest's Spotify buttons work** (from the Feedback button: "spotify button dont work"). Two causes: the Spotify row ignored a press made while its own status check (every 3 seconds) was still on its way, and for a guest that check crosses the network to the host, so it was on its way much of the time. And the companion answered a press "Spotify is busy" whenever it was reading Spotify for the host or another guest. A press now goes at once, the companion waits its turn for it instead of refusing, and a status check that finds Spotify busy answers with the last state. After a press the row checks again a moment later, so Play/Pause shows the new state straight away. The first part works with any companion.
+- **When you turn off guest Spotify controls, guests can tell.** Their Play/Pause, Next and Previous are marked unavailable, the row says "The host has turned off guest Spotify controls.", and pressing one says so instead of failing.
+- A removed Mimic draft clip is no longer reused as if it were still there.
 
 ### Tests
 
-- 5 new companion tests (`TempRemovalTests`) on a pipe that, like the real Soundpad, can't remove one entry; the browser-test harness has `--real-removal` for the same. A new browser test covers a guest removing one clip and all of theirs, the host removing one, and Undo. Unit tests for the list's optimistic removal.
+- Companion: 5 new tests for Temp removal (`TempRemovalTests`) on a pipe that, like the real Soundpad, can't remove one entry, and 3 for Spotify (a guest's press during a status read waits and presses, a status read during another answers with the last state, a guest with Spotify controls off is refused without pressing). The browser-test harness has `--real-removal` for the real-Soundpad removal rule, and now always uses a fixture Spotify, never the PC's real one.
+- Browser: new tests for the transcript following, Delete with Undo and Full screen in Mimic; a guest removing one clip and all of theirs, the host removing one, and Undo; and three Spotify tests (a guest presses while their status check is held on its way, a press while the companion's status reads are slow, a guest with Spotify controls off).
+- Unit tests for the transcript follow logic, the delayed delete and the Temp list's at-once removal.
 
 ## 2.45.0 — Feedback, and fixes from the real Soundpad
 

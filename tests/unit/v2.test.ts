@@ -138,6 +138,27 @@ describe('extended protocol', () => {
     expect(isGuestAllowed(command('spotify', { action: 'enable' }), EMPTY)).toBe(false);
     expect(isGuestAllowed(command('keepAudio'), EMPTY)).toBe(false);
   });
+  it("relays a guest's Spotify presses unless the host turned guest Spotify controls off (2.46)", () => {
+    const allowed = { ...EMPTY.permissions, guestSpotify: true },
+      off = { ...EMPTY.permissions, guestSpotify: false };
+    for (const action of ['toggle', 'next', 'previous'] as const) {
+      expect(
+        isGuestAllowed(command('spotify', { action }), { ...EMPTY, permissions: allowed }),
+      ).toBe(true);
+      // Unset means allowed, as in the companion (GuestSpotify defaults to true).
+      expect(isGuestAllowed(command('spotify', { action }), EMPTY)).toBe(true);
+      expect(isGuestAllowed(command('spotify', { action }), { ...EMPTY, permissions: off })).toBe(
+        false,
+      );
+    }
+    // A guest still sees what plays, and never switches the integration.
+    expect(
+      isGuestAllowed(command('spotify', { action: 'status' }), { ...EMPTY, permissions: off }),
+    ).toBe(true);
+    expect(
+      isGuestAllowed(command('spotify', { action: 'disable' }), { ...EMPTY, permissions: allowed }),
+    ).toBe(false);
+  });
   it('does not clone or revalidate trusted libraries for lightweight ticks', () => {
     const light = { ...EMPTY, library: null };
     expect(parseSnapshot(light, EMPTY.library).library).toBe(EMPTY.library);
