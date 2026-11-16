@@ -33,7 +33,7 @@ jobs:
       - run: npm ci
       - run: dotnet build companion/harness/SoundpadWeb.Harness.csproj -c Release
       - run: npx playwright install chromium
-      - run: npm install --no-save --package-lock=false --no-audit @actions/artifact@6.3.1
+      - run: npm install --prefix .github/actions/second-network-host --no-save --package-lock=false --no-audit @actions/artifact@6.3.1
       - uses: ./.github/actions/second-network-host
       - uses: actions/upload-artifact@v7
         if: always()
