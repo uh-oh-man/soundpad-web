@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
   ArrowDownToLine,
   BookAudio,
@@ -190,7 +190,12 @@ export function MimicHistory({
     sessionId: string;
     words: Word[];
     pending: FrameRange[];
+    before: number | null;
   } | null>(null);
+  const olderPage = useRef<{ session: string; before: number } | null>(null);
+  const [loadingOlder, setLoadingOlder] = useState(false);
+  const prependPosition = useRef<{ top: number; height: number } | null>(null);
+  const transcriptList = useRef<HTMLOListElement | null>(null);
   const [picked, setPicked] = useState<BoundSelection | null>(null);
   const frozenBySelection = useRef(false);
   const [anchor, setAnchor] = useState<number | null>(null);
@@ -285,12 +290,17 @@ export function MimicHistory({
   viewRef.current = { follow, viewEnd };
   const poller = useRef<ReturnType<typeof historyPoller> | null>(null);
   useEffect(() => {
-    if (!connected) return;
+    if (!connected) {
+      olderPage.current = null;
+      setLoadingOlder(false);
+      return;
+    }
     let shownEnd = -1;
     let wordsEnd = -1;
     let shownSession: string | null = null;
     let known: Timeline | null = null;
     let knownAt = -Infinity;
+    const pendingPages = new Set<number>();
     const interval = host ? POLL_MS : GUEST_POLL_MS;
     const loop = historyPoller(
       async ({ tick, nudged, alive }) => {
@@ -310,6 +320,7 @@ export function MimicHistory({
           shownSession = session;
           shownEnd = -1;
           wordsEnd = -1;
+          pendingPages.clear();
         }
         // The newest wanted view, read now (not when the pass was asked for).
         const v = viewRef.current;
@@ -344,37 +355,79 @@ export function MimicHistory({
           });
           shownEnd = e;
         }
-        const liveTranscript = !nudged && tick % 4 === 0;
-        const transcriptEnd = liveTranscript ? t.liveFrame : e;
-        const transcriptStart = Math.max(0, windowStart(transcriptEnd, t.rate));
-        if (transcriptEnd > transcriptStart && (nudged ? e !== wordsEnd : tick % 2 === 0)) {
-          const reply = transcriptSchema.parse(
-            await controller.run(
-              'historyTranscript',
-              { startFrame: transcriptStart, endFrame: transcriptEnd, sourceId: session },
-              { quiet: true },
-            ),
-          );
-          if (!alive() || currentSession.current !== session) return;
-          const available = t.available;
-          setTranscript((previous) => {
-            const known = ofSession(previous, session)?.words ?? NO_WORDS;
-            const kept = known.filter(
-              (word) =>
-                (word.end <= transcriptStart || word.start >= transcriptEnd) &&
-                available.some(
-                  (range) => word.start >= range.startFrame && word.end <= range.endFrame,
-                ),
+        const oldestAvailable = oldestFrame(t);
+        for (const before of pendingPages.keys()) {
+          if (before <= oldestAvailable) pendingPages.delete(before);
+        }
+        const page = olderPage.current?.session === session ? olderPage.current : null;
+        const retry =
+          !page && t.transcribing && !nudged && tick % 4 === 1
+            ? pendingPages.keys().next().value
+            : undefined;
+        const olderEnd = page?.before ?? retry;
+        const liveTranscript = wordsEnd < 0 || (!nudged && (v.follow || tick % 4 === 0));
+        const transcriptEnd = olderEnd ?? (liveTranscript ? t.liveFrame : e);
+        const transcriptStart = Math.max(
+          oldestAvailable,
+          olderEnd !== undefined ? transcriptEnd - t.rate * 30 : windowStart(transcriptEnd, t.rate),
+        );
+        if (page && transcriptEnd <= transcriptStart) {
+          olderPage.current = null;
+          setLoadingOlder(false);
+        }
+        if (
+          transcriptEnd > transcriptStart &&
+          (olderEnd !== undefined || (nudged ? e !== wordsEnd : tick % 2 === 0))
+        ) {
+          try {
+            const reply = transcriptSchema.parse(
+              await controller.run(
+                'historyTranscript',
+                { startFrame: transcriptStart, endFrame: transcriptEnd, sourceId: session },
+                { quiet: true },
+              ),
             );
-            const unique = new Map(kept.map((word) => [word.id, word]));
-            for (const word of reply.words) unique.set(word.id, word);
-            return {
-              sessionId: session,
-              words: [...unique.values()].sort((a, b) => a.start - b.start || a.id - b.id),
-              pending: reply.pending,
-            };
-          });
-          if (transcriptEnd === e) wordsEnd = e;
+            if (!alive() || currentSession.current !== session) return;
+            const list = transcriptList.current;
+            if (olderEnd !== undefined) {
+              pendingPages.delete(olderEnd);
+              if (reply.pending.length > 0) pendingPages.add(olderEnd);
+              if (list && (page || !list.matches(':focus-within')))
+                prependPosition.current = { top: list.scrollTop, height: list.scrollHeight };
+            }
+            const available = t.available;
+            setTranscript((previous) => {
+              const current = ofSession(previous, session);
+              const kept = (current?.words ?? NO_WORDS).filter(
+                (word) =>
+                  (word.end <= transcriptStart || word.start >= transcriptEnd) &&
+                  available.some(
+                    (range) => word.start >= range.startFrame && word.end <= range.endFrame,
+                  ),
+              );
+              const unique = new Map(kept.map((word) => [word.id, word]));
+              for (const word of reply.words) unique.set(word.id, word);
+              return {
+                sessionId: session,
+                words: [...unique.values()].sort((a, b) => a.start - b.start || a.id - b.id),
+                pending: olderEnd !== undefined ? (current?.pending ?? NO_RANGES) : reply.pending,
+                before:
+                  page || (olderEnd === undefined && liveTranscript)
+                    ? Math.min(current?.before ?? transcriptStart, transcriptStart)
+                    : (current?.before ?? null),
+              };
+            });
+            if (olderEnd === undefined) wordsEnd = e;
+          } catch (error) {
+            if (!page) throw error;
+            if (alive() && currentSession.current === session)
+              controller.notify('Earlier transcript could not be loaded. Try again.', 'error');
+          } finally {
+            if (page && olderPage.current === page && alive()) {
+              olderPage.current = null;
+              setLoadingOlder(false);
+            }
+          }
         }
         const oldest = oldestFrame(t);
         if (!nudged && tick % 4 === 0 && t.liveFrame > oldest) {
@@ -576,6 +629,9 @@ export function MimicHistory({
   const lastSession = useRef(sessionId);
   useEffect(() => {
     if (!sessionId) return;
+    olderPage.current = null;
+    prependPosition.current = null;
+    setLoadingOlder(false);
     const was = lastSession.current;
     lastSession.current = sessionId;
     if (!was || was === sessionId) return;
@@ -1077,6 +1133,21 @@ export function MimicHistory({
   }, [focusName, selection]);
   // The live transcript follows the newest words (2.46); see follow.ts.
   const newest = useFollowNewest<HTMLOListElement>();
+  const before = shownTranscript?.before ?? null;
+  const canLoadOlder = before !== null && !!timeline && before > oldestFrame(timeline);
+  function loadOlderTranscript() {
+    if (!canLoadOlder || !sessionId || before === null || olderPage.current) return;
+    newest.pause();
+    olderPage.current = { session: sessionId, before };
+    setLoadingOlder(true);
+    poller.current?.nudge();
+  }
+  useLayoutEffect(() => {
+    const el = transcriptList.current;
+    const saved = prependPosition.current;
+    prependPosition.current = null;
+    if (el && saved) el.scrollTop = saved.top + el.scrollHeight - saved.height;
+  }, [shownTranscript]);
   /** Jump to live: the view follows live again and the newest words show, in one press (or End). */
   function jumpToNewest() {
     if (timeline && !(follow || end >= timeline.liveFrame)) goLive();
@@ -1450,88 +1521,101 @@ export function MimicHistory({
           )}
         </div>
       )}
-      {(mimic?.transcribing || words.length > 0) && (
-        <div className="mimic-transcript-head">
-          <h2>Transcript</h2>
-          {/* Always here (its label changes), so it keeps the keyboard when pressed. */}
-          <button
-            type="button"
-            className={following ? 'mimic-follow live' : 'mimic-follow primary'}
-            aria-pressed={following}
-            title="Show the newest words and follow them (End)"
-            aria-keyshortcuts="End"
-            onClick={jumpToNewest}
+      {(mimic?.transcribing || words.length > 0 || (before !== null && canLoadOlder)) && (
+        <section className="mimic-reading" aria-labelledby="mimic-transcript-title">
+          <div className="mimic-transcript-head">
+            <h2 id="mimic-transcript-title">Transcript</h2>
+            <div className="mimic-reading-actions">
+              <button
+                type="button"
+                onClick={loadOlderTranscript}
+                aria-disabled={!canLoadOlder || loadingOlder}
+                title={canLoadOlder ? undefined : 'The oldest available transcript is loaded'}
+              >
+                {loadingOlder ? 'Loading…' : 'Earlier words'}
+              </button>
+              {/* Always here (its label changes), so it keeps the keyboard when pressed. */}
+              <button
+                type="button"
+                className={following ? 'mimic-follow live' : 'mimic-follow primary'}
+                aria-pressed={following}
+                title="Show the newest words and follow them (End)"
+                aria-keyshortcuts="End"
+                onClick={jumpToNewest}
+              >
+                <ArrowDownToLine size={14} aria-hidden="true" />{' '}
+                {following ? 'Following latest' : 'Jump to latest'}
+                <kbd className="mimic-follow-key" aria-hidden="true">
+                  End
+                </kbd>
+              </button>
+            </div>
+          </div>
+          <ol
+            ref={(element) => {
+              newest.ref.current = element;
+              transcriptList.current = element;
+            }}
+            onScroll={newest.onScroll}
+            onPointerDown={newest.onPointerDown}
+            onPointerUp={newest.onPointerUp}
+            onPointerCancel={newest.onPointerUp}
+            onPointerLeave={newest.onPointerUp}
+            className="mimic-transcript mimic-words mimic-reading-body"
+            aria-label="Transcript"
           >
-            <ArrowDownToLine size={14} aria-hidden="true" />{' '}
-            {following ? 'Following latest' : 'Jump to latest'}
-            <kbd className="mimic-follow-key" aria-hidden="true">
-              End
-            </kbd>
-          </button>
-        </div>
-      )}
-      {(mimic?.transcribing || words.length > 0) && (
-        <ol
-          ref={newest.ref}
-          onScroll={newest.onScroll}
-          onPointerDown={newest.onPointerDown}
-          onPointerUp={newest.onPointerUp}
-          onPointerCancel={newest.onPointerUp}
-          onPointerLeave={newest.onPointerUp}
-          className="mimic-transcript mimic-words"
-          aria-label="Transcript"
-        >
-          {shown.length ? (
-            shown.map((sentence) => (
-              <li key={sentence[0].id}>
-                <time>
-                  {formatClock(wallOf(timeline, sentence[0].start) ?? 0).replace(/\s[AP]M$/i, '')}
-                </time>
-                {speakers?.enabled && sentence[0].speaker != null && (
-                  <SpeakerChip id={sentence[0].speaker} groups={speakers} />
-                )}
-                <span className="mimic-sentence">
-                  {sentence.map((w) => (
-                    <button
-                      key={w.id}
-                      type="button"
-                      className={`mimic-word${w.status === 'uncertain' ? ' uncertain' : ''}${hover?.id === w.id ? ' hover' : ''}${playingIds.has(w.id) ? (reduced ? ' playing playing-static' : ' playing') : ''}`}
-                      aria-pressed={wordSelected(w, selection)}
-                      title={
-                        w.status === 'uncertain'
-                          ? 'Uncertain: check this word and its edges before using it'
-                          : undefined
-                      }
-                      onMouseEnter={() => setHover(w)}
-                      onMouseLeave={() => setHover((h) => (h?.id === w.id ? null : h))}
-                      onFocus={() => setHover(w)}
-                      onBlur={() => setHover((h) => (h?.id === w.id ? null : h))}
-                      onClick={(e) => {
-                        // Clamped to the audio this person may hear around the word (2.41).
-                        const cut = timeline
-                          ? wordCut(words, anchor, w.id, e.shiftKey, timeline)
-                          : { range: wordSelection(words, anchor, w.id, e.shiftKey, rate) };
-                        if ('reason' in cut) {
-                          controller.notify(cut.reason, 'error');
-                          return;
+            {shown.length ? (
+              shown.map((sentence) => (
+                <li key={sentence[0].id} className="mimic-reading-line">
+                  <time>
+                    {formatClock(wallOf(timeline, sentence[0].start) ?? 0).replace(/\s[AP]M$/i, '')}
+                  </time>
+                  {speakers?.enabled && sentence[0].speaker != null && (
+                    <SpeakerChip id={sentence[0].speaker} groups={speakers} />
+                  )}
+                  <span className="mimic-sentence">
+                    {sentence.map((w) => (
+                      <button
+                        key={w.id}
+                        type="button"
+                        className={`mimic-word${w.status === 'uncertain' ? ' uncertain' : ''}${hover?.id === w.id ? ' hover' : ''}${playingIds.has(w.id) ? (reduced ? ' playing playing-static' : ' playing') : ''}`}
+                        aria-pressed={wordSelected(w, selection)}
+                        title={
+                          w.status === 'uncertain'
+                            ? 'Uncertain: check this word and its edges before using it'
+                            : undefined
                         }
-                        select(cut.range);
-                        if (!e.shiftKey || anchor === null) setAnchor(w.id);
-                        // A click (or Enter) plays the word in the person's mode; Shift-click only selects (2.45).
-                        if (!e.shiftKey && cut.range) playRange(cut.range);
-                      }}
-                    >
-                      {w.text}
-                    </button>
-                  ))}
-                </span>
-              </li>
-            ))
-          ) : (
-            <li className="muted">Words will appear here a few seconds after they are said.</li>
-          )}
-          {recognising && <li className="muted mimic-pending">Recognising more of this part…</li>}
-        </ol>
+                        onMouseEnter={() => setHover(w)}
+                        onMouseLeave={() => setHover((h) => (h?.id === w.id ? null : h))}
+                        onFocus={() => setHover(w)}
+                        onBlur={() => setHover((h) => (h?.id === w.id ? null : h))}
+                        onClick={(e) => {
+                          // Clamped to the audio this person may hear around the word (2.41).
+                          const cut = timeline
+                            ? wordCut(words, anchor, w.id, e.shiftKey, timeline)
+                            : { range: wordSelection(words, anchor, w.id, e.shiftKey, rate) };
+                          if ('reason' in cut) {
+                            controller.notify(cut.reason, 'error');
+                            return;
+                          }
+                          select(cut.range);
+                          if (!e.shiftKey || anchor === null) setAnchor(w.id);
+                          // A click (or Enter) plays the word in the person's mode; Shift-click only selects (2.45).
+                          if (!e.shiftKey && cut.range) playRange(cut.range);
+                        }}
+                      >
+                        {w.text}
+                      </button>
+                    ))}
+                  </span>
+                </li>
+              ))
+            ) : (
+              <li className="muted">Words will appear here a few seconds after they are said.</li>
+            )}
+            {recognising && <li className="muted mimic-pending">Recognising more of this part…</li>}
+          </ol>
+        </section>
       )}
       <div className="mimic-quick" role="group" aria-label="Quick select">
         {QUICK_SECONDS.map((s) => (

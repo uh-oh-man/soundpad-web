@@ -203,3 +203,137 @@
     display: none;
   }
 }
+
+/* Reading surface. Timestamps form a quiet gutter and the words read as continuous text. */
+.mimic-reading {
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: calc(var(--radius) + 4px);
+  background: var(--surface-1);
+}
+
+.mimic-reading .mimic-transcript-head {
+  padding: 9px 14px;
+  border-bottom: 1px solid var(--line);
+  background: var(--surface-2);
+}
+
+.mimic-reading-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.mimic-reading-actions button {
+  min-height: 32px;
+  padding: 4px 9px;
+  font-size: 12px;
+}
+
+.mimic-reading .mimic-reading-body {
+  display: block;
+  min-height: 104px;
+  max-height: clamp(150px, 27vh, 320px);
+  padding: 9px 16px 12px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  overflow-anchor: none;
+}
+
+.mimic-reading .mimic-reading-body .mimic-reading-line {
+  display: grid;
+  position: relative;
+  grid-template-columns: 60px minmax(0, 1fr);
+  align-items: baseline;
+  gap: 0 12px;
+  padding: 7px 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
+.mimic-reading .mimic-reading-line time {
+  grid-column: 1;
+  grid-row: 1;
+  align-self: first baseline;
+  color: var(--text-muted);
+  font-size: 11px;
+  letter-spacing: 0.02em;
+}
+
+.mimic-reading .mimic-reading-line > :not(time) {
+  grid-column: 2;
+}
+
+.mimic-reading .mimic-reading-line .mimic-sentence {
+  display: block;
+  border-inline-start: 1px solid var(--line);
+  padding-inline-start: 11px;
+  font-size: clamp(15px, 1.45vw, 20px);
+  line-height: 1.6;
+}
+
+.mimic-reading .mimic-reading-body .mimic-word {
+  display: inline;
+  width: auto;
+  padding: 0 2px;
+  margin-inline-end: 0.23em;
+  border: 0;
+  border-radius: 3px;
+  font-size: inherit;
+  line-height: inherit;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.mimic-reading .mimic-reading-body .mimic-word[aria-pressed='true'] {
+  background: var(--accent-soft);
+  color: var(--text-primary);
+  box-shadow: 0 1px 0 var(--accent);
+}
+
+.mimic-reading .mimic-reading-body .mimic-word.playing {
+  color: var(--text-primary);
+  background: var(--accent-soft);
+  box-shadow: inset 0 -2px 0 var(--accent);
+}
+
+.mimic-reading .mimic-pending {
+  padding-inline-start: 83px;
+  font-size: 12px;
+}
+
+@container mimic (max-width: 720px) {
+  .mimic-page .mimic-reading {
+    order: -2;
+  }
+
+  .mimic-reading .mimic-transcript-head {
+    gap: 6px;
+    padding-inline: 9px;
+  }
+
+  .mimic-reading .mimic-reading-body {
+    padding-inline: 9px;
+  }
+
+  .mimic-reading .mimic-reading-body .mimic-reading-line {
+    grid-template-columns: 47px minmax(0, 1fr);
+    column-gap: 6px;
+  }
+
+  .mimic-reading .mimic-reading-line .mimic-sentence {
+    padding-inline-start: 6px;
+  }
+
+  .mimic-reading .mimic-pending {
+    padding-inline-start: 53px;
+  }
+
+  .mimic-reading .mimic-follow-key {
+    display: none;
+  }
+}

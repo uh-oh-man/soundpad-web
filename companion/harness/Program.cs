@@ -377,10 +377,11 @@ if (args.FirstOrDefault() == "--mimic-silent-selftest" && args.Length == 2)
     capture.Stop(); transcriber.Disable(); HistorySinkFixture.Delete(store, folder);
     return;
 }
-if (args.FirstOrDefault() == "--whisper-bench" && args.Length == 2)
+if (args.FirstOrDefault() == "--whisper-bench" && args.Length is 2 or 3)
 {
     // Times warm transcription of a WAV with 1, 2 and 4 CPU threads to choose a light default for gaming hosts.
     var data = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "SoundpadWeb");
+    string model = args.Length == 3 ? args[2] : Path.Combine(data, "models", "ggml-base.en.bin");
     using var file = new NAudio.Wave.WaveFileReader(args[1]);
     var provider = NAudio.Wave.WaveExtensionMethods.ToSampleProvider(file);
     var mono = new List<float>(); var frame = new float[provider.WaveFormat.Channels * 4096]; int read;
@@ -388,9 +389,9 @@ if (args.FirstOrDefault() == "--whisper-bench" && args.Length == 2)
         for (int i = 0; i + provider.WaveFormat.Channels <= read; i += provider.WaveFormat.Channels) mono.Add(frame.AsSpan(i, provider.WaveFormat.Channels).ToArray().Average());
     var speech = MimicTranscriber.Resample(mono.ToArray(), provider.WaveFormat.SampleRate, MimicTranscriber.SpeechRate);
     double seconds = speech.Length / (double)MimicTranscriber.SpeechRate;
-    foreach (var threads in new[] { 1, 2, 4 })
+    foreach (var threads in new[] { 1, 2, 4, 8 })
     {
-        using var engine = new WhisperEngine(Path.Combine(data, "models", "ggml-base.en.bin"), null, Path.Combine(data, "native", "whisper-1.9.1"), threads);
+        using var engine = new WhisperEngine(model, null, null, threads);
         await engine.Transcribe(speech, default); // warm-up: loads the model
         var cpu = System.Diagnostics.Process.GetCurrentProcess().TotalProcessorTime;
         var clock = System.Diagnostics.Stopwatch.StartNew();
@@ -525,7 +526,14 @@ using var bridge = new Bridge(pipe, new StateStore(directory));
 HarnessStageH.BridgeMade(args, bridge);
 // The tone has been playing for 10 s when Mimic starts listening, so the browser tests' "Last 3 s" and "Last 10 s"
 // right after Start find that much recorded (2.39: the history view selects only audio that exists).
-bridge.UseMimicCapture(new MimicFixture { PrefillSeconds = 10 });
+var captureFixture = new MimicFixture { PrefillSeconds = 10 };
+bridge.UseMimicCapture(captureFixture);
+HarnessVerbs.Register("advance-mimic", (_, rest) =>
+{
+    if (!int.TryParse(rest, out int seconds) || seconds is < 1 or > 300) return;
+    captureFixture.Advance(TimeSpan.FromSeconds(seconds));
+    captureFixture.Pump();
+});
 bridge.UseTranscriptEngine(new TranscriptFixture());
 bridge.UseHotkeys(key => new HotkeyFixture(key) { Taken = key == "F9" }); // F9 plays a key another app owns
 bridge.UseVoiceReplayLibrary(VoiceReplayFixture.Create(Path.Combine(directory, "voice-replay"))); // never the real library

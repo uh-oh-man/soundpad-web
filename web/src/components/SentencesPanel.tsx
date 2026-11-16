@@ -131,7 +131,6 @@ export function SentencesPanel({ state, host, connected, canPlay, openId = null 
             aria-selected={tab === key}
             onClick={() => {
               setTab(key);
-              if (key === 'sentences') setOpen(null);
             }}
           >
             {label}
@@ -148,6 +147,7 @@ export function SentencesPanel({ state, host, connected, canPlay, openId = null 
             canEdit={rights.canEdit}
             host={host}
             compose={compose && rights.canBuild}
+            openPalette={() => setTab('palette')}
             back={() => setOpen(null)}
           />
         ) : (
@@ -469,6 +469,7 @@ function Builder({
   canEdit,
   host,
   compose,
+  openPalette,
   back,
 }: {
   id: string;
@@ -480,6 +481,7 @@ function Builder({
   /** 2.45: this sentence's caret is where the palette's and phrase blocks' Add to sentence goes. */
   compose: boolean;
   back: () => void;
+  openPalette: () => void;
 }) {
   const { list } = useSentenceStore();
   const voices = useVoices();
@@ -682,215 +684,242 @@ function Builder({
       className="sentence-builder"
       aria-label={`Sentence ${sentence.title || sentence.text}`}
     >
-      <div className="voices-inline">
-        <button type="button" onClick={leave}>
+      <header className="sentence-builder-head">
+        <button type="button" className="btn" onClick={leave}>
           Back to sentences
         </button>
+        <h2>{sentence.title || 'Sentence editor'}</h2>
         {sentence.kept && <span className="badge">Kept · version {sentence.versions[0]?.n}</span>}
         {!sentence.mine && <span className="muted">by {sentence.ownerName}</span>}
-      </div>
+        {editable && compose && (
+          <button type="button" onClick={() => void flush().then(openPalette)}>
+            <Plus size={15} aria-hidden="true" /> Browse recorded words
+          </button>
+        )}
+      </header>
       {loadFailed && (
         <p className="warning" role="status">
           The sentence could not be refreshed. Trying again…
         </p>
       )}
-      <label className="sentence-text">
-        <span>Sentence text</span>
-        <textarea
-          rows={2}
-          value={draft}
-          maxLength={4000}
-          readOnly={!editable}
-          placeholder="Type what to say. [laugh] adds a named piece."
-          onChange={(e) => {
-            type(e.target.value);
-            noteCaret(e);
-          }}
-          onSelect={noteCaret}
-        />
-      </label>
-      <p className="sentence-words" aria-label="Matched words">
-        {wordMarks(sentence).map(({ word, index, piece }) => {
-          const marker = piece?.kind === 'missing' ? missingMarker(piece, reduced) : null;
-          const voice = voiceById(voices, piece?.voiceId);
-          return (
-            <span
-              key={index}
-              className={`sentence-word${marker ? ' missing ' + marker.className : ''}${piece && selection.includes(piece.id) ? ' selected' : ''}`}
-              style={voice ? ({ '--voice': voice.color } as CSSProperties) : undefined}
-              title={marker?.label ?? (voice ? voice.name : undefined)}
-            >
-              {word}
-              {marker && <span className="sr-only"> ({marker.label})</span>}
-              {marker && reduced && (
-                <span className="missing-badge" aria-hidden="true">
-                  !
+      <div className="sentence-workspace">
+        <div className="sentence-script">
+          <label className="sentence-text">
+            <span>Sentence text</span>
+            <textarea
+              rows={2}
+              value={draft}
+              maxLength={4000}
+              readOnly={!editable}
+              placeholder="Type what to say. [laugh] adds a named piece."
+              onChange={(e) => {
+                type(e.target.value);
+                noteCaret(e);
+              }}
+              onSelect={noteCaret}
+            />
+          </label>
+          <p className="sentence-words" aria-label="Matched words">
+            {wordMarks(sentence).map(({ word, index, piece }) => {
+              const marker = piece?.kind === 'missing' ? missingMarker(piece, reduced) : null;
+              const voice = voiceById(voices, piece?.voiceId);
+              return (
+                <span
+                  key={index}
+                  className={`sentence-word${marker ? ' missing ' + marker.className : ''}${piece && selection.includes(piece.id) ? ' selected' : ''}`}
+                  style={voice ? ({ '--voice': voice.color } as CSSProperties) : undefined}
+                  title={marker?.label ?? (voice ? voice.name : undefined)}
+                >
+                  {word}
+                  {marker && <span className="sr-only"> ({marker.label})</span>}
+                  {marker && reduced && (
+                    <span className="missing-badge" aria-hidden="true">
+                      !
+                    </span>
+                  )}
                 </span>
+              );
+            })}
+          </p>
+          {sentence.missing > 0 && (
+            <p className="sentence-note" role="status">
+              <AlertTriangle size={14} aria-hidden="true" /> {sentence.missing} word
+              {sentence.missing === 1 ? ' is' : 's are'} not in the voice library. Each plays as a
+              gap or a bleep; nothing is filled in for you.
+              {editable && (
+                <button type="button" onClick={() => void apply({ do: 'rematch' })}>
+                  Find missing again
+                </button>
               )}
-            </span>
-          );
-        })}
-      </p>
-      {sentence.missing > 0 && (
-        <p className="sentence-note" role="status">
-          <AlertTriangle size={14} aria-hidden="true" /> {sentence.missing} word
-          {sentence.missing === 1 ? ' is' : 's are'} not in the voice library. Each plays as a gap
-          or a bleep; nothing is filled in for you.
-          {editable && (
-            <button type="button" onClick={() => void apply({ do: 'rematch' })}>
-              Find missing again
-            </button>
+            </p>
           )}
-        </p>
-      )}
-      {editable && sentence.suggestContrast && (
-        <p className="sentence-note">
-          This line may sound more unsettling with contrasting deliveries.
-          <button type="button" onClick={() => void apply({ do: 'contrast' })}>
-            Try contrasting deliveries
-          </button>
-        </p>
-      )}
-      <div className="voices-inline sentence-actions">
-        <button type="button" onClick={() => previewSentence()}>
-          <Headphones size={14} /> {preview.previewing ? 'Previewing…' : 'Preview here'}
-        </button>
-        {preview.previewing && (
-          <button type="button" onClick={preview.stop}>
-            <Square size={13} /> Stop preview
-          </button>
-        )}
-        <button
-          type="button"
-          className="primary"
-          aria-disabled={!canPlayHere || busy || sentence.pieces.length === 0 || undefined}
-          title={
-            !canPlay
-              ? 'Playback is not available'
-              : canPlayHere
-                ? undefined
-                : 'The host has turned guest seeking off: only kept sentences play into the game'
-          }
-          onClick={() => canPlayHere && sentence.pieces.length > 0 && void playIntoGame(latestKept)}
-        >
-          <Play size={14} /> Play into game
-        </button>
-        {editable && canKeep && (
-          <button
-            type="button"
-            aria-disabled={busy || sentence.pieces.length === 0 || undefined}
-            onClick={() => {
-              if (busy || sentence.pieces.length === 0) return;
-              setBusy(true);
-              void flush()
-                .then(() => controller.run('sentenceKeep', { sentenceId: id }))
-                .then((r) => {
-                  const version = (r as { version?: number } | undefined)?.version;
-                  controller.notify(
-                    `Kept as version ${version ?? ''}.`.replace(' .', '.'),
-                    'success',
-                  );
-                  return Promise.all([load(), refreshSentences()]);
-                })
-                .catch(() => {})
-                .finally(() => setBusy(false));
-            }}
+          {editable && sentence.suggestContrast && (
+            <p className="sentence-note">
+              This line may sound more unsettling with contrasting deliveries.
+              <button type="button" onClick={() => void apply({ do: 'contrast' })}>
+                Try contrasting deliveries
+              </button>
+            </p>
+          )}
+          <div
+            className="voices-inline sentence-actions"
+            role="group"
+            aria-label="Sentence playback and save"
           >
-            <Save size={14} /> {sentence.kept ? 'Keep new version' : 'Keep'}
-          </button>
-        )}
-        {editable && sentence.kept && (
-          <button
-            type="button"
-            aria-pressed={sentence.pinned}
-            onClick={() => void apply({ do: 'pin', pinned: !sentence.pinned })}
-          >
-            <Pin size={14} /> {sentence.pinned ? 'Unpin from board' : 'Pin to board'}
-          </button>
-        )}
-        {editable && (
-          <button
-            type="button"
-            onClick={() => void apply({ do: 'shuffle', pieces: [...selection] })}
-          >
-            <Shuffle size={14} /> Shuffle voices{selection.length ? ' (selected)' : ''}
-          </button>
-        )}
-        {editable && !sentence.kept && sentence.mine && (
-          <button
-            type="button"
-            onClick={() => {
-              // Text not sent yet would only be refused once the sentence is gone.
-              if (pendingText.current) window.clearTimeout(pendingText.current.timer);
-              pendingText.current = null;
-              void controller
-                .run('sentenceDiscard', { sentenceId: id })
-                .then(() => refreshSentences())
-                .then(back)
-                .catch(() => {});
-            }}
-          >
-            <Trash2 size={14} /> Discard
-          </button>
-        )}
-        {host && !sentence.mine && !sentence.kept && (
-          <button
-            type="button"
-            onClick={() =>
-              void controller
-                .run('sentenceDiscard', { sentenceId: id })
-                .then(() => refreshSentences())
-                .then(back)
-                .catch(() => {})
-            }
-          >
-            <Trash2 size={14} /> Discard {sentence.ownerName}&apos;s sentence
-          </button>
-        )}
+            <button type="button" onClick={() => previewSentence()}>
+              <Headphones size={14} /> {preview.previewing ? 'Previewing…' : 'Preview here'}
+            </button>
+            {preview.previewing && (
+              <button type="button" onClick={preview.stop}>
+                <Square size={13} /> Stop preview
+              </button>
+            )}
+            <button
+              type="button"
+              className="primary"
+              aria-disabled={!canPlayHere || busy || sentence.pieces.length === 0 || undefined}
+              title={
+                !canPlay
+                  ? 'Playback is not available'
+                  : canPlayHere
+                    ? undefined
+                    : 'The host has turned guest seeking off: only kept sentences play into the game'
+              }
+              onClick={() =>
+                canPlayHere && sentence.pieces.length > 0 && void playIntoGame(latestKept)
+              }
+            >
+              <Play size={14} /> Play into game
+            </button>
+            {editable && canKeep && (
+              <button
+                type="button"
+                aria-disabled={busy || sentence.pieces.length === 0 || undefined}
+                onClick={() => {
+                  if (busy || sentence.pieces.length === 0) return;
+                  setBusy(true);
+                  void flush()
+                    .then(() => controller.run('sentenceKeep', { sentenceId: id }))
+                    .then((r) => {
+                      const version = (r as { version?: number } | undefined)?.version;
+                      controller.notify(
+                        `Kept as version ${version ?? ''}.`.replace(' .', '.'),
+                        'success',
+                      );
+                      return Promise.all([load(), refreshSentences()]);
+                    })
+                    .catch(() => {})
+                    .finally(() => setBusy(false));
+                }}
+              >
+                <Save size={14} /> {sentence.kept ? 'Keep new version' : 'Keep'}
+              </button>
+            )}
+            {editable && sentence.kept && (
+              <button
+                type="button"
+                aria-pressed={sentence.pinned}
+                onClick={() => void apply({ do: 'pin', pinned: !sentence.pinned })}
+              >
+                <Pin size={14} /> {sentence.pinned ? 'Unpin from board' : 'Pin to board'}
+              </button>
+            )}
+            {editable && (
+              <button
+                type="button"
+                onClick={() => void apply({ do: 'shuffle', pieces: [...selection] })}
+              >
+                <Shuffle size={14} /> Shuffle voices{selection.length ? ' (selected)' : ''}
+              </button>
+            )}
+            {editable && !sentence.kept && sentence.mine && (
+              <button
+                type="button"
+                onClick={() => {
+                  // Text not sent yet would only be refused once the sentence is gone.
+                  if (pendingText.current) window.clearTimeout(pendingText.current.timer);
+                  pendingText.current = null;
+                  void controller
+                    .run('sentenceDiscard', { sentenceId: id })
+                    .then(() => refreshSentences())
+                    .then(back)
+                    .catch(() => {});
+                }}
+              >
+                <Trash2 size={14} /> Discard
+              </button>
+            )}
+            {host && !sentence.mine && !sentence.kept && (
+              <button
+                type="button"
+                onClick={() =>
+                  void controller
+                    .run('sentenceDiscard', { sentenceId: id })
+                    .then(() => refreshSentences())
+                    .then(back)
+                    .catch(() => {})
+                }
+              >
+                <Trash2 size={14} /> Discard {sentence.ownerName}&apos;s sentence
+              </button>
+            )}
+          </div>
+        </div>
+        <div className="sentence-editing">
+          <h3>Timeline</h3>
+          <Timeline
+            sentence={sentence}
+            voices={voices}
+            selection={selection}
+            setSelection={setSelection}
+            editable={editable}
+            reduced={reduced}
+            apply={apply}
+            remove={remove}
+            refocus={refocus}
+            previewPiece={(p) => previewSentence({ pieces: [p.id] })}
+          />
+          {one && (
+            <PieceInspector
+              key={one.id}
+              sentence={sentence}
+              piece={one}
+              voices={voices}
+              editable={editable}
+              apply={apply}
+              remove={remove}
+              previewAlternative={(i) => previewSentence({ pieces: [one.id], alternative: i })}
+            />
+          )}
+        </div>
+        <aside className="sentence-tools" aria-label="Sentence settings">
+          <h3>Mix &amp; versions</h3>
+          {editable && (
+            <MixSettings
+              sentence={sentence}
+              voices={voices}
+              apply={apply}
+              preview={previewSentence}
+            />
+          )}
+          {editable && (
+            <EffectsBox
+              count={selected.length}
+              apply={(effect) => void apply({ do: 'effects', pieces: [...selection], effect })}
+            />
+          )}
+          {sentence.versions.length > 0 && (
+            <Versions
+              sentence={sentence}
+              editable={editable}
+              canPlay={canPlay}
+              play={(n) => void playIntoGame(n)}
+              preview={(n) => previewSentence({ version: n })}
+              restore={(n) => void apply({ do: 'restore', version: n })}
+            />
+          )}
+        </aside>
       </div>
-      {editable && (
-        <MixSettings sentence={sentence} voices={voices} apply={apply} preview={previewSentence} />
-      )}
-      <Timeline
-        sentence={sentence}
-        voices={voices}
-        selection={selection}
-        setSelection={setSelection}
-        editable={editable}
-        reduced={reduced}
-        apply={apply}
-        remove={remove}
-        refocus={refocus}
-        previewPiece={(p) => previewSentence({ pieces: [p.id] })}
-      />
-      {one && (
-        <PieceInspector
-          key={one.id}
-          sentence={sentence}
-          piece={one}
-          voices={voices}
-          editable={editable}
-          apply={apply}
-          remove={remove}
-          previewAlternative={(i) => previewSentence({ pieces: [one.id], alternative: i })}
-        />
-      )}
-      {editable && (
-        <EffectsBox
-          count={selected.length}
-          apply={(effect) => void apply({ do: 'effects', pieces: [...selection], effect })}
-        />
-      )}
-      {sentence.versions.length > 0 && (
-        <Versions
-          sentence={sentence}
-          editable={editable}
-          canPlay={canPlay}
-          play={(n) => void playIntoGame(n)}
-          preview={(n) => previewSentence({ version: n })}
-          restore={(n) => void apply({ do: 'restore', version: n })}
-        />
-      )}
     </section>
   );
 }

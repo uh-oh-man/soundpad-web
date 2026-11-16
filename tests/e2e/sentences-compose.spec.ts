@@ -86,7 +86,7 @@ test('Add to sentence puts the palette word at the caret without playing it; a p
   // The caret goes before "tone".
   await text.click();
   await text.press('ControlOrMeta+Home');
-  await sentences.getByRole('tab', { name: 'Palette' }).click();
+  await builder.getByRole('button', { name: 'Browse recorded words' }).click();
   await expect(
     sentences.getByRole('status').filter({ hasText: 'Add to sentence goes' }),
   ).toHaveText(/into “tone”, at the caret you left in its text/);

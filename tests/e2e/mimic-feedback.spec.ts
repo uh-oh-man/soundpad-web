@@ -179,3 +179,38 @@ test('phone Mimic switches between the transcript and clips without hiding the p
   await mimic.getByRole('button', { name: 'Live transcript' }).click();
   await expect(mimic.getByRole('button', { name: 'Stop listening' })).toBeVisible();
 });
+
+test('Mimic reads below the current waveform in 30-second pages without moving it', async ({
+  page,
+  harness,
+}) => {
+  await host(page, harness);
+  const mimic = await openMimic(page);
+  await setMimicTranscription(mimic);
+  await sectionNav(page).getByRole('button', { name: 'Soundboard' }).click();
+  harness.send('advance-mimic 52');
+  await expect
+    .poll(async () => {
+      const result = await sendCommand(page, 'historyTimeline');
+      return (
+        (result.data as { liveFrame: number; rate: number }).liveFrame /
+        (result.data as { liveFrame: number; rate: number }).rate
+      );
+    })
+    .toBeGreaterThan(58);
+  await sectionNav(page).getByRole('button', { name: 'Mimic', exact: true }).click();
+  const earlier = mimic.getByRole('button', { name: 'Earlier words' });
+  await expect(earlier).toBeEnabled();
+  await earlier.press('Enter');
+  await expect(mimic.getByRole('button', { name: 'Jump to latest' })).toBeVisible();
+  await expect(mimic.getByRole('button', { name: 'Live', exact: true })).toHaveAttribute(
+    'aria-pressed',
+    'true',
+  );
+  await expect(earlier).toBeEnabled();
+  await earlier.press('Enter');
+  await expect(earlier).toBeDisabled();
+  await expect(
+    mimic.getByRole('list', { name: 'Transcript', exact: true }).locator('.mimic-word').first(),
+  ).toBeVisible({ timeout: 20000 });
+});

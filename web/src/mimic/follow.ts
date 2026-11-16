@@ -53,6 +53,7 @@ export function useFollowNewest<T extends HTMLElement>() {
   return {
     ref,
     following: shown,
+    pause: () => set(false),
     onScroll: () => {
       const el = ref.current;
       if (el) {

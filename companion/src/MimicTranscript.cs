@@ -33,12 +33,14 @@ public interface ITranscriptEngine : IDisposable
 
 public sealed class WhisperEngine(string modelPath, string? sharedModelPath = null, string? nativeDirectory = null, int? threads = null) : ITranscriptEngine
 {
-    /// <summary>
-    /// Settings measured by the word-timing evaluation (2.39): Gaming 1 thread on a below-normal thread (about 90 % of
-    /// the CPU time is then low priority), Balanced 2 threads below normal (about half), Fast 2 threads at normal
-    /// priority. All use a Whisper window sized to the audio, 3.5 to 4.8 times cheaper for short phrases.
-    /// </summary>
-    public int Threads => threads ?? (mode == SubtitleMode.Gaming ? 1 : 2);
+    public int Threads => threads ?? LiveThreads(mode, Environment.ProcessorCount);
+
+    internal static int LiveThreads(SubtitleMode mode, int processors) => mode switch
+    {
+        SubtitleMode.Gaming => processors >= 8 ? 2 : 1,
+        SubtitleMode.Balanced => Math.Clamp(processors / 3, 1, 4),
+        _ => Math.Clamp(processors / 2, 1, 8)
+    };
     private volatile SubtitleMode mode = SubtitleMode.Gaming;
     public void UseMode(SubtitleMode next) => mode = next;
     /// <summary>Background files (2.41) always use the Gaming settings: one thread, below normal priority, whatever the subtitles setting.</summary>
@@ -216,7 +218,7 @@ public sealed class WhisperEngine(string modelPath, string? sharedModelPath = nu
 public sealed class MimicTranscriber(ITranscriptEngine engine) : IDisposable
 {
     public const int SpeechRate = 16000;
-    private const double MinChunkSeconds = 2, MaxChunkSeconds = 15, PauseSeconds = 0.4, CutSearchSeconds = 5, CutWindowMs = 300, EdgeMs = 50;
+    private const double BackfillChunkSeconds = 15, PauseSeconds = 0.35, CutSearchSeconds = 3, CutWindowMs = 300, EdgeMs = 50;
     private const int MaxRequests = 8;
     private readonly object gate = new();
     private HistoryStore? store;
@@ -416,7 +418,7 @@ public sealed class MimicTranscriber(ITranscriptEngine engine) : IDisposable
     /// <summary>
     /// One step of the live loop; public so tests can drive it deterministically. Recognises the next chunk of the
     /// history behind live once it ends at a pause (relative to its own background, so game sound does not hide
-    /// pauses), or at 15 s, or when <paramref name="force"/> (capture stopped) says no more audio is coming.
+    /// pauses), or at the active subtitle mode’s time limit, or when <paramref name="force"/> (capture stopped) says no more audio is coming.
     /// </summary>
     public async Task<bool> Step(HistoryStore? current, bool force, CancellationToken cancel, int? generation = null)
     {
@@ -432,8 +434,14 @@ public sealed class MimicTranscriber(ITranscriptEngine engine) : IDisposable
         }
         PruneIfDue(history, transcript);
         long rate = history.Rate, length = live - start;
-        if (length < MinChunkSeconds * rate && !(force && length >= rate * 3 / 10)) return false;
-        long end = start + Math.Min(length, (long)(MaxChunkSeconds * rate));
+        var (minSeconds, maxSeconds) = Mode switch
+        {
+            SubtitleMode.Fast => (1.0, 7),
+            SubtitleMode.Balanced => (1.25, 9),
+            _ => (1.5, 10)
+        };
+        if (length < minSeconds * rate && !(force && length >= rate * 3 / 10)) return false;
+        long end = start + Math.Min(length, maxSeconds * rate);
         float[] audio;
         try { audio = history.Read(HistoryAccess.Host, start, (int)(end - start)); }
         catch (HistoryUnavailableException ex)
@@ -444,7 +452,7 @@ public sealed class MimicTranscriber(ITranscriptEngine engine) : IDisposable
         }
         var speech = Resample(audio, (int)rate, SpeechRate);
         var energy = SpeechEnergy.Analyze(speech);
-        bool full = end - start >= MaxChunkSeconds * rate;
+        bool full = end - start >= maxSeconds * rate;
         bool pause = Quiet(audio.AsSpan(Math.Max(0, audio.Length - (int)(PauseSeconds * rate)))) || energy.QuietAtEnd(PauseSeconds * 1000);
         // Cut at a pause so no sentence is split (a split makes Whisper guess the missing words).
         if (!force && !full && !pause) return false;
@@ -457,7 +465,7 @@ public sealed class MimicTranscriber(ITranscriptEngine engine) : IDisposable
         long cut = end; bool forced = false;
         if (!pause && full)
         {
-            // No pause in 15 s: cut at the quietest moment of the last few seconds rather than at the hard end.
+            // No pause in this window: cut at the quietest moment of the last few seconds rather than at the hard end.
             double at = energy.QuietestBetween(energy.DurationMs - CutSearchSeconds * 1000, energy.DurationMs, CutWindowMs);
             if (at > 1000 && at < energy.DurationMs) cut = start + (long)(at * rate / 1000);
             forced = !energy.QuietBetween(at - CutWindowMs / 2, at + CutWindowMs / 2);
@@ -500,7 +508,7 @@ public sealed class MimicTranscriber(ITranscriptEngine engine) : IDisposable
         }
         if (!found) return false;
         long rate = history.Rate;
-        long end = Math.Min(piece.EndFrame, piece.StartFrame + (long)(MaxChunkSeconds * rate));
+        long end = Math.Min(piece.EndFrame, piece.StartFrame + (long)(BackfillChunkSeconds * rate));
         float[] audio;
         try { audio = history.Read(HistoryAccess.Host, piece.StartFrame, (int)(end - piece.StartFrame)); }
         catch (HistoryUnavailableException)
@@ -622,7 +630,7 @@ public sealed class MimicTranscriber(ITranscriptEngine engine) : IDisposable
                         ? await Step(history, stopped, cancel, generation) || await StepRequest(history, cancel, generation)
                         : await StepRequest(history, cancel, generation) || await Step(history, stopped, cancel, generation);
                     liveFirst = !liveFirst;
-                    if (!did) await Task.Delay(500, cancel);
+                    if (!did) await Task.Delay(250, cancel);
                 }
                 catch (HistoryException) { await Task.Delay(500, cancel); /* the history changed under the step; the next one resyncs */ }
                 catch (InvalidDataException) { await Task.Delay(500, cancel); }

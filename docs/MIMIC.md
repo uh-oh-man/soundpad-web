@@ -25,7 +25,7 @@ The companion's capture is a port of Voice Replay Studio's `CaptureService` onto
 
 ## Using it
 
-**Where it opens.** Choose **Mimic** in the section navigation or press the **Mimic on** badge. On desktop, **Fill window** hides the sidebar and keeps the player within reach. Phones have **Live transcript** and **Clips** tabs. **Mimic settings** contains history, subtitles and the hotkey. Switch sections using the navigation. The host browser and companion window can still open the same draft.
+**Where it opens.** Choose **Mimic** in the section navigation or press the **Mimic on** badge. On desktop, **Fill window** hides the sidebar and keeps the player within reach. Phones have **Live transcript** and **Clips** tabs. **Mimic settings** contains history, subtitles and the hotkey. Use **Earlier words** above the transcript to load the previous 30 seconds, then repeat until you reach the beginning of the retained recording. **Jump to latest** brings you back. Switch sections using the navigation. The host browser and companion window can still open the same draft.
 
 ### Host
 

@@ -467,3 +467,72 @@ html[data-motion='reduce'] .missing-pulse {
 .guest-sentences-group > .sentence-rows {
   margin-left: 12px;
 }
+
+.sentence-builder-head {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--line);
+}
+
+.sentence-builder-head h2 {
+  flex: 1 1 12ch;
+  min-width: 0;
+  margin: 0;
+  font-size: clamp(18px, 2vw, 26px);
+  overflow-wrap: anywhere;
+}
+
+.sentence-workspace {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 12px;
+  align-items: start;
+}
+
+.sentence-script,
+.sentence-editing,
+.sentence-tools {
+  display: grid;
+  min-width: 0;
+  gap: 10px;
+  padding: clamp(10px, 1.6vw, 18px);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface-1);
+}
+
+.sentence-workspace h3 {
+  margin: 0;
+  font-size: 16px;
+}
+
+.sentence-script .sentence-text textarea {
+  min-height: 4.75rem;
+  font-size: 17px;
+  line-height: 1.5;
+  resize: vertical;
+  background: var(--surface-0);
+}
+
+.sentence-script .sentence-actions {
+  padding-top: 8px;
+  border-top: 1px solid var(--line);
+}
+
+@container board (min-width: 900px) {
+  .sentence-workspace {
+    grid-template-columns: minmax(0, 1fr) minmax(220px, 28%);
+  }
+
+  .sentence-editing {
+    grid-column: 1;
+  }
+
+  .sentence-tools {
+    grid-column: 2;
+    grid-row: 1 / span 2;
+  }
+}

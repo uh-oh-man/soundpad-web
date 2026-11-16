@@ -8,6 +8,10 @@ Fixes and ideas sent from the Feedback button on 2026-11-15, by the host and a g
 
 ### Added
 
+- **Transcript reading view.** Read across the line with timestamps in a separate gutter. **Earlier words** loads the previous 30 seconds at a time up to the oldest available recording. The waveform keeps its position and new captions continue to arrive.
+- **Sentence editor.** Text and playback are together above the timeline. The mix, effects and saved versions sit in their own area, and **Browse recorded words** preserves the open sentence and insertion cursor.
+
+
 - **Live transcript.** New words keep arriving while you select a clip or move the waveform. Scroll up to read earlier words, or press **Jump to latest** or **End** to resume following.
 - **One-press Delete with Undo in Mimic** (from the Feedback button: "have easy delete button"). Each clip in **Just mimicked** has a Delete button, and the open draft's **Discard** is now **Delete**. The item goes at once and the notice offers **Undo**. The host can delete any clip; a guest can delete their own, when the host allows guest uploads or Mimic. The clip is really removed when the notice goes, so until then it is still in Soundpad's Temp.
 - **Mimic has its own page.** The waveform, transcript and clip actions share the main area. **Fill window** hides the sidebar and the player stays visible. Phones have **Live transcript** and **Clips** tabs. **Just mimicked** keeps up to 100 clips and can filter by clip name or participant.
@@ -22,6 +26,9 @@ Fixes and ideas sent from the Feedback button on 2026-11-15, by the host and a g
 - **Remove all my Temp clips** for guests (from the Feedback button: "add a button to remove all temps for guest side"). One question, then the guest's own clips go (never anyone else's, nor kept ones), with Undo.
 
 ### Changed
+
+- **Live subtitles respond sooner.** The companion checks for complete phrases more often, uses shorter speech windows, and scales live Whisper threads to available CPU cores. Background indexing retains its single-thread worker.
+
 
 - A guest's Spotify buttons say that they play on the host's PC, and a guest's Spotify row says it is the host's Spotify.
 
