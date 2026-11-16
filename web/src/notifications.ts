@@ -107,6 +107,17 @@ export function runNoticeAction(id: string) {
   record.action.run();
   return true;
 }
+/** Whether the notice `id` is still on screen (its card, not its Activity record). */
+export const noticeShown = (id: string) => notices.some((n) => n.id === id);
+/**
+ * What the notice's action would undo has now happened for good (2.46, Mimic's Delete): Activity stops
+ * offering the action. The card itself is left alone.
+ */
+export function retireNoticeAction(id: string) {
+  if (!history.some((h) => h.id === id && !h.done)) return;
+  history = history.map((h) => (h.id === id ? { ...h, done: true } : h));
+  emit();
+}
 /** A notice's action ran from its card: Activity no longer offers it. */
 export function noticeActionRan(id: string) {
   history = history.map((h) => (h.id === id ? { ...h, done: true } : h));
