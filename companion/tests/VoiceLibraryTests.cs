@@ -302,6 +302,47 @@ public sealed class VoiceLibraryTests : IDisposable
         Assert.Contains("Only the host", await Refused(rig.As(Alice, Cmd("librarySettings") with { GroupSpeakers = true })));
     }
 
+    /// <summary>
+    /// 2.45 (D04): "Edit the voice library" lets a guest remove only the recordings they added. Anyone else's is refused
+    /// with a clear message, and a mixed batch removes nothing. The host removes any. Undo and the audit still work.
+    /// </summary>
+    [Fact]
+    public async Task GuestsRemoveOnlyTheirOwnRecordingsAndTheHostRemovesAny()
+    {
+        await using var rig = new Rig(folder); var bridge = rig.Bridge;
+        await rig.Host(listen: false);
+        var library = bridge.VoiceLibraryStore;
+        Assert.True(bridge.Snapshot.Permissions.GuestLibraryEdit);
+        var (hosts, _) = library.Add(Recording(folder, "HostTake"), [new(0, 400, "yes", 1, false)], "host", "Host");
+        var (alices, _) = library.Add(Recording(folder, "AliceTake"), [new(0, 400, "hi", 1, false)], Alice.Id, "Alice");
+        var (bobs, _) = library.Add(Recording(folder, "BobTake"), [new(0, 400, "yo", 1, false)], Bob.Id, "Bob");
+
+        // Someone else's: refused, and it stays.
+        Assert.Contains("only recordings you added", await Refused(rig.As(Alice, Cmd("libraryRemove") with { RecordingId = hosts.Id })));
+        Assert.Contains("Ask the host", await Refused(rig.As(Alice, Cmd("libraryRemove") with { RecordingIds = [bobs.Id] })));
+        // A batch with one of someone else's removes nothing, and says how many were not theirs.
+        Assert.Contains("1 of these", await Refused(rig.As(Alice, Cmd("libraryRemove") with { RecordingIds = [alices.Id, bobs.Id] })));
+        Assert.NotNull(library.Get(hosts.Id)); Assert.NotNull(library.Get(alices.Id)); Assert.NotNull(library.Get(bobs.Id));
+        Assert.DoesNotContain(library.Audit(null, 50), a => a.Field == "record" && a.After == null);
+
+        // Their own: removed, audited under their name, and their Undo puts it back.
+        long group = Body(await Ok(rig.As(Alice, Cmd("libraryRemove") with { RecordingIds = [alices.Id] }))).GetProperty("group").GetInt64();
+        Assert.Null(library.Get(alices.Id));
+        var removed = Assert.Single(library.Audit(alices.Id, 10), a => a.Group == group);
+        Assert.Equal(("Alice", Alice.Id), (removed.ByName, removed.By));
+        await Ok(rig.As(Alice, Cmd("libraryUndo") with { AuditId = group }));
+        Assert.NotNull(library.Get(alices.Id));
+
+        // The host removes anyone's, in one group, and can undo it; a guest cannot undo the host's removal.
+        long hostGroup = Body(await Ok(bridge.Execute(Cmd("libraryRemove") with { RecordingIds = [alices.Id, bobs.Id, hosts.Id] }, "host"))).GetProperty("group").GetInt64();
+        Assert.Null(library.Get(bobs.Id)); Assert.Null(library.Get(alices.Id)); Assert.Null(library.Get(hosts.Id));
+        Assert.Contains("only your own", await Refused(rig.As(Bob, Cmd("libraryUndo") with { AuditId = hostGroup })));
+        await Ok(bridge.Execute(Cmd("libraryUndo") with { AuditId = hostGroup }, "host"));
+        Assert.NotNull(library.Get(bobs.Id)); Assert.NotNull(library.Get(alices.Id)); Assert.NotNull(library.Get(hosts.Id));
+        // The files are never touched by any of it.
+        Assert.Equal(3, library.List(new(), 0, 10).Total);
+    }
+
     // ---- Wanted words ------------------------------------------------------------------------------------------
 
     [Fact]

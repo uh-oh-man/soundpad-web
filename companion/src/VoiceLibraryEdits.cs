@@ -93,14 +93,22 @@ public sealed partial class VoiceLibrary
         }
     }
 
-    /// <summary>Takes recordings out of the library (never their files). Undo puts them back.</summary>
-    public long Remove(IReadOnlyList<string> ids, string by, string byName)
+    /// <summary>
+    /// Takes recordings out of the library (never their files). Undo puts them back. A guest (<paramref name="host"/>
+    /// false, 2.45) may take out only recordings they added themselves (<see cref="LibraryRecording.By"/> is their key);
+    /// one recording of anyone else refuses the whole removal, so nothing is half done. The host may take out any.
+    /// </summary>
+    public long Remove(IReadOnlyList<string> ids, string by, string byName, bool host = true)
     {
         lock (gate)
         {
             RequireWritable();
             if (ids.Count is 0 or > 500) throw new InvalidDataException("Choose between 1 and 500 recordings.");
             var targets = ids.Distinct().Select(id => byId.GetValueOrDefault(id) ?? throw new InvalidDataException("That recording is no longer in the voice library.")).ToList();
+            if (!host && targets.Count(r => r.By != by) is int others and > 0)
+                throw new InvalidDataException(targets.Count == 1
+                    ?"You can remove only recordings you added. Ask the host to remove this one."
+                    : $"You can remove only recordings you added; {others} of these were added by someone else. Nothing was removed. Ask the host to remove those.");
             var changes = targets.Select(r => new AuditChange("recording", r.Id, "record", Json.Write(r), null)).ToList();
             return Commit(by, byName, changes,
                 () => { foreach (var r in targets) { file.Recordings.Remove(r); byId.Remove(r.Id); index.Remove(DocKey(r.Id)); } },

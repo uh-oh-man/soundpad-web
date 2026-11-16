@@ -102,7 +102,12 @@ describe('companion version gate', () => {
   });
 });
 
-/** The Stage H (2.44) features, last in every list of what an older companion lacks. */
+/** The 2.45 features (each WP adds its own here), last in every list of what an older companion lacks. */
+const V2_45 = [
+  'one Recover previous session or Discard after a crash, covering Temp, the recording history and your drafts',
+  "each guest's recent Temp and Keep clips under their storage request",
+];
+/** The Stage H (2.44) features and everything newer, last in every list of what an older companion lacks. */
 const STAGE_H = [
   'automatic backups to a folder you choose, with restore of single clips, recordings, voices, sentences or the whole library',
   'updates from inside the app that keep your session, guests and Temp',

@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react';
-import { HardDrive, History } from 'lucide-react';
+import { useEffect, useId, useState } from 'react';
+import { ChevronDown, ChevronRight, HardDrive, History } from 'lucide-react';
 import { z } from 'zod';
 import { controller } from '../controller';
 import { flattenCategories, type Snapshot } from '../protocol';
@@ -7,50 +7,173 @@ import { refreshBudget, useDraftStore } from '../mimic/draft-store';
 import { formatMb, type BudgetRequest, type KeepSettings } from '../mimic/drafts';
 import { Modal } from './Modal';
 
+const budgetActionsSchema = z.object({
+  guestId: z.string().max(128),
+  actions: z
+    .array(
+      z.object({
+        kind: z.enum(['temp', 'kept']),
+        name: z.string().max(200).nullish(),
+        bytes: z.number().nonnegative(),
+        at: z.number(),
+      }),
+    )
+    .max(100),
+});
+export type BudgetAction = z.infer<typeof budgetActionsSchema>['actions'][number];
+
+/** "12:03" (or a date and time when it was not today), for a storage action. */
+function when(at: number) {
+  const date = new Date(at);
+  const today = new Date().toDateString() === date.toDateString();
+  return today
+    ? date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+    : date.toLocaleString([], { dateStyle: 'short', timeStyle: 'short' });
+}
+
 /**
- * Guests waiting for more storage (2.40), in the same list style as the lobby: the request stays until
- * the host decides. "Allow more" lasts until the companion closes and never deletes anything.
+ * A guest's recent Temp and Keep actions (2.45, gate budgetActions): what they put into storage, with
+ * its size and time, newest first. Fetched when opened, and again when their request changes. The
+ * companion answers it to the host (any guest) and to that guest (only their own), nobody else.
  */
-export function BudgetRequests({ requests }: { requests: BudgetRequest[] }) {
-  if (!requests.length) return null;
-  const decide = async (guestId: string, action: 'allow' | 'deny') => {
-    try {
-      await controller.run('budgetGrant', { guestId, action });
-      await refreshBudget(true);
-    } catch {
-      /* Controller shows the error. */
-    }
-  };
+export function BudgetActions({
+  guestId,
+  name,
+  revision,
+}: {
+  guestId?: string;
+  name: string;
+  revision: string;
+}) {
+  const [actions, setActions] = useState<BudgetAction[] | null>(null);
+  const [failed, setFailed] = useState(false);
+  useEffect(() => {
+    let live = true;
+    setFailed(false);
+    void controller
+      .run('budgetActions', guestId ? { guestId } : {}, { quiet: true })
+      .then((raw) => {
+        if (live) setActions(budgetActionsSchema.parse(raw).actions);
+      })
+      .catch(() => {
+        if (live) setFailed(true);
+      });
+    return () => {
+      live = false;
+    };
+  }, [guestId, revision]);
+  if (failed) return <p className="budget-actions muted">The recent clips could not be loaded.</p>;
+  if (!actions) return <p className="budget-actions muted">Loading recent clips…</p>;
+  if (!actions.length)
+    return (
+      <p className="budget-actions muted">
+        {name} has not added anything since the companion started.
+      </p>
+    );
   return (
-    <ul className="lobby-requests budget-requests" aria-label="Guests waiting for more storage">
-      {requests.map((request) => (
-        <li key={request.guestId}>
-          <HardDrive size={16} aria-hidden="true" />
-          <span>
-            <strong>{request.name}</strong> asks for more{' '}
-            {request.kind === 'kept' ? 'kept audio' : 'Temp space'}{' '}
-            <small>({formatMb(request.neededBytes)} over)</small>
+    <ul className="budget-actions" aria-label={`Recent clips of ${name}`}>
+      {actions.map((a, i) => (
+        <li key={`${a.at}-${i}`}>
+          <span className="budget-action-kind">{a.kind === 'kept' ? 'Kept' : 'Temp'}</span>
+          <span className="budget-action-name">
+            {a.name ?? (a.kind === 'kept' ? 'Kept audio' : 'A clip')}
           </span>
-          <button
-            className="primary"
-            aria-label={`Allow ${request.name} more`}
-            onClick={() => void decide(request.guestId, 'allow')}
-          >
-            Allow more
-          </button>
-          <button
-            aria-label={`Not now for ${request.name}`}
-            onClick={() => void decide(request.guestId, 'deny')}
-          >
-            Not now
-          </button>
+          <span className="budget-action-size">{formatMb(a.bytes)}</span>
+          <time dateTime={new Date(a.at).toISOString()}>{when(a.at)}</time>
         </li>
       ))}
     </ul>
   );
 }
 
-/** After a crash (2.40): the previous session's clips are still in Temp until the host decides. */
+function BudgetRequestRow({ request, history }: { request: BudgetRequest; history: boolean }) {
+  const [open, setOpen] = useState(false);
+  const id = useId();
+  const decide = async (action: 'allow' | 'deny') => {
+    try {
+      await controller.run('budgetGrant', { guestId: request.guestId, action });
+      await refreshBudget(true);
+    } catch {
+      /* Controller shows the error. */
+    }
+  };
+  return (
+    <li>
+      <HardDrive size={16} aria-hidden="true" />
+      <span>
+        <strong>{request.name}</strong> asks for more{' '}
+        {request.kind === 'kept' ? 'kept audio' : 'Temp space'}{' '}
+        <small>({formatMb(request.neededBytes)} over)</small>
+      </span>
+      {history && (
+        <button
+          type="button"
+          className="budget-actions-toggle"
+          aria-expanded={open}
+          aria-controls={id}
+          aria-label={`Recent clips of ${request.name}`}
+          onClick={() => setOpen((was) => !was)}
+        >
+          {open ? (
+            <ChevronDown size={14} aria-hidden="true" />
+          ) : (
+            <ChevronRight size={14} aria-hidden="true" />
+          )}{' '}
+          Recent clips
+        </button>
+      )}
+      <button
+        className="primary"
+        aria-label={`Allow ${request.name} more`}
+        onClick={() => void decide('allow')}
+      >
+        Allow more
+      </button>
+      <button aria-label={`Not now for ${request.name}`} onClick={() => void decide('deny')}>
+        Not now
+      </button>
+      {history && (
+        <div id={id} className="budget-actions-panel" hidden={!open}>
+          {open && (
+            <BudgetActions
+              guestId={request.guestId}
+              name={request.name}
+              revision={`${request.kind}/${request.neededBytes}/${request.at}`}
+            />
+          )}
+        </div>
+      )}
+    </li>
+  );
+}
+
+/**
+ * Guests waiting for more storage (2.40), in the same list style as the lobby: the request stays until
+ * the host decides. "Allow more" lasts until the companion closes and never deletes anything. With
+ * `history` (2.45, gate budgetActions) each row opens to that guest's recent Temp and Keep clips.
+ */
+export function BudgetRequests({
+  requests,
+  history = false,
+}: {
+  requests: BudgetRequest[];
+  history?: boolean;
+}) {
+  if (!requests.length) return null;
+  return (
+    <ul className="lobby-requests budget-requests" aria-label="Guests waiting for more storage">
+      {requests.map((request) => (
+        <BudgetRequestRow key={request.guestId} request={request} history={history} />
+      ))}
+    </ul>
+  );
+}
+
+/**
+ * After a crash (2.40): the previous session's clips are still in Temp until the host decides. Since
+ * 2.45 (gate sessionRecovery) RecoverSession asks once for Temp, history and drafts; this stays for
+ * older companions.
+ */
 export function TempRecovery({ clips }: { clips: number }) {
   const [busy, setBusy] = useState(false);
   const decide = async (action: 'recover' | 'discard') => {

@@ -1,11 +1,17 @@
-import { useEffect, useReducer, useState, useSyncExternalStore } from 'react';
+import { useEffect, useReducer, useRef, useState, useSyncExternalStore } from 'react';
 import { CheckCircle2, Link, RefreshCw } from 'lucide-react';
 import { controller } from '../../controller';
 import { useStageH } from '../../stage-h';
 import { supports } from '../../version';
 import { Modal } from '../Modal';
 import { SessionAccess } from '../SessionAccess';
-import { STEPS, guideReducer, initialGuide, soundpadAdvice } from './guide-state';
+import {
+  STEPS,
+  guideReducer,
+  initialGuide,
+  shouldPreselectGuestCapture,
+  soundpadAdvice,
+} from './guide-state';
 import { HostHotkeyPickers } from './HostHotkeyPickers';
 import { ShortcutList } from './ShortcutList';
 import {
@@ -30,6 +36,26 @@ const MAIN_PERMISSIONS = [
   },
   { key: 'guestKeep', label: 'Guest Keep: guests can keep clips permanently', feature: 'drafts' },
 ] as const;
+
+const PRESELECTED_KEY = 'soundpad-web.setup.guestCapturePreselected';
+let preselectedThisPage = false;
+
+function preselectedBefore() {
+  if (preselectedThisPage) return true;
+  try {
+    return localStorage.getItem(PRESELECTED_KEY) === '1';
+  } catch {
+    return false;
+  }
+}
+function rememberPreselected() {
+  preselectedThisPage = true;
+  try {
+    localStorage.setItem(PRESELECTED_KEY, '1');
+  } catch {
+    /* Remembered for this page only. */
+  }
+}
 
 /**
  * The guided setup (2.44, gate setup): a dialog for a host on a real companion that has not finished
@@ -63,6 +89,23 @@ function Guide({ info, connected }: { info: SetupInfo; connected: boolean }) {
   const { hotkeys } = useSetupStore();
   const step = STEPS[guide.step];
   const last = guide.step === STEPS.length - 1;
+  // O02 (2.45): new hosts start with guest capture ticked; see shouldPreselectGuestCapture.
+  const preselecting = useRef(false);
+  useEffect(() => {
+    if (!connected || preselecting.current) return;
+    if (!shouldPreselectGuestCapture(info, state, preselectedBefore())) return;
+    preselecting.current = true;
+    rememberPreselected();
+    void controller
+      .run(
+        'permissions',
+        { permissions: { ...state.permissions, guestMimic: true } },
+        { quiet: true },
+      )
+      .catch(() => {
+        /* It stays off; the box below still works. */
+      });
+  }, [connected, info, state]);
   useEffect(() => {
     if (!guide.finished) return;
     closeGuide();

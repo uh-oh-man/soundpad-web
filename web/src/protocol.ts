@@ -155,6 +155,11 @@ export const commandSchema = z
       // in this launch while its files are still there (gate tempUndo; assetId or assetIds).
       'tempRemoveMine',
       'tempRestore',
+      // 2.45 (gates sessionRecovery, budgetActions): one Recover previous session / Discard after a
+      // crash (host only), and a guest's recent Temp and Keep actions (the host's for any guest, a
+      // guest's for their own only; the companion decides whose).
+      'sessionRecover',
+      'budgetActions',
     ]),
     // Stage H (2.44): the one payload field of every Stage H op (any JSON; each op's module checks it).
     body: z.json().optional(),
@@ -700,6 +705,7 @@ export const slowOps: readonly Command['op'][] = [
   'draftKeep',
   'draftPlay',
   'tempRecover',
+  'sessionRecover',
   'libraryPreview',
   'libraryAdd',
   'sentencePreview',
@@ -755,6 +761,8 @@ export function isGuestAllowed(c: Command, s: Snapshot) {
   if (c.op === 'budgetStatus') return true;
   // Feedback (2.45): any guest may send a note to the host; the companion checks it and limits how many.
   if (c.op === 'feedbackSend') return true;
+  // 2.45: always only their own storage actions (the companion ignores another guest's id).
+  if (c.op === 'budgetActions') return true;
   // The voice library (2.41): guests see and search the kept library by default; private previews
   // are answered to them only. Editing (names, tags, voices, wanted words, Undo) needs the host's
   // guestLibraryEdit; the settings and the category word index are the host's.

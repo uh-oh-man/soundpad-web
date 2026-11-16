@@ -251,7 +251,8 @@ public sealed partial class Bridge
                         if (c.VoiceId is { Length: > 0 }) foreach (var id in ids) CheckWantedRecording(id);
                         return Ok(c, new { group });
                     }
-                case "libraryRemove": RequireEdit(); return Ok(c, new { group = library.Remove(Ids(), by, person.Name) });
+                // 2.45: a guest removes only recordings they added; the host any (VoiceLibrary.Remove says which).
+                case "libraryRemove": RequireEdit(); return Ok(c, new { group = library.Remove(Ids(), by, person.Name, host) });
                 case "libraryUndo":
                     {
                         RequireEdit();

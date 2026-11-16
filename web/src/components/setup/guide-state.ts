@@ -1,4 +1,6 @@
 import type { SoundpadProblem } from './setup-store';
+import type { Snapshot } from '../../protocol';
+import { supports } from '../../version';
 
 /** The setup guide's steps, in order (2.44). */
 export const STEPS = [
@@ -63,4 +65,25 @@ export function soundpadAdvice(problem: SoundpadProblem, elevated: boolean): str
     case 'oldVersion':
       return 'Update Soundpad.';
   }
+}
+
+/**
+ * O02 (2.45): a brand-new host's first-run guide starts with guest capture (Guest Mimic) on, as the usual
+ * friend permissions. Only then: never for an install that kept data from before, never once setup is
+ * done, never when it is already on, and only once (the host may untick it and it stays off). The stored
+ * default stays off, so a state.json without the field never turns guest capture on by itself.
+ */
+export function shouldPreselectGuestCapture(
+  info: { existing: boolean; done: boolean },
+  state: Pick<Snapshot, 'setupDone' | 'permissions' | 'companionVersion'>,
+  alreadyDone: boolean,
+) {
+  return (
+    !alreadyDone &&
+    !info.existing &&
+    !info.done &&
+    state.setupDone === false &&
+    state.permissions.guestMimic !== true &&
+    supports(state.companionVersion, 'mimic')
+  );
 }

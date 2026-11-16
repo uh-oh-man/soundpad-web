@@ -202,38 +202,47 @@ public sealed partial class Bridge
                 case "tempRecover":
                     {
                         if (c.Action is not ("recover" or "discard")) throw new InvalidDataException("Recover or discard the previous session's Temp.");
-                        await audioGate.EnterAsync(PriorityGate.Lane.Normal);
-                        try
-                        {
-                            if (c.Action == "recover") { if (!Audio.Public.Blocked) await Audio.Recover(); }
-                            else if (!Audio.Public.Blocked)
-                            {
-                                // Only what the last launch left: clips made since (hosting carries on in the same
-                                // journal session and Temp category) stay, as does the session itself.
-                                await StopTemporaryPlayback();
-                                if (OnlyLeftoversInTemp())
-                                {
-                                    // Nothing new: the cleanup an ordinary quit would have done, Temp category and all.
-                                    Audio.RetireSession(); await Audio.Cleanup();
-                                    if (sessionAccepting) Audio.BeginSession();
-                                }
-                                else foreach (var files in tempLeftovers)
-                                {
-                                    try { await Audio.RetireFiles(files); }
-                                    catch (InvalidDataException ex) { Log("A clip from the last session could not be discarded: " + ex.Message); }
-                                }
-                            }
-                        }
-                        finally { audioGate.Release(); }
-                        int was = tempRecovery; tempRecovery = 0; tempLeftovers = [];
-                        Log(c.Action == "recover" ? $"Recovered {was} clip(s) in Temp from the last session" : "Discarded the last session's Temp");
-                        await gate.EnterAsync(PriorityGate.Lane.Normal); try { await RefreshInner(); Publish(); } finally { gate.Release(); }
+                        await DecideTempRecovery(c.Action);
                         return new("ack", c.Id, true);
                     }
             }
             return null;
         }
         catch (InvalidDataException ex) { return new("ack", c.Id, false, ex.Message); }
+    }
+
+    /// <summary>
+    /// The host's Recover or Discard of the Temp a crashed launch left (2.40; since 2.45 also part of Recover previous
+    /// session). Discard retires only those files: clips made since, and anything kept, stay.
+    /// </summary>
+    private async Task DecideTempRecovery(string action)
+    {
+        await audioGate.EnterAsync(PriorityGate.Lane.Normal);
+        try
+        {
+            if (action == "recover") { if (!Audio.Public.Blocked) await Audio.Recover(); }
+            else if (!Audio.Public.Blocked)
+            {
+                // Only what the last launch left: clips made since (hosting carries on in the same
+                // journal session and Temp category) stay, as does the session itself.
+                await StopTemporaryPlayback();
+                if (OnlyLeftoversInTemp())
+                {
+                    // Nothing new: the cleanup an ordinary quit would have done, Temp category and all.
+                    Audio.RetireSession(); await Audio.Cleanup();
+                    if (sessionAccepting) Audio.BeginSession();
+                }
+                else foreach (var files in tempLeftovers)
+                {
+                    try { await Audio.RetireFiles(files); }
+                    catch (InvalidDataException ex) { Log("A clip from the last session could not be discarded: " + ex.Message); }
+                }
+            }
+        }
+        finally { audioGate.Release(); }
+        int was = tempRecovery; tempRecovery = 0; tempLeftovers = [];
+        Log(action == "recover" ? $"Recovered {was} clip(s) in Temp from the last session" : "Discarded the last session's Temp");
+        await gate.EnterAsync(PriorityGate.Lane.Normal); try { await RefreshInner(); Publish(); } finally { gate.Release(); }
     }
 
     /// <summary>A guest's Keep (2.40): into the host's destination, within their permanent budget. The caller holds the audio gate.</summary>
@@ -248,7 +257,7 @@ public sealed partial class Bridge
         if (budgets.CheckKeep(guest, name, variant.Bytes, settings) is { } refusal) { Publish(); throw new InvalidDataException(refusal); }
         // The host chose the destination once; a guest's command never carries a path.
         await Audio.Promote(assetId, variant.Id, settings.Destination, settings.CategoryId, settings.CategoryName, true);
-        budgets.NoteKept(guest, name, variant.Bytes);
+        budgets.NoteKept(guest, name, variant.Bytes, asset.Name);
         Log($"{name} kept \"{asset.Name}\"");
         // Every kept clip is a voice-library recording (2.41).
         LibraryFromKeep(assetId, guest, name, source, words);

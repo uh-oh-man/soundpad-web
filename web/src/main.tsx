@@ -42,6 +42,7 @@ import { StageHContext, organizeActive, type StageH } from './stage-h';
 import { BackupLayoutSync } from './components/backups/BackupLayoutSync';
 import { LobbyRequests } from './components/LobbyRequests';
 import { BudgetRequests, QuitPromptDialog, TempRecovery } from './components/StoragePanel';
+import { RecoverSession } from './components/RecoverSession';
 import { useBudgetSync, useDraftStore, useDraftSync } from './mimic/draft-store';
 import type { ConnectionInfo } from './network/session';
 import { WhatsNew } from './components/WhatsNew';
@@ -928,8 +929,18 @@ function App() {
                     </p>
                   )}
                   {host && <LobbyRequests requests={view.requests} />}
-                  {host && budget?.host && <BudgetRequests requests={budget.host.requests} />}
-                  {host && !!state.tempRecovery && <TempRecovery clips={state.tempRecovery} />}
+                  {host && budget?.host && (
+                    <BudgetRequests
+                      requests={budget.host.requests}
+                      history={supports(state.companionVersion, 'budgetActions')}
+                    />
+                  )}
+                  {/* 2.45 (WP2): one question for Temp, history and drafts after a crash. */}
+                  {host && supports(state.companionVersion, 'sessionRecovery') ? (
+                    <RecoverSession state={state} />
+                  ) : (
+                    host && !!state.tempRecovery && <TempRecovery clips={state.tempRecovery} />
+                  )}
                 </SectionHeader>
                 {host && <SetupCard state={state} />}
                 {(!connected || state.error) && (
