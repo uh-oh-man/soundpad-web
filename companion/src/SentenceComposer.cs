@@ -345,9 +345,10 @@ public static class SentenceComposer
     /// Puts words into the text at a caret, a character position (2.45: palette "Add to sentence" and phrase blocks).
     /// A caret inside a word puts them after that word, and one inside a recorded phrase after the phrase, so no piece
     /// is split. Nothing is matched or played here: later pieces only move along, and the caller adds the piece(s) for
-    /// the new words, [Token, Token + Count). Refused when the text would grow past its limits.
+    /// the new words, [Token, Token + Count). Caret: the character position just after them (for the next insert).
+    /// Refused when the text would grow past its limits.
     /// </summary>
-    public static (int Token, int Count) InsertText(SentenceProject project, int caret, string words)
+    public static (int Token, int Count, int Caret) InsertText(SentenceProject project, int caret, string words)
     {
         int count = Tokens(words).Count;
         if (count == 0) throw new InvalidDataException("There is nothing to add.");
@@ -364,6 +365,7 @@ public static class SentenceComposer
         }
         at = Math.Min(at, existing.Count);
         words = words.Trim();
+        int place = at == 0 ? 0 : existing[at - 1].End + 1;
         string next = at == 0 ? (text.Trim().Length == 0 ? words : words + " " + text) : text[..existing[at - 1].End] + " " + words + text[existing[at - 1].End..];
         if (next.Length > SentenceStore.MaxText) throw new InvalidDataException($"A sentence is at most {SentenceStore.MaxText} characters.");
         var after = Tokens(next);
@@ -371,7 +373,7 @@ public static class SentenceComposer
         foreach (var p in project.Pieces)
             if (p.TokenStart is int s && p.TokenEnd is int e && s >= at) { p.TokenStart = s + count; p.TokenEnd = e + count; }
         project.Text = next;
-        return (at, count);
+        return (at, count, place + words.Length);
     }
 
     /// <summary>

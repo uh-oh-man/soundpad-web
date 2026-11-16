@@ -896,20 +896,21 @@ public sealed class SentenceTests : IDisposable
         SentenceComposer.Rematch(p, "alpha beta, gamma", corpus);
         var gamma = p.Pieces.Single(x => x.TokenStart == 2);
         // Caret inside "gamma": after it, at the end.
-        Assert.Equal((3, 1), SentenceComposer.InsertText(p, 14, "delta"));
+        Assert.Equal((3, 1, 23), SentenceComposer.InsertText(p, 14, "delta"));
         Assert.Equal("alpha beta, gamma delta", p.Text);
         // Caret at the very start.
-        Assert.Equal((0, 2), SentenceComposer.InsertText(p, 0, "[laugh] oh"));
+        Assert.Equal((0, 2, 10), SentenceComposer.InsertText(p, 0, "[laugh] oh"));
         Assert.Equal("[laugh] oh alpha beta, gamma delta", p.Text);
         Assert.Equal((4, 5), (gamma.TokenStart!.Value, gamma.TokenEnd!.Value));
         // Caret between "alpha" and "beta", which are one recorded phrase: after the phrase, before its comma's next word.
         var phrase = p.Pieces.Single(x => x.TokenEnd - x.TokenStart == 2 && x.Source != null);
         Assert.Equal((2, 4), (phrase.TokenStart!.Value, phrase.TokenEnd!.Value));
-        Assert.Equal((4, 1), SentenceComposer.InsertText(p, p.Text.IndexOf("beta", StringComparison.Ordinal) - 1, "ok"));
+        Assert.Equal((4, 1, 25), SentenceComposer.InsertText(p, p.Text.IndexOf("beta", StringComparison.Ordinal) - 1, "ok"));
         Assert.Equal("[laugh] oh alpha beta, ok gamma delta", p.Text);
         Assert.Equal((5, 6), (gamma.TokenStart!.Value, gamma.TokenEnd!.Value));
         // Past the end is the end; nothing to add, or too much, is refused and changes nothing.
-        Assert.Equal((7, 1), SentenceComposer.InsertText(p, 9999, "end"));
+        Assert.Equal((7, 1, p.Text.Length + 4), SentenceComposer.InsertText(p, 9999, "end"));
+        Assert.EndsWith(" end", p.Text);
         var before = p.Text;
         Assert.Throws<InvalidDataException>(() => SentenceComposer.InsertText(p, 0, " , "));
         Assert.Throws<InvalidDataException>(() => SentenceComposer.InsertText(p, 0, string.Join(' ', Enumerable.Repeat("w", SentenceStore.MaxTokens))));
@@ -928,6 +929,7 @@ public sealed class SentenceTests : IDisposable
         var piece = s.Pieces.Single(p => p.Id == reply.GetProperty("result").GetProperty("pieceId").GetString());
         Assert.Equal((0, 1, true, false), (piece.TokenStart!.Value, piece.TokenEnd!.Value, piece.Chosen, piece.Manual));
         Assert.Equal((rig.Recordings[2], 0L, 300L), (piece.Source!.RecordingId, piece.Source.StartMs, piece.Source.EndMs));
+        Assert.Equal(5, reply.GetProperty("result").GetProperty("caret").GetInt32()); // just after "hello"
         // The words after it moved along, in order on the timeline.
         Assert.Equal(["hello", "fixture tone"], s.Pieces.OrderBy(p => p.OffsetMs).Select(p => p.Text));
         // At the end when no caret is given with words; a named piece goes in as [name].

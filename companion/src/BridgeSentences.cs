@@ -411,10 +411,10 @@ public sealed partial class Bridge
                         if (input.Item is { } item)
                         {
                             var label = Resolve(item).Label;
-                            var (at, count) = SentenceComposer.InsertText(s, caret, label);
+                            var (at, count, after) = SentenceComposer.InsertText(s, caret, label);
                             var p = PieceFromItem(item, 0, at, at + count);
                             p.Manual = false;
-                            s.Pieces.Add(p); result = new { pieceId = p.Id };
+                            s.Pieces.Add(p); result = new { pieceId = p.Id, caret = after };
                         }
                         else
                         {
@@ -422,13 +422,13 @@ public sealed partial class Bridge
                             if (words.Length == 0 || words.Length > 400) throw new InvalidDataException("Add up to 400 characters of words.");
                             string? voice = input.VoiceIds is [var only] ? only : input.VoiceIds is { Length: > 1 } ? throw new InvalidDataException("A phrase is said by one voice.") : null;
                             if (voice != null && !SentenceStore.ValidId(voice)) throw new InvalidDataException("Choose a voice from the library.");
-                            var (at, count) = SentenceComposer.InsertText(s, caret, words);
+                            var (at, count, after) = SentenceComposer.InsertText(s, caret, words);
                             var tokens = SentenceComposer.Tokens(s.Text);
                             string? before = s.Pieces.Where(x => x.TokenEnd <= at && x.Source != null).OrderBy(x => x.TokenEnd).LastOrDefault()?.Source?.VoiceId;
                             var fresh = SentenceComposer.Match(tokens, at, at + count, voice == null ? s.Settings : SentenceComposer.Locked(s.Settings, voice), corpus, before);
                             foreach (var p in fresh) p.VoiceLock = voice;
                             if (s.Pieces.Count + fresh.Count > SentenceStore.MaxPieces) throw new InvalidDataException("This sentence has as many pieces as it can hold.");
-                            s.Pieces.AddRange(fresh); result = new { pieces = fresh.Select(x => x.Id).ToArray() };
+                            s.Pieces.AddRange(fresh); result = new { pieces = fresh.Select(x => x.Id).ToArray(), caret = after };
                         }
                         SentenceComposer.Layout(s);
                         break;
