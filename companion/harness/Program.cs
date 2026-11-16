@@ -13,6 +13,8 @@ if (args.FirstOrDefault() == "--real-responsiveness-probe") { Environment.ExitCo
 if (args.FirstOrDefault() == "--real-import-timing-probe") { Environment.ExitCode = await RealImportTimingProbe.Run(RealProbes.Root(args)); return; }
 if (args.FirstOrDefault() == "--word-timing-eval" && args.Length >= 2) { await WordTimingEval.Run(args); return; } // see WordTimingEval.cs
 if (args.FirstOrDefault() == "--word-pipeline-eval" && args.Length >= 2) { Environment.ExitCode = await WordPipelineEval.Run(args); return; } // see WordPipelineEval.cs (2.39)
+// WP5 audio-quality evaluation on the public-domain Apollo 11 demo clips (offline, read only); see AudioQualityEval.cs.
+if (args.FirstOrDefault() == "--audio-quality-eval" && args.Length >= 2) { Environment.ExitCode = await AudioQualityEval.Run(args); return; }
 if (args.FirstOrDefault() == "--speaker-eval" && args.Length >= 2) { Environment.ExitCode = SpeakerGroupingEval.Run(args); return; } // see SpeakerGroupingEval.cs (2.41)
 // Backups (2.44): back up a fixture, delete and damage it, restore it, compare bytes; see HarnessBackups.cs.
 if (args.FirstOrDefault() == "--backup-roundtrip" && args.Length >= 2) { Environment.ExitCode = await HarnessBackups.RoundTrip(args[1]); return; }
