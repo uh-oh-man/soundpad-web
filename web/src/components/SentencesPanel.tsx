@@ -22,14 +22,24 @@ import {
   Trash2,
 } from 'lucide-react';
 import { controller } from '../controller';
-import type { Command, SentenceInput, Snapshot } from '../protocol';
+import type { Command, PhraseBlock, SentenceInput, Snapshot } from '../protocol';
+import { supports } from '../version';
 import { usePreviewAudio } from '../preview-audio';
 import { useReducedMotion } from '../motion';
 import { useVoiceStore } from '../library/voice-store';
-import { refreshSentences, useSentenceStore } from '../library/sentence-store';
+import {
+  composeTarget,
+  noteTextSending,
+  refreshSentences,
+  setComposeTarget,
+  textSent,
+  useComposeTarget,
+  useSentenceStore,
+} from '../library/sentence-store';
 import type { Voice } from '../library/voices';
 import {
   alternativesSchema,
+  blockNamed,
   changedSchema,
   fillTemplate,
   formatMs,
@@ -50,10 +60,12 @@ import {
   setsSchema,
   sourceProblem,
   takeSchema,
+  templateFields,
   templateSlots,
   timelineKey,
   wordMarks,
   type Alternatives,
+  type GuestUnkept,
   type PaletteItem,
   type PerformanceSet,
   type Piece,
@@ -82,6 +94,8 @@ export function SentencesPanel({ state, host, connected, canPlay, openId = null 
   const { list } = useSentenceStore();
   // The list's flags are the session's; the host's setting for this guest narrows them (2.42 review).
   const rights = sentenceRights(list, state.permissions, host);
+  // 2.45: voice slots and phrase blocks, Add to sentence, and guests' unkept sentences for the host.
+  const compose = supports(state.companionVersion, 'sentenceCompose');
   const [tab, setTab] = useState<Tab>('sentences');
   const [open, setOpen] = useState<string | null>(openId);
   // Section memory (Stage G): the open sentence and the scroll position are written here; the shell
@@ -132,16 +146,19 @@ export function SentencesPanel({ state, host, connected, canPlay, openId = null 
             canKeep={rights.canKeep}
             canPlayParts={rights.canPlayParts}
             canEdit={rights.canEdit}
+            host={host}
+            compose={compose && rights.canBuild}
             back={() => setOpen(null)}
           />
         ) : (
-          <SentenceList open={setOpen} canBuild={rights.canBuild} />
+          <SentenceList open={setOpen} canBuild={rights.canBuild} host={host && compose} />
         ))}
       {tab === 'palette' && (
         <PalettePanel
           canPlay={canPlay && connected}
           canGame={canPlay && connected && rights.canPlayParts}
           canBuild={rights.canBuild}
+          compose={compose && rights.canBuild}
           openTake={(id) => {
             setOpen(id);
             setTab('sentences');
@@ -151,6 +168,7 @@ export function SentencesPanel({ state, host, connected, canPlay, openId = null 
       {tab === 'sets' && (
         <SetsPanel
           canBuild={rights.canBuild}
+          compose={compose}
           openSentence={(id) => {
             setOpen(id);
             setTab('sentences');
@@ -178,6 +196,46 @@ async function create(text: string, origin?: 'typed' | 'template') {
 }
 
 /**
+ * Add to sentence (2.45): a palette item, or a phrase block's words in its voice, into the sentence
+ * last open for editing, at the caret left in its text (the end when none), and nothing plays. With
+ * no such sentence (or it is gone) a new one is started. The caret then moves past what was added, so
+ * adds in a row go in order. Resolves with the sentence's title, for the confirmation.
+ */
+async function addToSentence(
+  what: { item: SentenceInput['item'] } | { text: string; voiceId: string | null },
+  sentences: readonly { id: string; canEdit: boolean }[] | undefined,
+) {
+  await textSent();
+  let target = composeTarget();
+  if (target && !sentences?.some((s) => s.id === target!.sentenceId && s.canEdit)) target = null;
+  if (!target) {
+    const made = await create('');
+    target = { sentenceId: made.id, caret: null, title: '' };
+  }
+  const input: SentenceInput =
+    'item' in what
+      ? { do: 'insert', item: what.item, caret: target.caret ?? 4000 }
+      : {
+          do: 'insert',
+          text: what.text,
+          caret: target.caret ?? 4000,
+          ...(what.voiceId && { voiceIds: [what.voiceId] }),
+        };
+  const { sentence, result } = changedSchema.parse(
+    await controller.run('sentenceEdit', { sentenceId: target.sentenceId, sentence: input }),
+  );
+  const caret = (result as { caret?: unknown } | undefined)?.caret;
+  const title = sentence.title || sentence.text.slice(0, 60);
+  setComposeTarget({
+    sentenceId: sentence.id,
+    caret: typeof caret === 'number' ? caret : null,
+    title,
+  });
+  void refreshSentences();
+  return { id: sentence.id, title };
+}
+
+/**
  * A list setting changed by quick clicks (2.42 review): each change builds on the last one asked for,
  * not on the last reply, and the changes are sent one after another, so none undoes another.
  */
@@ -201,7 +259,16 @@ function useListSetting<T>(current: T[], send: (next: T[]) => Promise<unknown>) 
   return [pending ?? current, change] as const;
 }
 
-function SentenceList({ open, canBuild }: { open: (id: string) => void; canBuild: boolean }) {
+function SentenceList({
+  open,
+  canBuild,
+  host,
+}: {
+  open: (id: string) => void;
+  canBuild: boolean;
+  /** The host on a 2.45 companion: guests' unkept sentences are listed to clear. */
+  host: boolean;
+}) {
   const { list, failed } = useSentenceStore();
   const [text, setText] = useState('');
   const [busy, setBusy] = useState(false);
@@ -281,7 +348,114 @@ function SentenceList({ open, canBuild }: { open: (id: string) => void; canBuild
           {projects.map(row)}
         </ul>
       )}
+      {host && <GuestSentences groups={list.guestUnkept ?? []} open={open} />}
     </div>
+  );
+}
+
+/** How long ago, in words: "just now", "5 min ago", "3 h ago", "2 days ago". */
+function ago(at: number) {
+  const minutes = Math.floor(Math.max(0, Date.now() - at) / 60000);
+  if (minutes < 1) return 'just now';
+  if (minutes < 60) return `${minutes} min ago`;
+  if (minutes < 48 * 60) return `${Math.floor(minutes / 60)} h ago`;
+  return `${Math.floor(minutes / 1440)} days ago`;
+}
+
+/**
+ * Guests' unkept sentences (2.45, host only): each guest's, newest first, to open (read only) or to
+ * clear. Clearing asks once more, since it cannot be undone. Kept sentences are not here.
+ */
+function GuestSentences({ groups, open }: { groups: GuestUnkept[]; open: (id: string) => void }) {
+  const [asking, setAsking] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [shown, setShown] = useState<string | null>(null);
+  const clear = (g: GuestUnkept) => {
+    if (busy) return;
+    setBusy(true);
+    void controller
+      .run('sentenceDiscard', { guestId: g.guestId })
+      .then((r) => {
+        const removed = (r as { removed?: number } | undefined)?.removed ?? 0;
+        controller.notify(
+          `Cleared ${removed} unkept sentence${removed === 1 ? '' : 's'} of ${g.ownerName}.`,
+          'success',
+        );
+        setAsking(null);
+        return refreshSentences();
+      })
+      .catch(() => {})
+      .finally(() => setBusy(false));
+  };
+  return (
+    <section className="guest-sentences" aria-label="Guests' sentences in progress">
+      <h3>Guests&apos; sentences in progress</h3>
+      {groups.length === 0 ? (
+        <p className="muted">No guest has an unkept sentence.</p>
+      ) : (
+        <ul className="sentence-rows">
+          {groups.map((g) => (
+            <li key={g.guestId} className="guest-sentences-group">
+              <div className="voices-inline">
+                <strong>{g.ownerName}</strong>
+                <span className="muted">
+                  {g.count} unkept · last changed {ago(g.updated)}
+                </span>
+                <button
+                  type="button"
+                  aria-expanded={shown === g.guestId}
+                  onClick={() => setShown(shown === g.guestId ? null : g.guestId)}
+                >
+                  {shown === g.guestId ? 'Hide' : 'Show'}
+                </button>
+                {asking === g.guestId ? (
+                  <span
+                    className="voices-inline"
+                    role="group"
+                    aria-label={`Clear ${g.ownerName}'s`}
+                  >
+                    <span>
+                      Clear {g.count} unkept sentence{g.count === 1 ? '' : 's'} of {g.ownerName}?
+                      This cannot be undone.
+                    </span>
+                    <button
+                      type="button"
+                      className="primary"
+                      aria-disabled={busy || undefined}
+                      onClick={() => clear(g)}
+                    >
+                      Clear
+                    </button>
+                    <button type="button" onClick={() => setAsking(null)}>
+                      Cancel
+                    </button>
+                  </span>
+                ) : (
+                  <button type="button" onClick={() => setAsking(g.guestId)}>
+                    <Trash2 size={13} /> Clear {g.ownerName}&apos;s
+                  </button>
+                )}
+              </div>
+              {shown === g.guestId && (
+                <ul className="sentence-rows" aria-label={`${g.ownerName}'s sentences in progress`}>
+                  {g.sentences.map((s) => (
+                    <li key={s.id} className="sentence-row">
+                      <button type="button" className="sentence-open" onClick={() => open(s.id)}>
+                        <strong>{s.title || s.text || 'Untitled sentence'}</strong>
+                        <span className="muted">{s.text}</span>
+                      </button>
+                      {s.missing > 0 && (
+                        <span className="badge warning-badge">{s.missing} missing</span>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
   );
 }
 
@@ -293,6 +467,8 @@ function Builder({
   canKeep,
   canPlayParts,
   canEdit,
+  host,
+  compose,
   back,
 }: {
   id: string;
@@ -300,6 +476,9 @@ function Builder({
   canKeep: boolean;
   canPlayParts: boolean;
   canEdit: (canEdit: boolean) => boolean;
+  host: boolean;
+  /** 2.45: this sentence's caret is where the palette's and phrase blocks' Add to sentence goes. */
+  compose: boolean;
   back: () => void;
 }) {
   const { list } = useSentenceStore();
@@ -410,12 +589,38 @@ function Builder({
       if (!waiting) return;
       window.clearTimeout(waiting.timer);
       pendingText.current = null;
-      void controller
-        .run('sentenceText', { sentenceId: id, sentence: { text: waiting.value } }, { quiet: true })
-        .catch(() => {});
+      // Add to sentence (2.45) waits for this, so it lands in the text the box showed.
+      noteTextSending(
+        controller.run(
+          'sentenceText',
+          { sentenceId: id, sentence: { text: waiting.value } },
+          { quiet: true },
+        ),
+      );
     },
     [id],
   );
+  const editableNow = !!sentence && canEdit(sentence.canEdit);
+  const titleNow = sentence ? sentence.title || sentence.text.slice(0, 60) : '';
+  // The sentence open for editing is where Add to sentence goes; at its end until the caret moves.
+  useEffect(() => {
+    if (!compose || !editableNow) return;
+    const current = composeTarget();
+    setComposeTarget({
+      sentenceId: id,
+      caret: current?.sentenceId === id ? current.caret : null,
+      title: titleNow,
+    });
+  }, [compose, editableNow, id, titleNow]);
+  const noteCaret = (e: { currentTarget: HTMLTextAreaElement }) => {
+    if (!compose || !editableNow) return;
+    const end = e.currentTarget.selectionEnd;
+    setComposeTarget({
+      sentenceId: id,
+      caret: end >= e.currentTarget.value.length ? null : end,
+      title: titleNow,
+    });
+  };
   const leave = () => void flush().then(back);
   if (!sentence)
     return (
@@ -494,7 +699,11 @@ function Builder({
           maxLength={4000}
           readOnly={!editable}
           placeholder="Type what to say. [laugh] adds a named piece."
-          onChange={(e) => type(e.target.value)}
+          onChange={(e) => {
+            type(e.target.value);
+            noteCaret(e);
+          }}
+          onSelect={noteCaret}
         />
       </label>
       <p className="sentence-words" aria-label="Matched words">
@@ -619,6 +828,20 @@ function Builder({
             }}
           >
             <Trash2 size={14} /> Discard
+          </button>
+        )}
+        {host && !sentence.mine && !sentence.kept && (
+          <button
+            type="button"
+            onClick={() =>
+              void controller
+                .run('sentenceDiscard', { sentenceId: id })
+                .then(() => refreshSentences())
+                .then(back)
+                .catch(() => {})
+            }
+          >
+            <Trash2 size={14} /> Discard {sentence.ownerName}&apos;s sentence
           </button>
         )}
       </div>
@@ -1076,6 +1299,13 @@ function PieceInspector({
         {piece.kind === 'splice' && <span className="badge warning-badge">Splice (approved)</span>}
         {piece.substitute && <span className="badge warning-badge">Similar word</span>}
       </div>
+      {piece.voiceLock && (
+        <p className="muted">
+          Said by {voiceById(voices, piece.voiceLock)?.name ?? 'a voice no longer in the library'}{' '}
+          only (a voice slot or a phrase block chose it): the mix, Swap and Shuffle stay in that
+          voice.
+        </p>
+      )}
       {problem && (
         <p className="warning" role="status">
           {problem === 'missing'
@@ -1479,15 +1709,34 @@ function PalettePanel({
   canPlay,
   canGame,
   canBuild,
+  compose,
   openTake,
 }: {
   canPlay: boolean;
   /** A word into the game: playback, and (guests) seeking, as for a region (2.42 review). */
   canGame: boolean;
   canBuild: boolean;
+  /** 2.45: Add to sentence. */
+  compose: boolean;
   openTake: (id: string) => void;
 }) {
   const voices = useVoices();
+  const { list } = useSentenceStore();
+  const target = useComposeTarget();
+  const [adding, setAdding] = useState(false);
+  /** Add to sentence: never plays; one at a time, so adds in a row land in order. */
+  const add = (item: PaletteItem) => {
+    if (adding) return;
+    setAdding(true);
+    void addToSentence({ item: itemRef(item) }, list?.sentences)
+      .then((s) =>
+        controller.notify(`Added “${item.text}” to “${s.title || 'the new sentence'}”.`, 'success'),
+      )
+      .catch(() => {})
+      .finally(() => setAdding(false));
+  };
+  const targetShown =
+    target && list?.sentences.some((s) => s.id === target.sentenceId && s.canEdit) ? target : null;
   const preview = usePreviewAudio();
   const [mode, setMode] = usePaletteMode();
   const [query, setQuery] = useState('');
@@ -1626,6 +1875,26 @@ function PalettePanel({
         </label>
         {active && <span className="muted">Set: {active.name}</span>}
       </div>
+      {compose && (
+        <div className="voices-inline sentence-target" role="status">
+          {targetShown ? (
+            <>
+              <span>
+                Add to sentence goes into “{targetShown.title || 'Untitled sentence'}”,{' '}
+                {targetShown.caret === null ? 'at the end' : 'at the caret you left in its text'}.
+              </span>
+              <button type="button" onClick={() => openTake(targetShown.sentenceId)}>
+                Open it
+              </button>
+              <button type="button" onClick={() => setComposeTarget(null)}>
+                Start a new one instead
+              </button>
+            </>
+          ) : (
+            <span className="muted">Add to sentence starts a new sentence. Nothing plays.</span>
+          )}
+        </div>
+      )}
       {canBuild && (
         <div className="voices-inline sentence-record" role="status">
           {recording ? (
@@ -1634,11 +1903,7 @@ function PalettePanel({
               <span>
                 Recording your performance: {recording.taps} tap{recording.taps === 1 ? '' : 's'}
               </span>
-              <button
-                type="button"
-                className="primary"
-                onClick={() => void stopRecording()}
-              >
+              <button type="button" className="primary" onClick={() => void stopRecording()}>
                 <Square size={13} /> Stop recording
               </button>
               <button
@@ -1700,6 +1965,18 @@ function PalettePanel({
                 <span>{item.text}</span>
                 <span className="muted">{formatMs(item.durationMs)}</span>
               </button>
+              {compose && (
+                <button
+                  type="button"
+                  className="icon-button"
+                  aria-label={`Add “${item.text}” to sentence`}
+                  title="Add to sentence (does not play it)"
+                  aria-disabled={adding || undefined}
+                  onClick={() => add(item)}
+                >
+                  <Plus size={13} />
+                </button>
+              )}
               <button
                 type="button"
                 className="icon-button"
@@ -1773,11 +2050,21 @@ function PalettePanel({
 
 // ---- Performance sets ----------------------------------------------------------------------------
 
+/**
+ * Where a template's typed slot values are kept: by its name and text, not its id, since a template
+ * just added has no id until the companion answers (2.45: a value chosen meanwhile was lost).
+ */
+const templateSlotKey = (t: { name: string; text: string }, key: string) =>
+  `${t.name}|${t.text}|${key}`;
+
 function SetsPanel({
   canBuild,
+  compose,
   openSentence,
 }: {
   canBuild: boolean;
+  /** 2.45: phrase blocks, and voice and block slots in templates. */
+  compose: boolean;
   openSentence: (id: string) => void;
 }) {
   const voices = useVoices();
@@ -1809,12 +2096,38 @@ function SetsPanel({
   const [templates, changeTemplates] = useListSetting(active?.templates ?? [], (next) =>
     update({ templates: next }),
   );
+  const [blocks, changeBlocks] = useListSetting<PhraseBlock>(active?.blocks ?? [], (next) =>
+    update({ blocks: next }),
+  );
   if (!sets || !active) return <p className="muted">Loading your performance sets…</p>;
+  const startFromTemplate = (t: { id: string; text: string }) => {
+    const fields = compose ? templateFields(t.text) : [];
+    const value = (key: string) => slots[templateSlotKey(t, key)] ?? '';
+    const text = compose
+      ? fillTemplate(
+          t.text,
+          Object.fromEntries(
+            fields.filter((f) => f.kind === 'text').map((f) => [f.key, value(f.key)]),
+          ),
+          {
+            voices: Object.fromEntries(
+              fields.filter((f) => f.kind === 'voice').map((f) => [f.key, value(f.key)]),
+            ),
+            blocks,
+            marks: true,
+          },
+        )
+      : fillTemplate(t.text, Object.fromEntries(templateSlots(t.text).map((n) => [n, value(n)])));
+    void create(text, 'template')
+      .then((s) => openSentence(s.id))
+      .catch(() => {});
+  };
   return (
     <div className="sentence-sets">
       <p className="muted">
-        A set holds voice filters, palette favourites and templates, as references to the library:
-        no copies of any audio. Your active set is yours alone.
+        A set holds voice filters, palette favourites, templates
+        {compose ? ' and phrase blocks' : ''}, as references to the library: no copies of any audio.
+        Your active set is yours alone.
       </p>
       <label>
         Active set{' '}
@@ -1881,38 +2194,69 @@ function SetsPanel({
         {active.favorites.length} favourite{active.favorites.length === 1 ? '' : 's'} (star them in
         the palette).
       </p>
+      {compose && (
+        <PhraseBlocks
+          blocks={blocks}
+          change={changeBlocks}
+          voices={voices}
+          canBuild={canBuild}
+          openSentence={openSentence}
+        />
+      )}
       <h3>Templates</h3>
+      {compose && (
+        <p className="muted">
+          In a template, <code>{'{name}'}</code> is filled with words, <code>{'{who:voice}'}</code>{' '}
+          chooses the voice that says the words after it, and <code>{'{Greeting:block}'}</code> uses
+          the phrase block called Greeting, in its voice.
+        </p>
+      )}
       <ul className="sentence-takes" aria-label="Templates">
         {templates.map((t, index) => {
-          const names = templateSlots(t.text);
+          const fields = compose
+            ? templateFields(t.text)
+            : templateSlots(t.text).map((key) => ({ key, name: key, kind: 'text' as const }));
+          const slotKey = (key: string) => templateSlotKey(t, key);
           return (
             <li key={t.id || `new-${index}`}>
               <strong>{t.name}</strong>
               <span className="muted">{t.text}</span>
-              {names.map((n) => (
-                <input
-                  key={n}
-                  aria-label={`${t.name}: ${n}`}
-                  placeholder={n}
-                  value={slots[`${t.id}:${n}`] ?? ''}
-                  onChange={(e) => setSlots({ ...slots, [`${t.id}:${n}`]: e.target.value })}
-                />
-              ))}
+              {fields.map((f) =>
+                f.kind === 'text' ? (
+                  <input
+                    key={f.key}
+                    aria-label={`${t.name}: ${f.name}`}
+                    placeholder={f.name}
+                    value={slots[slotKey(f.key)] ?? ''}
+                    onChange={(e) => setSlots({ ...slots, [slotKey(f.key)]: e.target.value })}
+                  />
+                ) : f.kind === 'voice' ? (
+                  <select
+                    key={f.key}
+                    aria-label={`${t.name}: voice for ${f.name}`}
+                    value={slots[slotKey(f.key)] ?? ''}
+                    onChange={(e) => setSlots({ ...slots, [slotKey(f.key)]: e.target.value })}
+                  >
+                    <option value="">{f.name}: the mix</option>
+                    {voices.map((v) => (
+                      <option key={v.id} value={v.id}>
+                        {f.name}: {v.name}
+                      </option>
+                    ))}
+                  </select>
+                ) : (
+                  <span
+                    key={f.key}
+                    className={blockNamed(blocks, f.name) ? 'badge' : 'badge warning-badge'}
+                  >
+                    {blockNamed(blocks, f.name)
+                      ? `Phrase block ${f.name}`
+                      : `No phrase block called ${f.name}`}
+                  </span>
+                ),
+              )}
               {canBuild && (
-                <button
-                  type="button"
-                  onClick={() =>
-                    void create(
-                      fillTemplate(
-                        t.text,
-                        Object.fromEntries(names.map((n) => [n, slots[`${t.id}:${n}`] ?? ''])),
-                      ),
-                      'template',
-                    )
-                      .then((s) => openSentence(s.id))
-                      .catch(() => {})
-                  }
-                >
+                <button type="button" onClick={() => startFromTemplate(t)}>
                   Use template
                 </button>
               )}
@@ -1950,7 +2294,9 @@ function SetsPanel({
         />
         <input
           aria-label="Template text"
-          placeholder="Hello {name}, behind you"
+          placeholder={
+            compose ? '{who:voice} Hello {name}, behind you' : 'Hello {name}, behind you'
+          }
           value={template.text}
           maxLength={400}
           onChange={(e) => setTemplate({ ...template, text: e.target.value })}
@@ -1960,6 +2306,214 @@ function SetsPanel({
         </button>
       </form>
     </div>
+  );
+}
+
+/**
+ * Phrase blocks (2.45): reusable named words with an optional voice, in the active set. Each can be
+ * renamed or changed, added to the sentence being built (at its caret) or started as a new sentence,
+ * used in templates as {Name:block}, and removed. Names are unique in the set (any case).
+ */
+function PhraseBlocks({
+  blocks,
+  change,
+  voices,
+  canBuild,
+  openSentence,
+}: {
+  blocks: PhraseBlock[];
+  change: (update: (list: PhraseBlock[]) => PhraseBlock[]) => void;
+  voices: Voice[];
+  canBuild: boolean;
+  openSentence: (id: string) => void;
+}) {
+  const { list } = useSentenceStore();
+  const empty = { name: '', text: '', voiceId: '' };
+  const [draft, setDraft] = useState(empty);
+  const [editing, setEditing] = useState<{
+    id: string;
+    name: string;
+    text: string;
+    voiceId: string;
+  } | null>(null);
+  const [busy, setBusy] = useState(false);
+  const taken = (name: string, except?: string) =>
+    blocks.some(
+      (b) =>
+        b.id !== except && b.name.trim().toLocaleLowerCase() === name.trim().toLocaleLowerCase(),
+    );
+  const voiceName = (id: string | null | undefined) =>
+    id ? (voiceById(voices, id)?.name ?? 'a removed voice') : 'the mix';
+  const add = (b: PhraseBlock, fresh: boolean) => {
+    if (busy) return;
+    setBusy(true);
+    if (fresh) setComposeTarget(null);
+    void addToSentence({ text: b.text, voiceId: b.voiceId ?? null }, list?.sentences)
+      .then((s) => {
+        if (fresh) openSentence(s.id);
+        else
+          controller.notify(`Added “${b.name}” to “${s.title || 'the new sentence'}”.`, 'success');
+      })
+      .catch(() => {})
+      .finally(() => setBusy(false));
+  };
+  return (
+    <section className="phrase-blocks" aria-label="Phrase blocks">
+      <h3>Phrase blocks</h3>
+      <p className="muted">
+        Words you say often, each with a name and (if you like) the voice that says them. Add one to
+        the sentence you are building, at its caret, or use it in a template as{' '}
+        <code>{'{Name:block}'}</code>. Nothing plays when you add it.
+      </p>
+      <ul className="sentence-takes" aria-label="Phrase blocks list">
+        {blocks.map((b) =>
+          editing?.id === b.id ? (
+            <li key={b.id}>
+              <form
+                className="voices-inline"
+                aria-label={`Change phrase block ${b.name}`}
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  const name = editing.name.trim().slice(0, 40);
+                  const text = editing.text.trim().slice(0, 400);
+                  if (!name || !text || taken(name, b.id)) return;
+                  change((all) =>
+                    all.map((x) =>
+                      x.id === b.id ? { ...x, name, text, voiceId: editing.voiceId || null } : x,
+                    ),
+                  );
+                  setEditing(null);
+                }}
+              >
+                <input
+                  aria-label="Phrase block name"
+                  value={editing.name}
+                  maxLength={40}
+                  onChange={(e) => setEditing({ ...editing, name: e.target.value })}
+                />
+                <input
+                  aria-label="Phrase block words"
+                  value={editing.text}
+                  maxLength={400}
+                  onChange={(e) => setEditing({ ...editing, text: e.target.value })}
+                />
+                <VoicePick
+                  voices={voices}
+                  value={editing.voiceId}
+                  change={(voiceId) => setEditing({ ...editing, voiceId })}
+                />
+                {taken(editing.name, b.id) && (
+                  <span className="warning">Another block is called that.</span>
+                )}
+                <button type="submit" className="primary">
+                  Save
+                </button>
+                <button type="button" onClick={() => setEditing(null)}>
+                  Cancel
+                </button>
+              </form>
+            </li>
+          ) : (
+            <li key={b.id}>
+              <strong>{b.name}</strong>
+              <span className="muted">
+                “{b.text}” · {voiceName(b.voiceId)}
+              </span>
+              {canBuild && (
+                <>
+                  <button
+                    type="button"
+                    aria-disabled={busy || undefined}
+                    onClick={() => add(b, false)}
+                  >
+                    <Plus size={13} /> Add to sentence
+                  </button>
+                  <button
+                    type="button"
+                    aria-disabled={busy || undefined}
+                    onClick={() => add(b, true)}
+                  >
+                    New sentence
+                  </button>
+                </>
+              )}
+              <button
+                type="button"
+                onClick={() =>
+                  setEditing({ id: b.id, name: b.name, text: b.text, voiceId: b.voiceId ?? '' })
+                }
+              >
+                Edit
+              </button>
+              <button
+                type="button"
+                aria-label={`Remove phrase block ${b.name}`}
+                onClick={() => change((all) => all.filter((x) => x.id !== b.id))}
+              >
+                <Trash2 size={13} />
+              </button>
+            </li>
+          ),
+        )}
+      </ul>
+      <form
+        className="voices-inline"
+        aria-label="New phrase block"
+        onSubmit={(e) => {
+          e.preventDefault();
+          const name = draft.name.trim().slice(0, 40);
+          const text = draft.text.trim().slice(0, 400);
+          if (!name || !text || taken(name) || blocks.length >= 100) return;
+          change((all) => [...all, { id: '', name, text, voiceId: draft.voiceId || null }]);
+          setDraft(empty);
+        }}
+      >
+        <input
+          aria-label="New phrase block name"
+          placeholder="Name, like Greeting"
+          value={draft.name}
+          maxLength={40}
+          onChange={(e) => setDraft({ ...draft, name: e.target.value })}
+        />
+        <input
+          aria-label="New phrase block words"
+          placeholder="The words, like hello there"
+          value={draft.text}
+          maxLength={400}
+          onChange={(e) => setDraft({ ...draft, text: e.target.value })}
+        />
+        <VoicePick
+          voices={voices}
+          value={draft.voiceId}
+          change={(voiceId) => setDraft({ ...draft, voiceId })}
+        />
+        {taken(draft.name) && <span className="warning">Another block is called that.</span>}
+        <button type="submit">
+          <Plus size={13} /> Add phrase block
+        </button>
+      </form>
+    </section>
+  );
+}
+
+function VoicePick({
+  voices,
+  value,
+  change,
+}: {
+  voices: Voice[];
+  value: string;
+  change: (voiceId: string) => void;
+}) {
+  return (
+    <select aria-label="Said by" value={value} onChange={(e) => change(e.target.value)}>
+      <option value="">Said by: the mix</option>
+      {voices.map((v) => (
+        <option key={v.id} value={v.id}>
+          Said by: {v.name}
+        </option>
+      ))}
+    </select>
   );
 }
 

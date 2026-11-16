@@ -1,5 +1,12 @@
 import { z } from 'zod';
-import { effectSchema, paletteRefSchema, templateSchema, type PaletteRef } from '../protocol';
+import {
+  effectSchema,
+  paletteRefSchema,
+  phraseBlockSchema,
+  templateSchema,
+  type PaletteRef,
+  type PhraseBlock,
+} from '../protocol';
 
 /**
  * Sentences, the speaking palette and performance sets (2.42): the companion's replies, and the pure
@@ -42,6 +49,8 @@ export const pieceSchema = z.object({
   namedId: id.nullish(),
   effect: effectSchema.nullish(),
   voiceId: id.nullish(),
+  /** 2.45: a voice slot or a phrase block keeps these words to this voice. */
+  voiceLock: id.nullish(),
   source: partSchema.nullish(),
   parts: z.array(partSchema).max(4).nullish(),
 });
@@ -115,6 +124,26 @@ export const namedSchema = z.object({
   endMs: ms,
   byName: z.string().max(40),
 });
+/** 2.45 (host only): one guest's unkept sentences, which the host may open and clear. */
+export const guestUnkeptSchema = z.object({
+  guestId: z.string().min(1).max(128),
+  ownerName: z.string().max(40),
+  count: z.number().int().min(0),
+  updated: z.number(),
+  sentences: z
+    .array(
+      z.object({
+        id,
+        title: z.string().max(200),
+        text: z.string().max(400),
+        updated: z.number(),
+        origin: z.enum(['typed', 'performance', 'template']),
+        missing: z.number().int().min(0),
+      }),
+    )
+    .max(200),
+});
+export type GuestUnkept = z.infer<typeof guestUnkeptSchema>;
 export const listSchema = z.object({
   revision: z.number().int().min(0),
   canBuild: z.boolean(),
@@ -122,6 +151,7 @@ export const listSchema = z.object({
   problem: z.string().max(2000).nullish(),
   sentences: z.array(listEntrySchema).max(5000),
   named: z.array(namedSchema).max(5000),
+  guestUnkept: z.array(guestUnkeptSchema).max(512).nullish(),
 });
 export type SentenceList = z.infer<typeof listSchema>;
 /**
@@ -203,6 +233,8 @@ export const setSchema = z.object({
   voiceIds: z.array(id).max(256),
   favorites: z.array(paletteRefSchema).max(200),
   templates: z.array(templateSchema).max(100),
+  /** 2.45: absent from older companions, and when the set has none. */
+  blocks: z.array(phraseBlockSchema).max(100).nullish(),
 });
 export type PerformanceSet = z.infer<typeof setSchema>;
 export const setsSchema = z.object({
@@ -382,12 +414,66 @@ export function wordMarks(sentence: Pick<Sentence, 'tokens' | 'pieces'>) {
   });
 }
 
+const SLOT = /\{([^{}]{1,40})\}/g;
 /** Text with slots ({name}) of a template, so a person can fill them in. */
 export function templateSlots(text: string) {
-  return [...new Set([...text.matchAll(/\{([^{}]{1,40})\}/g)].map((m) => m[1]))];
+  return [...new Set([...text.matchAll(SLOT)].map((m) => m[1]))];
 }
-export function fillTemplate(text: string, values: Record<string, string>) {
-  return text.replace(/\{([^{}]{1,40})\}/g, (whole, name: string) => values[name]?.trim() || whole);
+
+/**
+ * A template's slots by kind (2.45): {name} is filled with words, {who:voice} chooses the voice that
+ * says the words after it (up to the next voice slot), and {Greeting:block} is the phrase block of
+ * that name, said in its own voice. `key` is the slot as written.
+ */
+export type TemplateField = { key: string; name: string; kind: 'text' | 'voice' | 'block' };
+export function templateFields(text: string): TemplateField[] {
+  return templateSlots(text).map((key) => {
+    const typed = /^(.*):(voice|block)$/i.exec(key);
+    const name = (typed ? typed[1] : key).trim();
+    return {
+      key,
+      name: name || key,
+      kind: typed ? (typed[2].toLowerCase() as 'voice' | 'block') : 'text',
+    };
+  });
+}
+/** The phrase block a {Name:block} slot means: the same name, in any case. */
+export const blockNamed = (blocks: readonly PhraseBlock[] | null | undefined, name: string) =>
+  blocks?.find((b) => b.name.trim().toLocaleLowerCase() === name.trim().toLocaleLowerCase()) ??
+  null;
+
+/**
+ * Fills a template's slots. Text slots take their words (an empty one stays as written). With
+ * `marks` (a 2.45 companion), voice slots and phrase blocks become voice marks for the companion:
+ * {@<voice id>} before the words a voice says, {@} for the sentence's own mix; a block with a voice
+ * gives the words after it back to the voice before it. Without `marks` voice slots are left out and
+ * blocks are their words.
+ */
+export function fillTemplate(
+  text: string,
+  values: Record<string, string>,
+  extra: {
+    voices?: Record<string, string>;
+    blocks?: readonly PhraseBlock[] | null;
+    marks?: boolean;
+  } = {},
+) {
+  let voice = '';
+  const filled = text.replace(SLOT, (whole, key: string) => {
+    const typed = /^(.*):(voice|block)$/i.exec(key);
+    if (!typed) return values[key]?.trim() || whole;
+    if (typed[2].toLowerCase() === 'voice') {
+      voice = extra.voices?.[key] ?? '';
+      return extra.marks ? ` {@${voice}} ` : ' ';
+    }
+    const block = blockNamed(extra.blocks, typed[1]);
+    if (!block) return ' ';
+    return extra.marks && block.voiceId
+      ? ` {@${block.voiceId}} ${block.text} {@${voice}} `
+      : ` ${block.text} `;
+  });
+  // Slots that became marks or left the text leave no runs of spaces behind.
+  return filled === text ? text : filled.replace(/[ \t]{2,}/g, ' ').trim();
 }
 
 export const formatMs = (value: number) =>
