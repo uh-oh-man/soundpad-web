@@ -163,7 +163,7 @@ Every sound here is in the public domain or released under CC0 1.0, so none of t
 - File downloaded: https://nssdc.gsfc.nasa.gov/planetary/lunar/a11step.aiff
 - Licence: Public domain. NASA mission audio, a work of the U.S. government (not subject to copyright in the U.S.). Also on Commons as File:Phrase_de_Neil_Armstrong.oga with {{PD-USGov-NASA}}.
 - Changes: Decoded the 8-bit signed 22,254 Hz AIFF, ended at 6.66 s (before a static click) with an 80 ms fade-out, resampled to 44.1 kHz mono, peak-normalized to -1 dBFS, MP3 64 kbps mono. The radio hiss is original.
-- Transcript: "That's one small step for man, one giant leap for mankind." Wording as printed on the NASA NSSDC page https://nssdc.gsfc.nasa.gov/planetary/lunar/apollo11.html (NASA's Apollo Lunar Surface Journal writes "for (a) man"). Word times are approximate.
+- Transcript: "That's one small step for man, one giant leap for mankind." Wording as printed on the NASA NSSDC page https://nssdc.gsfc.nasa.gov/planetary/lunar/apollo11.html (NASA's Apollo Lunar Surface Journal writes "for (a) man"). Word times were checked against spectrograms on 2026-11-15 (about ±30 ms).
 
 ## The Eagle Has Landed (Apollo 11) (`apollo11-eagle-landed.mp3`)
 
@@ -173,7 +173,7 @@ Every sound here is in the public domain or released under CC0 1.0, so none of t
 - File downloaded: https://nssdc.gsfc.nasa.gov/planetary/lunar/a11landing.aiff
 - Licence: Public domain. NASA mission audio, a work of the U.S. government (not subject to copyright in the U.S.).
 - Changes: Decoded the 8-bit signed 22,254 Hz AIFF, ended at 3.10 s (before a static burst) with a 60 ms fade-out, resampled to 44.1 kHz mono, peak-normalized to -1 dBFS, MP3 64 kbps mono. The radio hiss is original.
-- Transcript: "Houston, Tranquility Base here. The Eagle has landed." Wording as printed on the NASA NSSDC page https://nssdc.gsfc.nasa.gov/planetary/lunar/apollo11.html Word times are approximate.
+- Transcript: "Houston, Tranquility Base here. The Eagle has landed." Wording as printed on the NASA NSSDC page https://nssdc.gsfc.nasa.gov/planetary/lunar/apollo11.html Word times were checked against spectrograms on 2026-11-15 (about ±30 ms). "Houston" cannot be heard in this file: its first 0.5 s is radio static with no voice in it.
 
 ## Artwork (`art/`)
 

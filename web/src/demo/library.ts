@@ -15,7 +15,10 @@ export type DemoSound = {
   category: string;
   /** Length measured from the file's MP3 frames; the decoded length replaces it once loaded. */
   durationMs: number;
-  /** Speech clips: the published wording with approximate word times (about ±0.15 s). */
+  /**
+   * Speech clips: the published wording with word times checked against spectrograms in the audio-quality
+   * evaluation (2.45, companion/harness/AudioQualityEval.cs; about ±0.03 s).
+   */
   words?: DemoWord[];
 };
 
@@ -151,8 +154,8 @@ export const DEMO_SOUNDS: DemoSound[] = [
     durationMs: 6713,
     words: [
       { w: "That's", startMs: 100, endMs: 290 },
-      { w: 'one', startMs: 320, endMs: 540 },
-      { w: 'small', startMs: 860, endMs: 1170 },
+      { w: 'one', startMs: 320, endMs: 500 },
+      { w: 'small', startMs: 500, endMs: 1170 },
       { w: 'step', startMs: 1180, endMs: 1510 },
       { w: 'for', startMs: 1700, endMs: 1810 },
       { w: 'man,', startMs: 1850, endMs: 2180 },
@@ -171,14 +174,15 @@ export const DEMO_SOUNDS: DemoSound[] = [
     category: 'Speech',
     durationMs: 3161,
     words: [
-      { w: 'Houston,', startMs: 300, endMs: 680 },
-      { w: 'Tranquility', startMs: 740, endMs: 1380 },
-      { w: 'Base', startMs: 1440, endMs: 1620 },
-      { w: 'here.', startMs: 1620, endMs: 1740 },
-      { w: 'The', startMs: 2040, endMs: 2140 },
-      { w: 'Eagle', startMs: 2140, endMs: 2440 },
-      { w: 'has', startMs: 2440, endMs: 2640 },
-      { w: 'landed.', startMs: 2700, endMs: 3000 },
+      // "Houston" is lost in the radio static that opens this clip: it keeps the static's time.
+      { w: 'Houston,', startMs: 80, endMs: 505 },
+      { w: 'Tranquility', startMs: 510, endMs: 1140 },
+      { w: 'Base', startMs: 1170, endMs: 1400 },
+      { w: 'here.', startMs: 1465, endMs: 1740 },
+      { w: 'The', startMs: 2045, endMs: 2205 },
+      { w: 'Eagle', startMs: 2205, endMs: 2470 },
+      { w: 'has', startMs: 2470, endMs: 2650 },
+      { w: 'landed.', startMs: 2700, endMs: 3060 },
     ],
   },
 ];
