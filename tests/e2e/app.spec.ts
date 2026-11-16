@@ -3524,7 +3524,11 @@ test('Panic stops playback and holds guest playback until the host resumes; Shif
 });
 
 test.describe('with a Soundpad that takes 40 ms to answer', () => {
-  test.use({ harnessOptions: ['--latency-ms', '40'] });
+  // Root cause of this test's old flake (2.45): the mock's sounds last 2.5 s. Under load (two suites at
+  // once), more than 2.5 s could pass between the last play of a burst and the Stop click, so the sound
+  // had ended, the guest's Stop was disabled (nothing playing) and the click waited until the timeout.
+  // Sounds here last a minute, so something is always playing when Stop is pressed.
+  test.use({ harnessOptions: ['--latency-ms', '40', '--sound-ms', '60000'] });
   test('Stop wins: after a burst of plays Soundpad ends stopped, and nothing starts after the Stop', async ({
     page,
     harness,

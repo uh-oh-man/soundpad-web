@@ -502,6 +502,10 @@ HarnessStageH.MockReady(args, mock, directory);
 // Soundpad request take N ms; --slow-add-ms N makes only an import into Soundpad (DoAddSound) take N ms longer.
 int Option(string name) { int at = Array.IndexOf(args, name); return at >= 0 && at + 1 < args.Length && int.TryParse(args[at + 1], out int value) && value is >= 0 and <= 3000 ? value : 0; }
 mock.LatencyMs = Option("--latency-ms"); mock.SlowMs = Option("--slow-add-ms"); mock.SlowPrefix = "DoAddSound(";
+// --sound-ms N (2.45): every library sound plays for N ms instead of 2.5 s (at most 10 minutes), for tests that must
+// still have something playing after slow steps (the "Stop wins" burst under load).
+int soundMsAt = Array.IndexOf(args, "--sound-ms");
+if (soundMsAt >= 0 && soundMsAt + 1 < args.Length && int.TryParse(args[soundMsAt + 1], out int soundMs) && soundMs is > 0 and <= 600000) mock.DurationMs = soundMs;
 using var pipe = new SoundpadPipe(mock.Name, true);
 HarnessStageH.BeforeBridge(args, directory);
 using var bridge = new Bridge(pipe, new StateStore(directory));

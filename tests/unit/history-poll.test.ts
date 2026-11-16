@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { historyPoller } from '../../web/src/mimic/history-poll';
+import { historyPoller, viewStillWanted } from '../../web/src/mimic/history-poll';
 
 /**
  * Review finding (2.41): dragging the recording overview restarted the Mimic fetch loop on every pointer move,
@@ -99,5 +99,27 @@ describe('Mimic history fetch loop', () => {
     await vi.advanceTimersByTimeAsync(1100);
     expect(calls).toBe(3);
     loop.stop();
+  });
+});
+
+/**
+ * 2.45 (the WebKit Mimic flake): a waveform asked for while following live arrived after a drag had held the view
+ * still, moved the window, and the next press missed the selection's edge handle.
+ */
+describe('a waveform reply fits the view wanted now', () => {
+  const live = { follow: true, viewEnd: 0 };
+  const held = (viewEnd: number) => ({ follow: false, viewEnd });
+  it('keeps a live reply while still following', () => {
+    expect(viewStillWanted(live, { follow: true, viewEnd: 123 })).toBe(true);
+  });
+  it('drops a live reply once a drag held the view still', () => {
+    expect(viewStillWanted(live, held(48000))).toBe(false);
+  });
+  it('keeps a held reply only for the same frame', () => {
+    expect(viewStillWanted(held(48000), held(48000))).toBe(true);
+    expect(viewStillWanted(held(48000), held(96000))).toBe(false);
+  });
+  it('drops a held reply once the view follows live again', () => {
+    expect(viewStillWanted(held(48000), live)).toBe(false);
   });
 });
