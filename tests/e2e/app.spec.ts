@@ -1439,6 +1439,7 @@ test('Mimic: host listens, everyone sees it, and a selection becomes a playable 
   await dialog.getByRole('button', { name: 'Clear' }).click();
   await zoom.getByRole('button', { name: '30 s', exact: true }).click();
   // Picking a key another app owns is refused even while the hotkey is off (the harness pretends F9 is taken).
+  await dialog.getByText('Mimic settings', { exact: true }).click();
   await dialog.getByLabel('Hotkey key', { exact: true }).selectOption('F9');
   await expect(page.getByText('F9 is already used by another app', { exact: false })).toBeVisible();
   await expect(dialog.getByLabel('Hotkey key', { exact: true })).toHaveValue('F6');
