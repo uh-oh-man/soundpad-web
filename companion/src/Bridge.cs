@@ -175,12 +175,12 @@ public sealed partial class Bridge(ISoundpad pipe, StateStore store) : IDisposab
         if (ExecuteFeedback(c, actor, participant, requester, audience) is { } feedback) return feedback;
         if (await ExecuteKeep(c, actor, participant, requester, audience) is { } keep) return keep;
         if (await ExecuteVoices(c, actor, participant, requester, audience) is { } voices) return voices;
-        var query = await Query(c, actor); if (query != null) return query;
+        var query = await Query(c, actor, participant, requester); if (query != null) return query;
         // A sound whose file is missing is never sent to Soundpad to play (2.44): its reaction is unknown.
         if (c.Op is "play" or "startAt" or "region" && MissingRefusal(c) is { } miss) return miss;
         if (c.Op == "stop") return await ExecuteStop(c, actor, requester, audience, intent);
         if (c.Op == "panic") return await ExecutePanic(c, actor, intent);
-        if (c.Op is "reverse" or "audioPlay" or "keepAudio" or "removeAudio" or "retryAudio" or "retryCleanup" or "cleanupCategories" or "clearTemp" or "beginSession" or "endSession" || (c.Op is "play" or "startAt" or "region" && c.SoundId != null && managed?.Annotation(c.SoundId) is { Kind: not "native" })) return await ExecuteAudio(c, actor, participant, intent, requester, audience);
+        if (c.Op is "reverse" or "audioPlay" or "keepAudio" or "removeAudio" or "tempRemoveMine" or "tempRestore" or "retryAudio" or "retryCleanup" or "cleanupCategories" or "clearTemp" or "beginSession" or "endSession" || (c.Op is "play" or "startAt" or "region" && c.SoundId != null && managed?.Annotation(c.SoundId) is { Kind: not "native" })) return await ExecuteAudio(c, actor, participant, intent, requester, audience);
         return await ExecutePlain(c, actor, participant, requester, audience, intent);
     }
     /// <summary>The guest rules of the plain commands; throws the refusal the guest is shown.</summary>

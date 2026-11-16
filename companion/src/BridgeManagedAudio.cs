@@ -36,23 +36,26 @@ public sealed partial class Bridge
             }
         }
     }
+    /// <summary>Whether the poll would retry recovery or cleanup now (tests, 2.46).</summary>
+    internal bool AudioRecoveryDue => managed?.RecoveryDue == true;
     private bool GuestStillAllowed(string actor, string? requester, string? audience) => actor == "host" ||
         (disk.Permissions.RemotePlayback && (audioAudience == null || sessionAccepting && audience == audioAudience) && (requester == null || !revokedAudioPeers.ContainsKey(requester)));
     private void AudioPermission(Command command, string actor, string? requester, string? audience, Participant? participant = null)
     {
         long now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
         if (command.V is not (1 or 2) || !Guid.TryParseExact(command.Id, "D", out _) || Math.Abs(now - command.At) > 90000) throw new InvalidDataException("Invalid or expired audio command.");
-        if (actor != "host" && command.Op == "removeAudio")
+        if (actor != "host" && command.Op is "removeAudio" or "tempRemoveMine" or "tempRestore")
         {
             // Undo for guests (2.32): a guest may take back only temporary audio they added themselves (an
-            // upload, edited copy or Mimic clip), while the host still allows guests to add audio.
-            if (requester == null || !disk.Permissions.GuestUploads || (audioAudience != null && (!sessionAccepting || audience != audioAudience)) || revokedAudioPeers.ContainsKey(requester))
+            // upload, edited copy or Mimic clip), while the host still allows guests to add audio. Since 2.46 that is
+            // uploads or Mimic: a guest allowed only Mimic could make clips but never remove them.
+            if (requester == null || !(disk.Permissions.GuestUploads || disk.Permissions.GuestMimic) || (audioAudience != null && (!sessionAccepting || audience != audioAudience)) || revokedAudioPeers.ContainsKey(requester))
                 throw new InvalidDataException("The host has not allowed guests to add or remove audio.");
-            var asset = Audio.AssetById(command.AssetId ?? "");
-            // Their own: added from this connection, or (2.40) by this participant in this launch, also before a reload.
-            bool own = asset.UploaderId == requester || budgets.OwnerOf(asset.Id) is { } maker && maker == PersonKey(actor, participant, requester);
-            if (!own || asset.State == "permanent" || asset.Promotion != null || asset.Variants.Any(v => v.Permanent || v.LegacyApproval))
-                throw new InvalidDataException("Guests can remove only temporary audio they added themselves.");
+            if (command.Op == "tempRemoveMine") return;
+            // An Undo may name a source that is gone meanwhile (Clear Temp): nothing of it comes back, and it says so.
+            foreach (var id in command.Op == "tempRestore" ? RestoreIds(command).Where(id => Audio.OwnerOf(id) != null) : [command.AssetId ?? ""])
+                if (!GuestRemovable(id, actor, participant, requester))
+                    throw new InvalidDataException("Guests can remove only temporary audio they added themselves.");
             return;
         }
         if (actor != "host" && command.Op == "keepAudio")
@@ -69,6 +72,20 @@ public sealed partial class Bridge
             if (command.Op is "startAt" or "region" && !disk.Permissions.GuestSeeking) throw new InvalidDataException("Guest seeking is disabled.");
         }
     }
+    /// <summary>Added by this guest: from this connection, or (2.40) by this participant in this launch, also before a reload.</summary>
+    /// <summary>A guest's own source that is only temporary audio (never kept, nor being kept).</summary>
+    private bool GuestRemovable(string assetId, string actor, Participant? participant, string? requester) =>
+        Audio.OwnerOf(assetId) is { OnlyTemporary: true } owner
+        && (requester != null && owner.UploaderId == requester || budgets.OwnerOf(assetId) is { } maker && maker == PersonKey(actor, participant, requester));
+    /// <summary>The sources an Undo of a removal names (2.46): its assetIds, or its one assetId.</summary>
+    private static string[] RestoreIds(Command c) =>
+        c.AssetIds is { Length: > 0 and <= 256 } ids ? [.. ids.Distinct(StringComparer.Ordinal)] : c.AssetId is { } one ? [one] : throw new InvalidDataException("Choose what to bring back.");
+    /// <summary>
+    /// The Temp sources this guest may remove (2.46): the ids in the Temp list's answer, so their page offers Remove
+    /// on exactly their own clips, and what "Remove all my Temp clips" removes.
+    /// </summary>
+    private string[] GuestOwnTemp(string actor, Participant? participant, string? requester) =>
+        [.. Audio.Public.Assets.Where(a => a.HasTemporary && GuestRemovable(a.Id, actor, participant, requester)).Select(a => a.Id)];
     private Task<Reply> ExecuteAudio(Command c, string actor, Participant? participant, Intent? intent, string? requester, string? audience)
     {
         if (c.Op == "endSession" && actor == "host") sessionAccepting = false;
@@ -253,8 +270,8 @@ public sealed partial class Bridge
                     var assetId = c.AssetId ?? throw new InvalidDataException("Choose a managed source.");
                     // Undo (2.30; guests 2.32, for their own audio): "stopIfPlaying" stops the sound first only when it is this source that
                     // the companion itself started (Save & play, Mimic & play). Soundpad can't say what is
-                    // playing, but the companion knows what it last played. Anything else keeps playing, and
-                    // Remove then refuses as before.
+                    // playing, but the companion knows what it last played. Anything else keeps playing (and since
+                    // 2.46 the removal goes ahead; its files go once Soundpad is quiet).
                     if (c.Action == "stopIfPlaying" && (actor == "host" || disk.Permissions.RemotePlayback) && playback.SoundId is string current
                         && parsed.Public.Sounds.FirstOrDefault(s => s.Id == current)?.AssetId == assetId
                         && await pipe.Request("GetPlayStatus()") != "STOPPED")
@@ -264,7 +281,38 @@ public sealed partial class Bridge
                         await StopNow(ReserveInternal(true));
                         for (int i = 0; i < 20 && await pipe.Request("GetPlayStatus()") != "STOPPED"; i++) await Task.Delay(100);
                     }
+                    // Since 2.46 a removal no longer waits for Soundpad to be quiet: the files go once it is. Only the
+                    // source's own playback, which the companion started, is still refused without "stopIfPlaying".
+                    else if (playback.SoundId is string playing && parsed.Public.Sounds.FirstOrDefault(s => s.Id == playing)?.AssetId == assetId
+                        && await pipe.Request("GetPlayStatus()") != "STOPPED")
+                        throw new InvalidDataException("Stop playback before removing this audio. Nothing was removed.");
                     await Audio.Remove(assetId);
+                }
+                else if (c.Op == "tempRemoveMine")
+                {
+                    // A guest's "Remove all my Temp clips" (2.46): every temporary source of theirs, in one go.
+                    if (actor == "host") throw new InvalidDataException("Use Clear all temporary audio.");
+                    var mine = GuestOwnTemp(actor, participant, requester);
+                    if (c.Action == "stopIfPlaying" && disk.Permissions.RemotePlayback && playback.SoundId is string current
+                        && parsed.Public.Sounds.FirstOrDefault(s => s.Id == current)?.AssetId is { } playingAsset && mine.Contains(playingAsset)
+                        && await pipe.Request("GetPlayStatus()") != "STOPPED")
+                    {
+                        await StopNow(ReserveInternal(true));
+                        for (int i = 0; i < 20 && await pipe.Request("GetPlayStatus()") != "STOPPED"; i++) await Task.Delay(100);
+                    }
+                    var removed = mine.Length == 0 ? [] : await Audio.RemoveMany(mine);
+                    Log($"A guest removed {removed.Length} of their Temp clip(s)");
+                    await gate.EnterAsync(PriorityGate.Lane.Normal); try { await RefreshInner(); SaveAudioReceipt(c); Publish(); } finally { gate.Release(); }
+                    return new("ack", c.Id, true, Data: new { removed = removed.Length, assetIds = removed });
+                }
+                else if (c.Op == "tempRestore")
+                {
+                    // Undo of a removal in this launch (2.46), while its files are still there.
+                    int restored = 0; var back = new List<string>();
+                    foreach (var id in RestoreIds(c)) if (await Audio.Restore(id) > 0) { restored++; back.Add(id); }
+                    if (restored == 0) throw new InvalidDataException("It is already gone from Soundpad, so it can't come back.");
+                    await gate.EnterAsync(PriorityGate.Lane.Normal); try { await RefreshInner(); SaveAudioReceipt(c); Publish(); } finally { gate.Release(); }
+                    return new("ack", c.Id, true, Data: new { restored, assetIds = back });
                 }
                 else if (c.Op == "retryAudio") await Audio.RetryAsset(c.AssetId ?? throw new InvalidDataException("Choose a managed source."));
                 else if (c.Op == "keepAudio" && actor != "host") await GuestKeep(c, actor, participant, requester);
@@ -323,7 +371,7 @@ public sealed partial class Bridge
     }
     private async Task RecoverAudioIfDue(bool force)
     {
-        if (!recoveryPending && (managed == null || !managed.Public.Assets.Any(a => a.State is "waiting-soundpad" or "promotion-pending" or "cleanup-pending"))) return;
+        if (!recoveryPending && (managed == null || !managed.RecoveryDue)) return;
         if (!force && Environment.TickCount64 < nextAudioRecovery || !audioGate.TryEnter()) return;
         try
         {

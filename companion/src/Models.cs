@@ -88,7 +88,9 @@ public record Command(int V, string Id, long At, string Op, string? SoundId = nu
     // uiPrefsSet (2.43): the style fields to change, checked field by field by UiPrefsStore.
     JsonElement? UiPrefs = null,
     // Stage H (2.44): the one payload field of every Stage H command, checked strictly by the command's own handler.
-    JsonElement? Body = null);
+    JsonElement? Body = null,
+    // tempRestore (2.46): the Temp sources whose removal is undone (a guest's "Remove all my Temp clips").
+    string[]? AssetIds = null);
 /// <summary>The details of a sentence or palette command (2.42); null fields are not part of the request.</summary>
 public sealed record SentenceInput(string? Do = null, string? Text = null, string[]? Pieces = null, double? OffsetMs = null, long? StartMs = null, long? EndMs = null,
     double? FadeInMs = null, double? FadeOutMs = null, double? Gain = null, bool? Balanced = null, double? DurationMs = null, string? Mode = null, PieceEffect? Effect = null,

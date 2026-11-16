@@ -64,16 +64,71 @@ public sealed partial class ManagedAudioStore
         source.Retired = true; source.Current = false; source.LegacyApproval = false;
         plan.State = "committed"; asset.State = "permanent"; asset.ModifiedAt = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(); ClearIssues(asset, "promotion", "legacy-approval"); Save();
     }
+    /// <summary>
+    /// Retires a source's temporary files and cleans them up. Since 2.46 this no longer waits for Soundpad to be
+    /// quiet: the files are only marked here, and nothing is deleted while a sound plays (Cleanup checks that again
+    /// before every change), so the files go once Soundpad is quiet. With the real Soundpad they wait for the app's
+    /// Temp category to go, as one, when the companion quits or Temp is cleared (see <see cref="Deferred"/>). The
+    /// caller decides about the source's own playback (Bridge: Undo stops it, otherwise a playing source is refused).
+    /// </summary>
     public async Task Remove(string assetId)
     {
         RequireWritable(); var asset = Asset(assetId);
-        var status = await Native(() => pipe.Request("GetPlayStatus()"));
-        if (status != "STOPPED") throw new InvalidDataException("Stop playback before removing temporary audio. No playing file was removed.");
-        if (asset.Promotion is { State: not "committed" }) throw new InvalidDataException("Resolve the pending permanent save first. Its source must remain available for recovery.");
-        foreach (var variant in asset.Variants.Where(v => v.OwnsFile && !v.Permanent && !v.LegacyApproval && v.Storage is "session" or "legacy" && v.State != "removed")) variant.Retired = true;
-        if (asset.Input != null) asset.Input.State = "retired";
-        asset.State = "cleanup-pending"; Save(); await Cleanup(assetId);
+        Retire(asset); Save(); await Cleanup(assetId);
     }
+    /// <summary>Removes several sources at once (2.46, a guest's "Remove all my Temp clips"): one save and one cleanup.</summary>
+    public async Task<string[]> RemoveMany(IReadOnlyCollection<string> assetIds)
+    {
+        RequireWritable();
+        var assets = assetIds.Select(Asset).Where(a => a.Promotion is not { State: not "committed" }).ToArray();
+        foreach (var asset in assets) Retire(asset);
+        Save();
+        foreach (var asset in assets) await Cleanup(asset.Id);
+        return [.. assets.Select(a => a.Id)];
+    }
+    private void Retire(AudioAsset asset)
+    {
+        if (asset.Promotion is { State: not "committed" }) throw new InvalidDataException("Resolve the pending permanent save first. Its source must remain available for recovery.");
+        var retired = new List<string>();
+        foreach (var variant in asset.Variants.Where(v => v.OwnsFile && !v.Permanent && !v.LegacyApproval && v.Storage is "session" or "legacy" && v.State != "removed" && !v.Retired)) { variant.Retired = true; retired.Add(variant.Id); }
+        if (retired.Count > 0) lock (removedNow) removedNow[asset.Id] = [.. retired];
+        if (asset.Input != null) asset.Input.State = "retired";
+        asset.State = "cleanup-pending";
+    }
+    /// <summary>The variants each Remove in this launch retired (2.46), which Undo may bring back while their files are still there.</summary>
+    private readonly Dictionary<string, string[]> removedNow = new(StringComparer.Ordinal);
+    /// <summary>
+    /// Undo of a Remove in this launch (2.46): the files it retired come back, as long as each one is still on disk
+    /// unchanged and still listed in Soundpad. With the real Soundpad that is until the companion quits or Temp is
+    /// cleared; with a pipe that removes entries itself, until the cleanup ran. Returns how many files came back.
+    /// </summary>
+    public async Task<int> Restore(string assetId)
+    {
+        RequireWritable(); var asset = journal.Assets.SingleOrDefault(a => a.Id == assetId);
+        if (asset == null) return 0; // forgotten after Clear Temp
+        string[] ids; lock (removedNow) ids = removedNow.GetValueOrDefault(asset.Id) ?? [];
+        var candidates = asset.Variants.Where(v => ids.Contains(v.Id) && v.Retired && v.OwnsFile && !v.Permanent && !v.LegacyApproval && v.State == "ready" && v.Native is { VerifiedAt: > 0 } && ManagedFiles.Verified(v.Path, v.FileHash, v.Bytes)).ToArray();
+        if (candidates.Length == 0) return 0;
+        var catalog = await Native(() => ManagedSoundpad.Read(pipe));
+        var back = candidates.Where(v => catalog.Entries.Count(e => e.Path.Equals(v.Path, StringComparison.OrdinalIgnoreCase)) == 1).ToArray();
+        if (back.Length == 0) return 0;
+        foreach (var variant in back) variant.Retired = false;
+        lock (removedNow) removedNow.Remove(asset.Id);
+        ClearIssues(asset, "cleanup-file", "native-removal-required");
+        asset.State = asset.Variants.Any(v => v.Permanent && v.Current) ? "permanent" : asset.Variants.Any(v => v.Retired && v.OwnsFile && !v.Permanent && v.State != "removed") ? "cleanup-pending" : "temporary";
+        Save();
+        return back.Length;
+    }
+    /// <summary>
+    /// A retired temporary file that waits for the app's Temp category to go rather than being removed by itself
+    /// (2.46). The real Soundpad cannot remove one entry safely (only the test pipes can, see
+    /// <see cref="IAtomicOwnedEntryRemoval"/>), so while the session is open such a file stays in the Temp category,
+    /// unlisted in the app, until the companion quits or Temp is cleared, which removes the category with its entries.
+    /// That is no problem to report and no reason to retry every few seconds.
+    /// </summary>
+    private bool Deferred(AudioVariant v) => journal.SessionOpen && !CanRemoveEntries && journal.TempCategory is { State: "created" }
+        && v.Retired && v.OwnsFile && !v.Permanent && !v.LegacyApproval && v.Storage == "session" && v.State == "ready" && v.Native is { VerifiedAt: > 0 };
+    private bool CanRemoveEntries => pipe is IAtomicOwnedEntryRemoval { CanRemoveOwnedAtomically: true };
     /// <summary>The app's temporary files as they stand (2.40 crash recovery): each source and its owned, not yet removed temporary variants and staged input.</summary>
     public TemporaryFiles[] CurrentTemporaryFiles() =>
         [.. journal.Assets.Select(a => new TemporaryFiles(a.Id, [.. a.Variants.Where(v => v.OwnsFile && !v.Permanent && !v.LegacyApproval && v.State != "removed").Select(v => v.Id)], a.Input?.Path))
@@ -220,7 +275,9 @@ public sealed partial class ManagedAudioStore
         catch (Exception ex) when (ex is not OutOfMemoryException) { Issue(null, "native-unavailable", "Cleanup is waiting for Soundpad. All files and permanent copies are preserved.", "info"); Save(); return; }
         if (status != "STOPPED")
         {
-            if (journal.Assets.Any(a => a.Variants.Any(v => v.Retired && v.State != "removed"))) { Issue(null, "playback-active", "Cleanup is paused while playback is active or its status is unknown. It will retry after playback stops.", "info"); Save(); }
+            // A file removed during the session just waits for quiet (2.46); only the cleanup of a whole session or of
+            // Clear Temp is reported as paused.
+            if ((!journal.SessionOpen || everything) && journal.Assets.Any(a => a.Variants.Any(v => v.Retired && v.State != "removed"))) { Issue(null, "playback-active", "Cleanup is paused while playback is active or its status is unknown. It will retry after playback stops.", "info"); Save(); }
             return;
         }
         journal.Issues.RemoveAll(i => i.Code is "native-unavailable" or "playback-active");
@@ -230,6 +287,8 @@ public sealed partial class ManagedAudioStore
             if (asset.Promotion is { State: not "committed" }) continue;
             foreach (var variant in asset.Variants.Where(v => v.Retired && v.OwnsFile && !v.Permanent && !v.LegacyApproval && v.Storage is "session" or "legacy" && v.State != "removed").ToArray())
             {
+                // Waits, quietly, for the Temp category to go with its entries (2.46). Clear Temp removes that category first.
+                if (!everything && Deferred(variant)) continue;
                 try
                 {
                     bool canDelete = await Native(async () =>
