@@ -4,6 +4,8 @@
     <AssemblyName>SoundpadWeb</AssemblyName><Version>2.45.0</Version><RuntimeIdentifier>win-x64</RuntimeIdentifier>
     <PublishSingleFile>true</PublishSingleFile><SelfContained>true</SelfContained><IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
     <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile><DebugType>embedded</DebugType><PublishReferencesDocumentationFiles>false</PublishReferencesDocumentationFiles>
+    <!-- The app icon (2.46, "Minimal orbit"): the EXE, and so the window, which takes the EXE's icon. -->
+    <ApplicationIcon>app.ico</ApplicationIcon>
   </PropertyGroup>
   <ItemGroup><Compile Remove="tests/**/*.cs;harness/**/*.cs;update-fixture/**/*.cs"/><FrameworkReference Include="Microsoft.AspNetCore.App"/></ItemGroup>
   <ItemGroup><EmbeddedResource Include="../docs/licenses/*.txt" Link="Licenses/%(Filename)%(Extension)"/></ItemGroup>
