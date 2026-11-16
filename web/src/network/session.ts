@@ -1505,7 +1505,8 @@ export class Session {
   }
   /** Board counters are identical for admitted guests. Share an outstanding read for the same snapshot. */
   private guestResult(c: Command, state: Snapshot, run: () => Promise<unknown>) {
-    if (c.op !== 'statistics' || c.soundId || state.statisticsVersion === undefined) return run();
+    if (c.op !== 'statistics' || c.soundId !== undefined || state.statisticsVersion === undefined)
+      return run();
     const version = `${state.statisticsVersion}:${state.library.version}`;
     if (this.guestTotals?.version === version) return this.guestTotals.promise;
     const promise = run().finally(() => {
