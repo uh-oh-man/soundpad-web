@@ -164,7 +164,8 @@ revision rises on every change; pages fetch `organizeGet`.
 - Every test's `MockSoundpad` fails on dispose if a forbidden command reached it (`AllowForbiddenCommands`
   opts out). Its new options keep the old behaviour by default: `NestedIndexing` (`Append` | `DepthFirst`),
   `DuplicateOnAdd` (default true, as before), `InsertPositions`, `RemoveCategoryScope` (`EveryOccurrence` |
-  `Exclusive`), `ApplyLagReads`, `ExitOnRiskyRemoval`, `BeforeCommand`.
+  `Exclusive`), `ApplyLagReads`, `SoundlistLagReads` (All sounds lags behind the categories after an add, as
+  measured), `ExitOnRiskyRemoval`, `BeforeCommand`.
 - Harness: `--missing-fixture` (a sound in Reactions whose file does not exist, and the file scan on),
   `--organize-duplicates` (the mock lists an added sound twice; without it the harness's mock does not).
   Verbs: `library-mutate <json>` (`addCategory`, `removeCategory`, `renameCategory`, `addSound`,
@@ -172,26 +173,42 @@ revision rises on every change; pages fetch `organizeGet`.
   `reject-prefix <text>` (the mock refuses those commands; empty clears).
 - e2e: `tests/e2e/organize.spec.ts` (Chromium and WebKit).
 
-## Not verified on the real Soundpad
+## Measured on the real Soundpad (2026-11-15)
 
-Nothing in 2.44 runs Organize against the real Soundpad. Tested against the test Soundpad only, so unknown:
+`--real-organize-probe` ran Organize against the owner's Soundpad 4.0.35 three times, only in new categories named
+"SPW probe <time>…" holding one-second tones of its own, and left the list exactly as it was. What it found:
 
-- how Soundpad numbers categories when one is created inside another (Organize offers that as a guided step);
-- whether `DoAddSound` of a path already in All sounds lists it twice (the first such Apply measures it and
-  pauses);
-- Soundpad's insert-position semantics for `DoAddSound` (Organize always adds at the end);
-- what removing a category does to sounds that are also in other categories (Organize removes only empty
-  categories);
-- Soundpad's reaction to playing a missing file (Organize never sends it);
-- category names with parentheses or commas inside a quoted command argument.
+- **`DoAddSound(path, index, position)`** is accepted with `-1` (end), `1` (first) and `n` (before the nth entry).
+  The entry lands in that category at that place and gets the next index at the end of All sounds.
+- **Every `DoAddSound` makes a new All sounds entry**, also for a file that is already there (a second category, or
+  the same category again). The first add on a Soundpad therefore always measures `duplicates` and pauses.
+- **Soundpad shows a sound in its category a moment (up to about 60 ms) before All sounds lists the new entry.** Apply's verification
+  now waits until the category's entry is in All sounds (`NativeTree.Listed`). Before that fix, a read in between
+  could record "no second entry" (seen once: the fourth add of the first probe run).
+- **Sub-categories are numbered depth first.** `DoAddCategory(name, parent)` makes a sub-category whose index is its
+  parent's + 1; every later category moves up by one. `NativeTree`'s indexes match what Soundpad expects: an add
+  and a removal with the index read just before reached the sub-category. Organize still creates only top-level
+  categories (a sub-category stays a guided step).
+- **Removing a category removes exactly its own entries.** The same file in another category stays there and in
+  All sounds once per remaining entry. (The test Soundpad's `RemoveCategoryScope` options both differ from this:
+  `EveryOccurrence` removes every entry with that path. Organize only removes empty categories, so it does not
+  depend on it.)
+- **Names with `(`, `)` and `,`** inside the quoted argument are taken as they are ("SPW probe … (empty, x)").
+- **Soundpad saves `soundlist.spl` on its own timer: every 5 minutes, and only when the list changed** (writes at
+  19:58:19, 20:03:19, 20:13:19 and 20:18:19; none at the 5-minute marks when nothing had changed). So the checkpoint's
+  `.spl.bak` can be up to about 5 minutes older than what Soundpad holds, and a change made just before Apply may
+  be missing from it. The checkpoint's `.v1.json` (the tree Apply read) is always exact.
+- Apply of 7 steps (create, 4 adds, an empty-category removal, one guided rename) took about 2.5 s to the
+  duplicates pause and finished after Continue; "Remove the empty categories this plan created" removed the plan's
+  empty new category in about 1.2 s (its quiet second included).
 
-### A future opt-in probe (design only, not built)
+Still unknown: Soundpad's reaction to playing a missing file (Organize never sends it).
 
-A `--real-organize-probe` harness mode could answer the questions above on the owner's Soundpad, following
-the repo's real-Soundpad test permissions: back up `%APPDATA%\Leppsoft\soundlist.spl` and the companion's
-data first; work only in two new top-level categories with a random tag in their names; create a category,
-add one existing library sound to it at the end, read whether All sounds gained an entry, try names with
-`(`, `)` and `,`, create a nested category by hand and read the numbering; then remove both tagged categories
-behind the quiet rule (each empty first) and verify the library is exactly as before. It must never play a
-missing file, never remove a category with sounds, and stop at the first unexpected result. No code path for
-this exists in 2.44.
+### The probe
+
+`SoundpadWeb.Harness.exe --real-organize-probe --data-dir <short folder in the temp folder> [--spl-watch-s 60]`
+(`companion/harness/RealOrganizeProbe.cs`). It refuses while the companion or VRChat runs or Soundpad is busy, plays
+nothing, uses a real Bridge on a throwaway data folder inside `--data-dir` for the plan, and removes its categories
+deepest first, each after Stop, 2 s stopped and a re-read, then compares the exact `GetSoundlist` and
+`GetCategories` text with the start and waits (up to 330 s) for Soundpad's next save to put `soundlist.spl` back.
+Back up `%APPDATA%\Leppsoft` first.

@@ -240,7 +240,10 @@ public sealed partial class Bridge
                     var oldSignature = NativeTree.Signature(target);
                     var expectedSignatures = new List<string>(beforeSignatures); expectedSignatures.Remove(oldSignature); expectedSignatures.Add(grown);
                     var withDuplicate = new List<string>(beforeSounds) { path.Replace('/', '\\').ToUpperInvariant() }; withDuplicate.Sort(StringComparer.Ordinal);
-                    expected = after => Same(after.Signatures(), expectedSignatures) && (after.SoundPaths().SequenceEqual(beforeSounds) || after.SoundPaths().SequenceEqual(withDuplicate));
+                    // Only once All sounds lists the category's entry: Soundpad shows the category first, and a read in
+                    // between would look like "no second entry" and measure the wrong add behaviour.
+                    var addedPath = path;
+                    expected = after => Same(after.Signatures(), expectedSignatures) && after.Listed(addedPath) && (after.SoundPaths().SequenceEqual(beforeSounds) || after.SoundPaths().SequenceEqual(withDuplicate));
                     break;
                 case "removeCategory":
                     target = before.Find(step.Target!, out var moved);

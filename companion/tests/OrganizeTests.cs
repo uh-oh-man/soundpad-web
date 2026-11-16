@@ -300,6 +300,36 @@ public sealed class OrganizeTests : IDisposable
     }
 
     [Fact]
+    public async Task TheDuplicateMeasurementWaitsUntilAllSoundsListsTheNewEntry()
+    {
+        // The real Soundpad (4.0.35, 2026-11-15) shows an added sound in its category a moment (up to about 60 ms) before All sounds
+        // lists the new entry. A read in between must not count as "no second entry".
+        var h = await Start(m => { m.DuplicateOnAdd = true; m.SoundlistLagReads = 2; });
+        try
+        {
+            var b = h.Bridge; var empty = OrganizeKit.Cat(b, "Empty category");
+            await OrganizeKit.Edit(b, new { kind = "addSound", soundId = OrganizeKit.Id(b, "Airhorn"), categoryId = empty, categoryName = "Empty category" });
+            var paused = await OrganizeKit.Apply(b);
+            Assert.Equal("duplicates", OrganizeKit.Plan(paused).GetProperty("paused").GetString());
+            Assert.True(OrganizeKit.Steps(paused)[0].GetProperty("addedToAllSounds").GetBoolean());
+            Assert.Equal("duplicates", new OrganizeFiles(folder).ReadSettings().AddBehaviour);
+        }
+        finally { await Stop(h); }
+    }
+
+    [Fact]
+    public void ACategoryEntryIsListedOnlyOnceAllSoundsHasItsIndex()
+    {
+        const string soundlist = "<Soundlist><Sound index=\"1\" url=\"a.wav\" /></Soundlist>";
+        const string categories = "<Categories><Category index=\"1\" type=\"1\" name=\"All sounds\" /><Category index=\"2\" name=\"One\"><Sound index=\"1\" url=\"a.wav\" /><Sound index=\"2\" url=\"a.wav\" /></Category></Categories>";
+        Assert.False(NativeTree.Parse(soundlist, categories).Listed("A.WAV"));
+        const string both = "<Soundlist><Sound index=\"1\" url=\"a.wav\" /><Sound index=\"2\" url=\"a.wav\" /></Soundlist>";
+        Assert.True(NativeTree.Parse(both, categories).Listed("A.WAV"));
+        // Soundpad versions that give no index: nothing to wait for.
+        Assert.True(NativeTree.Parse(soundlist, "<Categories><Category index=\"2\" name=\"One\"><Sound url=\"a.wav\" /></Category></Categories>").Listed("A.WAV"));
+    }
+
+    [Fact]
     public async Task GuestsProposeWithinLimitsAndNeverApply()
     {
         var h = await Start();

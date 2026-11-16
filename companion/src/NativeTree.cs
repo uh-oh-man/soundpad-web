@@ -16,6 +16,8 @@ public sealed record NativeNode(int Index, string Name, string? Type, string[] C
     /// <summary>A stable fingerprint of what is in it: SHA-256 of its sounds' upper-cased paths, sorted.</summary>
     public string PathsHash => NativeTree.HashPaths(Paths);
     public CategoryRef Ref => new(Name, Chain, PathsHash);
+    /// <summary>The All sounds index each of <see cref="Paths"/> refers to, in the same order (-1 when Soundpad gave none).</summary>
+    public int[] EntryIndexes { get; init; } = [];
 }
 /// <summary>
 /// What a step remembers about a category (2.44): its name, its parents' names and what is in it. Indexes shift, so
@@ -39,6 +41,22 @@ public sealed class NativeTree
     public IEnumerable<NativeNode> Categories => All.Where(n => !n.Builtin);
     public NativeNode? ByIndex(int index) => All.FirstOrDefault(n => n.Index == index);
     public int Count(string path) => Entries.Count(e => string.Equals(e.Path, path, StringComparison.OrdinalIgnoreCase));
+    /// <summary>
+    /// True when every category entry for this path is already in the sound list (All sounds) under the index the
+    /// category gives. Soundpad shows a sound in its category a moment (up to about 60 ms) before its All sounds list has the new entry
+    /// (measured on Soundpad 4.0.35, 2026-11-15), so a read in between looks as if no entry was added.
+    /// </summary>
+    public bool Listed(string path)
+    {
+        foreach (var node in All)
+            for (int i = 0; i < node.Paths.Length; i++)
+            {
+                if (!string.Equals(node.Paths[i], path, StringComparison.OrdinalIgnoreCase) || i >= node.EntryIndexes.Length || node.EntryIndexes[i] < 0) continue;
+                int index = node.EntryIndexes[i];
+                if (!Entries.Any(e => e.Index == index && string.Equals(e.Path, path, StringComparison.OrdinalIgnoreCase))) return false;
+            }
+        return true;
+    }
     public static string HashPaths(IEnumerable<string> paths) =>
         Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(string.Join("\n", paths.Select(p => p.Replace('/', '\\').ToUpperInvariant()).Order(StringComparer.Ordinal))))).ToLowerInvariant();
     private static XDocument Xml(string text, string root)
@@ -64,7 +82,7 @@ public sealed class NativeTree
         {
             if (depth > 16) throw new InvalidDataException("Category tree too deep.");
             int index = (int?)e.Attribute("index") ?? -1; var name = (string?)e.Attribute("name") ?? "";
-            var placeholder = new NativeNode(index, name, (string?)e.Attribute("type"), chain, [.. e.Elements("Sound").Select(s => (string?)s.Attribute("url") ?? "")], [], parent);
+            var placeholder = new NativeNode(index, name, (string?)e.Attribute("type"), chain, [.. e.Elements("Sound").Select(s => (string?)s.Attribute("url") ?? "")], [], parent) { EntryIndexes = [.. e.Elements("Sound").Select(s => (int?)s.Attribute("index") ?? -1)] };
             int at = flat.Count; flat.Add(placeholder);
             var children = e.Elements("Category").Select(c => Node(c, [.. chain, name], index, depth + 1)).ToArray();
             var node = placeholder with { Children = children };

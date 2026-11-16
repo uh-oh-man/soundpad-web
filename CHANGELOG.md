@@ -7,6 +7,7 @@ Notable changes to Soundpad Web. Versions follow the website's `package.json`; t
 ### Fixed
 
 - **Exact cue starts and regions work from the start of a session on the real Soundpad.** Soundpad lists the first file added to a new category about 100 ms after it accepts it, and the companion checked only once, straight away. So in a new session the slot files behind exact cue starts never registered (every cue start and region played the older way, start then seek), and the first upload or copy into a new Temp category could be left "not verified". The companion now waits up to 2 seconds for Soundpad to list the file. Found by the first run of the exact-playback check on the owner's Soundpad 4.0.35; after the fix, 17 of 18 measured cue starts and regions played exactly the wanted audio with nothing before or after it.
+- **Organize asks about duplicates in All sounds reliably.** Soundpad shows a sound in its category a moment before it adds the new entry to All sounds, and Apply could check in between. It then recorded "no second entry" for that sound, and for the first add on a Soundpad it would have remembered "Soundpad doesn't list sounds twice" and never asked. Apply now waits until All sounds lists the entry. Found by the first run of Organize on the owner's Soundpad 4.0.35, which also showed that Soundpad lists a sound once more in All sounds every time it is added to a category.
 
 ## 2.44.0 — Backups, updates, Organize and setup
 

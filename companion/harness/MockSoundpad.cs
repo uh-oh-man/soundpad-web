@@ -68,6 +68,13 @@ public sealed class MockSoundpad : IAsyncDisposable
     /// <summary>After a change, this many library reads still describe the library as it was (Soundpad applies changes a moment later).</summary>
     public int ApplyLagReads { get; set; }
     private int lagLeft;
+    /// <summary>
+    /// After a DoAddSound, this many GetSoundlist() reads still give the sound list from before it while the categories
+    /// already show the new entry, as the real Soundpad 4.0.35 does for up to about 60 ms (measured 2026-11-15).
+    /// </summary>
+    public int SoundlistLagReads { get; set; }
+    private int soundlistLagLeft;
+    private string? soundlistLag;
     private string? lagAll, lagCategories;
     /// <summary>A risky category removal (see <see cref="RiskyRemovals"/>) makes the mock stop answering, as the real Soundpad exited once.</summary>
     public bool ExitOnRiskyRemoval { get; set; }
@@ -164,6 +171,7 @@ public sealed class MockSoundpad : IAsyncDisposable
             foreach (var e in all.Root.Elements("Sound")) e.SetAttributeValue("index", indexes[(int)e.Attribute("index")!]);
         }
         if (ApplyLagReads > 0) { lagAll = AllXml; lagCategories = CategoryXml; lagLeft = ApplyLagReads; }
+        if (SoundlistLagReads > 0 && command.StartsWith("DoAddSound(", StringComparison.Ordinal)) { soundlistLag = AllXml; soundlistLagLeft = SoundlistLagReads; }
         AllXml = all.ToString(); CategoryXml = cats.ToString(); return "R-200";
     }
     private long startedTick, position;
@@ -265,6 +273,7 @@ public sealed class MockSoundpad : IAsyncDisposable
                     if (RejectPrefix is { } rejected && command.StartsWith(rejected)) { await server.WriteAsync(Encoding.UTF8.GetBytes("R-500"), cancel.Token); continue; }
                     bool lagging = lagLeft > 0 && command is "GetSoundlist()" or "GetCategories(true, true)" or "GetCategories(true, false)";
                     if (lagging) lagLeft--;
+                    if (!lagging && command == "GetSoundlist()" && soundlistLagLeft > 0) { soundlistLagLeft--; await server.WriteAsync(Encoding.UTF8.GetBytes(soundlistLag!), cancel.Token); continue; }
                     string result = lagging ? LaggingRead(command) : command switch { "GetSoundlist()" => AllXml, "GetCategories(true, true)" => CategoryXml, "GetCategories(false, false)" => CategoriesMetadata(), "GetCategories(true, false)" => CategoriesMetadata(true), "GetPlayStatus()" => ReportStatus(), "GetPlaybackPositionInMs()" => ReportPosition().ToString(), "GetPlaybackDurationInMs()" => CurrentDuration.ToString(), "IsAlive()" => "R-200", _ => command.StartsWith("Do") ? "R-200" : "R-404" };
                     if (command.StartsWith("FixtureRemoveOwnedEntry(") || command.StartsWith("DoAdd") || command.StartsWith("DoRemoveCategory(") || command.StartsWith("DoSelectCategory(") || command.StartsWith("DoSelectIndex(") || command.StartsWith("DoRemoveSelectedEntries(")) result = Manage(command);
                     if (Exited) break;
