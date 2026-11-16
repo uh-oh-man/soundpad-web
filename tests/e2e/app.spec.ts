@@ -1330,7 +1330,7 @@ test('Mimic: host listens, everyone sees it, and a selection becomes a playable 
   }
   await dialog.getByLabel('Clip name').fill('Fixture mimic');
   await dialog.getByRole('button', { name: 'Mimic & play' }).click();
-  const sound = page.getByRole('button', { name: 'Play from start: Fixture mimic', exact: true });
+  const sound = dialog.getByRole('button', { name: /Replay Fixture mimic/ });
   await expect(sound).toBeEnabled();
   await expect.poll(() => harness.plays).toContain('DoPlaySound(5)');
   // The clip can be replayed from the window without hunting for it on the board.
@@ -1345,7 +1345,7 @@ test('Mimic: host listens, everyone sees it, and a selection becomes a playable 
     .toBe(true);
   await expect(page.locator('.player-track')).toContainText('Fixture mimic (reversed)');
   // Trim saves an exact copy as a new Temp sound and keeps the original.
-  await page.keyboard.press('Escape');
+  await closeSection(page, 'Mimic');
   await openTemp(page);
   const source = page
     .locator('.temp-source')
@@ -1507,9 +1507,7 @@ test('Mimic transcript: words appear, a click and a Shift-click select them, and
     await expect(button).toHaveAttribute('aria-pressed', 'true');
   await expect(dialog.getByLabel('Clip name')).toHaveAttribute('placeholder', words);
   await captureAndKeep(dialog);
-  await expect(
-    page.getByRole('button', { name: `Play from start: ${words}`, exact: true }),
-  ).toBeEnabled();
+  await expect(dialog.getByRole('button', { name: `Replay ${words}` })).toBeEnabled();
   // Turning transcripts off stops recognising; the words already recognised stay with the history.
   await setMimicTranscription(dialog, false);
   await expect(
@@ -1517,7 +1515,7 @@ test('Mimic transcript: words appear, a click and a Shift-click select them, and
   ).toBeVisible();
 });
 
-test('Mimic keyboard: number keys grab recent audio, Enter captures and keeps, Escape clears before closing', async ({
+test('Mimic keyboard: number keys grab recent audio, Enter captures and keeps, Escape clears without leaving the view', async ({
   page,
   harness,
 }) => {
@@ -1545,9 +1543,7 @@ test('Mimic keyboard: number keys grab recent audio, Enter captures and keeps, E
   await expect(dialog.getByRole('region', { name: 'Draft' })).toBeVisible();
   await expect(name).toBeFocused();
   await page.keyboard.press('Enter');
-  await expect(
-    page.getByRole('button', { name: 'Play from start: Key mimic', exact: true }),
-  ).toBeEnabled();
+  await expect(dialog.getByRole('button', { name: 'Replay Key mimic' })).toBeEnabled();
   // Escape puts the draft away (it stays in the draft history).
   await name.blur();
   await page.keyboard.press('Escape');
@@ -1558,7 +1554,7 @@ test('Mimic keyboard: number keys grab recent audio, Enter captures and keeps, E
   await page.keyboard.press('Escape');
   await expect(dialog.locator('.mimic-range')).toHaveCount(0);
   await expect(dialog).toBeVisible();
-  await page.keyboard.press('Escape');
+  await closeSection(page, 'Mimic');
   await expect(dialog).toHaveCount(0);
 });
 
@@ -1686,7 +1682,7 @@ test('Mimic history: a guest sees only what was recorded since they joined, unle
   await dialog.getByRole('button', { name: 'Start listening' }).click();
   await expect(dialog.getByRole('status').first()).toContainText('Listening to Fixture');
   await page.waitForTimeout(6000); // six seconds the guest was not there for
-  await page.keyboard.press('Escape');
+  await closeSection(page, 'Mimic');
   const guest = await joinGuest(page);
   const hostView = (await sendCommand(page, 'historyTimeline')).data as HistoryView;
   expect(hostView.available[0].startFrame).toBe(0);
@@ -1854,7 +1850,7 @@ test('Mimic drafts: a guest previews privately only what was recorded since join
   await dialog.getByRole('button', { name: 'Start listening' }).click();
   await expect(dialog.getByRole('status').first()).toContainText('Listening to Fixture');
   await page.waitForTimeout(5000); // five seconds the guest was not there for
-  await page.keyboard.press('Escape');
+  await closeSection(page, 'Mimic');
   const guest = await joinGuest(page);
   const view = (await sendCommand(guest, 'historyTimeline')).data as HistoryView;
   const sourceId = view.sessionId;
@@ -2857,7 +2853,7 @@ test('Mimic: the host imports a clip from Voice Replay Studio into Temp', async 
   await expect(list.getByRole('listitem')).toHaveCount(2);
   await list.getByRole('button', { name: 'Import Fixture hello there' }).click();
   await expect(page.getByText('Imported “Fixture hello there” into Temp.')).toBeVisible();
-  await page.keyboard.press('Escape');
+  await closeSection(page, 'Mimic');
   await expect(
     page.getByRole('button', { name: 'Play from start: Fixture hello there', exact: true }),
   ).toBeEnabled();
@@ -2868,6 +2864,7 @@ test('Mimic: the host imports a clip from Voice Replay Studio into Temp', async 
   await dialog
     .getByRole('button', { name: 'Import & play Fixture see you later', exact: true })
     .click();
+  await closeSection(page, 'Mimic');
   await expect(
     page.getByRole('button', { name: 'Play from start: Fixture see you later', exact: true }),
   ).toBeEnabled();
@@ -2957,6 +2954,7 @@ test('Mimic: a fresh clip can be played with a quick effect', async ({ page, har
   const dialog = page.getByRole('main', { name: 'Mimic', exact: true });
   await dialog.getByRole('button', { name: 'Start listening' }).click();
   await page.waitForTimeout(2600);
+  await dialog.getByRole('heading', { name: 'Mimic' }).focus();
   await page.keyboard.press('5');
   await dialog.getByLabel('Clip name').fill('Effect me');
   // 2.40: Enter captures a draft, and Enter again keeps it in Temp.
@@ -2967,6 +2965,7 @@ test('Mimic: a fresh clip can be played with a quick effect', async ({ page, har
   await expect(recent.getByRole('button', { name: /Replay Effect me/ })).toBeVisible();
   const playsBefore = harness.plays.length;
   await recent.getByLabel('Play Effect me with an effect').selectOption('slow-voice');
+  await closeSection(page, 'Mimic');
   await expect(
     page.getByRole('button', {
       name: 'Play from start: Effect me (0.5x speed, same pitch)',
@@ -2984,6 +2983,7 @@ test('Mimic: Edit on a fresh clip opens its Edit copy in Temp', async ({ page, h
   const dialog = page.getByRole('main', { name: 'Mimic', exact: true });
   await dialog.getByRole('button', { name: 'Start listening' }).click();
   await page.waitForTimeout(2600);
+  await dialog.getByRole('heading', { name: 'Mimic' }).focus();
   await page.keyboard.press('5');
   await dialog.getByLabel('Clip name').fill('Trim me');
   // 2.40: Enter captures a draft, and Enter again keeps it in Temp.
@@ -3017,11 +3017,12 @@ test('Mimic: Undo on the clip notice takes a clip made by mistake back out (host
   const dialog = page.getByRole('main', { name: 'Mimic', exact: true });
   await dialog.getByRole('button', { name: 'Start listening' }).click();
   await page.waitForTimeout(2600);
+  await dialog.getByRole('heading', { name: 'Mimic' }).focus();
   await page.keyboard.press('5');
   await dialog.getByLabel('Clip name', { exact: true }).fill('Oops');
   // Mimic & play: the clip is playing when Undo is pressed, so Undo stops it first.
   await page.keyboard.press('Shift+Enter');
-  const clip = page.getByRole('button', { name: 'Play from start: Oops', exact: true });
+  const clip = dialog.getByRole('button', { name: /Replay Oops/ });
   await expect(clip).toBeEnabled({ timeout: TEMP_READY });
   const notice = page.getByRole('status').filter({ hasText: 'mimicked “Oops”' });
   await notice.getByRole('button', { name: 'Undo' }).click();
@@ -3043,6 +3044,7 @@ test('Mimic: Keep on a fresh clip opens Keep permanently for it in Temp (host)',
   let dialog = await openMimic();
   await dialog.getByRole('button', { name: 'Start listening' }).click();
   await page.waitForTimeout(2600);
+  await dialog.getByRole('heading', { name: 'Mimic' }).focus();
   await page.keyboard.press('5');
   await dialog.getByLabel('Clip name').fill('Keeper');
   // 2.40: Enter captures a draft, and Enter again keeps it in Temp.
@@ -3083,6 +3085,7 @@ test('Edit copy: with transcripts on, a plain trim is named after its words', as
   await dialog.getByRole('button', { name: 'Start listening' }).click();
   await setMimicTranscription(dialog);
   await page.waitForTimeout(2600);
+  await dialog.getByRole('heading', { name: 'Mimic' }).focus();
   await page.keyboard.press('5');
   await dialog.getByLabel('Clip name').fill('Words test');
   // 2.40: Enter captures a draft, and Enter again keeps it in Temp.
@@ -3100,6 +3103,7 @@ test('Edit copy: with transcripts on, a plain trim is named after its words', as
   await expect(form).not.toContainText('named after its words');
   await form.getByRole('combobox').selectOption('none');
   await form.getByRole('button', { name: 'Save copy' }).click();
+  await closeSection(page, 'Mimic');
   await expect(
     page.getByRole('button', { name: /^Play from start: Fixture tone \d+.* \(trimmed\)$/ }).first(),
   ).toBeEnabled({ timeout: TEMP_READY });
@@ -3150,6 +3154,7 @@ test('accessibility: no serious or critical axe violations in the newer controls
   const dialog = page.getByRole('main', { name: 'Mimic', exact: true });
   await dialog.getByRole('button', { name: 'Start listening' }).click();
   await page.waitForTimeout(2600);
+  await dialog.getByRole('heading', { name: 'Mimic' }).focus();
   await page.keyboard.press('5');
   await dialog.getByLabel('Clip name').fill('Scan clip');
   // 2.40: Enter captures a draft, and Enter again keeps it in Temp.
@@ -3179,6 +3184,7 @@ test('Mimic on a phone: a fresh clip keeps its name readable beside Edit, Keep a
   const dialog = page.getByRole('main', { name: 'Mimic', exact: true });
   await dialog.getByRole('button', { name: 'Start listening' }).click();
   await page.waitForTimeout(2600);
+  await dialog.getByRole('heading', { name: 'Mimic' }).focus();
   await page.keyboard.press('5');
   await dialog
     .getByLabel('Clip name', { exact: true })
@@ -3369,6 +3375,7 @@ test('Mimic fits a phone: header keeps Settings on screen and long clip names do
   const noticeBox = (await page.locator('.notification-stack').boundingBox())!;
   expect(noticeBox.y).toBeGreaterThan(closeBox.y + closeBox.height);
   await page.waitForTimeout(2600);
+  await dialog.getByRole('heading', { name: 'Mimic' }).focus();
   await page.keyboard.press('5');
   await dialog
     .getByLabel('Clip name')
@@ -3377,10 +3384,11 @@ test('Mimic fits a phone: header keeps Settings on screen and long clip names do
   await page.keyboard.press('Enter');
   await expect(dialog.getByRole('region', { name: 'Draft' })).toBeVisible();
   await page.keyboard.press('Enter');
+  await dialog.getByRole('button', { name: 'Clips', exact: true }).click();
   await expect(dialog.getByRole('region', { name: 'Just mimicked' })).toBeVisible();
   const pastDialog = await page.evaluate(() => {
-    const edge = document.querySelector('#editor-panel')!.getBoundingClientRect().right + 1;
-    return [...document.querySelectorAll('#editor-panel *')].filter(
+    const edge = document.querySelector('#mimic-page')!.getBoundingClientRect().right + 1;
+    return [...document.querySelectorAll('#mimic-page *')].filter(
       (e) => e.getBoundingClientRect().right > edge,
     ).length;
   });
@@ -3802,7 +3810,9 @@ test.describe('with a Soundpad that takes 1.5 s to import a file', () => {
     await dialog.getByRole('button', { name: 'Mimic & play' }).click();
     await playButton(guest, 'Airhorn').click();
     // The clip is finished and added, but only the guest's newer click is heard.
-    await expect(playButton(page, 'Late clip')).toBeEnabled({ timeout: TEMP_READY });
+    await expect(dialog.getByRole('button', { name: /Replay Late clip/ })).toBeEnabled({
+      timeout: TEMP_READY,
+    });
     await expect.poll(() => harness.soundpad.slice(before)).toEqual(['DoPlaySound(1)']);
     await page.waitForTimeout(1500);
     expect(harness.soundpad.slice(before)).toEqual(['DoPlaySound(1)']);
