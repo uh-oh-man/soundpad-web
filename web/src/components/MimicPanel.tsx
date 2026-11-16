@@ -61,7 +61,7 @@ export function MimicPanel({
   const mimic = state.mimic;
   const active = !!mimic?.active;
   const allowed = host || state.permissions.guestMimic === true;
-  /** The example session (2.41) shows the older Mimic and says so. */
+  /** The example session: since 2.43 it has the recording history too, and the intro says what it listens to. */
   const demo = useSyncExternalStore(controller.subscribe, () => controller.getSnapshot().demo);
   // A 2.39 companion keeps a rolling recording history: its own view replaces the live 30 s buffer below.
   const historyMode = supports(state.companionVersion, 'history');
