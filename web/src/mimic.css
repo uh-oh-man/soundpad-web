@@ -413,6 +413,32 @@
 .mimic-transcript .mimic-word:hover {
   background: color-mix(in srgb, var(--accent) 12%, transparent);
 }
+/* The word being heard (2.45): lit while a word, a waveform click or a preview plays it. The colour change eases
+   in; with reduced motion every word of the play is lit at once (playing-static) and nothing moves or fades. */
+.mimic-transcript .mimic-word.playing {
+  background: color-mix(in srgb, var(--accent) 30%, transparent);
+  box-shadow: inset 0 -2px 0 var(--accent);
+  color: var(--text-primary);
+  transition: background-color 120ms ease-out;
+}
+.mimic-transcript .mimic-word.playing-static {
+  transition: none;
+  animation: none;
+}
+.mimic-play-mode,
+.mimic-play-mode > [role='radiogroup'] {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 12px;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+.mimic-play-mode label {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
 /* Uncertain words: the word or its edges may be wrong, so they are marked rather than hidden. */
 .mimic-transcript .mimic-word.uncertain {
   text-decoration: underline dotted color-mix(in srgb, var(--text-dim) 80%, transparent);
