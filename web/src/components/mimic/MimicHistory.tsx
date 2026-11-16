@@ -83,7 +83,7 @@ import {
 } from '../../library/voices';
 import { MimicWave } from './MimicWave';
 import { MimicOverview } from './MimicOverview';
-import { historyPoller } from '../../mimic/history-poll';
+import { historyPoller, viewStillWanted } from '../../mimic/history-poll';
 import { mimicKeysApply } from './keys';
 import { useFollowNewest } from '../../mimic/follow';
 import { followFocus } from '../../focus-follow';
@@ -320,6 +320,11 @@ export function MimicHistory({
             ),
           );
           if (!alive() || currentSession.current !== session) return;
+          // Held still or moved meanwhile (2.45): this window is not the one wanted now, so it would shift the view.
+          if (!viewStillWanted(v, viewRef.current)) {
+            poller.current?.nudge();
+            return;
+          }
           setMain({
             end: e,
             peaks: [...new Array(lead).fill(0), ...toPeaks(reply.levels)],

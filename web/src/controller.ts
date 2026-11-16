@@ -48,6 +48,7 @@ import {
 } from './network/identity';
 import { notify, type NoticeAction, type NoticeKind } from './notifications';
 import { APP_VERSION, companionAtLeast, supports } from './version';
+import { commandDetails } from './technical-details';
 import type { SharedLayout, Organization } from './shared-layout';
 // Types only: the example session's code is loaded on demand (see `startDemo`), never with this page.
 import type { DemoModel } from './demo/model';
@@ -298,8 +299,8 @@ export class Controller {
       this.bridge?.post(fits ? info : { ...info, layouts: [] });
     }, 250);
   }
-  notify = (message: string, kind: NoticeKind = 'info', action?: NoticeAction) =>
-    notify(message, kind, action);
+  notify = (message: string, kind: NoticeKind = 'info', action?: NoticeAction, details?: string) =>
+    notify(message, kind, action, details);
   async start() {
     if (this.initialized) return;
     this.initialized = true;
@@ -867,7 +868,24 @@ export class Controller {
           },
         });
       }
-      if (!quiet) this.notify(errorMessage(e, 'Command failed.'), 'error');
+      if (!quiet) {
+        // 2.45: the error notice says what was asked and what came back (paths hidden on a guest's page).
+        const message = errorMessage(e, 'Command failed.');
+        this.notify(
+          message,
+          'error',
+          undefined,
+          commandDetails({
+            op,
+            id: c.id,
+            error: message,
+            role: this.view.mode,
+            companion: this.view.state.companionVersion,
+            website: APP_VERSION,
+            at: Date.now(),
+          }),
+        );
+      }
       throw e;
     }
   }

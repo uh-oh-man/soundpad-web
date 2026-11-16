@@ -218,6 +218,8 @@ const FEATURE_OPS: Record<Feature, Op[]> = {
     'sentenceList',
     'sentenceDiscard',
   ],
+  // 2.45 (WP4): host only, never in the example (DEMO_COMPANION stays below 2.45 until integration).
+  diagnostics: ['activityAdd', 'activityList', 'diagnosticsLog'],
 };
 
 /** What the example honestly cannot do, and the reason it gives. Each must be refused with exactly that. */

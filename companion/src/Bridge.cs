@@ -173,6 +173,7 @@ public sealed partial class Bridge(ISoundpad pipe, StateStore store) : IDisposab
         if (c.Op == "revokePeer" && actor == "host" && c.GuestId is { Length: > 0 and <= 128 } guestId) ForgetGuest(guestId);
         if (ExecuteUiPrefs(c, actor) is { } ui) return ui;
         if (ExecuteFeedback(c, actor, participant, requester, audience) is { } feedback) return feedback;
+        if (ExecuteDiagnostics(c, actor) is { } diagnostics) return diagnostics;
         if (await ExecuteKeep(c, actor, participant, requester, audience) is { } keep) return keep;
         // 2.45 (WP2): Recover previous session / Discard, and a guest's storage action history.
         if (await ExecuteRecovery(c, actor, participant, requester, audience) is { } recovery) return recovery;

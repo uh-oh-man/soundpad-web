@@ -122,7 +122,9 @@ or "all off" and is left untouched until the host changes the setting), keep unk
 - Host-wide hotkeys are fixtures; `Ctrl+Alt+F9` plays a key another app owns.
 - Verbs: `soundpad-offline` / `soundpad-online` (the mock answers R-500 to everything and Soundpad "is not
   running", or comes back) and `press-hotkey capture|panic|stop`.
-- `tests/e2e/setup.spec.ts` raises snapshots below 2.44 to 2.44.0 until the release bumps the companion's version.
+- The harness reports the companion's own version (2.44.0 since the 2.44 release bump). `tests/e2e/setup.spec.ts`
+  still raises any snapshot below 2.44 to 2.44.0, so its tests don't depend on the harness's version; a newer
+  version is left as it is.
 
 ## Not proven
 

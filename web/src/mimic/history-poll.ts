@@ -94,3 +94,14 @@ export function historyPoller(
     busy: () => running,
   };
 }
+
+/** The view a pass asked for: following live, or held at a frame. */
+export type WantedView = { follow: boolean; viewEnd: number };
+/**
+ * Whether a waveform reply asked for with view `asked` still fits the view wanted `now` (2.45). A reply asked for
+ * while following live can arrive after a drag held the view still (or a held view went back to live); applying it
+ * moved the shown window by the time it was on its way, so a selection's edge slid away from where it was drawn
+ * and the next press missed its handle (the WebKit Mimic flake). Such a reply is dropped and fetched again.
+ */
+export const viewStillWanted = (asked: WantedView, now: WantedView) =>
+  asked.follow ? now.follow : !now.follow && now.viewEnd === asked.viewEnd;

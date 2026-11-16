@@ -12,6 +12,7 @@ import {
 import { requestEditor } from '../shell';
 import { watchFocusClearance } from '../focus-clear';
 import { useNoticeSlot } from './Modal';
+import { TechnicalDetails } from './TechnicalDetails';
 
 const NARROW = '(max-width: 1000px)';
 const narrowNow = () => {
@@ -97,17 +98,23 @@ export function Notifications() {
 }
 
 function NoticeCard({ notice }: { notice: Notice }) {
+  // An error's technical details (2.45): while they are open the card stays, wherever the pointer goes.
+  const details = notice.kind === 'error' ? notice.details : undefined;
+  const reading = useRef(false);
+  const release = () => {
+    if (!reading.current) holdNotice(notice.id, false);
+  };
   return (
     <div
-      className={`toast notice-${notice.kind}`}
+      className={`toast notice-${notice.kind}${details ? ' has-details' : ''}`}
       role={notice.kind === 'error' ? 'group' : 'status'}
       aria-label={notice.kind === 'error' ? 'Error notice' : undefined}
       aria-live="off"
       onPointerEnter={() => holdNotice(notice.id, true)}
-      onPointerLeave={() => holdNotice(notice.id, false)}
+      onPointerLeave={release}
       onFocus={() => holdNotice(notice.id, true)}
       onBlur={(e) => {
-        if (!e.currentTarget.contains(e.relatedTarget as Node | null)) holdNotice(notice.id, false);
+        if (!e.currentTarget.contains(e.relatedTarget as Node | null)) release();
       }}
     >
       {notice.kind === 'error' ? (
@@ -136,6 +143,15 @@ function NoticeCard({ notice }: { notice: Notice }) {
       >
         <X size={15} />
       </button>
+      {details && (
+        <TechnicalDetails
+          details={details}
+          onToggle={(open) => {
+            reading.current = open;
+            holdNotice(notice.id, open);
+          }}
+        />
+      )}
     </div>
   );
 }

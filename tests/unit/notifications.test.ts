@@ -4,13 +4,17 @@ import {
   dismissNotice,
   expireNotices,
   markActivitySeen,
+  holdNotice,
   noticeActionRan,
   noticeState,
   notify,
   onNoticePushed,
   resetNotices,
+  restoreNoticeHistory,
   runNoticeAction,
+  setDetailsContext,
 } from '../../web/src/notifications';
+import { commandDetails, redactPaths } from '../../web/src/technical-details';
 
 beforeEach(() => {
   vi.useFakeTimers();
@@ -35,12 +39,12 @@ it('keeps at most four visible notices and deduplicates by text', () => {
   ]);
 });
 
-it('keeps the last 50 notices in Activity', () => {
-  for (let i = 0; i < 60; i++) notify(`N${i}`);
+it('keeps the last 200 notices in Activity (50 before 2.45)', () => {
+  for (let i = 0; i < 210; i++) notify(`N${i}`);
   const { history } = noticeState();
-  expect(history).toHaveLength(50);
-  expect(history[0].message).toBe('N59');
-  expect(history[49].message).toBe('N10');
+  expect(history).toHaveLength(200);
+  expect(history[0].message).toBe('N209');
+  expect(history[199].message).toBe('N10');
 });
 
 it('tells listeners about each push exactly once (the single announcer)', () => {
@@ -97,4 +101,80 @@ it('counts notices since Activity was looked at', () => {
   expect(noticeState().unread).toBe(0);
   notify('c');
   expect(noticeState().unread).toBe(1);
+});
+
+// 2.45 (D07): technical details on error notices, and Activity brought back from the companion.
+it('gives every error notice technical details, its own or the page context', () => {
+  setDetailsContext(() => 'Page: host\nWebsite: 2.45.0');
+  try {
+    notify('Saved', 'success');
+    notify('Soundpad refused', 'error');
+    notify('Upload failed', 'error', undefined, 'Command: upload\nError: 413');
+    const { notices, history } = noticeState();
+    expect(notices[0].details).toBeUndefined();
+    expect(notices[1].details).toBe(
+      'Time: 2026-11-14T12:00:00.000Z\nPage: host\nWebsite: 2.45.0\nMessage: Soundpad refused',
+    );
+    expect(notices[2].details).toBe('Command: upload\nError: 413');
+    expect(history[0].details).toBe('Command: upload\nError: 413');
+  } finally {
+    setDetailsContext(null);
+  }
+});
+
+it('holds a notice with details while someone reads them, then lets it go', () => {
+  const id = notify('Failed', 'error', undefined, 'Error: x');
+  holdNotice(id, true);
+  vi.advanceTimersByTime(20000);
+  expireNotices();
+  expect(noticeState().notices).toHaveLength(1);
+  holdNotice(id, false);
+  vi.advanceTimersByTime(3001);
+  expireNotices();
+  expect(noticeState().notices).toHaveLength(0);
+});
+
+it('restores Activity from the companion once, in time order, without buttons or unread', () => {
+  const now = Date.now();
+  notify('Fresh on this page');
+  markActivitySeen();
+  const entries = [
+    { id: 'c1', kind: 'error' as const, text: 'Older error', at: now - 5000, details: 'Error: x' },
+    { id: 'c2', kind: 'success' as const, text: 'Newer', at: now - 1000, details: null },
+  ];
+  expect(restoreNoticeHistory(entries)).toBe(2);
+  expect(restoreNoticeHistory(entries)).toBe(0);
+  const { history, unread } = noticeState();
+  expect(history.map((h) => h.message)).toEqual(['Fresh on this page', 'Newer', 'Older error']);
+  expect(history[2]).toMatchObject({ restored: true, details: 'Error: x', actionUntil: 0 });
+  expect(history[1].details).toBeUndefined();
+  expect(unread).toBe(0);
+  expect(runNoticeAction('c1')).toBe(false);
+});
+
+it('writes command details, and hides folders for guests', () => {
+  const details = commandDetails({
+    op: 'play',
+    id: '0f0e0d0c-0000-4000-8000-000000000000',
+    error: String.raw`Could not open C:\Users\Pat\Music\horn.wav`,
+    role: 'guest',
+    companion: '2.45.0',
+    website: '2.45.0',
+    at: Date.now(),
+  });
+  expect(details).toBe(
+    [
+      'Time: 2026-11-14T12:00:00.000Z',
+      'Page: guest',
+      'Command: play',
+      'Command id: 0f0e0d0c-0000-4000-8000-000000000000',
+      'Website: 2.45.0',
+      'Companion: 2.45.0',
+      String.raw`Answer: Could not open …\horn.wav`,
+    ].join('\n'),
+  );
+  expect(redactPaths(String.raw`Saved to \\nas\share\x\one.wav and D:\a b\c.wav`)).toBe(
+    String.raw`Saved to …\one.wav and …\c.wav`,
+  );
+  expect(redactPaths('no paths here')).toBe('no paths here');
 });

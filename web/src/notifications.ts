@@ -8,9 +8,14 @@ export type Notice = {
   kind: NoticeKind;
   expires: number;
   action?: NoticeAction;
+  /**
+   * What happened in technical terms (2.45): the command, its id, versions, the companion's answer. Error
+   * notices show it behind a "Technical details" expander; it is never announced.
+   */
+  details?: string;
 };
 /**
- * A notice as Activity keeps it (2.43): the last 50, newest first. Its action stays usable for 60 s
+ * A notice as Activity keeps it (2.43): the last 200 (50 before 2.45), newest first. Its action stays usable for 60 s
  * after the card leaves (`actionUntil`), so nothing that can be undone is lost to the card's timer
  * (WCAG 2.2.1). `done` once the action ran.
  */
@@ -22,10 +27,14 @@ export type NoticeRecord = {
   action?: NoticeAction;
   actionUntil: number;
   done?: boolean;
+  details?: string;
+  /** Brought back from the companion after a reload (2.45): shown, never sent back, never counted as unread. */
+  restored?: boolean;
 };
 /** How long a notice's action stays in Activity after its card has gone. */
 export const ACTION_GRACE_MS = 60_000;
-const HISTORY_SIZE = 50;
+/** Activity's length: 50 until 2.44; 200 since 2.45, as many as the companion keeps across a reload. */
+const HISTORY_SIZE = 200;
 
 let notices: Notice[] = [];
 let history: NoticeRecord[] = [];
@@ -51,12 +60,13 @@ export function dismissNotice(id: string) {
   emit();
 }
 /**
- * Holds a notice that has a button while the pointer is over it or focus is inside it, so its button
- * can't vanish as someone reaches it (WCAG timing). On release it stays at least 3 more seconds.
+ * Holds a notice that has a button (or technical details, 2.45) while the pointer is over it or focus is
+ * inside it, so its button can't vanish as someone reaches it (WCAG timing). On release it stays at least 3
+ * more seconds.
  */
 export function holdNotice(id: string, on: boolean) {
   const notice = notices.find((n) => n.id === id);
-  if (!notice?.action) return;
+  if (!notice?.action && !notice?.details) return;
   if (on) held.add(id);
   else if (held.delete(id)) {
     notices = notices.map((n) =>
@@ -65,11 +75,39 @@ export function holdNotice(id: string, on: boolean) {
     emit();
   }
 }
-/** Shows a notice and returns its id (for `dismissNotice`); '' when there was nothing to show. */
-export function notify(message: string, kind: NoticeKind = 'info', action?: NoticeAction) {
+/**
+ * Says what this page is (role, versions) for an error's technical details (2.45); set once by the app.
+ * Errors notified without details of their own get these lines, so every error has something to copy.
+ */
+let detailsContext: (() => string) | null = null;
+export function setDetailsContext(context: (() => string) | null) {
+  detailsContext = context;
+}
+function contextDetails(message: string, at: number) {
+  let page = '';
+  try {
+    page = detailsContext?.() ?? '';
+  } catch {
+    /* the details are a convenience */
+  }
+  return [`Time: ${new Date(at).toISOString()}`, page, `Message: ${message}`]
+    .filter(Boolean)
+    .join('\n');
+}
+/**
+ * Shows a notice and returns its id (for `dismissNotice`); '' when there was nothing to show. An error
+ * notice always carries technical details (2.45): `details` when given, else the page's context.
+ */
+export function notify(
+  message: string,
+  kind: NoticeKind = 'info',
+  action?: NoticeAction,
+  details?: string,
+) {
   if (!message) return '';
   const existing = notices.find((n) => n.message === message);
   const now = Date.now();
+  const technical = details || (kind === 'error' ? contextDetails(message, now) : undefined);
   const entry: Notice = {
     id: existing?.id ?? crypto.randomUUID(),
     message,
@@ -77,6 +115,7 @@ export function notify(message: string, kind: NoticeKind = 'info', action?: Noti
     // A notice with a button stays long enough to reach it (2.28); errors 8 s as before, others 4 s.
     expires: now + (action ? 10000 : kind === 'error' ? 8000 : 4000),
     ...(action && { action }),
+    ...(technical && { details: technical }),
   };
   const next = [...notices.filter((n) => n.id !== entry.id), entry];
   // At most 4 visible; the ones pushed out keep their action in Activity.
@@ -88,6 +127,7 @@ export function notify(message: string, kind: NoticeKind = 'info', action?: Noti
     kind,
     at: now,
     ...(action && { action }),
+    ...(technical && { details: technical }),
     actionUntil: entry.expires + ACTION_GRACE_MS,
   };
   history = [record, ...history.filter((h) => h.id !== entry.id)].slice(0, HISTORY_SIZE);
@@ -95,6 +135,31 @@ export function notify(message: string, kind: NoticeKind = 'info', action?: Noti
   emit();
   for (const listener of pushListeners) listener(entry);
   return entry.id;
+}
+/**
+ * Activity kept by the companion (2.45), after this page reloaded: entries this page does not list yet are
+ * added in time order, without buttons (an Undo can't outlive the page that made it), never as unread and
+ * never announced. Returns how many were added.
+ */
+export function restoreNoticeHistory(
+  entries: { id: string; kind: NoticeKind; text: string; at: number; details?: string | null }[],
+) {
+  const known = new Set(history.map((h) => h.id));
+  const fresh: NoticeRecord[] = entries
+    .filter((e) => !known.has(e.id) && e.text)
+    .map((e) => ({
+      id: e.id,
+      message: e.text,
+      kind: e.kind,
+      at: e.at,
+      actionUntil: 0,
+      restored: true,
+      ...(e.details && { details: e.details }),
+    }));
+  if (!fresh.length) return 0;
+  history = [...history, ...fresh].sort((a, b) => b.at - a.at).slice(0, HISTORY_SIZE);
+  emit();
+  return fresh.length;
 }
 /** Runs a notice's action from Activity, once, while it is still usable. */
 export function runNoticeAction(id: string) {

@@ -1,0 +1,166 @@
+/*
+ * Diagnostics (2.45, WP4): technical details under errors (notice cards and Activity), the companion log in
+ * Settings, and the miniature in Copy into My Layout. Only new class names live here, so nothing in the layered
+ * files (tokens, studio, shell, ...) is overridden by import order.
+ */
+.notification-stack .toast.has-details {
+  flex-wrap: wrap;
+}
+.toast.has-details > span {
+  flex: 1 1 0;
+  min-width: 0;
+}
+.technical-details {
+  flex: 1 0 100%;
+  min-width: 0;
+  font-size: 11px;
+}
+.technical-details > summary {
+  width: fit-content;
+  cursor: pointer;
+  color: var(--text-dim);
+  border-radius: var(--radius-s);
+}
+.technical-details > summary:focus-visible,
+.technical-details > pre:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+.technical-details > pre {
+  margin: 6px 0 4px;
+  max-height: 9.5em;
+  overflow: auto;
+  padding: 6px 8px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-family: ui-monospace, 'Cascadia Mono', Consolas, monospace;
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--text-muted);
+  background: var(--surface-1);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-s);
+}
+.technical-details > .technical-copy {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 28px;
+  padding: 0 8px;
+  font-size: 11px;
+}
+.activity-item .technical-details {
+  grid-column: 1 / -1;
+}
+
+/* Settings → Companion log (host only). */
+.companion-log-tools {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+}
+.companion-log {
+  margin: 8px 0 0;
+  max-height: 260px;
+  overflow: auto;
+  padding: 8px 10px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-family: ui-monospace, 'Cascadia Mono', Consolas, monospace;
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--text-muted);
+  background: var(--surface-1);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-s);
+}
+.companion-log:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+
+/* Copy into My Layout: the board it makes, in miniature. */
+.copy-miniature {
+  margin: 4px 0 0;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface-1);
+}
+.copy-miniature h4 {
+  margin: 0 0 6px;
+  font-size: 12px;
+  color: var(--text-dim);
+}
+.copy-miniature-folders {
+  list-style: none;
+  margin: 0 0 8px;
+  padding: 0;
+  display: grid;
+  gap: 3px;
+  font-size: 12px;
+}
+.copy-miniature-folders li {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.copy-miniature-folders li > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.copy-miniature-folders .is-new {
+  color: var(--accent-text);
+}
+.copy-miniature-folders small,
+.copy-miniature-tiles small {
+  color: var(--text-dim);
+}
+.copy-miniature-tiles {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(86px, 1fr));
+  gap: 4px;
+}
+.copy-miniature-tiles li {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  min-width: 0;
+  height: 40px;
+  padding: 4px 6px;
+  font-size: 11px;
+  line-height: 1.25;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-s);
+  background: var(--surface-2);
+}
+.copy-miniature-tiles li > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.copy-miniature-tiles .is-favorite {
+  border-color: var(--accent);
+}
+.copy-miniature-tiles .is-favorite::before {
+  content: '★';
+  position: absolute;
+  top: 2px;
+  right: 5px;
+  font-size: 10px;
+  color: var(--accent);
+}
+.copy-miniature-tiles .is-hidden {
+  opacity: 0.45;
+  border-style: dashed;
+}
+.copy-miniature-tiles .is-hidden > span {
+  text-decoration: line-through;
+}
