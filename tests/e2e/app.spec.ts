@@ -1970,7 +1970,7 @@ test('live Nostr/WebRTC: guests see Mimic only when allowed and can clip from it
   await page.getByRole('button', { name: 'Mimic', exact: true }).click();
   await page.getByRole('button', { name: 'Start listening' }).click();
   await setMimicTranscription(page);
-  await page.keyboard.press('Escape');
+  await closeSection(page, 'Mimic');
   const url = await invite(page);
   const context = await browser.newContext();
   try {
@@ -1987,16 +1987,15 @@ test('live Nostr/WebRTC: guests see Mimic only when allowed and can clip from it
     await expect(
       guest.getByText("The host's Mimic is listening to Fixture: tone every 2 s", { exact: false }),
     ).toBeVisible();
-    await expect(guest.getByRole('button', { name: 'Mimic', exact: true })).toHaveCount(0);
+    await guest.getByRole('button', { name: 'Mimic', exact: true }).click();
+    const dialog = guest.getByRole('main', { name: 'Mimic', exact: true });
+    await expect(dialog).toContainText('The host has not enabled Mimic for guests.');
     await page.getByRole('button', { name: 'Access settings' }).click();
     await page.getByLabel('Allow guest Mimic').check();
     await page.keyboard.press('Escape');
-    await guest.getByRole('button', { name: 'Mimic', exact: true }).click();
-    const dialog = guest.getByRole('main', { name: 'Mimic', exact: true });
+    await expect(dialog).not.toContainText('The host has not enabled Mimic for guests.');
     await expect(dialog.getByLabel('Mimic source', { exact: true })).toHaveCount(0);
     await expect(dialog.getByLabel('Transcribe Mimic audio')).toHaveCount(0);
-    if (!(await dialog.locator('.mimic-page-settings[open]').count()))
-      await dialog.getByText('Mimic settings', { exact: true }).click();
     await expect(dialog.getByLabel('F6 hotkey')).toHaveCount(0);
     await expect(dialog.getByText('From Voice Replay Studio')).toHaveCount(0); // host only
     // The host's transcript reaches the guest as text; clicking a line selects that audio.
