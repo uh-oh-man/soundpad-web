@@ -202,6 +202,7 @@ const FEATURE_OPS: Record<Feature, Op[]> = {
   missingFiles: [],
   setup: ['setupGet', 'setupSet', 'mimicSources'],
   hostHotkeys: ['hotkeysGet', 'hotkeysSet'],
+  feedback: ['feedbackSend'],
 };
 
 /** What the example honestly cannot do, and the reason it gives. Each must be refused with exactly that. */

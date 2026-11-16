@@ -1,0 +1,80 @@
+/*
+ * Feedback (2.45): the header's Feedback button (.feedback-button) and its dialog (.feedback-form).
+ * Loads after setup.css. Only selectors for these pieces; tokens and the controls primitives only,
+ * no raw colours and no !important.
+ */
+
+.feedback-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 32px;
+  padding: 0 12px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-pill);
+  background: var(--surface-2);
+  color: var(--text-primary);
+  font-size: 12px;
+  font-weight: 650;
+}
+.feedback-button:hover {
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--line-strong));
+  background: var(--accent-soft);
+}
+/* On narrow headers the button keeps its icon and its name, but not its word. */
+@media (max-width: 700px) {
+  .feedback-button {
+    padding: 0 9px;
+  }
+  .feedback-button .feedback-label {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+}
+
+.feedback-form {
+  display: grid;
+  gap: var(--space-3);
+  width: min(560px, 100%);
+}
+.feedback-intro {
+  margin: 0;
+  color: var(--text-muted);
+}
+.feedback-form .choice-group {
+  margin: 0;
+}
+.feedback-text textarea {
+  min-height: 140px;
+  padding: var(--space-2) var(--space-3);
+  line-height: 1.45;
+  resize: vertical;
+}
+.feedback-foot {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  gap: var(--space-2) var(--space-3);
+}
+.feedback-count {
+  color: var(--text-muted);
+}
+.feedback-error {
+  grid-column: 1 / -1;
+  grid-row: 1;
+  margin: 0;
+  color: var(--danger);
+}
+.feedback-actions {
+  display: inline-flex;
+  gap: var(--space-2);
+}
+.feedback-actions .primary {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}

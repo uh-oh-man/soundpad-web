@@ -113,6 +113,10 @@ A new host on companion 2.44 is guided through setup: a Soundpad check that name
 
 More: [docs/SETUP.md](docs/SETUP.md).
 
+## Feedback
+
+Press **Feedback** in the header to send a **Bug**, an **Idea** or an **Opinion**. Guests can use it too. Every note is added, with who sent it and when, to one file on the host's desktop: **`Soundpad Web feedback.md`**. Guests are never shown where the file is. Needs the 2.45 companion on the host's PC.
+
 ## Features
 
 - **Mimic**, described above, merged from the Voice Replay Studio desktop app.

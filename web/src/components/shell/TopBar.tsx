@@ -1,5 +1,5 @@
 import { useEffect, useRef, type ReactNode } from 'react';
-import { AudioLines, History, Settings2 } from 'lucide-react';
+import { AudioLines, History, MessageSquareText, Settings2 } from 'lucide-react';
 import { controller } from '../../controller';
 import { APP_VERSION_LABEL } from '../../version';
 import { UpdateChip } from '../updates/UpdateOffer';
@@ -39,6 +39,8 @@ export type TopBarProps = {
   nav?: ReactNode;
   /** Notices since Activity was last opened, and whether it is open now. */
   activity?: { unread: number; open: boolean; show: () => void };
+  /** Opens the Feedback dialog (2.45, gate feedback); absent when the host's companion can't save notes. */
+  feedback?: () => void;
 };
 
 /**
@@ -56,6 +58,7 @@ export function TopBar({
   openSettings,
   nav,
   activity,
+  feedback,
 }: TopBarProps) {
   const { state, mode, status } = view;
   // The editor sheet (narrow screens) starts where the header ends; the header's height changes as it wraps.
@@ -126,6 +129,17 @@ export function TopBar({
             onClick={openMimic}
           >
             <i /> Mimic on
+          </button>
+        )}
+        {mode !== 'landing' && feedback && (
+          <button
+            type="button"
+            className="feedback-button"
+            title="Send the host a bug, an idea or an opinion"
+            onClick={feedback}
+          >
+            <MessageSquareText size={18} aria-hidden="true" />
+            <span className="feedback-label">Feedback</span>
           </button>
         )}
         {mode !== 'landing' && activity && (

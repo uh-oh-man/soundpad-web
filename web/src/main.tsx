@@ -25,6 +25,7 @@ import { z } from 'zod';
 import { useWorkspace, viewModes, type Workspace } from './workspace';
 import { arrangeSounds, boardTitle, type Totals } from './arrange';
 import { REQUIRED_COMPANION, companionAtLeast, supports } from './version';
+import { FeedbackDialog } from './components/FeedbackDialog';
 import { DEMO_COPY, hostCopy } from './hosting';
 import { SoundCollection } from './components/SoundCollection';
 import { Player } from './components/Player';
@@ -118,6 +119,7 @@ import './backups.css';
 import './updates.css';
 import './organize.css';
 import './setup.css';
+import './feedback.css';
 
 const viewLabels: Record<(typeof viewModes)[number], string> = {
   icons: 'Icons',
@@ -334,6 +336,7 @@ function App() {
   const [myCategory, setMyCategory] = useState('all');
   const [search, setSearch] = useState('');
   const [settings, setSettings] = useState(false);
+  const [feedbackOpen, setFeedbackOpen] = useState(false);
   const [managing, setManaging] = useState(false);
   const [editing, setEditing] = useState<Sound | null>(null);
   const [organizing, setOrganizing] = useState<Sound | null>(null);
@@ -772,6 +775,11 @@ function App() {
               open: shownPanel?.kind === 'activity',
               show: () => openEditor({ kind: 'activity' }),
             }}
+            feedback={
+              connected && !view.demo && supports(state.companionVersion, 'feedback')
+                ? () => setFeedbackOpen(true)
+                : undefined
+            }
           />
         }
         banner={mode !== 'landing' && view.demo ? <DemoBanner inert={sheetShown} /> : undefined}
@@ -1326,6 +1334,21 @@ function App() {
       <BackupLayoutSync workspace={w} ready={personal.ready} replace={personal.replace} />
       <UpdateDialogHost />
       <SetupGuide />
+      {feedbackOpen && (
+        <FeedbackDialog
+          host={host}
+          where={
+            shownPanel?.kind === 'mimic'
+              ? 'Mimic'
+              : shown === 'voices'
+                ? 'Voices'
+                : shown === 'sentences'
+                  ? 'Sentences'
+                  : 'Soundboard'
+          }
+          onClose={() => setFeedbackOpen(false)}
+        />
+      )}
       {settings && (
         <Modal label="Session & access" onClose={() => setSettings(false)}>
           <SettingsDialog

@@ -73,6 +73,8 @@ export const FEATURES = {
   missingFiles: [2, 44],
   setup: [2, 44],
   hostHotkeys: [2, 44],
+  // The header's Feedback button: notes saved by the host's companion on the host's desktop.
+  feedback: [2, 45],
 } as const satisfies Record<string, readonly [number, number]>;
 
 /** True when the website changed version since this browser last used it (and it had used it before). */
@@ -125,6 +127,7 @@ const FEATURE_NAMES: Record<keyof typeof FEATURES, string> = {
   setup: 'a guided setup: Soundpad check with fixes, capture output, invitations',
   hostHotkeys:
     'host-wide hotkeys for Capture, Panic and (optionally) Stop, with conflicts reported',
+  feedback: "the Feedback button (notes saved on the host's desktop)",
 };
 
 /**

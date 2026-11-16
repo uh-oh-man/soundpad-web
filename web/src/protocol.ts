@@ -148,6 +148,9 @@ export const commandSchema = z
       'setupSet',
       'hotkeysGet',
       'hotkeysSet',
+      // Feedback (2.45, gate feedback): a note from the header's Feedback button, saved by the host's companion in
+      // one file on the host's desktop. Host and guests; body { kind, text, where?, version? }.
+      'feedbackSend',
     ]),
     // Stage H (2.44): the one payload field of every Stage H op (any JSON; each op's module checks it).
     body: z.json().optional(),
@@ -742,6 +745,8 @@ export function isGuestAllowed(c: Command, s: Snapshot) {
       c.categoryName === undefined
     );
   if (c.op === 'budgetStatus') return true;
+  // Feedback (2.45): any guest may send a note to the host; the companion checks it and limits how many.
+  if (c.op === 'feedbackSend') return true;
   // The voice library (2.41): guests see and search the kept library by default; private previews
   // are answered to them only. Editing (names, tags, voices, wanted words, Undo) needs the host's
   // guestLibraryEdit; the settings and the category word index are the host's.

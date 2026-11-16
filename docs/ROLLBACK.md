@@ -6,6 +6,7 @@ Every release stays on GitHub permanently, so any earlier version can be restore
 
 | Version | What it is | Git tag | Download |
 | --- | --- | --- | --- |
+| 2.45.0 | Feedback, and fixes from the real Soundpad | `v2.45.0` | [Release](https://github.com/uh-oh-man/soundpad-web/releases/tag/v2.45.0) |
 | 2.44.0 | Backups, updates, Organize and setup | `v2.44.0` | [Release](https://github.com/uh-oh-man/soundpad-web/releases/tag/v2.44.0) |
 | 2.43.0 | Blue studio | `v2.43.0` | [Release](https://github.com/uh-oh-man/soundpad-web/releases/tag/v2.43.0) |
 | 2.42.0 | Sentences from recorded words | `v2.42.0` | [Release](https://github.com/uh-oh-man/soundpad-web/releases/tag/v2.42.0) |

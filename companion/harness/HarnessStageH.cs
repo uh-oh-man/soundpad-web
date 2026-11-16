@@ -65,6 +65,11 @@ public static class HarnessStageH
     {
         HarnessOrganize.BridgeMade(args, bridge);
         HarnessSetup.BridgeMade(args, bridge);
+        // Feedback (2.45): never the real desktop. --feedback-dir <folder>, or a folder of this process in TEMP.
+        int at = Array.IndexOf(args, "--feedback-dir");
+        bridge.FeedbackFolder = at >= 0 && at + 1 < args.Length
+            ? Path.GetFullPath(args[at + 1])
+            : Path.Combine(Path.GetTempPath(), "soundpad-web-harness-feedback", Environment.ProcessId.ToString());
     }
 
     /// <summary>After the Bridge is set up and before the server starts; the server's resume values after an update (WP2).</summary>
