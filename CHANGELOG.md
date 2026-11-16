@@ -2,6 +2,18 @@
 
 Notable changes to Soundpad Web. Versions follow the website's `package.json`; the Windows companion is versioned separately and only needs updating when a release says so.
 
+## Unreleased (2.46) — Spotify for guests
+
+### Fixed
+
+- **A guest's Spotify buttons work.** A guest reported that the Spotify button did nothing. Two causes: the Spotify row ignored a press made while its own status check (every 3 seconds) was still on its way, and for a guest that check crosses the network to the host, so it was on its way much of the time. And the companion answered a press "Spotify is busy" whenever it was reading Spotify for the host or another guest. A press now goes at once, the companion waits its turn for it instead of refusing, and a status check that finds Spotify busy answers with the last state. After a press the row checks again a moment later, so Play/Pause shows the new state straight away. **Update the companion** for the second part; the first works with any companion.
+- **When you turn off guest Spotify controls, guests can tell.** Their Play/Pause, Next and Previous are marked unavailable, the row says "The host has turned off guest Spotify controls.", and pressing one says so instead of failing. A guest's buttons also say that they play on the host's PC.
+
+### Tests
+
+- 3 new companion tests: a guest's press during a status read waits and presses, a status read during another answers with the last state, and a guest with Spotify controls off is refused without pressing. The browser-test harness now uses a fixture Spotify and never the PC's real one.
+- 3 new browser tests: a guest presses Play/Pause and Next while their status check is held on its way, a press while the companion's status reads are slow, and a guest with Spotify controls off.
+
 ## 2.45.0 — Feedback, and fixes from the real Soundpad
 
 A **Feedback** button for you and your guests, no more storage limits for guests, and two fixes found by testing on a real Soundpad. **Update the companion** for the Feedback button and for the limits to go; with an older companion the button is hidden, the old limits apply and everything else works as in 2.44.
