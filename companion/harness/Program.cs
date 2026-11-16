@@ -13,6 +13,12 @@ if (args.FirstOrDefault() == "--real-responsiveness-probe") { Environment.ExitCo
 if (args.FirstOrDefault() == "--real-import-timing-probe") { Environment.ExitCode = await RealImportTimingProbe.Run(RealProbes.Root(args)); return; }
 // Organize's native operations on the real Soundpad, in probe categories only (2.44 proof); see RealOrganizeProbe.cs.
 if (args.FirstOrDefault() == "--real-organize-probe") { Environment.ExitCode = await RealOrganizeProbe.Run(args, RealProbes.Root(args)); return; }
+// Mimic capture on the real PC (2.44 proof): output sessions, feeding Soundpad a quiet speech clip, and recording what
+// Soundpad plays; see RealMimicCaptureProbe.cs. Loopback of outputs only, never a microphone.
+if (args.FirstOrDefault() == "--real-audio-sessions") { Environment.ExitCode = await RealMimicCaptureProbe.Sessions(args); return; }
+if (args.FirstOrDefault() == "--real-mimic-feed") { Environment.ExitCode = await RealMimicCaptureProbe.Feed(args, RealProbes.Root(args)); return; }
+if (args.FirstOrDefault() == "--real-render-tone") { Environment.ExitCode = await RealMimicCaptureProbe.RenderTone(args); return; }
+if (args.FirstOrDefault() == "--real-soundpad-listen") { Environment.ExitCode = await RealMimicCaptureProbe.Listen(args, RealProbes.Root(args)); return; }
 if (args.FirstOrDefault() == "--word-timing-eval" && args.Length >= 2) { await WordTimingEval.Run(args); return; } // see WordTimingEval.cs
 if (args.FirstOrDefault() == "--word-pipeline-eval" && args.Length >= 2) { Environment.ExitCode = await WordPipelineEval.Run(args); return; } // see WordPipelineEval.cs (2.39)
 if (args.FirstOrDefault() == "--speaker-eval" && args.Length >= 2) { Environment.ExitCode = SpeakerGroupingEval.Run(args); return; } // see SpeakerGroupingEval.cs (2.41)
