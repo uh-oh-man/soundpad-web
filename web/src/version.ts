@@ -73,6 +73,8 @@ export const FEATURES = {
   missingFiles: [2, 44],
   setup: [2, 44],
   hostHotkeys: [2, 44],
+  // 2.45 (WP3): voice slots and phrase blocks, palette Add to sentence, guests' unkept sentences for the host.
+  sentenceCompose: [2, 45],
 } as const satisfies Record<string, readonly [number, number]>;
 
 /** True when the website changed version since this browser last used it (and it had used it before). */
@@ -125,6 +127,8 @@ const FEATURE_NAMES: Record<keyof typeof FEATURES, string> = {
   setup: 'a guided setup: Soundpad check with fixes, capture output, invitations',
   hostHotkeys:
     'host-wide hotkeys for Capture, Panic and (optionally) Stop, with conflicts reported',
+  sentenceCompose:
+    "voice slots and phrase blocks in sentence templates, Add to sentence from the palette, and guests' unkept sentences for the host to see and clear",
 };
 
 /**
