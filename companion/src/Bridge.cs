@@ -173,6 +173,8 @@ public sealed partial class Bridge(ISoundpad pipe, StateStore store) : IDisposab
         if (c.Op == "revokePeer" && actor == "host" && c.GuestId is { Length: > 0 and <= 128 } guestId) ForgetGuest(guestId);
         if (ExecuteUiPrefs(c, actor) is { } ui) return ui;
         if (await ExecuteKeep(c, actor, participant, requester, audience) is { } keep) return keep;
+        // 2.45 (WP2): Recover previous session / Discard, and a guest's storage action history.
+        if (await ExecuteRecovery(c, actor, participant, requester, audience) is { } recovery) return recovery;
         if (await ExecuteVoices(c, actor, participant, requester, audience) is { } voices) return voices;
         var query = await Query(c, actor); if (query != null) return query;
         // A sound whose file is missing is never sent to Soundpad to play (2.44): its reaction is unknown.

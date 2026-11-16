@@ -215,6 +215,11 @@ public sealed record KeepSettings(int Format = 1, bool GuestKeep = true, string?
 public sealed record GuestUsageView(string Id, string Name, long TempBytes, long TempLimitBytes, long KeptBytes, long KeptLimitBytes, bool Paused, string? Waiting);
 /// <summary>A guest waiting for the host to allow more (same list style as the lobby).</summary>
 public sealed record BudgetRequestView(string GuestId, string Name, string Kind, long NeededBytes, long At);
+/// <summary>
+/// One thing a guest put into storage (2.45, budgetActions): a clip, copy or upload into Temp ("temp"), or audio kept
+/// permanently ("kept"). Shown to the host under that guest's storage request, and to that guest; never to anyone else.
+/// </summary>
+public sealed record BudgetActionView(string Kind, string? Name, long Bytes, long At);
 
 /// <summary>
 /// Separate per-guest budgets for Temp (this session) and permanent (kept) audio (2.40). Pure bookkeeping; the
@@ -235,7 +240,12 @@ public sealed class GuestBudgets(string? totalsPath = null, Func<long>? clock = 
         /// <summary>Bytes of Keeps under way (<see cref="ReserveKeep"/>), counted as kept until they finish.</summary>
         public long PendingKept;
         public BudgetRequestView? Request;
+        /// <summary>2.45: their latest Temp and Keep actions, oldest first, at most <see cref="MaxActions"/>. In memory only.</summary>
+        public readonly List<BudgetActionView> Actions = [];
+        public void Add(BudgetActionView action) { Actions.Add(action); if (Actions.Count > MaxActions) Actions.RemoveRange(0, Actions.Count - MaxActions); }
     }
+    /// <summary>How many of a guest's latest storage actions are kept (2.45).</summary>
+    public const int MaxActions = 20;
     private readonly Dictionary<string, Guest> guests = [];
     private readonly Dictionary<string, (string Guest, long Bytes)> tempAssets = [];
     private Dictionary<string, long>? totals;
@@ -342,25 +352,43 @@ public sealed class GuestBudgets(string? totalsPath = null, Func<long>? clock = 
         lock (guests) if (guests.TryGetValue(guest, out var g)) g.PendingKept = Math.Max(0, g.PendingKept - bytes);
     }
 
-    public void NoteTemp(string guest, string? name, string assetId, long bytes)
+    /// <param name="clipName">What the clip is called, for the guest's action history (2.45).</param>
+    public void NoteTemp(string guest, string? name, string assetId, long bytes, string? clipName = null)
     {
         lock (guests)
         {
-            For(guest, name);
+            var g = For(guest, name);
             if (tempAssets.Count > 8192) tempAssets.Remove(tempAssets.Keys.First());
-            tempAssets[assetId] = (guest, bytes); Changed();
+            tempAssets[assetId] = (guest, bytes);
+            g.Add(new("temp", CleanClipName(clipName), bytes, now()));
+            Changed();
         }
     }
 
-    public void NoteKept(string guest, string? name, long bytes)
+    /// <param name="clipName">What was kept, for the guest's action history (2.45).</param>
+    public void NoteKept(string guest, string? name, long bytes, string? clipName = null)
     {
         lock (guests)
         {
             var g = For(guest, name);
             g.SessionKept += bytes;
+            g.Add(new("kept", CleanClipName(clipName), bytes, now()));
             if (Totals.Count < MaxGuests || Totals.ContainsKey(guest)) { Totals[guest] = Totals.GetValueOrDefault(guest) + bytes; SaveTotals(); }
             Changed();
         }
+    }
+
+    private static string? CleanClipName(string? name)
+    {
+        if (string.IsNullOrWhiteSpace(name)) return null;
+        var clean = new string(name.Where(ch => !char.IsControl(ch)).Take(100).ToArray()).Trim();
+        return clean.Length == 0 ? null : clean;
+    }
+
+    /// <summary>A guest's latest storage actions, newest first (2.45). Empty for a guest this launch has not seen.</summary>
+    public BudgetActionView[] Actions(string guest)
+    {
+        lock (guests) return guests.TryGetValue(guest, out var g) ? [.. Enumerable.Reverse(g.Actions)] : [];
     }
 
     /// <summary>The guest who made a Temp asset in this launch, if a guest did.</summary>

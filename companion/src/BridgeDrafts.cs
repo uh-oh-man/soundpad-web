@@ -42,7 +42,7 @@ public sealed partial class Bridge
 
     private static string PersonKey(string actor, Participant? participant, string? requester) => actor == "host" ? "host" : participant?.Id ?? requester ?? "guest";
     private static bool IsDraftOp(string op) => op is "draftCreate" or "draftList" or "draftUpdate" or "draftDiscard" or "draftCopy" or "draftKeep" or "draftPlay";
-    private void DraftsChanged() { Interlocked.Increment(ref draftsRevision); Publish(); }
+    private void DraftsChanged() { Interlocked.Increment(ref draftsRevision); SaveDraftsSoon(); Publish(); }
     private string Tag(string owner) => Convert.ToHexString(HMACSHA256.HashData(draftTagKey, Encoding.UTF8.GetBytes(owner)))[..8].ToLowerInvariant();
     private static DraftView View(Draft d) => new(d.Id, d.Start, d.End, d.Name, d.Created, d.Updated, d.SessionId, d.ClipAssetId != null && d.ClipRange == new HistoryRange(d.Start, d.End));
 
@@ -73,9 +73,140 @@ public sealed partial class Bridge
     private void ForgetDrafts(HistoryStore? pinnedIn)
     {
         Draft[] gone;
-        lock (drafts) { gone = [.. drafts.Values]; drafts.Clear(); }
+        lock (drafts) { gone = [.. drafts.Values, .. recoveredDrafts]; drafts.Clear(); recoveredDrafts.Clear(); }
         if (pinnedIn != null) foreach (var d in gone) { try { pinnedIn.Unpin(d.PinKey); } catch (Exception ex) when (ex is HistoryException or InvalidOperationException) { } }
         if (gone.Length > 0) Interlocked.Increment(ref draftsRevision);
+        // 2.45: the history they pinned is going too, so nothing is left to recover (drafts.v1.json goes).
+        DeleteDraftFile();
+    }
+
+    // ---- Drafts on disk (2.45) ----------------------------------------------------------------------------------
+
+    private readonly DraftStore draftStore = new(store.DirectoryPath);
+    /// <summary>
+    /// The host's drafts a crashed launch left (drafts.v1.json), on the recovered history, until the host chooses
+    /// Recover previous session (they come back) or Discard (they go with the recovered history). Their pins hold
+    /// their audio meanwhile, and they are written to the file again, so a second crash still has them. Guarded by <see cref="drafts"/>.
+    /// </summary>
+    private readonly List<Draft> recoveredDrafts = [];
+    private readonly object draftFileGate = new();
+    private readonly object draftSaveGate = new();
+    private bool draftSaveDirty, draftSaveRunning;
+    private Task draftSave = Task.CompletedTask;
+    /// <summary>Test seam: the host's drafts waiting for Recover or Discard.</summary>
+    public int RecoveredDraftCount { get { lock (drafts) return recoveredDrafts.Count; } }
+
+    private static DraftHandoff Handoff(Draft d) => new(d.Id, d.Owner, d.OwnerName, d.SessionId, d.Start, d.End, d.Name, d.NameTyped, d.NameRange.StartFrame, d.NameRange.EndFrame, d.Created, d.Updated, d.ClipAssetId, d.ClipRange.StartFrame, d.ClipRange.EndFrame);
+    private static Draft FromHandoff(DraftHandoff d) => new()
+    {
+        Id = d.Id, Owner = d.Owner, OwnerName = d.OwnerName, SessionId = d.SessionId, Start = d.Start, End = d.End, Name = d.Name, NameTyped = d.NameTyped,
+        NameRange = new(d.NameStart, d.NameEnd), Created = d.Created, Updated = d.Updated, ClipAssetId = d.ClipAssetId, ClipRange = new(d.ClipStart, d.ClipEnd),
+    };
+
+    /// <summary>
+    /// The host's drafts changed: drafts.v1.json is written again off the caller's thread, one write at a time, the
+    /// newest state last (a burst of edits costs one or two writes). Guests' drafts are never written.
+    /// </summary>
+    private void SaveDraftsSoon()
+    {
+        lock (draftSaveGate)
+        {
+            draftSaveDirty = true;
+            if (draftSaveRunning) return;
+            draftSaveRunning = true;
+            draftSave = Task.Run(DraftSaveLoop);
+        }
+    }
+    private void DraftSaveLoop()
+    {
+        while (true)
+        {
+            lock (draftSaveGate) { if (!draftSaveDirty) { draftSaveRunning = false; return; } draftSaveDirty = false; }
+            WriteDraftFile();
+        }
+    }
+    /// <summary>Test seam: waits until the drafts written last are on disk.</summary>
+    public async Task FlushDrafts()
+    {
+        for (int i = 0; i < 100; i++)
+        {
+            Task pending; lock (draftSaveGate) { if (!draftSaveRunning) return; pending = draftSave; }
+            await pending;
+        }
+    }
+    private void WriteDraftFile()
+    {
+        // The snapshot is taken under the file's lock, so a write never puts back drafts that a quit deleted.
+        lock (draftFileGate)
+        {
+            var h = history;
+            // Without a history (an update closed it, or nothing was recorded yet) the file stays as it is: an
+            // update's next process continues these drafts, and a quit deletes the file explicitly.
+            if (h == null) return;
+            DraftHandoff[] mine;
+            lock (drafts) mine = [.. drafts.Values.Concat(recoveredDrafts).Where(d => d.Owner == "host" && d.SessionId == h.SessionId).OrderBy(d => d.Created).Select(Handoff)];
+            try { draftStore.Save(mine.Length == 0 ? null : new DraftFile(1, h.SessionId, utcNow(), mine)); }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidDataException) { Log("The drafts could not be saved for crash recovery: " + ex.Message); }
+        }
+    }
+    private void DeleteDraftFile() { lock (draftFileGate) draftStore.Delete(); }
+
+    /// <summary>
+    /// Startup after a crash (2.45, from <see cref="RecoverHistory"/>): the host's drafts on the recovered history come
+    /// back from drafts.v1.json as <see cref="recoveredDrafts"/>, each with its pin. A draft whose audio did not survive
+    /// is left out. Draft pins that belong to no saved draft (a guest's, or one made just before the crash) are let go.
+    /// The caller holds <see cref="historyGate"/>.
+    /// </summary>
+    private int LoadRecoveredDrafts(HistoryStore h)
+    {
+        var saved = draftStore.Load(h.SessionId, h.LiveFrame);
+        var pins = h.Pins(HistoryAccess.Host);
+        var available = h.Timeline(HistoryAccess.Host).Available;
+        var kept = new List<Draft>(); int dropped = 0;
+        foreach (var d in saved)
+        {
+            var draft = FromHandoff(d);
+            if (!available.Any(r => r.StartFrame <= draft.Start && r.EndFrame >= draft.End)) { dropped++; continue; }
+            try
+            {
+                if (!pins.TryGetValue(draft.PinKey, out var pinned)) h.Pin(HistoryAccess.Host, draft.PinKey, draft.Start, draft.End);
+                else if (pinned != new HistoryRange(draft.Start, draft.End)) h.ReplacePin(HistoryAccess.Host, draft.PinKey, draft.Start, draft.End);
+                kept.Add(draft);
+            }
+            catch (Exception ex) when (ex is HistoryException or InvalidOperationException or InvalidDataException or ArgumentException) { dropped++; }
+        }
+        var keys = kept.Select(d => d.PinKey).ToHashSet(StringComparer.Ordinal);
+        foreach (var key in pins.Keys.Where(k => k.StartsWith("draft:", StringComparison.Ordinal) && !keys.Contains(k)))
+        { try { h.Unpin(key); } catch (Exception ex) when (ex is HistoryException or InvalidOperationException) { } }
+        lock (drafts) { recoveredDrafts.Clear(); recoveredDrafts.AddRange(kept); }
+        if (dropped > 0) Log($"{dropped} draft(s) from the last session could not be recovered (their audio is gone)");
+        if (kept.Count > 0) Log($"{kept.Count} draft(s) from the last session can be recovered");
+        return kept.Count;
+    }
+
+    /// <summary>Recover previous session (2.45): the host's recovered drafts are theirs again, as they were.</summary>
+    private int RestoreRecoveredDrafts()
+    {
+        var h = history; int restored = 0;
+        lock (drafts)
+        {
+            foreach (var d in recoveredDrafts)
+                if (h != null && d.SessionId == h.SessionId && !drafts.ContainsKey(d.Id)) { drafts[d.Id] = d; restored++; }
+            recoveredDrafts.Clear();
+        }
+        DraftsChanged();
+        return restored;
+    }
+
+    /// <summary>Discard (2.45, also the history's own Discard): the recovered drafts go, and their pins with them.</summary>
+    private int DropRecoveredDrafts()
+    {
+        var h = history; Draft[] gone;
+        lock (drafts) { gone = [.. recoveredDrafts]; recoveredDrafts.Clear(); }
+        if (gone.Length == 0) return 0;
+        if (h != null) foreach (var d in gone) { try { h.Unpin(d.PinKey); } catch (Exception ex) when (ex is HistoryException or InvalidOperationException) { } }
+        DraftsChanged();
+        return gone.Length;
     }
 
     /// <summary>Lets go of the drafts <paramref name="which"/> picks, and their pins. True when any went.</summary>

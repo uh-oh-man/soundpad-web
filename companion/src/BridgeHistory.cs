@@ -225,7 +225,8 @@ public sealed partial class Bridge
                         if (Path.GetFileName(folder) != crashed?.SessionId) TranscriptWords.Delete(HistoryRoot, Path.GetFileName(folder));
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
-            if (crashed == null) return 0;
+            // 2.45: the host's drafts are kept in drafts.v1.json for a crash; with nothing recovered they are stale.
+            if (crashed == null) { DeleteDraftFile(); return 0; }
             try
             {
                 var recovered = HistoryStore.Open(HistoryRoot, crashed.SessionId, HistoryGapReason.Crash, historyOptions with { WindowSeconds = Settings.HistorySeconds });
@@ -235,6 +236,8 @@ public sealed partial class Bridge
                 long frames = recovered.Timeline(HistoryAccess.Host).Available.Sum(r => r.Frames);
                 Interlocked.Exchange(ref recoveredMs, frames * 1000 / recovered.Rate);
                 Log($"Recovered {frames / (double)recovered.Rate / 60:0.#} minutes of recording history from the last session");
+                // 2.45: the host's drafts on it wait for Recover previous session or Discard (written again for a second crash).
+                if (LoadRecoveredDrafts(recovered) > 0) SaveDraftsSoon(); else DeleteDraftFile();
                 return frames;
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidDataException or HistoryException or InvalidOperationException)
@@ -257,6 +260,8 @@ public sealed partial class Bridge
             recoveredUntil = null;
             long boundary = until.Frame;
             // Drafts made on recovered audio go first, so no pin holds it; drafts wholly on new capture stay.
+            // 2.45: so do the drafts the crash left, which were waiting for Recover.
+            DropRecoveredDrafts();
             ReleaseDrafts(d => d.SessionId == h.SessionId && d.Start < boundary);
             try { foreach (var owner in h.DiscardBefore(boundary)) Log($"A selection on the recovered history was let go ({owner})"); }
             catch (HistoryException) { return false; }

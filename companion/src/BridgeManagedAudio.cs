@@ -298,7 +298,7 @@ public sealed partial class Bridge
             string budgetKey = guest ?? owner;
             if (!host && budgets.CheckCreate(budgetKey, by, bytes.Length, Keep, TemporaryIds()) is { } refusal) { Publish(); throw new InvalidDataException(refusal); }
             var asset = await Audio.Upload(bytes, name, by, owner, host);
-            if (!host) budgets.NoteTemp(budgetKey, by, asset.Id, bytes.Length);
+            if (!host) budgets.NoteTemp(budgetKey, by, asset.Id, bytes.Length, asset.Name);
             await gate.EnterAsync(PriorityGate.Lane.Normal); try { await RefreshInner(); Publish(); } finally { gate.Release(); }
             return new("ack", "upload", true, Data: new { assetId = asset.Id, state = asset.State });
         }
