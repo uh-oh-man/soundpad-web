@@ -541,3 +541,48 @@
   padding-left: 0;
   list-style: none;
 }
+
+/* The live transcript follows the newest words (2.46): its state and Jump to latest, above the list. */
+.mimic-transcript-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px 10px;
+  margin-bottom: -6px;
+  font-size: 12px;
+}
+.mimic-follow {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 32px;
+  padding: 4px 10px;
+  font-size: 12px;
+}
+.mimic-follow.live {
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--line));
+}
+.mimic-follow .mimic-follow-key {
+  margin-left: 2px;
+}
+@media (hover: none) and (pointer: coarse) {
+  .mimic-follow .mimic-follow-key {
+    display: none;
+  }
+}
+/* Delete (2.46): a quiet red, so it reads as Delete without shouting beside Play. */
+.mimic-panel button.mimic-delete {
+  color: color-mix(in srgb, var(--danger) 80%, var(--text-primary));
+}
+.mimic-panel button.mimic-delete:hover:not(:disabled, [aria-disabled='true']) {
+  border-color: color-mix(in srgb, var(--danger) 55%, var(--line));
+  background: color-mix(in srgb, var(--danger) 12%, transparent);
+}
+/* Full screen (2.46): more room for the words and the waveform. */
+.editor-panel[data-full='true'] .mimic-transcript {
+  max-height: min(46vh, 560px);
+}
+.editor-panel[data-full='true'] .mimic-wave canvas {
+  height: 160px;
+}

@@ -424,6 +424,10 @@ function App() {
         ? 'sentences'
         : 'board';
   const [panel, setPanel] = useState<EditorRequest | null>(restorePanel);
+  // Mimic's Full screen (2.46): remembered in this browser. Choosing a view from the nav shows that view
+  // with Mimic beside it again, until Mimic is opened from the nav once more.
+  const [mimicFull, setMimicFull] = usePref('mimicFull');
+  const [fullSetAside, setFullSetAside] = useState(false);
   const [panelFocus, setPanelFocus] = useState(0);
   const [minimized, setMinimized] = useState(false);
   const [dragWidth, setDragWidth] = useState<number | null>(null);
@@ -437,6 +441,7 @@ function App() {
         ? 'minimized'
         : 'sheet'
       : 'docked';
+  const full = panelMode === 'docked' && shownPanel?.kind === 'mimic' && mimicFull && !fullSetAside;
   // With the panel docked under 1280 px (the VR or companion window) the sidebar folds to icons, so the
   // board keeps its room; in top tabs style the sidebar can be folded by hand.
   const rail =
@@ -459,6 +464,7 @@ function App() {
   function openEditor(request: EditorRequest) {
     if (controller.getSnapshot().mode === 'landing') return;
     if (!panel) opener.current = currentOpener();
+    if (request.kind === 'mimic') setFullSetAside(false);
     setPanel((current) =>
       // Asking again for what is open keeps it as it is (a copy editor keeps its unsaved fields).
       current && JSON.stringify(current) === JSON.stringify(request) ? current : request,
@@ -514,6 +520,8 @@ function App() {
     const board = document.getElementById('board');
     if (board) remember(shown, { scrollTop: board.scrollTop });
     setSection(next);
+    // Mimic in full screen covers the view too: it goes back beside it, so the chosen view shows.
+    if (full) setFullSetAside(true);
     // On a phone the editor sheet covers the view: fold it to its bar, so the chosen view shows and can be
     // used (the editor keeps its state, and "Show editor" brings it back).
     if (panelMode === 'sheet') setMinimized(true);
@@ -759,6 +767,7 @@ function App() {
         nav={navStyle}
         panelMode={panelMode}
         rail={rail}
+        full={full}
         topbar={
           <TopBar
             view={view}
@@ -1236,7 +1245,7 @@ function App() {
         }
         dock={<Notifications />}
         splitter={
-          panelMode === 'docked' ? (
+          panelMode === 'docked' && !full ? (
             <Splitter
               width={editorWidth}
               max={editorMax}
@@ -1262,6 +1271,13 @@ function App() {
                 setMinimized(false);
                 setPanelFocus((n) => n + 1);
               }}
+              {...(shownPanel.kind === 'mimic' && {
+                full,
+                onFull: (on: boolean) => {
+                  setFullSetAside(false);
+                  setMimicFull(on);
+                },
+              })}
             >
               {shownPanel.kind === 'mimic' ? (
                 <MimicPanel

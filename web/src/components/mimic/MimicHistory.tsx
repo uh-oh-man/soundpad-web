@@ -1,5 +1,6 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
+  ArrowDownToLine,
   BookAudio,
   BookmarkPlus,
   ChevronLeft,
@@ -82,6 +83,9 @@ import { MimicWave } from './MimicWave';
 import { MimicOverview } from './MimicOverview';
 import { historyPoller } from '../../mimic/history-poll';
 import { mimicKeysApply } from './keys';
+import { useFollowNewest } from '../../mimic/follow';
+import { followFocus } from '../../focus-follow';
+import { deleteWithUndo, useDeleted } from '../../mimic/pending-delete';
 
 // Guests refresh half as often: their requests share the host page's and the companion's request budgets.
 const POLL_MS = 500,
@@ -173,7 +177,16 @@ export function MimicHistory({
   const start = windowStart(displayEnd, rate);
 
   // Drafts: this person's (most recent first) and the other people's selections on this history.
-  const { drafts: list, budget } = useDraftStore();
+  const { drafts: listed, budget } = useDraftStore();
+  // Drafts deleted here (2.46) are gone at once; the companion lets go of them when Undo has gone.
+  const deleted = useDeleted();
+  const list = useMemo(
+    () =>
+      listed && listed.drafts.some((d) => deleted.has(d.id))
+        ? { ...listed, drafts: listed.drafts.filter((d) => !deleted.has(d.id)) }
+        : listed,
+    [listed, deleted],
+  );
   const { mine, others, open, gone } = draftState(
     list,
     sessionId ?? history?.sessionId ?? null,
@@ -631,18 +644,54 @@ export function MimicHistory({
       setBusy(false);
     }
   }
-  async function discardDraft(draft: Draft) {
+  /**
+   * Delete (2.46, was Discard): one press, with Undo. The draft goes from here at once and the companion
+   * lets go of it once the Undo notice has gone; Undo opens it again.
+   */
+  const mounted = useRef(true);
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
+  const reopen = useRef<(draft: Draft) => void>(() => {});
+  function deleteDraft(draft: Draft, from: Element) {
     if (busy) return;
-    setBusy(true);
-    try {
-      await controller.run('draftDiscard', { draftId: draft.id, sourceId: draft.sessionId });
-      closeDraft();
-      await refreshDrafts();
-    } catch {
-      /* Controller shows the error. */
-    } finally {
-      setBusy(false);
-    }
+    const label = name.trim() || draft.name?.trim();
+    deleteWithUndo(
+      draft.id,
+      label ? `Deleted the draft “${label}”.` : 'Deleted the draft.',
+      async () => {
+        try {
+          await controller.run(
+            'draftDiscard',
+            { draftId: draft.id, sourceId: draft.sessionId },
+            { quiet: true },
+          );
+        } catch (e) {
+          // Already gone (kept and closed elsewhere, a new recording): that is what was asked for.
+          const message = e instanceof Error ? e.message : '';
+          if (!/draft is gone/i.test(message)) {
+            controller.notify(message || 'Could not delete the draft.', 'error');
+            throw e;
+          }
+        } finally {
+          void refreshDrafts();
+        }
+      },
+      () => {
+        if (mounted.current) reopen.current(draft);
+      },
+    );
+    closeDraft();
+    // The draft's buttons go with it: the keyboard goes to the draft history, or the heading.
+    followFocus(
+      from,
+      () =>
+        document.querySelector<HTMLElement>('#editor-panel select[aria-label="Draft history"]') ??
+        document.getElementById('editor-title'),
+    );
   }
   /** Host (2.40): lets go of someone else's draft, such as one a guest left behind holding recording history. */
   async function discardBand(id: string) {
@@ -721,6 +770,14 @@ export function MimicHistory({
       setFocusName(false);
     }
   }, [focusName, selection]);
+  // The live transcript follows the newest words (2.46); see follow.ts.
+  const newest = useFollowNewest<HTMLOListElement>();
+  /** Jump to live: the view follows live again and the newest words show, in one press (or End). */
+  function jumpToNewest() {
+    if (timeline && !(follow || end >= timeline.liveFrame)) goLive();
+    newest.jump();
+  }
+  reopen.current = (draft) => openDraft(draft);
   const shortcut = useRef<(e: KeyboardEvent) => void>(() => {});
   useEffect(() => {
     shortcut.current = (e: KeyboardEvent) => {
@@ -748,6 +805,9 @@ export function MimicHistory({
           else if (canPlay) void playDraft(open);
         } else if (!e.shiftKey) void (draftsOn ? capture() : clip(false));
         else if (canPlay) void clip(true);
+      } else if (!typing && e.key === 'End') {
+        e.preventDefault();
+        jumpToNewest();
       } else if (!typing && QUICK_KEYS[e.key]) {
         e.preventDefault();
         // A number key starts a new selection: an open draft is put away (it stays in the draft history).
@@ -833,6 +893,8 @@ export function MimicHistory({
 
   const behind = behindLiveMs(timeline, end);
   const atLive = follow || end >= timeline.liveFrame;
+  // Showing the newest words: the view is at live and the transcript is scrolled to its end.
+  const following = atLive && newest.following;
   // Held still only because something is selected (as the 30 s view did): it still reads as "the last N seconds".
   const moved = !atLive && !frozenBySelection.current;
   const viewClock = wallOf(timeline, end);
@@ -1069,7 +1131,36 @@ export function MimicHistory({
         </div>
       )}
       {(mimic?.transcribing || words.length > 0) && (
-        <ol className="mimic-transcript mimic-words" aria-label="Transcript">
+        <div className="mimic-transcript-head">
+          <span className="muted">
+            {following ? 'New words show as they are said' : 'Newer words are further down'}
+          </span>
+          {/* Always here (its label changes), so it keeps the keyboard when pressed. */}
+          <button
+            type="button"
+            className={following ? 'mimic-follow live' : 'mimic-follow primary'}
+            aria-pressed={following}
+            title="Show the newest words and follow them (End)"
+            aria-keyshortcuts="End"
+            onClick={jumpToNewest}
+          >
+            <ArrowDownToLine size={14} aria-hidden="true" />{' '}
+            {following ? 'Following latest' : 'Jump to latest'}
+            <kbd className="mimic-follow-key" aria-hidden="true">
+              End
+            </kbd>
+          </button>
+        </div>
+      )}
+      {(mimic?.transcribing || words.length > 0) && (
+        <ol
+          ref={newest.ref}
+          onScroll={newest.onScroll}
+          onPointerMove={newest.onPointerMove}
+          onPointerLeave={newest.onPointerLeave}
+          className="mimic-transcript mimic-words"
+          aria-label="Transcript"
+        >
           {shown.length ? (
             shown.map((sentence) => (
               <li key={sentence[0].id}>
@@ -1248,10 +1339,12 @@ export function MimicHistory({
           )}
           <button
             type="button"
+            className="mimic-delete"
             aria-disabled={busy || undefined}
-            onClick={() => void discardDraft(open)}
+            title="Delete this draft (Undo brings it back)"
+            onClick={(e) => deleteDraft(open, e.currentTarget)}
           >
-            <Trash2 size={15} /> Discard
+            <Trash2 size={15} /> Delete
           </button>
           <p className="muted mimic-draft-help">
             Drag an edge on the waveform, or click words, to change it; it can reach into the audio

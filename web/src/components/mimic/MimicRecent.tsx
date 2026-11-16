@@ -1,8 +1,13 @@
-import { useState } from 'react';
-import { BookmarkPlus, Play, Rewind, Scissors } from 'lucide-react';
+import { useRef, useState } from 'react';
+import { BookmarkPlus, Play, Rewind, Scissors, Trash2 } from 'lucide-react';
+import { controller } from '../../controller';
 import type { Snapshot } from '../../protocol';
 import { supports } from '../../version';
 import { guestHeld, HELD_BY_HOST, intentKey, playback, usePendingIntent } from '../../playback';
+import { removeNewTempAudio } from '../../remove-temp';
+import { refreshTempAssets, useTempAssets } from '../../temp-assets';
+import { clipDeletable, deleteWithUndo, useDeleted } from '../../mimic/pending-delete';
+import { followFocus } from '../../focus-follow';
 
 /** Quick effects for a fresh clip (2.18.1): each makes an Edit copy of the whole clip and plays it at once. */
 const quickEffects = [
@@ -28,11 +33,41 @@ export function MimicRecent({
   const [making, setMaking] = useState('');
   // The replay this page asked for and has not heard back about (2.35).
   const intent = usePendingIntent();
-  // Skip clips already removed from Temp.
-  const recent = (state.mimic?.recent ?? []).filter((clip) =>
-    state.library.sounds.some((s) => s.assetId === clip.assetId),
+  const deleted = useDeleted();
+  const { data: temp } = useTempAssets();
+  const list = useRef<HTMLElement>(null);
+  // Skip clips already removed from Temp, and those deleted here (2.46).
+  const recent = (state.mimic?.recent ?? []).filter(
+    (clip) =>
+      !deleted.has(clip.assetId) && state.library.sounds.some((s) => s.assetId === clip.assetId),
   );
   if (!recent.length) return null;
+  const me = controller.getSnapshot().profile.name;
+  // The host may delete any clip; a guest their own, while the host lets guests add audio (2.32 Undo rules;
+  // the companion checks it really is theirs).
+  const canDelete = (clip: (typeof recent)[number]) =>
+    clipDeletable(temp?.manager.assets.find((a) => a.id === clip.assetId)) &&
+    (host ||
+      (clip.by === me &&
+        state.permissions.guestUploads !== false &&
+        supports(state.companionVersion, 'guestUndo')));
+  function remove(index: number, from: Element) {
+    const clip = recent[index];
+    const next = recent[index + 1] ?? recent[index - 1];
+    deleteWithUndo(clip.assetId, `Deleted “${clip.name}” from Temp.`, () =>
+      removeNewTempAudio(clip.assetId).finally(refreshTempAssets),
+    );
+    // The row's buttons go with it: the keyboard moves to the next clip (or the one before), else the heading.
+    followFocus(
+      from,
+      () =>
+        (next &&
+          list.current?.querySelector<HTMLElement>(
+            `[data-clip="${CSS.escape(next.assetId)}"] button`,
+          )) ||
+        document.getElementById('editor-title'),
+    );
+  }
   // Held by the host's Panic (2.35): play controls look unavailable, keep focus and ignore presses.
   const held = guestHeld(state, host);
   const play = (assetId: string, orientation: 'normal' | 'reversed') =>
@@ -73,10 +108,10 @@ export function MimicRecent({
     }
   }
   return (
-    <section className="mimic-recent" aria-label="Just mimicked">
+    <section className="mimic-recent" aria-label="Just mimicked" ref={list}>
       <small>Just mimicked</small>
-      {recent.map((clip) => (
-        <div className="mimic-recent-item" key={clip.assetId}>
+      {recent.map((clip, index) => (
+        <div className="mimic-recent-item" key={clip.assetId} data-clip={clip.assetId}>
           <button
             disabled={!canPlay}
             aria-disabled={held || undefined}
@@ -144,6 +179,17 @@ export function MimicRecent({
                   </option>
                 ))}
             </select>
+          )}
+          {/* One press (2.46): it goes at once, and Undo on the notice brings it back. */}
+          {canDelete(clip) && (
+            <button
+              className="icon-button mimic-delete"
+              aria-label={`Delete ${clip.name}`}
+              title="Delete: take it out of Temp (Undo brings it back)"
+              onClick={(e) => remove(index, e.currentTarget)}
+            >
+              <Trash2 size={14} />
+            </button>
           )}
         </div>
       ))}

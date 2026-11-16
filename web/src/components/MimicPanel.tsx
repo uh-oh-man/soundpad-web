@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
-import { Headphones, Play, Scissors, X } from 'lucide-react';
+import { ArrowDownToLine, Headphones, Play, Scissors, X } from 'lucide-react';
 import { z } from 'zod';
 import { controller } from '../controller';
 import type { Snapshot } from '../protocol';
@@ -22,6 +22,7 @@ import { MimicRecent } from './mimic/MimicRecent';
 import { MimicLibrary } from './mimic/MimicLibrary';
 import { MimicHistory } from './mimic/MimicHistory';
 import { mimicKeysApply } from './mimic/keys';
+import { useFollowNewest } from '../mimic/follow';
 
 const POLL_MS = 500;
 const peekSchema = z.object({
@@ -73,6 +74,8 @@ export function MimicPanel({
   const held = guestHeld(state, host);
   const lines = (peek?.transcript ?? []).filter((l) => l.endMs > 0);
   const suggestion = peek && selection ? transcriptFor(lines, selection) : '';
+  // The newest line stays in view while the list is at its end (2.46, follow.ts).
+  const newest = useFollowNewest<HTMLOListElement>();
 
   // After a keyboard quick-select, move focus to the name field so Enter mimics.
   const nameField = useRef<HTMLInputElement>(null);
@@ -178,6 +181,9 @@ export function MimicPanel({
       ) {
         e.preventDefault();
         if (!e.shiftKey || canPlay) void clip(e.shiftKey);
+      } else if (!typing && e.key === 'End') {
+        e.preventDefault();
+        newest.jump();
       } else if (!typing && QUICK_KEYS[e.key]) {
         e.preventDefault();
         setFocusName(true);
@@ -232,7 +238,37 @@ export function MimicPanel({
         <>
           <MimicWave peek={peek} selection={selection} onSelect={setSelection} />
           {mimic?.transcribing && (
-            <ol className="mimic-transcript" aria-label="Transcript">
+            <div className="mimic-transcript-head">
+              <span className="muted">
+                {newest.following
+                  ? 'New words show as they are said'
+                  : 'Newer words are further down'}
+              </span>
+              <button
+                type="button"
+                className={newest.following ? 'mimic-follow live' : 'mimic-follow primary'}
+                aria-pressed={newest.following}
+                title="Show the newest words and follow them (End)"
+                aria-keyshortcuts="End"
+                onClick={newest.jump}
+              >
+                <ArrowDownToLine size={14} aria-hidden="true" />{' '}
+                {newest.following ? 'Following latest' : 'Jump to latest'}
+                <kbd className="mimic-follow-key" aria-hidden="true">
+                  End
+                </kbd>
+              </button>
+            </div>
+          )}
+          {mimic?.transcribing && (
+            <ol
+              ref={newest.ref}
+              onScroll={newest.onScroll}
+              onPointerMove={newest.onPointerMove}
+              onPointerLeave={newest.onPointerLeave}
+              className="mimic-transcript"
+              aria-label="Transcript"
+            >
               {lines.length ? (
                 lines.map((line) => (
                   <li key={`${line.startMs}-${line.text}`}>

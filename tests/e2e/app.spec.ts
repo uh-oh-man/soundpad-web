@@ -1617,7 +1617,7 @@ test('Mimic history: go back, select words in older audio, clip them, and see ga
     page.getByRole('button', { name: `Play from start: ${words}`, exact: true }),
   ).toBeEnabled();
   // The draft goes; the clip stays in Temp (an open draft keeps its audio in view).
-  await dialog.getByRole('button', { name: 'Discard' }).click();
+  await dialog.getByRole('button', { name: 'Delete', exact: true }).click();
   // Go live returns to the newest audio.
   await dialog.getByRole('button', { name: 'Go live' }).click();
   await expect(dialog.getByRole('button', { name: 'Live', exact: true })).toBeVisible();
@@ -1858,8 +1858,8 @@ test('Mimic drafts: a guest previews privately only what was recorded since join
   await bands.getByRole('button', { name: 'Copy Fixture Guest’s selection to my drafts' }).click();
   const hostDraft = dialog.getByRole('region', { name: 'Draft' });
   await expect(hostDraft.getByLabel('Clip name')).toHaveValue('Guest draft');
-  // An independent copy: the guest's own draft is untouched when the host discards theirs.
-  await hostDraft.getByRole('button', { name: 'Discard' }).click();
+  // An independent copy: the guest's own draft is untouched when the host deletes theirs.
+  await hostDraft.getByRole('button', { name: 'Delete', exact: true }).click();
   await expect(guestDialog.getByRole('region', { name: 'Draft' })).toBeVisible();
   const theirs = (await sendCommand(guest, 'draftList')).data as DraftReply;
   expect(theirs.drafts.map((d) => d.name)).toEqual(['Guest draft']);
@@ -1972,7 +1972,7 @@ test('live Nostr/WebRTC: guests see Mimic only when allowed and can clip from it
     await expect(dialog.getByRole('button', { name: 'Preview' })).toBeVisible();
     await dialog.getByLabel('Clip name').fill('Guest mimic');
     await captureAndKeep(dialog);
-    await dialog.getByRole('button', { name: 'Discard' }).click();
+    await dialog.getByRole('button', { name: 'Delete', exact: true }).click();
     await expect(
       page.getByRole('button', { name: 'Play from start: Guest mimic', exact: true }),
     ).toBeEnabled();
