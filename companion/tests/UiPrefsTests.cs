@@ -25,7 +25,7 @@ public sealed class UiPrefsTests : IDisposable
         var first = await b.Execute(Cmd("uiPrefsGet"), "host");
         Assert.True(first.Ok);
         Assert.False(Saved(first));
-        Assert.Equal("sidebar", Prefs(first)["navStyle"]!.GetValue<string>());
+        Assert.Equal("tabs", Prefs(first)["navStyle"]!.GetValue<string>()); // top tabs by default since 2.47
         Assert.Equal("red-blue", Prefs(first)["theme"]!.GetValue<string>());
         Assert.Null(Prefs(first)["activeDraft"]);
         Assert.False(File.Exists(UiPath));
@@ -111,7 +111,7 @@ public sealed class UiPrefsTests : IDisposable
         var get = await b.Execute(Cmd("uiPrefsGet"), "host");
         Assert.True(get.Ok);
         Assert.False(Saved(get));
-        Assert.Equal("sidebar", Prefs(get)["navStyle"]!.GetValue<string>());
+        Assert.Equal("tabs", Prefs(get)["navStyle"]!.GetValue<string>());
         Assert.Equal(content, File.ReadAllText(UiPath));
     }
 

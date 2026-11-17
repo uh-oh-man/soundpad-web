@@ -16,7 +16,7 @@ public sealed partial class UiPrefsStore(string path)
     public const int MaxBytes = 4096;
     private static readonly string[] NavStyles = ["sidebar", "tabs"], Themes = ["red-blue", "purple", "ocean"], Motions = ["system", "reduce"], Contrasts = ["standard", "high"], HeaderAnimations = ["on", "still", "off"];
     /// <summary>Every known field with its default (activeDraft: none).</summary>
-    private static JsonObject Defaults() => new() { ["navStyle"] = "sidebar", ["theme"] = "red-blue", ["motion"] = "system", ["contrast"] = "standard", ["headerAnimation"] = "on", ["activeDraft"] = null };
+    private static JsonObject Defaults() => new() { ["navStyle"] = "tabs", ["theme"] = "red-blue", ["motion"] = "system", ["contrast"] = "standard", ["headerAnimation"] = "on", ["activeDraft"] = null };
     private static readonly HashSet<string> Known = ["version", "navStyle", "theme", "motion", "contrast", "headerAnimation", "activeDraft"];
     private readonly object sync = new();
     private JsonObject? current;
