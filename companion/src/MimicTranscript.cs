@@ -37,7 +37,8 @@ public sealed class WhisperEngine(string modelPath, string? sharedModelPath = nu
 
     internal static int LiveThreads(SubtitleMode mode, int processors) => mode switch
     {
-        SubtitleMode.Gaming => processors >= 8 ? 2 : 1,
+        // The 2.39 promise: Gaming recognises on one below-normal thread, whatever the PC, so a game keeps its CPU.
+        SubtitleMode.Gaming => 1,
         SubtitleMode.Balanced => Math.Clamp(processors / 3, 1, 4),
         _ => Math.Clamp(processors / 2, 1, 8)
     };
@@ -50,16 +51,17 @@ public sealed class WhisperEngine(string modelPath, string? sharedModelPath = nu
     /// <summary>
     /// Recognises a long file piece by piece, taking <paramref name="busy"/> for each piece only (2.41), so live
     /// subtitles, on-demand history requests and copy naming get the engine between pieces instead of waiting for
-    /// the whole file (up to 10 minutes of audio).
+    /// the whole file (up to 10 minutes of audio). Each piece waits in the background lane (2.47), so whatever
+    /// waits in the live lane goes first, also ahead of another file's pieces.
     /// </summary>
-    internal static async Task<IReadOnlyList<TranscribedSpan>> InPieces(float[] samples16k, SemaphoreSlim busy, Func<float[], Task<IReadOnlyList<TranscribedSpan>>> recognise, CancellationToken cancel)
+    internal static async Task<IReadOnlyList<TranscribedSpan>> InPieces(float[] samples16k, WhisperGate busy, Func<float[], Task<IReadOnlyList<TranscribedSpan>>> recognise, CancellationToken cancel)
     {
         var all = new List<TranscribedSpan>();
         for (int at = 0; at < samples16k.Length; at += PieceSeconds * MimicTranscriber.SpeechRate)
         {
             int length = samples16k.Length <= MaxCallSeconds * MimicTranscriber.SpeechRate ? samples16k.Length : Math.Min(PieceSeconds * MimicTranscriber.SpeechRate, samples16k.Length - at);
             var piece = length == samples16k.Length ? samples16k : samples16k.AsSpan(at, length).ToArray();
-            await busy.WaitAsync(cancel);
+            await busy.EnterBackground(cancel);
             IReadOnlyList<TranscribedSpan> spans;
             try { spans = await recognise(piece); }
             finally { busy.Release(); }
@@ -129,10 +131,10 @@ public sealed class WhisperEngine(string modelPath, string? sharedModelPath = nu
         catch (Exception ex) when (ex is not OutOfMemoryException) { Status = "Speech model setup failed: " + ex.Message; throw new InvalidDataException(Status); }
         finally { if (File.Exists(temporary)) File.Delete(temporary); }
     }
-    private readonly SemaphoreSlim busy = new(1, 1);
+    private readonly WhisperGate busy = new();
     public async Task<IReadOnlyList<TranscribedSpan>> Transcribe(float[] samples16k, CancellationToken cancel)
     {
-        await busy.WaitAsync(cancel);
+        await busy.EnterLive(cancel);
         try
         {
             if (samples16k.Length <= MaxCallSeconds * MimicTranscriber.SpeechRate) return await OnOwnThread(samples16k, cancel);
@@ -204,9 +206,40 @@ public sealed class WhisperEngine(string modelPath, string? sharedModelPath = nu
     public void Dispose()
     {
         // Never free the native processor under a running recognition; if one is stuck, leaking beats crashing.
-        if (!busy.Wait(TimeSpan.FromSeconds(15))) return;
+        if (!busy.Hold(TimeSpan.FromSeconds(15))) return;
         foreach (var p in processors) p.Processor.Dispose();
         processors.Clear(); factory?.Dispose(); factory = null;
+    }
+}
+
+/// <summary>
+/// The speech engine's one-at-a-time lock, with two lanes (2.47). Live work (subtitles, on-demand history stretches,
+/// copy naming: <see cref="WhisperEngine.Transcribe"/>) takes it before background work (library files and the
+/// category word index, piece by piece). Until 2.46 it was one first-come queue, so a live chunk could wait behind
+/// every background piece queued before it, each up to 25 s of audio. A running piece is never interrupted, and
+/// background work runs whenever nothing live waits (live requests come one at a time, so it is never starved).
+/// </summary>
+internal sealed class WhisperGate
+{
+    // No ageing: a background piece never takes a turn ahead of a live request that is waiting.
+    private readonly PriorityGate gate = new(int.MaxValue / 2, int.MaxValue / 2);
+    public Task EnterLive(CancellationToken cancel) => Enter(PriorityGate.Lane.Urgent, cancel);
+    public Task EnterBackground(CancellationToken cancel) => Enter(PriorityGate.Lane.Background, cancel);
+    private async Task Enter(PriorityGate.Lane lane, CancellationToken cancel)
+    {
+        cancel.ThrowIfCancellationRequested();
+        var waiter = gate.Enter(lane);
+        bool entered;
+        using (cancel.Register(() => gate.Cancel(waiter))) entered = await waiter.Entered;
+        // Cancelled while waiting; one that got the lock first holds it (its caller releases it as usual).
+        if (!entered) throw new OperationCanceledException(cancel);
+    }
+    public void Release() => gate.Release();
+    /// <summary>Takes the lock for good (disposal), waiting at most <paramref name="wait"/>; false when it stayed busy.</summary>
+    public bool Hold(TimeSpan wait)
+    {
+        var waiter = gate.Enter(PriorityGate.Lane.Urgent);
+        return waiter.Entered.Wait(wait) ? waiter.Entered.Result : !gate.Cancel(waiter);
     }
 }
 
@@ -219,6 +252,12 @@ public sealed class MimicTranscriber(ITranscriptEngine engine) : IDisposable
 {
     public const int SpeechRate = 16000;
     private const double BackfillChunkSeconds = 15, PauseSeconds = 0.35, CutSearchSeconds = 3, LiveCutSearchMs = 800, CutWindowMs = 300, EdgeMs = 50;
+    /// <summary>
+    /// Balanced and Fast (2.47): how much of a forced live cut is recognised twice. Words that reach into the last second
+    /// before the cut are not kept from that pass; the next chunk starts at a gap between words before them, so a word
+    /// spoken across the cut is recognised whole once, never clipped in two or kept twice.
+    /// </summary>
+    internal const double OverlapMs = 1000;
     private const int MaxRequests = 8;
     private readonly object gate = new();
     private HistoryStore? store;
@@ -434,11 +473,15 @@ public sealed class MimicTranscriber(ITranscriptEngine engine) : IDisposable
         }
         PruneIfDue(history, transcript);
         long rate = history.Rate, length = live - start;
+        // Gaming keeps the 2.39 chunks (a cut after 10 s of continuous speech, at the quietest moment of its last 3 s): one
+        // recognition per sentence or per 10 s. Balanced and Fast cut sooner for faster captions (2.46), and overlap
+        // each forced cut so no word is clipped or kept twice (2.47).
+        bool gaming = Mode == SubtitleMode.Gaming;
         var (minSeconds, maxSeconds) = Mode switch
         {
             SubtitleMode.Fast => (1.0, 3.0),
             SubtitleMode.Balanced => (1.25, 3.5),
-            _ => (1.5, 4.0)
+            _ => (1.5, 10.0)
         };
         if (length < minSeconds * rate && !(force && length >= rate * 3 / 10)) return false;
         long end = start + Math.Min(length, (long)(maxSeconds * rate));
@@ -466,12 +509,13 @@ public sealed class MimicTranscriber(ITranscriptEngine engine) : IDisposable
         if (!pause && full)
         {
             // No pause in this window: look near the end so the cut still makes timely progress.
-            double at = energy.QuietestBetween(energy.DurationMs - LiveCutSearchMs, energy.DurationMs, CutWindowMs);
+            double at = energy.QuietestBetween(energy.DurationMs - (gaming ? CutSearchSeconds * 1000 : LiveCutSearchMs), energy.DurationMs, CutWindowMs);
             if (at > 1000 && at < energy.DurationMs) cut = start + (long)(at * rate / 1000);
             forced = !energy.QuietBetween(at - CutWindowMs / 2, at + CutWindowMs / 2);
         }
         else if (!pause) forced = true; // capture stopped mid-word
-        var result = await Recognise(history, start, cut, audio, speech, startForced, forced, transcript, cancel, generation);
+        // More audio follows a forced cut: Balanced and Fast take the words near it from the next chunk instead.
+        var result = await Recognise(history, start, cut, audio, speech, startForced, forced, transcript, cancel, generation, holdBackLimit: gaming ? null : rate, overlap: !gaming && forced && !force);
         if (result == null) return false;
         var (recognised, next) = result.Value;
         // After a forced cut, a sentence still being spoken at the edge is held back and retried with what follows.
@@ -570,7 +614,9 @@ public sealed class MimicTranscriber(ITranscriptEngine engine) : IDisposable
     }
 
     /// <summary>Recognises [start, cut) and aligns its words. Returns the words (no ids yet) and where the next chunk begins.</summary>
-    private async Task<(List<TranscriptWord> Words, long Next)?> Recognise(HistoryStore history, long start, long cut, float[] audio, float[] speech, bool forcedStart, bool forcedEnd, TranscriptWords transcript, CancellationToken cancel, int? generation, bool holdBack = true)
+    /// <param name="holdBackLimit">How far before the cut a held-back phrase may start (frames); null for no limit (Gaming, as in 2.39).</param>
+    /// <param name="overlap">Keep no word that reaches into the last <see cref="OverlapMs"/> before the cut (see <see cref="Overlap"/>).</param>
+    private async Task<(List<TranscriptWord> Words, long Next)?> Recognise(HistoryStore history, long start, long cut, float[] audio, float[] speech, bool forcedStart, bool forcedEnd, TranscriptWords transcript, CancellationToken cancel, int? generation, bool holdBack = true, long? holdBackLimit = null, bool overlap = false)
     {
         long rate = history.Rate;
         int cutSamples = (int)Math.Min(speech.Length, (cut - start) * SpeechRate / rate);
@@ -580,14 +626,20 @@ public sealed class MimicTranscriber(ITranscriptEngine engine) : IDisposable
         var spans = await engine.Transcribe(piece, cancel);
         var aligned = WordAligner.Align(spans, energy);
         double cutMs = cutSamples * 1000.0 / SpeechRate;
-        long next = cut;
+        long next = cut; bool heldBack = false;
+        // A phrase still being spoken at a forced cut waits for the next chunk, from its start (a real pause before it).
         if (holdBack && forcedEnd && spans.Count > 1 && cutMs - spans[^1].End.TotalMilliseconds < 400)
         {
             int last = spans.Count - 1;
             double from = aligned.Where(w => w.Phrase == last).Select(w => w.StartMs).DefaultIfEmpty(spans[^1].Start.TotalMilliseconds).Min();
             from = Math.Min(from, spans[^1].Start.TotalMilliseconds);
             long held = start + (long)(Math.Max(0, from) * rate / 1000);
-            if (held > start && cut - held <= rate) { next = held; aligned.RemoveAll(w => w.Phrase == last); }
+            if (held > start && (holdBackLimit == null || cut - held <= holdBackLimit)) { next = held; aligned.RemoveAll(w => w.Phrase == last); heldBack = true; }
+        }
+        if (overlap && forcedEnd && !heldBack && Overlap(aligned, cutMs) is { } boundaryMs)
+        {
+            next = start + (long)Math.Floor(boundaryMs * rate / 1000);
+            aligned.RemoveAll(w => w.EndMs > boundaryMs);
         }
         double snr = energy.PeakDb - energy.FloorDb;
         var phrases = new Dictionary<int, long>();
@@ -603,6 +655,28 @@ public sealed class MimicTranscriber(ITranscriptEngine engine) : IDisposable
             result.Add(new(0, ws, we, text, w.Probability, w.StretchMs, w.PauseBefore, w.PauseAfter, WordAligner.Status(w.Probability, w.StretchMs, touches, snr), phraseId));
         }
         return (result, next);
+    }
+
+    /// <summary>
+    /// Where the next chunk starts after a forced cut, in ms of this one (2.47), or null to keep the cut. It is the start
+    /// of the first word that reaches into the last <see cref="OverlapMs"/> before the cut (or that second's start when
+    /// no word does), moved back to where no word is being spoken. Words before it are kept from this chunk, which heard
+    /// at least a second after them; the rest are recognised again, whole, by the next one. So the two passes meet at a
+    /// gap between words: nothing clipped, nothing twice, no hole between them. Null when that would leave less than
+    /// half a second of progress (one very long word): then the cut is kept, as before.
+    /// </summary>
+    internal static double? Overlap(IReadOnlyList<AlignedWord> words, double cutMs)
+    {
+        double horizon = cutMs - OverlapMs;
+        double boundary = words.Where(w => w.EndMs > horizon).Select(w => w.StartMs).DefaultIfEmpty(horizon).Min();
+        boundary = Math.Min(boundary, horizon);
+        for (int guard = 0; guard <= words.Count; guard++)
+        {
+            var across = words.Where(w => w.StartMs < boundary && w.EndMs > boundary).Select(w => w.StartMs).DefaultIfEmpty(double.NaN).Min();
+            if (double.IsNaN(across)) break;
+            boundary = across;
+        }
+        return boundary >= 500 ? boundary : null;
     }
 
     private void PruneIfDue(HistoryStore history, TranscriptWords transcript)

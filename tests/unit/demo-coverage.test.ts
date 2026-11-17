@@ -220,6 +220,8 @@ const FEATURE_OPS: Record<Feature, Op[]> = {
   // 2.45 (WP4): host only, never in the example (DEMO_COMPANION stays below 2.45 until integration).
   diagnostics: ['activityAdd', 'activityList', 'diagnosticsLog'],
   quickSave: ['libraryKeep'],
+  // 2.47: a field of the Temp list (audioAssets), no op of its own.
+  tempWaiting: [],
 };
 
 /** What the example honestly cannot do, and the reason it gives. Each must be refused with exactly that. */

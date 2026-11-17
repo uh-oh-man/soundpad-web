@@ -531,20 +531,44 @@ public sealed class VoiceLibraryTests : IDisposable
     public async Task ALongBackgroundFileGivesTheSpeechEngineBackBetweenItsPieces()
     {
         // 60 s: three pieces of at most 25 s. A live subtitle (or copy naming) waiting meanwhile runs after the first.
-        var gate = new SemaphoreSlim(1, 1); var order = new List<string>(); Task? live = null;
+        var gate = new WhisperGate(); var order = new List<string>(); Task? live = null;
         var spans = await WhisperEngine.InPieces(new float[60 * MimicTranscriber.SpeechRate], gate, piece =>
         {
             lock (order) order.Add("piece " + piece.Length / MimicTranscriber.SpeechRate);
             // Queued for the engine here, while the first piece holds it, as a live subtitle that arrives meanwhile is.
             // (Queued from Task.Run instead, it could reach the gate only after the second piece took it again: the
             // test failed so on a busy PC, though a request that is already waiting always gets its turn.)
-            live ??= gate.WaitAsync().ContinueWith(_ => { lock (order) order.Add("live"); gate.Release(); }, TaskScheduler.Default);
+            live ??= gate.EnterLive(default).ContinueWith(_ => { lock (order) order.Add("live"); gate.Release(); }, TaskScheduler.Default);
             return Task.FromResult<IReadOnlyList<TranscribedSpan>>([new(TimeSpan.Zero, TimeSpan.FromSeconds(1), "word")]);
         }, CancellationToken.None);
         await live!;
         Assert.Equal(["piece 25", "live", "piece 25", "piece 10"], order);
         Assert.Equal([0.0, 25.0, 50.0], spans.Select(s => s.Start.TotalSeconds));
-        Assert.Equal(1, gate.CurrentCount);
+        Assert.True(gate.Hold(TimeSpan.Zero)); // free again
+    }
+
+    [Fact]
+    public async Task ALiveRecognitionGoesAheadOfBackgroundPiecesQueuedBeforeIt()
+    {
+        // 2.47: a piece of a library file holds the engine; another file's piece queues, then a live subtitle chunk.
+        // Until 2.46 one first-come queue let the second file's 25 s piece go first.
+        var gate = new WhisperGate(); var order = new List<string>();
+        await gate.EnterBackground(default); // the running piece
+        var second = gate.EnterBackground(default).ContinueWith(_ => { lock (order) order.Add("background"); gate.Release(); }, TaskScheduler.Default);
+        await Task.Delay(20);
+        var live = gate.EnterLive(default).ContinueWith(_ => { lock (order) order.Add("live"); gate.Release(); }, TaskScheduler.Default);
+        await Task.Delay(20);
+        gate.Release(); // the running piece ends
+        await Task.WhenAll(second, live);
+        Assert.Equal(["live", "background"], order);
+        // A live request that gives up while waiting leaves the queue; the gate still works.
+        await gate.EnterBackground(default);
+        using var cancel = new CancellationTokenSource();
+        var given = gate.EnterLive(cancel.Token);
+        cancel.Cancel();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => given);
+        gate.Release();
+        Assert.True(gate.Hold(TimeSpan.FromSeconds(1)));
     }
 
     [Fact]
@@ -634,6 +658,28 @@ public sealed class VoiceLibraryTests : IDisposable
         // Guests are never told a host folder.
         Assert.Equal(JsonValueKind.Null, saved.GetProperty("folder").ValueKind);
         Assert.DoesNotContain(folder, saved.GetRawText(), StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task AGuestCannotPutBackAKeptClipTheHostTookOutOfTheLibrary()
+    {
+        await using var rig = new Rig(folder); var bridge = rig.Bridge;
+        await rig.Host();
+        rig.Advance(8);
+        var clip = Body(await Ok(bridge.Execute(Cmd("mimicClip") with { StartFrame = S(1.8), EndFrame = S(3), SourceId = rig.Session, Name = "Hosts line" }, "host")));
+        string assetId = clip.GetProperty("assetId").GetString()!;
+        var saved = Body(await Ok(bridge.Execute(Cmd("libraryKeep") with { AssetId = assetId }, "host")));
+        await Ok(bridge.Execute(Cmd("libraryRemove") with { RecordingIds = [saved.GetProperty("recordingId").GetString()!] }, "host"));
+        Assert.Equal(0, bridge.VoiceLibraryStore.Count);
+        // The clip is still kept (still listed), but the host decided it is not in the library: a guest can't undo that,
+        // neither by one-press Save nor by Keep naming its kept file.
+        Assert.Contains("Only the host can add it", await Refused(rig.As(Alice, Cmd("libraryKeep") with { AssetId = assetId })));
+        var kept = Body(await Ok(bridge.Execute(Cmd("audioAssets"), "host"))).GetProperty("manager").GetProperty("assets").EnumerateArray()
+            .First(a => a.GetProperty("id").GetString() == assetId).GetProperty("variants").EnumerateArray().First(v => v.GetProperty("permanent").GetBoolean()).GetProperty("id").GetString();
+        Assert.Contains("Only the host can add it", await Refused(rig.As(Alice, Cmd("keepAudio") with { AssetId = assetId, VariantId = kept })));
+        Assert.Equal(0, bridge.VoiceLibraryStore.Count);
+        // The host still can.
+        Assert.True(Body(await Ok(bridge.Execute(Cmd("libraryKeep") with { AssetId = assetId }, "host"))).GetProperty("added").GetBoolean());
     }
 
     [Fact]

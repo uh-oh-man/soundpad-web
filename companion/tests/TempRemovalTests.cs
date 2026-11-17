@@ -154,6 +154,82 @@ public sealed class TempRemovalTests : IDisposable
     }
 
     [Fact]
+    public async Task RemovedFilesStillTakeTempUntilFreedAndTheHostIsToldWhatFreesThem()
+    {
+        // With the real Soundpad a removed clip's file stays until Clear Temp or quitting. Making and removing clips
+        // filled Temp's 32 files while Temp looked empty, and then every new clip failed with "Resolve pending cleanup".
+        await using var rig = new Rig(folder); await rig.Start();
+        string? refusal = null;
+        for (int i = 0; i < 40 && refusal == null; i++)
+        {
+            // One uploader per clip: the six-per-minute upload limit is not what is tested here.
+            var reply = await rig.Bridge.Upload(Tone(0.1f + i * 0.01f), $"Clip {i}.wav", "Host", true, "host-" + i);
+            if (!reply.Ok) { refusal = reply.Error; break; }
+            await Ok(rig.Bridge.Execute(Cmd("removeAudio") with { AssetId = Body(reply).GetProperty("assetId").GetString() }, "host"));
+        }
+        Assert.NotNull(refusal);
+        Assert.Contains("only because", refusal);
+        Assert.Contains("waiting to be freed", refusal);
+        Assert.Contains("Clear all temporary audio", refusal);
+        // Temp shows what waits: nothing is listed as Temp audio, but the files and their size are said.
+        var manager = (await rig.Temp()).GetProperty("manager");
+        Assert.All(manager.GetProperty("assets").EnumerateArray(), a => Assert.False(a.GetProperty("hasTemporary").GetBoolean()));
+        var waiting = manager.GetProperty("waiting");
+        Assert.InRange(waiting.GetProperty("files").GetInt32(), 31, 32);
+        Assert.True(waiting.GetProperty("bytes").GetInt64() > 0);
+        Assert.Equal(manager.GetProperty("temporaryBytes").GetInt64(), waiting.GetProperty("bytes").GetInt64());
+        // Clear Temp frees them, and new clips fit again.
+        await Ok(rig.Bridge.Execute(Cmd("clearTemp"), "host"));
+        Assert.Equal(JsonValueKind.Null, (await rig.Temp()).GetProperty("manager").GetProperty("waiting").ValueKind);
+        Assert.True((await rig.Bridge.Upload(Tone(0.9f), "After.wav", "Host", true, "host-after")).Ok);
+    }
+
+    [Fact]
+    public async Task AGuestsRemovedClipCountsInTheirTempUntilItsFileIsDeleted()
+    {
+        await using var rig = new Rig(folder); await rig.Start(new(GuestUploads: true));
+        var clip = await rig.Clip(Alice, 0.2f);
+        long Used(JsonElement status) => status.GetProperty("own").GetProperty("tempBytes").GetInt64();
+        long before = Used(Body(await Ok(rig.As(Alice, Cmd("budgetStatus")))));
+        Assert.True(before > 0);
+        await Ok(rig.As(Alice, Cmd("removeAudio") with { AssetId = clip }));
+        // Its file is still on the host's PC: removing it did not give her that space back yet.
+        Assert.Equal(before, Used(Body(await Ok(rig.As(Alice, Cmd("budgetStatus"))))));
+        await Ok(rig.Bridge.Execute(Cmd("clearTemp"), "host"));
+        Assert.Equal(0, Used(Body(await Ok(rig.As(Alice, Cmd("budgetStatus"))))));
+        // A clip the host removed counts for nobody.
+        var second = await rig.Clip(Alice, 0.3f);
+        await Ok(rig.Bridge.Execute(Cmd("removeAudio") with { AssetId = second }, "host"));
+        Assert.Equal(0, Used(Body(await Ok(rig.As(Alice, Cmd("budgetStatus"))))));
+    }
+
+    [Fact]
+    public async Task OnlyWhoeverRemovedAClipCanBringItBackAndAGuestOnlyForTenMinutes()
+    {
+        await using var rig = new Rig(folder); await rig.Start(new(GuestUploads: true));
+        long now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+        rig.Bridge.UseClock(() => Interlocked.Read(ref now));
+        // The host takes Alice's clip away: she can't undo that, the host can.
+        var taken = await rig.Clip(Alice, 0.2f);
+        await Ok(rig.Bridge.Execute(Cmd("removeAudio") with { AssetId = taken }, "host"));
+        Assert.Contains("only the host", await Refused(rig.As(Alice, Cmd("tempRestore") with { AssetId = taken })));
+        Assert.False((await rig.Source(taken)).GetProperty("hasTemporary").GetBoolean());
+        Interlocked.Add(ref now, 60 * 60 * 1000); // the host's own Undo lasts while the companion runs
+        await Ok(rig.Bridge.Execute(Cmd("tempRestore") with { AssetId = taken }, "host"));
+        Assert.True((await rig.Source(taken)).GetProperty("hasTemporary").GetBoolean());
+        // Her own removal: hers to undo, not the host's, and only for ten minutes.
+        var own = await rig.Clip(Alice, 0.3f);
+        await Ok(rig.As(Alice, Cmd("removeAudio") with { AssetId = own }));
+        Assert.Contains("Someone else removed it", await Refused(rig.Bridge.Execute(Cmd("tempRestore") with { AssetId = own }, "host")));
+        Interlocked.Add(ref now, ManagedAudioStore.GuestUndoMs - 1000);
+        await Ok(rig.As(Alice, Cmd("tempRestore") with { AssetId = own }));
+        await Ok(rig.As(Alice, Cmd("removeAudio") with { AssetId = own }));
+        Interlocked.Add(ref now, ManagedAudioStore.GuestUndoMs + 1000);
+        Assert.Contains("more than 10 minutes", await Refused(rig.As(Alice, Cmd("tempRestore") with { AssetId = own })));
+        Assert.False((await rig.Source(own)).GetProperty("hasTemporary").GetBoolean());
+    }
+
+    [Fact]
     public async Task WithEntryRemovalTheFileGoesOnceSoundpadIsQuiet()
     {
         // The test pipes can remove one entry: then the removal completes as soon as nothing plays.

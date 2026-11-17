@@ -57,11 +57,17 @@ public sealed partial class Bridge
         budgets.Touch();
     }
 
-    /// <summary>The ids of the assets that are in Temp right now (a lookup for the budget sums).</summary>
+    /// <summary>
+    /// The ids of the assets whose temporary files take a guest's Temp budget right now (a lookup for the budget sums):
+    /// those in Temp, and (2.47) those the guest removed whose files are still on the PC. With the real Soundpad a
+    /// removed file waits for Clear Temp or quitting, and it still takes Temp's capacity meanwhile; freeing the budget
+    /// at once let a guest fill the host's Temp by making and removing clips. A clip the host removed counts for nobody.
+    /// </summary>
     private Func<string, bool> TemporaryIds()
     {
-        var ids = Audio.Public.Assets.Where(a => a.HasTemporary).Select(a => a.Id).ToHashSet(StringComparer.Ordinal);
-        return ids.Contains;
+        var audio = Audio;
+        var ids = audio.Public.Assets.Where(a => a.HasTemporary).Select(a => a.Id).ToHashSet(StringComparer.Ordinal);
+        return id => ids.Contains(id) || audio.WaitingRemovedBy(id) is { } by && by != "host";
     }
 
     /// <summary>Clips in Temp that quitting would remove: sources with a current temporary file not already on its way out.</summary>
@@ -253,7 +259,15 @@ public sealed partial class Bridge
         var asset = Audio.AssetById(assetId);
         var variant = (c.VariantId != null ? asset.Variants.SingleOrDefault(v => v.Id == c.VariantId) : KeepableVariant(assetId)) ?? throw new InvalidDataException("That clip is not ready to keep yet.");
         string guest = PersonKey(actor, participant, requester), name = Person(actor, participant).Name;
-        if (variant.Permanent) { LibraryFromKeep(assetId, guest, name, source, words); return; }
+        if (variant.Permanent)
+        {
+            // Kept already, so nothing is kept here: only its voice-library recording is made. A guest may do that only
+            // for a clip they made themselves (a keep of theirs the library could not take). Anyone else's kept clip,
+            // one the host removed from the library among them, stays as the host left it.
+            if (!GuestMade(assetId, actor, participant, requester)) throw new InvalidDataException("That clip is already kept. Only the host can add it to the voice library.");
+            LibraryFromKeep(assetId, guest, name, source, words);
+            return;
+        }
         if (budgets.CheckKeep(guest, name, variant.Bytes, settings) is { } refusal) { Publish(); throw new InvalidDataException(refusal); }
         // The host chose the destination once; a guest's command never carries a path.
         await Audio.Promote(assetId, variant.Id, settings.Destination, settings.CategoryId, settings.CategoryName, true);
@@ -262,6 +276,11 @@ public sealed partial class Bridge
         // Every kept clip is a voice-library recording (2.41).
         LibraryFromKeep(assetId, guest, name, source, words);
     }
+
+    /// <summary>A clip this guest added: from this connection, or (2.40) by this participant in this launch.</summary>
+    private bool GuestMade(string assetId, string actor, Participant? participant, string? requester) =>
+        actor != "host" && (Audio.OwnerOf(assetId) is { } owner && requester != null && owner.UploaderId == requester
+            || budgets.OwnerOf(assetId) is { } maker && maker == PersonKey(actor, participant, requester));
 
     /// <summary>
     /// Keep permanently into the voice library (2.41: a draft's "Keep in voice library"): the host's destination for

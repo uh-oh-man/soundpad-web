@@ -198,6 +198,55 @@ public sealed class UpdateContinuityTests : IDisposable
     }
 
     [Fact]
+    public async Task AnUpdateWaitsUntilTheHostHasAnsweredRecoverOrDiscard()
+    {
+        // A crashed launch leaves a draft, a Temp clip and recording history; the next launch asks Recover or Discard.
+        // None of that question is carried through an update's hand-over, so installing waits for the answer.
+        await using var mock = new MockSoundpad(); using var pipe = new SoundpadPipe(mock.Name, true);
+        var capture = new MimicFixture();
+        var crashed = new Bridge(pipe, new StateStore(folder));
+        crashed.UseMimicCapture(capture); crashed.UseTranscriptEngine(new TranscriptFixture()); crashed.UseHotkeys(key => new HotkeyFixture(key));
+        crashed.UseClock(() => Interlocked.Read(ref now));
+        await crashed.Poll(true);
+        await Ok(crashed.Execute(Cmd("beginSession"), "host"));
+        await Ok(crashed.Execute(Cmd("mimicStart") with { SourceId = MimicFixture.Source.Id }, "host"));
+        await Task.Delay(20); capture.Pump();
+        capture.Advance(TimeSpan.FromSeconds(12)); Interlocked.Add(ref now, 12000);
+        var session = crashed.Snapshot.Mimic!.History!.SessionId!;
+        var draft = Body(await Ok(crashed.Execute(Cmd("draftCreate") with { StartFrame = S(2), EndFrame = S(4), SourceId = session, Name = "Waiting" }, "host"))).GetProperty("id").GetString()!;
+        await Ok(crashed.Execute(Cmd("draftKeep") with { DraftId = draft, SourceId = session }, "host"));
+        await crashed.FlushDrafts();
+        Assert.True(crashed.History!.Flush(30000));
+        crashed.History!.Abandon(); // the process dies
+
+        var next = new Bridge(pipe, new StateStore(folder));
+        next.UseMimicCapture(new MimicFixture()); next.UseTranscriptEngine(new TranscriptFixture()); next.UseHotkeys(key => new HotkeyFixture(key));
+        next.UseClock(() => Interlocked.Read(ref now));
+        try
+        {
+            Assert.True(next.RecoverHistory() > 0);
+            await next.StartupCleanup();
+            await next.Poll(true);
+            Assert.Equal(1, next.RecoveredDraftCount);
+            var exits = new TaskCompletionSource();
+            next.UpdateExitRequested += _ => { exits.TrySetResult(); return Task.CompletedTask; };
+            next.Updates.Force(new("ready", "", "2.44.1"));
+            JsonElement install = JsonDocument.Parse("""{"version":"2.44.1","confirm":true}""").RootElement.Clone();
+            var refused = await next.Execute(Cmd("updateInstall") with { Body = install }, "host");
+            Assert.False(refused.Ok);
+            Assert.Contains("Recover or discard the previous session first", refused.Error);
+            Assert.False(exits.Task.IsCompleted);
+            Assert.False(next.UpdateExiting);
+            // Still all there to answer, and once answered the update may go.
+            Assert.Equal(1, next.RecoveredDraftCount);
+            await Ok(next.Execute(Cmd("sessionRecover") with { Action = "recover" }, "host"));
+            await Ok(next.Execute(Cmd("updateInstall") with { Body = install }, "host"));
+            await exits.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        }
+        finally { next.Dispose(); }
+    }
+
+    [Fact]
     public async Task InstallingStopsTheOldSessionThroughTheUpdatePathOnly()
     {
         await using var a = new Rig(this);

@@ -6,6 +6,7 @@ import { supports } from '../../version';
 import { guestHeld, HELD_BY_HOST, intentKey, playback, usePendingIntent } from '../../playback';
 import { removeNewTempAudio } from '../../remove-temp';
 import { guestOwns, refreshTempAssets, useTempAssets } from '../../temp-assets';
+import { guestMayRemoveTemp } from '../../temp-rights';
 import { clipDeletable, deleteWithUndo, useDeleted } from '../../mimic/pending-delete';
 import { followFocus } from '../../focus-follow';
 import { canQuickSave, saveClip } from '../../library/quick-save';
@@ -64,9 +65,7 @@ export function MimicRecent({
       (host ||
         ((asset ? guestOwns(temp, asset, me) : clip.by === me) &&
           supports(state.companionVersion, 'guestUndo') &&
-          (state.permissions.guestUploads !== false ||
-            (state.permissions.guestMimic === true &&
-              supports(state.companionVersion, 'tempUndo')))))
+          guestMayRemoveTemp(state)))
     );
   };
   function remove(index: number, from: Element) {

@@ -34,13 +34,27 @@ public sealed partial class Bridge
         return new(temp != null || recovered != null || kept != null, temp, recovered, kept);
     }
 
-    /// <summary>The size of exactly the temporary files the crashed launch left.</summary>
+    /// <summary>True while any part of a crash's Recover previous session / Discard is still unanswered (cheap; no sizes).</summary>
+    private bool RecoveryPendingNow
+    {
+        get
+        {
+            if (tempRecovery > 0) return true;
+            if (Interlocked.Read(ref recoveredMs) > 0 && history != null) return true;
+            lock (drafts) return recoveredDrafts.Count > 0 && history != null;
+        }
+    }
+
+    /// <summary>
+    /// The size of the clips the crashed launch left in Temp: the ones Recover keeps (the count beside it). A file that
+    /// launch had already removed (retired, waiting for its Temp category) is not one of them (2.47).
+    /// </summary>
     private long LeftoverBytes()
     {
         long bytes = 0;
         foreach (var f in tempLeftovers)
         {
-            try { bytes += Audio.AssetById(f.AssetId).Variants.Where(v => f.VariantIds.Contains(v.Id)).Sum(v => v.Bytes); }
+            try { bytes += Audio.AssetById(f.AssetId).Variants.Where(v => f.VariantIds.Contains(v.Id) && !v.Retired).Sum(v => v.Bytes); }
             catch (Exception ex) when (ex is InvalidDataException or InvalidOperationException) { }
         }
         return bytes;

@@ -83,6 +83,37 @@ public sealed class DraftRecoveryTests : IDisposable
     }
 
     [Fact]
+    public async Task TheRecoverPromptsSizeLeavesOutClipsTheCrashedLaunchHadRemoved()
+    {
+        // The production-style pipe: a removed clip's file stays until its Temp category goes, which a crash skips.
+        await using var mock = new MockSoundpad(); using var pipe = new SoundpadPipe(mock.Name, false);
+        var capture = new MimicFixture();
+        var crashed = Launch(pipe, capture);
+        await Host(crashed, capture);
+        Advance(capture, 6);
+        string IdOf(Reply r) => Body(r).GetProperty("assetId").GetString()!;
+        var kept = await crashed.Upload(Wave(3), "Kept.wav", "Host", true, "host-a");
+        var removed = await crashed.Upload(Wave(9), "Removed.wav", "Host", true, "host-b");
+        Assert.True(kept.Ok && removed.Ok, kept.Error ?? removed.Error);
+        await Ok(crashed.Execute(Cmd("removeAudio") with { AssetId = IdOf(removed) }, "host"));
+        await Crash(crashed);
+        var next = Launch(pipe, new MimicFixture());
+        try
+        {
+            await StartAfterCrash(next);
+            var status = Status(await Ok(next.Execute(Cmd("sessionRecover") with { Action = "status" }, "host")));
+            Assert.Equal(1, status.Temp!.Count);
+            // Exactly the one clip Recover keeps: the removed one's file is not counted.
+            long expected = Asset(IdOf(kept)).GetProperty("variants").EnumerateArray()
+                .Where(v => !v.GetProperty("permanent").GetBoolean() && !v.GetProperty("retired").GetBoolean() && v.GetProperty("state").GetString() != "removed")
+                .Sum(v => v.GetProperty("bytes").GetInt64());
+            Assert.True(expected > 0);
+            Assert.Equal(expected, status.Temp.Bytes);
+        }
+        finally { next.Dispose(); }
+    }
+
+    [Fact]
     public async Task AfterACrashOnePromptListsTempHistoryAndDraftsAndRecoverBringsThemBackAsTheyWere()
     {
         await using var mock = new MockSoundpad(); using var pipe = new SoundpadPipe(mock.Name, true);

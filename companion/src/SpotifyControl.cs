@@ -15,24 +15,66 @@ public interface ISpotifySession
 /// while a status read was under way, and was answered "Spotify is busy" without pressing anything: for a guest,
 /// whose press also waits on the network, the button seemed not to work. A press now waits its turn. A status read
 /// that finds another request under way answers with the last state rather than waiting or reporting busy.
+/// <para>
+/// While a press waits (2.47): the same person pressing the same button again joins that press instead of queueing
+/// another (two queued Play/Pause presses played and paused again, so the button seemed to do nothing), and whether
+/// they may press at all is asked once more when it is their turn (the host may have turned guest Spotify off
+/// meanwhile). A single press still waits for a slow status read (up to <see cref="PressWait"/>): on a busy PC a read
+/// takes seconds, and dropping the press brought back the 2.46 "button does nothing".
+/// </para>
 /// </summary>
 public sealed class SpotifyGate(ISpotifySession session)
 {
     private readonly SemaphoreSlim gate = new(1);
+    private readonly Dictionary<string, Task<SpotifyState>> waiting = new(StringComparer.Ordinal);
     private SpotifyState? last;
     public static readonly TimeSpan StatusWait = TimeSpan.FromMilliseconds(250), PressWait = TimeSpan.FromSeconds(5);
-    public async Task<SpotifyState> Request(string action)
+    /// <param name="who">Who pressed (a press of the same action by the same person while theirs waits joins it); null for none.</param>
+    /// <param name="refusal">Asked once it is the press's turn: why it may not be pressed now (thrown as <see cref="InvalidDataException"/>), or null.</param>
+    public Task<SpotifyState> Request(string action, string? who = null, Func<string?>? refusal = null)
     {
-        bool status = action == "status";
-        if (!await gate.WaitAsync(status ? StatusWait : PressWait))
-            return status && last is { } known ? known : new(false, Error: "Spotify is busy. Try again.");
+        if (action == "status" || who == null) return Run(action, null, null, refusal);
+        string key = who + "|" + action;
+        var press = new TaskCompletionSource<SpotifyState>(TaskCreationOptions.RunContinuationsAsynchronously);
+        lock (waiting)
+        {
+            if (waiting.TryGetValue(key, out var queued)) return queued;
+            waiting[key] = press.Task;
+        }
+        _ = Complete(press, Run(action, key, press.Task, refusal));
+        return press.Task;
+    }
+    /// <summary>The press stops waiting: only its own entry goes (a newer press of the same button may be waiting by now).</summary>
+    private void Forget(string? key, Task? mine)
+    {
+        if (key == null) return;
+        lock (waiting) if (waiting.TryGetValue(key, out var current) && current == mine) waiting.Remove(key);
+    }
+    private static async Task Complete(TaskCompletionSource<SpotifyState> press, Task<SpotifyState> run)
+    {
+        try { press.TrySetResult(await run); }
+        catch (Exception ex) { press.TrySetException(ex); }
+    }
+    private async Task<SpotifyState> Run(string action, string? key, Task? mine, Func<string?>? refusal)
+    {
+        bool status = action == "status", entered = false;
         try
         {
+            entered = await gate.WaitAsync(status ? StatusWait : PressWait);
+            // Its turn (or too late): a press of the same button after this point is a new press.
+            Forget(key, mine);
+            if (!entered)
+                return status && last is { } known ? known : new(false, Error: "Spotify was busy, so that press was not sent. Press again.");
+            if (refusal?.Invoke() is { } refused) throw new InvalidDataException(refused);
             var state = await session.Request(action);
             if (state.Available) last = state;
             return state;
         }
-        finally { gate.Release(); }
+        finally
+        {
+            Forget(key, mine);
+            if (entered) gate.Release();
+        }
     }
 }
 

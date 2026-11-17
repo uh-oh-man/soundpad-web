@@ -113,6 +113,7 @@ const NEW_FEATURES = [
   "voice slots and phrase blocks in sentence templates, Add to sentence from the palette, and guests' unkept sentences for the host to see and clear",
   "Activity that stays after a reload, and the companion's log in Settings for when something goes wrong",
   'one-press Save into the voice library',
+  'Temp showing removed files that still wait to be freed, and what frees them',
 ];
 const STAGE_H = [
   'automatic backups to a folder you choose, with restore of single clips, recordings, voices, sentences or the whole library',
@@ -453,7 +454,8 @@ describe('feature gates for older companions', () => {
     expect(missingFeatures('2.43.0')).toEqual([...STAGE_H, ...NEW_FEATURES]);
     expect(missingFeatures('2.44.0')).toEqual(NEW_FEATURES);
     expect(missingFeatures('2.45.0')).toEqual(NEW_FEATURES.slice(2));
-    expect(missingFeatures('2.46.0')).toEqual([]);
+    expect(missingFeatures('2.46.0')).toEqual(NEW_FEATURES.slice(-1));
+    expect(missingFeatures('2.47.0')).toEqual([]);
     expect(supports('2.39.0', 'drafts')).toBe(false);
     expect(supports('2.40.0', 'drafts')).toBe(true);
     expect(supports('2.40.0', 'reviewFixes')).toBe(false);

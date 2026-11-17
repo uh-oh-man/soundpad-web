@@ -130,7 +130,13 @@ public sealed partial class Bridge
         if (install && (!b.TryGetProperty("confirm", out var ok) || ok.ValueKind != JsonValueKind.True)) throw new InvalidDataException("Confirm the update first.");
         return v.GetString()!;
     }
-    private string? Blocked() { lock (updateBlockers) return updateBlockers.Select(b => { try { return b(); } catch (Exception ex) when (ex is not OutOfMemoryException) { return null; } }).FirstOrDefault(r => r != null); }
+    private string? Blocked()
+    {
+        // A crash's Recover previous session / Discard is not carried through the hand-over (its drafts, history boundary
+        // and Temp leftovers live only in this process until the host answers), so the host answers first.
+        if (RecoveryPendingNow) return "Recover or discard the previous session first (the question at the top of the page), then update.";
+        lock (updateBlockers) return updateBlockers.Select(b => { try { return b(); } catch (Exception ex) when (ex is not OutOfMemoryException) { return null; } }).FirstOrDefault(r => r != null);
+    }
 
     private async Task Install(string version)
     {

@@ -175,7 +175,16 @@ public sealed partial class ManagedAudioStore
             }
         var issues = journal.Issues.TakeLast(128).ToList();
         if (writeFailed) issues.Add(new("storage-write", null, "storage-write", "The recovery journal could not be saved. Managed mutations and cleanup are paused until local storage is writable.", Action: "retry"));
-        var view = new AudioManagerView(journal.Revision, assets.ToArray(), issues.ToArray(), journal.TempCategory?.NativeId, journal.TempCategory?.Name, blocked || writeFailed, TemporaryBytes());
+        var usage = TempUsage();
+        var view = new AudioManagerView(journal.Revision, assets.ToArray(), issues.ToArray(), journal.TempCategory?.NativeId, journal.TempCategory?.Name, blocked || writeFailed, usage.Bytes,
+            usage.WaitingFiles > 0 ? new TempWaiting(usage.WaitingFiles, usage.WaitingBytes) : null);
+        // Removed files still on the PC, by who removed them: a guest's count in that guest's Temp budget until deleted.
+        var waitingBy = new Dictionary<string, string>(StringComparer.Ordinal);
+        lock (removedNow)
+            foreach (var (id, removal) in removedNow)
+                if (journal.Assets.FirstOrDefault(a => a.Id == id) is { } removedAsset && removedAsset.Variants.Any(v => removal.VariantIds.Contains(v.Id) && v.Retired && v.State != "removed"))
+                    waitingBy[id] = removal.By;
+        Volatile.Write(ref removedWaiting, waitingBy);
         Volatile.Write(ref hostLocations, journal.Assets.SelectMany(a => a.Variants.Where(v => v.OwnsFile && v.State != "removed").Select(v => (object)new { assetId = a.Id, variantId = v.Id, v.Path, v.Storage })).ToArray());
         Volatile.Write(ref ready, playable);
         // What the companion's poll retries every few seconds: a removal waiting for the Temp category is not (2.46).
@@ -184,6 +193,12 @@ public sealed partial class ManagedAudioStore
         Volatile.Write(ref annotations, map); Volatile.Write(ref published, view); Changed?.Invoke();
     }
     private volatile bool recoveryDue;
+    private Dictionary<string, string> removedWaiting = new(StringComparer.Ordinal);
+    /// <summary>
+    /// Who removed this source in this launch, while any file that removal retired is still on the PC (waiting for the
+    /// Temp category to go, or for Soundpad to be quiet); else null. As last published, safe from any thread.
+    /// </summary>
+    public string? WaitingRemovedBy(string assetId) => Volatile.Read(ref removedWaiting).GetValueOrDefault(assetId);
     private Dictionary<string, AssetOwner> owners = new(StringComparer.Ordinal);
     /// <summary>
     /// Who added a source (its uploader's connection id) and whether it is only temporary audio (never kept, nor being
@@ -219,15 +234,45 @@ public sealed partial class ManagedAudioStore
         var source = asset.Origin == "native" ? asset.Variants.LastOrDefault(v => v.Current && v.Orientation == "normal" && !v.OwnsFile)?.Path : null;
         if (FileStamp.Of(variant.Path, source) is { } stamp) stamps[variant.Id] = stamp; else stamps.TryRemove(variant.Id, out _);
     }
-    private long TemporaryBytes()
+    /// <summary>Temp's capacity (2.18): files and bytes of temporary audio on the PC, removed files included until deleted.</summary>
+    public const int TempFileLimit = 32;
+    public const long TempByteLimit = 256L * 1024 * 1024;
+    /// <summary>
+    /// Every temporary file on the PC (staged inputs and owned temporary variants not yet deleted) and, of those, the
+    /// ones already removed or retired that wait to be deleted: with the real Soundpad, a removed clip's file waits for
+    /// the Temp category to go (quit or Clear Temp, see <see cref="Deferred"/>). They still take Temp's capacity.
+    /// </summary>
+    private (int Files, long Bytes, int WaitingFiles, long WaitingBytes) TempUsage()
     {
-        long Size(string path, long recorded) { try { return Math.Max(recorded, File.Exists(path) ? new FileInfo(path).Length : 0); } catch (IOException) { return Math.Max(recorded, 64L * 1024 * 1024); } }
-        return journal.Assets.Sum(a => (a.Input == null ? 0 : Size(a.Input.Path, a.Input.Bytes)) + a.Variants.Where(v => v.OwnsFile && !v.Permanent && v.State != "removed").Sum(v => Size(v.Path, v.Bytes)));
+        static long Size(string path, long recorded) { try { return Math.Max(recorded, File.Exists(path) ? new FileInfo(path).Length : 0); } catch (IOException) { return Math.Max(recorded, 64L * 1024 * 1024); } }
+        int files = 0, waitingFiles = 0; long bytes = 0, waitingBytes = 0;
+        foreach (var a in journal.Assets)
+        {
+            if (a.Input != null)
+            {
+                long size = Size(a.Input.Path, a.Input.Bytes); files++; bytes += size;
+                if (a.Input.State == "retired") { waitingFiles++; waitingBytes += size; }
+            }
+            foreach (var v in a.Variants.Where(v => v.OwnsFile && !v.Permanent && v.State != "removed"))
+            {
+                long size = Size(v.Path, v.Bytes); files++; bytes += size;
+                if (v.Retired && !v.LegacyApproval) { waitingFiles++; waitingBytes += size; }
+            }
+        }
+        return (files, bytes, waitingFiles, waitingBytes);
     }
-    private void Capacity(int additionalFiles = 1)
+    private long TemporaryBytes() => TempUsage().Bytes;
+    private void Capacity(int additionalFiles = 1, long additionalBytes = 0)
     {
-        int count = journal.Assets.Sum(a => (a.Input == null ? 0 : 1) + a.Variants.Count(v => v.OwnsFile && !v.Permanent && v.State != "removed"));
-        if (count + additionalFiles > 32 || TemporaryBytes() >= 256L * 1024 * 1024) throw new InvalidDataException("Temporary storage is full (32 files / 256 MiB). Resolve pending cleanup in Temp before adding more audio.");
+        var usage = TempUsage();
+        if (usage.Files + additionalFiles > TempFileLimit || usage.Bytes + additionalBytes >= TempByteLimit)
+        {
+            string waiting = $"{usage.WaitingFiles} removed file{(usage.WaitingFiles == 1 ? "" : "s")} ({usage.WaitingBytes / (1024.0 * 1024):0.#} MB)";
+            // Full only because removed files have not been deleted yet: say so, and what frees them.
+            if (usage.WaitingFiles > 0 && usage.Files - usage.WaitingFiles + additionalFiles <= TempFileLimit && usage.Bytes - usage.WaitingBytes + additionalBytes < TempByteLimit)
+                throw new InvalidDataException($"Temporary storage is full (32 files / 256 MiB), only because {waiting} {(usage.WaitingFiles == 1 ? "is" : "are")} still waiting to be freed. The host's Clear all temporary audio in Temp frees them (quitting the companion does too).");
+            throw new InvalidDataException("Temporary storage is full (32 files / 256 MiB)." + (usage.WaitingFiles > 0 ? $" {waiting} of it {(usage.WaitingFiles == 1 ? "is" : "are")} waiting to be freed: the host's Clear all temporary audio in Temp frees them." : " Remove or keep some Temp audio before adding more."));
+        }
         if (journal.Assets.Count >= 2048) throw new InvalidDataException("The managed-audio catalog reached its 2,048-source limit.");
     }
     private void Issue(AudioAsset? asset, string code, string message, string severity = "error", string action = "retry")

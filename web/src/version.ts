@@ -92,6 +92,8 @@ export const FEATURES = {
   diagnostics: [2, 46],
   // One-press Save: a Temp clip, selection or draft straight into the voice library, no prompt (libraryKeep).
   quickSave: [2, 46],
+  // 2.47: Temp says how many removed files still wait to be freed (and the capacity refusal says why).
+  tempWaiting: [2, 47],
 } as const satisfies Record<string, readonly [number, number]>;
 
 /** True when the website changed version since this browser last used it (and it had used it before). */
@@ -156,6 +158,7 @@ const FEATURE_NAMES: Record<keyof typeof FEATURES, string> = {
   diagnostics:
     "Activity that stays after a reload, and the companion's log in Settings for when something goes wrong",
   quickSave: 'one-press Save into the voice library',
+  tempWaiting: 'Temp showing removed files that still wait to be freed, and what frees them',
 };
 
 /**

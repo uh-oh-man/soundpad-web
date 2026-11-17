@@ -19,7 +19,16 @@ public sealed partial class Bridge
             var catalog = parsed; if (c.SoundId == null || !catalog.Paths.TryGetValue(c.SoundId, out var path)) return new("ack", c.Id, false, "Unknown sound.");
             return new("ack", c.Id, true, Data: waveformService.GetSnapshot(c.SoundId, path, playback.SoundId == c.SoundId ? 0 : 10));
         }
-        if (c.Op == "spotify" && c.Action is not ("enable" or "disable")) { if (actor != "host" && c.Action is not (null or "status") && !disk.Permissions.GuestSpotify) return new("ack", c.Id, false, "Guest Spotify controls are disabled."); return new("ack", c.Id, true, Data: disk.SpotifyEnabled ? await spotify.Request(c.Action ?? "status") : new SpotifyState(false, Error: "Spotify integration is disabled.", Enabled: false)); }
+        if (c.Op == "spotify" && c.Action is not ("enable" or "disable"))
+        {
+            string action = c.Action ?? "status";
+            string? GuestRefusal() => actor != "host" && action != "status" && !disk.Permissions.GuestSpotify ? "Guest Spotify controls are disabled." : null;
+            if (GuestRefusal() is { } refused) return new("ack", c.Id, false, refused);
+            if (!disk.SpotifyEnabled) return new("ack", c.Id, true, Data: new SpotifyState(false, Error: "Spotify integration is disabled.", Enabled: false));
+            // A press may wait for a status read (2.46): the permission and the integration are asked again on its turn (2.47).
+            try { return new("ack", c.Id, true, Data: await spotify.Request(action, PersonKey(actor, participant, requester), () => GuestRefusal() ?? (disk.SpotifyEnabled ? null : "Spotify integration is disabled."))); }
+            catch (InvalidDataException ex) { return new("ack", c.Id, false, ex.Message); }
+        }
         return null;
     }
     private async Task Success(string command) { if (!(await Pipe.Request(command)).StartsWith("R-200", StringComparison.Ordinal)) throw new InvalidDataException("Soundpad rejected this action or its API does not support it."); }

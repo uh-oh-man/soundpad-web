@@ -1,0 +1,9 @@
+{
+  "name": "second-network-host",
+  "private": true,
+  "description": "Dependencies of the second-network mock host action (.github/workflows/second-network.yml).",
+  "type": "module",
+  "dependencies": {
+    "@actions/artifact": "6.3.1"
+  }
+}

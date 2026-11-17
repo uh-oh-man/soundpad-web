@@ -318,7 +318,7 @@ public sealed class GuestBudgets(string? totalsPath = null, Func<long>? clock = 
             // At the permanent budget, or waiting for the host to allow more of it: new clips and copies pause too.
             if (kept >= keptLimit || g.Request is { Kind: "kept" }) return Ask(guest, g, "kept", Math.Max(g.Request is { Kind: "kept" } open ? open.NeededBytes : 0, kept - keptLimit + 1), Waiting + " You have used your permanent allowance.");
             long used = TempUsed(guest, stillTemporary), limit = TempLimit(g, settings);
-            if (used + bytes > limit) return Ask(guest, g, "temp", used + bytes - limit, Waiting + " Your Temp space is full; you can also remove some of your own clips.");
+            if (used + bytes > limit) return Ask(guest, g, "temp", used + bytes - limit, Waiting + " Your Temp space is full. Clips you remove free their space once their files are deleted (the host's Clear all temporary audio deletes them).");
             // It fits again (the guest removed clips): a Temp request still open is no longer needed.
             if (g.Request is { Kind: "temp" }) { g.Request = null; Changed(); }
             return null;

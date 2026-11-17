@@ -8,14 +8,8 @@ import { guestHeld, HELD_BY_HOST, intentKey, playback, usePendingIntent } from '
 import { recall, remember } from '../sections';
 import { useDraftStore } from '../mimic/draft-store';
 import { formatMb } from '../mimic/drafts';
-import {
-  guestOwns,
-  refreshTempAssets,
-  removedFromTemp,
-  useTempAssets,
-  type TempAsset,
-  type TempVariant,
-} from '../temp-assets';
+import { guestOwns, refreshTempAssets, type TempAsset, type TempVariant } from '../temp-assets';
+import { guestMayRemoveTemp, tempWaitingText, useTempList } from '../temp-rights';
 import { canUndoTempRemoval, removeAllMyTemp, removeTempSource } from '../temp-remove';
 import { requestEditor } from '../shell';
 import { HostOnlyTag } from './SimulatedBadge';
@@ -46,7 +40,9 @@ export function TempManager({
   // The list is fetched once for the page (2.43: the copy editor in the panel reads it too). An error from
   // loading it is shown until a later load works; one from an action the person took stays until their
   // next action, so a refresh landing just after a refused Keep never hides the refusal.
-  const { data, loadError, hidden } = useTempAssets();
+  // A source being removed here, deleted in Mimic (also during its Undo wait), or removed with its files
+  // still on their way out, is not on the list (2.46).
+  const { data, loadError, gone } = useTempList();
   const [saving, setSaving] = useState<{ asset: Asset; variant: Variant }>(),
     [directory, setDirectory] = useState(''),
     [category, setCategory] = useState('');
@@ -195,17 +191,12 @@ export function TempManager({
       return;
     }
   });
-  // A source being removed, or removed with its files still on their way out, is not on the list (2.46).
-  const gone = (a: Asset) => hidden.has(a.id) || removedFromTemp(a);
   const listed = (data?.manager.assets ?? []).filter(
     (a) =>
       !gone(a) && (a.origin === 'upload' || a.variants.some((v) => v.orientation === 'reversed')),
   );
   // A guest removes their own clips while the host lets guests add audio (uploads or Mimic, 2.46).
-  const guestRemoves =
-    !host &&
-    drafts &&
-    (state.permissions.guestUploads !== false || state.permissions.guestMimic === true);
+  const guestRemoves = !host && drafts && guestMayRemoveTemp(state);
   const mine = guestRemoves ? listed.filter((a) => a.hasTemporary && guestOwns(data, a, me)) : [];
   // Before 2.46 a removed file's Soundpad entry was reported as needing removal by hand; it goes with the
   // Temp category at quit, so such a notice about a removed source is left out.
@@ -273,6 +264,11 @@ export function TempManager({
           {(error || loadError) && (
             <p className="warning" role="alert">
               {error || loadError}
+            </p>
+          )}
+          {tempWaitingText(data, host, state.companionVersion) && (
+            <p className="muted temp-waiting" role="status">
+              {tempWaitingText(data, host, state.companionVersion)}
             </p>
           )}
           {data?.manager.blocked && (

@@ -28,8 +28,7 @@ public sealed partial class ManagedAudioStore
             if (times.Count >= 6) throw new InvalidDataException("Upload limit: six new files per minute. Retry later.");
             times.Enqueue(now); uploads[uploaderId] = times;
         }
-        Capacity(2);
-        if (TemporaryBytes() + bytes.Length >= 256L * 1024 * 1024) throw new InvalidDataException("Temporary storage is full. Resolve pending cleanup before uploading.");
+        Capacity(2, bytes.Length);
         var asset = new AudioAsset { Name = Clean(Path.GetFileNameWithoutExtension(name), 120), Uploader = Clean(uploader, 40), UploaderId = Clean(uploaderId, 128), UploadHash = hash };
         var inputPath = Path.Combine(Incoming, journal.SessionId!, asset.Id, "source" + extension);
         asset.Input = new() { Path = inputPath, Hash = hash, Bytes = bytes.Length, State = "planned", SessionId = journal.SessionId! };
