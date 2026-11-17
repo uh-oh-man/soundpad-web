@@ -1,0 +1,73 @@
+name: Add versioned EXE names to past releases
+
+# Run by hand from the Actions tab (2.48). For every past release that has SoundpadWeb.exe but not yet
+# SoundpadWeb-<version>.exe, it adds a copy under the versioned name. It only ADDS files: nothing is renamed or
+# deleted, so old download links, the rollback table and older updaters (which look for SoundpadWeb.exe) keep
+# working. The copy is checked against the release's own SHA256.txt when that file exists, and skipped if it
+# does not match. Safe to run again: releases that already have their versioned file are left alone.
+
+on:
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Only list what would be added (no uploads)'
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+concurrency:
+  group: versioned-exe-backfill
+  cancel-in-progress: false
+
+jobs:
+  backfill:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      REPO: ${{ github.repository }}
+      DRY_RUN: ${{ inputs.dry_run }}
+    steps:
+      - name: Add SoundpadWeb-<version>.exe beside SoundpadWeb.exe
+        shell: bash
+        run: |
+          set -euo pipefail
+          work="$(mktemp -d)"
+          added=0; skipped=0; mismatched=0
+          # Every release, newest first (tag names are vX.Y.Z).
+          gh api --paginate "repos/$REPO/releases?per_page=100" --jq '.[] | [.tag_name, ([.assets[].name] | join("|"))] | @tsv' > "$work/releases.tsv"
+          while IFS=$'\t' read -r tag assets; do
+            version="${tag#v}"
+            versioned="SoundpadWeb-${version}.exe"
+            case "|$assets|" in
+              *"|SoundpadWeb.exe|"*) ;;
+              *) echo "skip $tag: no SoundpadWeb.exe"; skipped=$((skipped+1)); continue ;;
+            esac
+            case "|$assets|" in
+              *"|$versioned|"*) echo "skip $tag: already has $versioned"; skipped=$((skipped+1)); continue ;;
+            esac
+            if [ "$DRY_RUN" = "true" ]; then echo "would add $versioned to $tag"; added=$((added+1)); continue; fi
+            dir="$work/$tag"; mkdir -p "$dir"
+            gh release download "$tag" --repo "$REPO" --dir "$dir" --pattern 'SoundpadWeb.exe'
+            case "|$assets|" in
+              *"|SHA256.txt|"*)
+                gh release download "$tag" --repo "$REPO" --dir "$dir" --pattern 'SHA256.txt'
+                want="$(tr -d ' \r\n' < "$dir/SHA256.txt" | tr 'A-F' 'a-f')"
+                have="$(sha256sum "$dir/SoundpadWeb.exe" | cut -d' ' -f1)"
+                if [ "$want" != "$have" ]; then echo "::warning::$tag: SoundpadWeb.exe does not match its SHA256.txt; skipped"; mismatched=$((mismatched+1)); rm -rf "$dir"; continue; fi ;;
+            esac
+            cp "$dir/SoundpadWeb.exe" "$dir/$versioned"
+            gh release upload "$tag" "$dir/$versioned" --repo "$REPO"
+            echo "added $versioned to $tag"; added=$((added+1))
+            rm -rf "$dir"
+          done < "$work/releases.tsv"
+          {
+            echo "### Versioned EXE names"
+            echo ""
+            echo "- ${added} release(s) $( [ "$DRY_RUN" = "true" ] && echo 'would get' || echo 'got' ) a SoundpadWeb-<version>.exe"
+            echo "- ${skipped} skipped (no EXE, or already named)"
+            echo "- ${mismatched} skipped because the EXE did not match its SHA256.txt"
+          } >> "$GITHUB_STEP_SUMMARY"
+          [ "$mismatched" -eq 0 ]

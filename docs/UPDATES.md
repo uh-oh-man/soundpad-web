@@ -206,3 +206,7 @@ built the EXE (no Authenticode, no attestation); Soundpad playback, WASAPI captu
 continuing across the swap on real hardware, and the length of the gap there; port rebinding on every machine (a
 fallback exists); renaming a running EXE on anything but local NTFS. There is no live binary replacement and no
 uninterrupted audio or capture: the companion restarts.
+
+## Versioned names for past releases
+
+Releases from before 2.48 have only `SoundpadWeb.exe`. The **Add versioned EXE names to past releases** workflow (`.github/workflows/versioned-exe-backfill.yml`, run by hand from the Actions tab) adds a `SoundpadWeb-<version>.exe` copy to each of them. It only adds files, checks each copy against the release's `SHA256.txt` and skips releases that already have their versioned file, so it is safe to run again. Tick **dry run** to see what it would add first.
