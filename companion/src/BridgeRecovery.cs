@@ -45,13 +45,16 @@ public sealed partial class Bridge
         }
     }
 
-    /// <summary>The size of exactly the temporary files the crashed launch left.</summary>
+    /// <summary>
+    /// The size of the clips the crashed launch left in Temp: the ones Recover keeps (the count beside it). A file that
+    /// launch had already removed (retired, waiting for its Temp category) is not one of them (2.47).
+    /// </summary>
     private long LeftoverBytes()
     {
         long bytes = 0;
         foreach (var f in tempLeftovers)
         {
-            try { bytes += Audio.AssetById(f.AssetId).Variants.Where(v => f.VariantIds.Contains(v.Id)).Sum(v => v.Bytes); }
+            try { bytes += Audio.AssetById(f.AssetId).Variants.Where(v => f.VariantIds.Contains(v.Id) && !v.Retired).Sum(v => v.Bytes); }
             catch (Exception ex) when (ex is InvalidDataException or InvalidOperationException) { }
         }
         return bytes;
