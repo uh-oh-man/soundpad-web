@@ -44,6 +44,11 @@ export const tempResponse = z.object({
     ),
     blocked: z.boolean(),
     temporaryBytes: z.number(),
+    // 2.47: removed files still on the host's PC (absent before, and null when there are none).
+    waiting: z
+      .object({ files: z.number().int().nonnegative(), bytes: z.number().nonnegative() })
+      .nullable()
+      .optional(),
   }),
   locations: z
     .array(
