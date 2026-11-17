@@ -1,4 +1,12 @@
-import { useEffect, useRef, useState, type PointerEvent, type ReactNode } from 'react';
+import {
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type MutableRefObject,
+  type PointerEvent,
+  type ReactNode,
+} from 'react';
 import {
   ago,
   nudgeSelection,
@@ -9,6 +17,7 @@ import {
   type Selection,
 } from '../../mimic/selection';
 import { isClick } from './playMode';
+import { glideData, glideStart, glideStep, type Glide } from '../../mimic/glide';
 
 const VIEW_KEY = 'soundpad-web:mimic-view';
 
@@ -47,6 +56,21 @@ export type WaveExtras = {
   onGrab?: () => void;
   onAbandon?: () => void;
   /**
+   * While following live (2.47): the end of the levels shown (ms of the recording) and how often new ones
+   * come. The view then glides on between polls instead of jumping once per poll. Absent: it stands still.
+   */
+  live?: { endMs: number; intervalMs: number };
+  /**
+   * Where the levels' window ends (ms of the recording). A held view keeps the glide's lag while levels of
+   * the same window come again, and drops it when another window is shown.
+   */
+  viewEndMs?: number;
+  /**
+   * Written with how far (ms) the view drawn now ends before the end of the levels: the glide's lag. It is
+   * kept after the glide stops until other levels arrive, so a view held still shows what was on screen.
+   */
+  shiftRef?: MutableRefObject<number>;
+  /**
    * A click (press and release without a drag, not on an edge handle) plays from that point (2.45): it gets the
    * position in ms of the window and the selection stays as it was. Without it a click clears the selection, as
    * the 30 s view always did. Releasing a drag only ever selects.
@@ -58,7 +82,7 @@ export type WaveExtras = {
   renderWords?: (start: number, end: number, width: number) => ReactNode;
 };
 
-function useCanvasColors() {
+function canvasColors() {
   const style = getComputedStyle(document.documentElement);
   return {
     wave: style.getPropertyValue('--wave').trim() || '#7c9fca',
@@ -111,7 +135,8 @@ export function MimicWave({
     };
   }, [hasWords]);
   const [draft, setDraft] = useState<Selection | null>(null);
-  const colors = useCanvasColors();
+  const colors = useRef(canvasColors());
+  colors.current = canvasColors();
   const storageKey = extras.storageKey ?? VIEW_KEY;
   const [viewSeconds, setViewSeconds] = useState(() =>
     rememberedView(storageKey, extras.defaultView ?? VIEW_SECONDS[0]),
@@ -119,20 +144,83 @@ export function MimicWave({
   // The range a drag started in: kept until the pointer is released, so the view never jumps under it.
   const [dragRange, setDragRange] = useState<{ start: number; end: number } | null>(null);
   const shown = draft ?? selection;
-  const { start, end } = dragRange ?? visibleRange(peek.windowMs, viewSeconds * 1000, selection);
-  const span = end - start;
   const { marks, hidden, highlight, bands, playhead } = extras;
-  useEffect(() => {
+  // The glide (2.47): the drawn view ends `shift` ms before the levels do. While following live it changes
+  // every animation frame without a React render: the canvas is redrawn and the word lane moved directly.
+  const glide = useRef<{ g: Glide | null; endMs: number | undefined; shift: number }>({
+    g: null,
+    endMs: undefined,
+    shift: 0,
+  });
+  const lane = useRef<HTMLDivElement>(null);
+  const live = extras.live;
+  const shiftRef = extras.shiftRef;
+  /**
+   * The glide holds while the pointer is over the waveform or its words, or the keyboard is in them: what is
+   * aimed at stands still (2.47). It catches up, a little faster than time passes, once let go.
+   */
+  const aiming = useRef(false);
+  // New levels while following live: the glide learns where they end (here, so the words below are laid out
+  // at the lag of this render). With the glide off, the lag stays until other levels arrive (a held view is
+  // fetched to end where the glide was).
+  {
+    const state = glide.current;
+    if (live) {
+      state.g = state.g
+        ? glideData(state.g, live.endMs, aiming.current)
+        : glideStart(live.endMs, live.intervalMs);
+      state.shift = state.g.dataEnd - state.g.visEnd;
+      state.endMs = extras.viewEndMs ?? live.endMs;
+    } else {
+      state.g = null;
+      if (extras.viewEndMs === undefined || extras.viewEndMs !== state.endMs) {
+        state.shift = 0;
+        state.endMs = extras.viewEndMs;
+      }
+    }
+  }
+  // A selection that starts before the zoomed view as drawn (with the glide's lag) widens it.
+  const lag = glide.current.shift;
+  const { start, end } =
+    dragRange ??
+    visibleRange(
+      peek.windowMs,
+      viewSeconds * 1000,
+      selection && { from: selection.from + lag, to: selection.to + lag },
+    );
+  const span = end - start;
+  /** The lag the words were laid out at in this render; the lane moves by the change since. */
+  const wordsShift = dragRange ? 0 : glide.current.shift;
+  const laidOut = useRef(0);
+  laidOut.current = wordsShift;
+  /** The time range drawn now (ms of the window). */
+  const view = () =>
+    dragRange ?? { start: start - glide.current.shift, end: end - glide.current.shift };
+  const draw = useRef<() => void>(() => {});
+  draw.current = () => {
     const el = canvas.current;
     const ctx = el?.getContext('2d');
     if (!el || !ctx) return;
+    const shift = dragRange ? 0 : glide.current.shift;
+    const c = colors.current;
+    // The lag the view is held at, also while a drag shows its own range.
+    if (shiftRef) shiftRef.current = glide.current.shift;
+    if (lane.current)
+      lane.current.style.transform =
+        shift !== laidOut.current
+          ? `translateX(${(((shift - laidOut.current) / span) * 100).toFixed(3)}%)`
+          : '';
     const ratio = window.devicePixelRatio || 1;
-    const width = el.clientWidth * ratio,
-      height = el.clientHeight * ratio;
-    el.width = width;
-    el.height = height;
+    const width = Math.round(el.clientWidth * ratio),
+      height = Math.round(el.clientHeight * ratio);
+    // Resizing clears the canvas and costs a new buffer: only when the size really changed.
+    if (el.width !== width || el.height !== height) {
+      el.width = width;
+      el.height = height;
+    }
     ctx.clearRect(0, 0, width, height);
-    const x = (t: number) => ((t - start) / span) * width;
+    const from = start - shift;
+    const x = (t: number) => ((t - from) / span) * width;
     // What this person cannot see is hatched, so it is never mistaken for silence.
     for (const part of hidden ?? []) {
       const a = Math.max(0, x(part.from)),
@@ -143,7 +231,7 @@ export function MimicWave({
       ctx.rect(a, 0, b - a, height);
       ctx.clip();
       ctx.beginPath();
-      ctx.strokeStyle = colors.line;
+      ctx.strokeStyle = c.line;
       ctx.lineWidth = ratio;
       for (let h = a - height; h < b; h += 8 * ratio) {
         ctx.moveTo(h, height);
@@ -169,34 +257,34 @@ export function MimicWave({
       ctx.restore();
     }
     if (highlight) {
-      ctx.fillStyle = colors.accent + '26';
+      ctx.fillStyle = c.accent + '26';
       ctx.fillRect(x(highlight.from), 0, x(highlight.to) - x(highlight.from), height);
     }
     if (shown) {
-      ctx.fillStyle = colors.accent + '33';
+      ctx.fillStyle = c.accent + '33';
       ctx.fillRect(x(shown.from), 0, x(shown.to) - x(shown.from), height);
     }
     const edges = shown ? [shown.from, shown.to].map(x) : [];
     const step = peek.windowMs / peek.levels.length;
     const bar = (step / span) * width;
-    peek.levels.forEach((level, i) => {
+    for (let i = 0; i < peek.levels.length; i++) {
       const t = (i + 0.5) * step;
-      if (t < start) return;
+      if (t < from - step || t > from + span + step) continue;
       const inside = shown && t >= shown.from && t <= shown.to;
-      ctx.fillStyle = inside ? colors.accent : colors.wave;
-      const h = Math.max(ratio, (level / 1000) * height * 0.92);
+      ctx.fillStyle = inside ? c.accent : c.wave;
+      const h = Math.max(ratio, (peek.levels[i] / 1000) * height * 0.92);
       ctx.fillRect(x(i * step) + bar * 0.15, (height - h) / 2, Math.max(ratio, bar * 0.7), h);
-    });
-    // Ticks every 5 s, or every second when zoomed in.
-    ctx.fillStyle = colors.line;
+    }
+    // Ticks every 5 s, or every second when zoomed in: fixed to the view, like the ruler above it.
+    ctx.fillStyle = c.line;
     const tick = span > 10000 ? 5000 : 1000;
-    for (let s = end - tick; s > start; s -= tick)
-      ctx.fillRect(x(s), height - 6 * ratio, ratio, 6 * ratio);
+    for (let s = span - tick; s > 0; s -= tick)
+      ctx.fillRect((s / span) * width, height - 6 * ratio, ratio, 6 * ratio);
     // Gaps: a dashed line where recording stopped and resumed (no time passes on the waveform there).
     if (marks?.length) {
       ctx.save();
-      ctx.strokeStyle = colors.muted;
-      ctx.fillStyle = colors.muted;
+      ctx.strokeStyle = c.muted;
+      ctx.fillStyle = c.muted;
       ctx.setLineDash([4 * ratio, 3 * ratio]);
       ctx.lineWidth = 1.5 * ratio;
       ctx.font = `${11 * ratio}px system-ui, sans-serif`;
@@ -214,35 +302,64 @@ export function MimicWave({
       ctx.restore();
     }
     // Edge handles, like Voice Replay Studio's: drag one to adjust that end of the selection.
-    ctx.fillStyle = colors.accent;
+    ctx.fillStyle = c.accent;
     for (const x of edges) {
       ctx.fillRect(x - ratio, 0, 2 * ratio, height);
       ctx.fillRect(x - 4 * ratio, height / 2 - 12 * ratio, 8 * ratio, 24 * ratio);
     }
     // What is playing from this view (2.45): a thin line in the text colour, apart from the accent edges.
-    if (playhead != null && playhead >= start && playhead <= end) {
-      ctx.fillStyle = colors.text;
+    if (playhead != null && playhead >= from && playhead <= from + span) {
+      ctx.fillStyle = c.text;
       ctx.fillRect(x(playhead) - ratio / 2, 0, ratio, height);
     }
-  }, [
-    peek,
-    shown,
-    start,
-    end,
-    span,
-    colors.accent,
-    colors.wave,
-    colors.line,
-    colors.muted,
-    colors.text,
-    marks,
-    hidden,
-    highlight,
-    bands,
-    playhead,
-  ]);
-  const pointerTime = (box: DOMRect) => (x: number) =>
-    start + (Math.min(Math.max(x - box.left, 0), box.width) / box.width) * span;
+  };
+  // Every render draws once.
+  useLayoutEffect(() => {
+    draw.current();
+  });
+  const gliding = !!live;
+  useEffect(() => {
+    if (!gliding) return;
+    let frame = requestAnimationFrame(function tick(now) {
+      const state = glide.current;
+      if (state.g && aiming.current) state.g.last = now;
+      else if (state.g) {
+        const shift = glideStep(state.g, now);
+        // Under a tenth of a pixel moved: nothing to redraw.
+        const px = canvas.current?.clientWidth ?? 0;
+        if (Math.abs(shift - state.shift) * (px / span) >= 0.1) {
+          state.shift = shift;
+          draw.current();
+        }
+      }
+      frame = requestAnimationFrame(tick);
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [gliding, span]);
+  // The theme changed (light or dark, another colour set): redraw now, not at the next poll.
+  useEffect(() => {
+    const redraw = () =>
+      requestAnimationFrame(() => {
+        colors.current = canvasColors();
+        draw.current();
+      });
+    const observer = new MutationObserver(redraw);
+    observer.observe(document.documentElement, {
+      attributes: true,
+      attributeFilter: ['data-theme', 'data-palette', 'class', 'style'],
+    });
+    const scheme = window.matchMedia?.('(prefers-color-scheme: dark)');
+    scheme?.addEventListener?.('change', redraw);
+    return () => {
+      observer.disconnect();
+      scheme?.removeEventListener?.('change', redraw);
+    };
+  }, []);
+  const pointerTime = (box: DOMRect) => {
+    const from = view().start;
+    return (x: number) =>
+      from + (Math.min(Math.max(x - box.left, 0), box.width) / box.width) * span;
+  };
   /** The opposite end of the selection when the pointer is on one of its edge handles. */
   const anchorFor = (time: number, width: number) => {
     if (!selection) return null;
@@ -263,7 +380,15 @@ export function MimicWave({
     gesture.abandon?.();
   };
   return (
-    <div className="mimic-wave">
+    <div
+      className="mimic-wave"
+      onPointerEnter={() => (aiming.current = true)}
+      onPointerLeave={() => (aiming.current = false)}
+      onFocus={() => (aiming.current = true)}
+      onBlur={(e) => {
+        if (!e.currentTarget.contains(e.relatedTarget as Node | null)) aiming.current = false;
+      }}
+    >
       {extras.ruler && (
         <div className="mimic-ruler" aria-hidden="true">
           {Array.from({ length: 6 }, (_, index) => {
@@ -323,7 +448,8 @@ export function MimicWave({
             abandon: extras.onAbandon,
           };
           e.currentTarget.setPointerCapture(e.pointerId);
-          setDragRange({ start, end });
+          // The view as drawn (with the glide's lag) holds still until the pointer is released.
+          setDragRange(view());
           extras.onGrab?.();
         }}
         onPointerMove={(e) => {
@@ -353,7 +479,10 @@ export function MimicWave({
       />
       {extras.renderWords && (
         <div className="mimic-word-track" role="group" aria-label="Words on the waveform">
-          {width > 0 && extras.renderWords(start, end, width)}
+          {/* The lane moves with the glide (2.47); the words keep their places in it. */}
+          <div className="mimic-word-lane" ref={lane}>
+            {width > 0 && extras.renderWords(start - wordsShift, end - wordsShift, width)}
+          </div>
         </div>
       )}
       <div className="mimic-axis">
