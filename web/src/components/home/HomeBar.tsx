@@ -2,7 +2,6 @@ import type { MouseEvent } from 'react';
 import { ArrowUpRight } from 'lucide-react';
 import { controller } from '../../controller';
 import { APP_VERSION, APP_VERSION_LABEL } from '../../version';
-import { statusLabel } from '../shell/TopBar';
 import { PROJECT_URL } from '../shell/Landing';
 
 type View = ReturnType<typeof controller.getSnapshot>;
@@ -28,11 +27,10 @@ export function goToSection(e: MouseEvent<HTMLAnchorElement>, id: string) {
 }
 
 /**
- * The start page's own header (homepage): icon, name, tagline, links, the version and the connection
- * status. Connected screens keep the app's TopBar.
+ * The start page's own header (homepage): icon, name and version, tagline, How it works and GitHub.
+ * Connected screens keep the app's TopBar.
  */
-export function HomeBar({ view }: { view: View }) {
-  const loading = demoLoading(view);
+export function HomeBar() {
   return (
     <header className="home-bar">
       <div className="home-bar-inner">
@@ -43,33 +41,20 @@ export function HomeBar({ view }: { view: View }) {
             <span className="sr-only">, home</span>
           </span>
         </a>
+        <span className="home-version" title={`Soundpad Web ${APP_VERSION}`}>
+          v{APP_VERSION_LABEL}
+        </span>
         <span className="home-tagline">a little thing for your friends</span>
         <nav className="home-nav" aria-label="Start page">
           <a href="#how" className="home-nav-section" onClick={(e) => goToSection(e, 'how')}>
             How it works
           </a>
-          <button
-            type="button"
-            className="home-nav-demo"
-            aria-disabled={loading || undefined}
-            aria-busy={loading || undefined}
-            onClick={() => startDemo(view)}
-          >
-            Try the real demo
-          </button>
           <a href={PROJECT_URL} target="_blank" rel="noopener noreferrer" className="home-nav-git">
             GitHub
             <ArrowUpRight size={14} aria-hidden="true" />
             <span className="sr-only"> (opens in a new tab)</span>
           </a>
         </nav>
-        <span className="status home-status" title={view.status}>
-          <i aria-hidden="true" />
-          {statusLabel(view.mode, false, false, false, view.status, false, view.demo)}
-        </span>
-        <span className="home-version" title={`Soundpad Web ${APP_VERSION}`}>
-          v{APP_VERSION_LABEL}
-        </span>
       </div>
     </header>
   );

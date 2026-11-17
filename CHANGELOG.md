@@ -6,6 +6,8 @@ Notable changes to Soundpad Web. Versions follow the website's `package.json`; t
 
 ### Changed
 
+- **The start page's header is simpler.** The version sits right beside the name, and the header keeps only How it works and GitHub (the status line and the second demo link are gone; **Mess with the demo** starts it).
+
 - **A new start page.** The screen you see before connecting is redesigned, after an AI-made concept the owner liked, in the colours of the app's icon, with fewer words. It has its own header with the icon, name, version and connection status, and links to **How it works**, **Try the real demo** and GitHub. Connected screens keep the usual header.
 - **"Give your friends the soundboard. They click a sound. Your PC plays it."** Then two buttons: **Mess with the demo** (the example session; it was called **Try the example**) and **Host from your PC**, which opens the latest release.
 - **A soundboard you can press right away.** Beside it sits a small pretend soundboard window: six pads (Vine boom, Bruh, Victory, Airhorn, Wow, Applause), categories, and a Now playing bar with a waveform and Stop. A press plays a short tone in your browser, pushes the pad down with a ripple, sends a ring out through the background and a ripple through the app's header ribbon, which flows out of the Now playing bar. Keys 1 to 6 press the pads. It downloads nothing and sends nothing anywhere.

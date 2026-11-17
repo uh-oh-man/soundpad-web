@@ -110,31 +110,10 @@
   background: color-mix(in srgb, var(--text-primary) 6%, transparent);
   color: var(--text-primary);
 }
-.home-bar .home-nav button[aria-disabled='true'] {
-  opacity: 1;
-  color: var(--text-dim);
-}
-.home-bar .home-status {
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  margin: 0;
-  padding: 0;
-  border: 0;
-  background: none;
-  color: var(--text-dim);
-  font: 600 12px/1 var(--font-ui);
-  white-space: nowrap;
-}
-.home-bar .home-status i {
-  width: 7px;
-  height: 7px;
-  border: 1.5px solid var(--text-dim);
-  border-radius: 50%;
-  background: none;
-}
 .home-version {
-  padding: 7px 11px;
+  /* Beside the name (the owner's choice): small, so the name still leads. */
+  margin-left: calc(var(--space-1) * -1);
+  padding: 5px 9px;
   border: 1px solid color-mix(in srgb, var(--brand-violet) 40%, var(--line));
   border-radius: var(--radius-pill);
   background: color-mix(in srgb, var(--brand-violet) 10%, var(--surface-0));
@@ -1594,8 +1573,7 @@
   }
 }
 @media (max-width: 760px) {
-  .home-bar .home-nav :is(.home-nav-section, .home-nav-demo),
-  .home-version {
+  .home-bar .home-nav .home-nav-section {
     display: none;
   }
   .home .home-promises {
@@ -1749,8 +1727,5 @@
   .home-bar .home-nav :is(a, button) {
     padding: 0 6px;
     font-size: 12px;
-  }
-  .home-bar .home-status {
-    font-size: 11px;
   }
 }

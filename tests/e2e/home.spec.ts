@@ -14,7 +14,7 @@ async function axe(page: Page) {
     .map((v) => `${v.id} (${v.nodes.map((n) => n.target.join(' ')).join(', ')})`);
 }
 
-test('the start page header: name, version, status and links, and only before connecting', async ({
+test('the start page header: name with the version beside it, and links, only before connecting', async ({
   page,
 }) => {
   const { version } = JSON.parse(await readFile('package.json', 'utf8')) as { version: string };
@@ -24,7 +24,20 @@ test('the start page header: name, version, status and links, and only before co
   await expect(header.locator('.home-version')).toHaveText(
     `v${version.split('.').slice(0, 2).join('.')}`,
   );
-  await expect(header.locator('.status')).toHaveText('Not connected');
+  // The version sits right after the name, on the left (the owner's choice); no status or demo link here.
+  const order = await header.evaluate((h) => {
+    const name = h.querySelector('.home-brand')!.getBoundingClientRect();
+    const version = h.querySelector('.home-version')!.getBoundingClientRect();
+    return {
+      gap: version.left - name.right,
+      left: version.left < h.getBoundingClientRect().width / 2,
+    };
+  });
+  expect(order.left).toBe(true);
+  expect(order.gap).toBeGreaterThanOrEqual(0);
+  expect(order.gap).toBeLessThan(40);
+  await expect(header.locator('.status')).toHaveCount(0);
+  await expect(header.getByRole('button', { name: 'Try the real demo' })).toHaveCount(0);
   const github = header.getByRole('link', { name: /^GitHub/ });
   await expect(github).toHaveAttribute('href', 'https://github.com/uh-oh-man/soundpad-web');
   await expect(github).toHaveAttribute('target', '_blank');
@@ -46,13 +59,13 @@ test('the start page header: name, version, status and links, and only before co
   await expect(credits).toContainText('Codex (OpenAI)');
   await expect(credits).toContainText('Claude (Anthropic)');
   expect(await axe(page)).toEqual([]);
-  // Try the real demo starts the example; the app's own header takes over.
-  await header.getByRole('button', { name: 'Try the real demo' }).click();
+  // The demo starts the example; the app's own header takes over.
+  await page.getByRole('button', { name: 'Mess with the demo' }).click();
   await expect(page.getByRole('complementary', { name: 'Example session' })).toBeVisible();
   await expect(page.locator('header.home-bar')).toHaveCount(0);
   await expect(page.locator('header.topbar .status')).toHaveText('Example session');
   await page.getByRole('button', { name: 'Leave example' }).click();
-  await expect(page.locator('header.home-bar .status')).toHaveText('Not connected');
+  await expect(page.locator('header.home-bar')).toBeVisible();
 });
 
 test('the pretend soundboard plays in this browser, filters, and Stop ends it', async ({
@@ -124,7 +137,7 @@ test('the start page never scrolls sideways, and reduced motion keeps it a still
       await page.evaluate(() => document.documentElement.scrollWidth),
       `width ${width}`,
     ).toBeLessThanOrEqual(width);
-    await expect(page.locator('header.home-bar .status')).toBeVisible();
+    await expect(page.locator('header.home-bar .home-version')).toBeVisible();
     await expect(page.getByRole('button', { name: 'Mess with the demo' })).toBeVisible();
   }
   await page.setViewportSize({ width: 1440, height: 900 });

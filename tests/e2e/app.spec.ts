@@ -43,7 +43,10 @@ test('landing page has an honest disconnected state', async ({ page }) => {
   await expect(
     page.getByRole('heading', { name: 'Give your friends the soundboard.' }),
   ).toBeVisible();
-  await expect(page.getByText('Not connected', { exact: true })).toBeVisible();
+  // The start page has its own header (2.48: no status line there) and claims no connection.
+  await expect(page.locator('header.home-bar')).toBeVisible();
+  await expect(page.locator('header.topbar')).toHaveCount(0);
+  await expect(page.getByText(/^(Connected|Hosting)$/)).toHaveCount(0);
   expect(await page.getByRole('button', { name: /Play / }).count()).toBe(0);
 });
 
@@ -4451,7 +4454,7 @@ test('example session: plays example sounds in this browser, edits a copy, and l
   // Leaving returns to the start page, with nothing left playing.
   await page.getByRole('button', { name: 'Leave example' }).click();
   await expect(page.getByRole('button', { name: 'Mess with the demo' })).toBeVisible();
-  await expect(page.getByText('Not connected', { exact: true })).toBeVisible();
+  await expect(page.locator('header.home-bar')).toBeVisible();
   await expect(page.getByRole('button', { name: /Play / })).toHaveCount(0);
   expect(sockets).toEqual([]);
   expect(harness.plays).toEqual([]);

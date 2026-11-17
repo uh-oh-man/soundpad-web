@@ -823,7 +823,7 @@ function App() {
         mimicFill={full}
         topbar={
           mode === 'landing' ? (
-            <HomeBar view={view} />
+            <HomeBar />
           ) : (
             <TopBar
               view={view}
