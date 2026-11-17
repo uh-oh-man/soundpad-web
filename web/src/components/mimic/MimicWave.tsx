@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type PointerEvent } from 'react';
+import { useEffect, useRef, useState, type PointerEvent, type ReactNode } from 'react';
 import {
   ago,
   nudgeSelection,
@@ -45,6 +45,7 @@ export type WaveExtras = {
   bands?: (Selection & { color: string; label: string })[];
   /** Called when a drag starts, so a view that follows live can hold still under the pointer. */
   onGrab?: () => void;
+  onAbandon?: () => void;
   /**
    * A click (press and release without a drag, not on an edge handle) plays from that point (2.45): it gets the
    * position in ms of the window and the selection stays as it was. Without it a click clears the selection, as
@@ -53,6 +54,8 @@ export type WaveExtras = {
   onPlayAt?: (ms: number) => void;
   /** Where the audio playing from this view is (ms of the window): a thin line; null or absent for none. */
   playhead?: number | null;
+  ruler?: boolean;
+  renderWords?: (start: number, end: number, width: number) => ReactNode;
 };
 
 function useCanvasColors() {
@@ -79,9 +82,34 @@ export function MimicWave({
   extras?: WaveExtras;
 }) {
   const canvas = useRef<HTMLCanvasElement>(null);
-  const drag = useRef<number | null>(null);
-  // Where the press was, and whether it took an edge handle: a release close by is a click, not a drag.
-  const press = useRef<{ x: number; y: number; edge: boolean } | null>(null);
+  const drag = useRef<{
+    pointer: number;
+    anchor: number;
+    x: number;
+    y: number;
+    edge: boolean;
+    at: (x: number) => number;
+    windowMs: number;
+    select: typeof onSelect;
+    playAt: WaveExtras['onPlayAt'];
+    abandon: WaveExtras['onAbandon'];
+  } | null>(null);
+  const [width, setWidth] = useState(0);
+  const hasWords = !!extras.renderWords;
+  useEffect(() => {
+    const element = canvas.current;
+    if (!element || !hasWords) return;
+    let frame = 0;
+    const resize = new ResizeObserver(() => {
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(() => setWidth(element.clientWidth));
+    });
+    resize.observe(element);
+    return () => {
+      resize.disconnect();
+      cancelAnimationFrame(frame);
+    };
+  }, [hasWords]);
   const [draft, setDraft] = useState<Selection | null>(null);
   const colors = useCanvasColors();
   const storageKey = extras.storageKey ?? VIEW_KEY;
@@ -213,21 +241,43 @@ export function MimicWave({
     bands,
     playhead,
   ]);
-  const at = (e: PointerEvent<HTMLCanvasElement>) => {
-    const box = e.currentTarget.getBoundingClientRect();
-    return start + (Math.min(Math.max(e.clientX - box.left, 0), box.width) / box.width) * span;
-  };
+  const pointerTime = (box: DOMRect) => (x: number) =>
+    start + (Math.min(Math.max(x - box.left, 0), box.width) / box.width) * span;
   /** The opposite end of the selection when the pointer is on one of its edge handles. */
-  const anchorFor = (e: PointerEvent<HTMLCanvasElement>) => {
+  const anchorFor = (time: number, width: number) => {
     if (!selection) return null;
-    const msPerPixel = span / e.currentTarget.getBoundingClientRect().width;
-    const t = at(e);
-    if (Math.abs(t - selection.from) <= EDGE_PX * msPerPixel) return selection.to;
-    if (Math.abs(t - selection.to) <= EDGE_PX * msPerPixel) return selection.from;
+    const edgeMs = EDGE_PX * (span / width);
+    if (Math.abs(time - selection.from) <= edgeMs) return selection.to;
+    if (Math.abs(time - selection.to) <= edgeMs) return selection.from;
     return null;
+  };
+  const finishDrag = () => {
+    drag.current = null;
+    setDragRange(null);
+    setDraft(null);
+  };
+  const cancelDrag = (e: PointerEvent<HTMLCanvasElement>) => {
+    const gesture = drag.current;
+    if (gesture?.pointer !== e.pointerId) return;
+    finishDrag();
+    gesture.abandon?.();
   };
   return (
     <div className="mimic-wave">
+      {extras.ruler && (
+        <div className="mimic-ruler" aria-hidden="true">
+          {Array.from({ length: 6 }, (_, index) => {
+            const offset = (start + (span * index) / 5 - end) / 1000;
+            return (
+              <span key={index}>
+                {index === 5
+                  ? (extras.endLabel ?? 'now')
+                  : `${offset.toFixed(1).replace(/\.0$/, '')} s`}
+              </span>
+            );
+          })}
+        </div>
+      )}
       <canvas
         ref={canvas}
         role="slider"
@@ -255,44 +305,57 @@ export function MimicWave({
           );
         }}
         onPointerDown={(e) => {
+          if (e.button !== 0 || drag.current) return;
+          const box = e.currentTarget.getBoundingClientRect();
+          const at = pointerTime(box);
+          const time = at(e.clientX);
+          const edge = anchorFor(time, box.width);
+          drag.current = {
+            pointer: e.pointerId,
+            anchor: edge ?? time,
+            edge: edge !== null,
+            x: e.clientX,
+            y: e.clientY,
+            at,
+            windowMs: peek.windowMs,
+            select: onSelect,
+            playAt: extras.onPlayAt,
+            abandon: extras.onAbandon,
+          };
           e.currentTarget.setPointerCapture(e.pointerId);
-          extras.onGrab?.();
-          const edge = anchorFor(e);
-          press.current = { x: e.clientX, y: e.clientY, edge: edge !== null };
-          drag.current = edge ?? at(e);
           setDragRange({ start, end });
-          setDraft(null);
+          extras.onGrab?.();
         }}
         onPointerMove={(e) => {
-          if (drag.current === null)
-            e.currentTarget.style.cursor = anchorFor(e) === null ? '' : 'ew-resize';
-          else setDraft({ from: Math.min(drag.current, at(e)), to: Math.max(drag.current, at(e)) });
-        }}
-        onPointerCancel={() => {
-          drag.current = null;
-          press.current = null;
-          setDragRange(null);
-          setDraft(null);
-        }}
-        onPointerUp={(e) => {
-          if (drag.current === null) return;
-          const pressed = press.current;
-          const next = normalizeSelection(drag.current, at(e), peek.windowMs);
-          drag.current = null;
-          press.current = null;
-          setDragRange(null);
-          setDraft(null);
-          if (
-            extras.onPlayAt &&
-            pressed &&
-            isClick(e.clientX - pressed.x, e.clientY - pressed.y, pressed.edge)
-          ) {
-            extras.onPlayAt(at(e));
-            return;
+          const gesture = drag.current;
+          if (gesture?.pointer === e.pointerId) {
+            const at = gesture.at(e.clientX);
+            setDraft({ from: Math.min(gesture.anchor, at), to: Math.max(gesture.anchor, at) });
+          } else if (!gesture) {
+            const box = e.currentTarget.getBoundingClientRect();
+            const edge = anchorFor(pointerTime(box)(e.clientX), box.width);
+            e.currentTarget.style.cursor = edge === null ? '' : 'ew-resize';
           }
-          onSelect(next);
+        }}
+        onPointerCancel={cancelDrag}
+        onLostPointerCapture={cancelDrag}
+        onPointerUp={(e) => {
+          const gesture = drag.current;
+          if (gesture?.pointer !== e.pointerId) return;
+          const at = gesture.at(e.clientX);
+          const clicked = isClick(e.clientX - gesture.x, e.clientY - gesture.y, gesture.edge);
+          const next = normalizeSelection(gesture.anchor, at, gesture.windowMs);
+          finishDrag();
+          if (clicked && gesture.playAt) gesture.playAt(at);
+          else if (next || (clicked && !gesture.edge)) gesture.select(next);
+          else gesture.abandon?.();
         }}
       />
+      {extras.renderWords && (
+        <div className="mimic-word-track" role="group" aria-label="Words on the waveform">
+          {width > 0 && extras.renderWords(start, end, width)}
+        </div>
+      )}
       <div className="mimic-axis">
         <span aria-hidden="true">−{span / 1000} s</span>
         <span className="mimic-zoom" role="group" aria-label="Waveform zoom">

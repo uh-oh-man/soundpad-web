@@ -44,7 +44,7 @@ The companion's console window logs these events with the time, including who ma
 1. Open **Mimic**, or click the **Mimic on** badge.
 2. Select a moment:
    - drag across the waveform, then drag either edge handle to adjust that end;
-   - click a transcript line, which selects exactly that audio with a little padding;
+   - click a word on the waveform or in the transcript to select it, then Shift-click another word to extend the cut;
    - use **Last 3 s / 5 s / 10 s**;
    - or use the keyboard: **3**, **5** or **0** select the last 3, 5 or 10 seconds and focus the name field. On the focused waveform, **Left/Right** move the end, **Shift+Left/Right** the start, and **Ctrl** makes 1-second steps.
 
@@ -90,7 +90,7 @@ Like Voice Replay Studio's trim, it saves a new Temp sound and never changes the
 
 - **Off until the host turns it on.** The first time, **Get transcripts** downloads Whisper's English `base.en` model (~148 MB) to `%LOCALAPPDATA%\SoundpadWeb\models\` in the background, with progress shown. If Voice Replay Studio already downloaded the model on this PC, that copy is reused.
 - **Recognition runs on the host PC.** Audio is never uploaded. People allowed to use Mimic receive only the text, with timings.
-- **Word by word (2.39).** Each word gets its own start and end, found from Whisper's alignment and the audio itself, so a word can be clicked, highlighted and clipped. Words the method is unsure about are underlined with dots. On synthetic test speech about 13 % of single-word cuts clip part of the word or catch a neighbour (18 % with background noise); real voices in a game have not been measured yet. **Subtitles: Gaming / Balanced / Fast** sets how much CPU recognition may use; Gaming uses one or two low-priority threads, depending on available logical processors. Balanced can use up to four and Fast up to eight.
+- **Word by word (2.39).** Each word gets its own start and end, found from Whisper's alignment and the audio itself, so each word lines up with its audio on the waveform. Clicking words selects them. Preview and game playback use their own controls. Words the method is unsure about are underlined with dots. On synthetic test speech about 13 % of single-word cuts clip part of the word or catch a neighbour (18 % with background noise); real voices in a game have not been measured yet. **Subtitles: Gaming / Balanced / Fast** sets how much CPU recognition may use; Gaming uses one or two low-priority threads, depending on available logical processors. Balanced can use up to four and Fast up to eight.
 - **Lines appear after a short pause** (0.35 s). In continuous speech, Gaming, Balanced and Fast attempt a cut after 10, 9 and 7 seconds respectively. An unfinished edge may be held back for the next recognition pass. Silent stretches are skipped, which saves CPU and avoids words invented from silence.
 - **Measured on a local Apollo 11 clip.** With the warm English base model, 6.7 seconds of speech took 0.87 seconds at one thread, 0.48 at two, and 0.31 at four. All runs produced the same words. This measures recognition time after the audio is ready.
 - **English only**, with the same confidence filters as Voice Replay Studio.

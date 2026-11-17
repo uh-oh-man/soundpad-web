@@ -170,7 +170,7 @@ export function TopBar({
             {activity.unread} new
           </span>
         )}
-        {mode !== 'landing' && (
+        {mode !== 'landing' && !view.demo && (
           <input
             className="profile-name"
             key={view.profile.name}

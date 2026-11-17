@@ -8,8 +8,7 @@ import {
   loopMs,
   msToFrames,
 } from '../../web/src/demo/history';
-import { ALEX_BAND_MS } from '../../web/src/demo/drafts';
-import { ALEX, GUEST_JOIN_MS, UNAVAILABLE } from '../../web/src/demo/model';
+import { UNAVAILABLE } from '../../web/src/demo/model';
 import { MIMIC_LOOP_MS } from '../../web/src/demo/library';
 import { blockPeaks, loopLevels, type Pcm } from '../../web/src/demo/dsp';
 import { levelsSchema, timelineSchema, transcriptSchema } from '../../web/src/mimic/history';
@@ -222,24 +221,15 @@ describe('example drafts', () => {
     expect(state().playback.epoch).toBe(second.epoch);
   });
 
-  it('keeps a draft in Temp, refuses the permanent keep, and shows the simulated guest’s selection', async () => {
+  it('keeps a draft in Temp without adding anyone else’s selection', async () => {
     const { model, send, state, engine } = setup();
     model.begin();
     await send('mimicStart', { sourceId: 'example:apollo-11' });
-    vi.advanceTimersByTime(GUEST_JOIN_MS);
     vi.setSystemTime(T0 + s(16));
     const draft = draftSchema.parse(await send('draftCreate', { action: 'recent' }));
     expect((draft.endFrame - draft.startFrame) / HISTORY_RATE).toBe(10);
-    const revision = state().drafts ?? 0;
-    await vi.advanceTimersByTimeAsync(ALEX_BAND_MS);
-    expect(state().drafts).toBeGreaterThan(revision);
-    const list = draftListSchema.parse(await send('draftList'));
-    expect(list.others).toMatchObject([{ ownerName: 'Alex (simulated)', tag: 'alex' }]);
-    expect(
-      list.others[0].endFrame <= draft.startFrame || list.others[0].startFrame >= draft.endFrame,
-    ).toBe(true);
-    const copy = draftSchema.parse(await send('draftCopy', { draftId: list.others[0].id }));
-    expect(copy.startFrame).toBe(list.others[0].startFrame);
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(draftListSchema.parse(await send('draftList')).others).toEqual([]);
     await expect(send('draftKeep', { draftId: draft.id, action: 'library' })).rejects.toThrow(
       UNAVAILABLE.keep,
     );
@@ -251,25 +241,7 @@ describe('example drafts', () => {
     expect(state().mimic?.recent?.[0].assetId).toBe(kept.assetId);
     expect(state().library.sounds.find((x) => x.assetId === kept.assetId)?.temporary).toBe(true);
     expect(engine.cuts).toHaveLength(1);
-    expect(draftListSchema.parse(await send('draftList')).drafts.map((d) => d.id)).toEqual([
-      copy.id,
-    ]);
-    await send('draftDiscard', { draftId: list.others[0].id });
-    expect(draftListSchema.parse(await send('draftList')).others).toEqual([]);
-    model.close();
-  });
-
-  it('gives the simulated guest no selection when they are not in the session', async () => {
-    const { model, send } = setup();
-    model.begin();
-    await send('mimicStart', { sourceId: 'example:apollo-11' });
-    vi.setSystemTime(T0 + s(3));
-    await send('draftCreate', { action: 'recent' });
-    await vi.advanceTimersByTimeAsync(ALEX_BAND_MS - GUEST_JOIN_MS);
-    // Alex joined meanwhile; the selection appears only if they were there when it was due.
-    model.disconnect(ALEX.peer);
-    await vi.advanceTimersByTimeAsync(GUEST_JOIN_MS);
-    expect(draftListSchema.parse(await send('draftList')).others).toEqual([]);
+    expect(draftListSchema.parse(await send('draftList')).drafts).toEqual([]);
     model.close();
   });
 

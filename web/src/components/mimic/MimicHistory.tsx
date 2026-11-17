@@ -1,4 +1,13 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import {
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type CSSProperties,
+  type PointerEvent,
+  type ReactNode,
+} from 'react';
 import {
   ArrowDownToLine,
   BookAudio,
@@ -9,6 +18,7 @@ import {
   Crosshair,
   Headphones,
   MessageSquareQuote,
+  Pause,
   Play,
   Radio,
   Scissors,
@@ -52,7 +62,6 @@ import {
   windowStart,
   wordSelected,
   wordCut,
-  wordSelection,
   wordsText,
   type BoundSelection,
   type FrameRange,
@@ -146,9 +155,8 @@ const field = (data: unknown, key: string) => {
  * while recording carries on. The transcript shows sentences of clickable words (click selects a word, Shift-click
  * a range to it). Guests see the history from when they joined, plus what the host shared.
  *
- * Since 2.45 a word click also plays that word, and a click on the waveform plays from that point, in the
- * person's own Preview here / Play into game mode (remembered in this browser, Preview by default); a drag only
- * selects. The words being heard carry the `playing` class.
+ * A click on the waveform plays from that point in the person's chosen mode. Word clicks and drags
+ * select audio. The words being heard carry the `playing` class.
  *
  * With a 2.40 companion, Capture opens a draft for the person who captured it instead of making a clip at once:
  * one draft is shown at a time (the others are in the draft history), its edges can be dragged into the
@@ -160,13 +168,16 @@ export function MimicHistory({
   host,
   connected,
   canPlay,
+  recentClips,
 }: {
   state: Snapshot;
   host: boolean;
   connected: boolean;
   canPlay: boolean;
+  recentClips: ReactNode;
 }) {
   const mimic = state.mimic;
+  const demo = controller.getSnapshot().demo;
   const history = mimic?.history;
   // Drafts need the 2.40 companion, and for a guest a host page that relays their commands.
   const draftsOn =
@@ -199,6 +210,16 @@ export function MimicHistory({
   const [picked, setPicked] = useState<BoundSelection | null>(null);
   const frozenBySelection = useRef(false);
   const [anchor, setAnchor] = useState<number | null>(null);
+  const wordDrag = useRef<{
+    pointer: number;
+    first: number;
+    x: number;
+    y: number;
+    sessionId: string;
+    moved: boolean;
+  } | null>(null);
+  const draggedClick = useRef<number | null>(null);
+  const [wordDragRange, setWordDragRange] = useState<BoundSelection | null>(null);
   const [hover, setHover] = useState<Word | null>(null);
   const [name, setName] = useState('');
   const [busy, setBusy] = useState(false);
@@ -225,7 +246,6 @@ export function MimicHistory({
       ),
     );
   }, [shownTranscript?.words, timeline?.available]);
-  const pending = shownTranscript?.pending ?? NO_RANGES;
   const selection = selectionOn(picked, sessionId);
   /** A selection on the recording shown in this render. */
   const setSelection = (next: FrameRange | null) => setPicked(bind(next, sessionId));
@@ -484,6 +504,7 @@ export function MimicHistory({
   }
   function goLive() {
     frozenBySelection.current = false;
+    viewRef.current = { follow: true, viewEnd };
     setFollow(true);
     poller.current?.nudge();
   }
@@ -529,6 +550,7 @@ export function MimicHistory({
    * `open` still holds that draft in this render, and its edges must not move to the new selection.
    */
   function select(next: FrameRange | null, fresh = false) {
+    if (!next || fresh) setAnchor(null);
     if (open && !fresh) {
       // Editing the open draft: dragging an edge or picking words moves its edges. Clearing closes it (it stays in the history).
       if (!next) {
@@ -556,7 +578,20 @@ export function MimicHistory({
       frozenBySelection.current = false;
     }
   }
-  const onWaveSelect = (s: Selection | null) => select(s ? selectionFrames(s, start, rate) : null);
+  function holdTimeline() {
+    if (!viewRef.current.follow) return;
+    viewRef.current = { follow: false, viewEnd: displayEnd };
+    setFollow(false);
+    setViewEnd(displayEnd);
+    frozenBySelection.current = true;
+  }
+  function abandonTimeline() {
+    if (selection || !frozenBySelection.current) return;
+    goLive();
+  }
+  const onWaveSelect = (s: Selection | null) => {
+    if (sessionId === currentSession.current) select(s ? selectionFrames(s, start, rate) : null);
+  };
 
   /**
    * `share` (2.43, host style sync): tell the host's other page (the companion window, or the browser)
@@ -619,6 +654,8 @@ export function MimicHistory({
   // Private preview: heard in this browser only, never through Soundpad. Guests have it with a 2.40 companion.
   const {
     previewing,
+    paused,
+    toggle: togglePreview,
     play: preview,
     stop: stopPreview,
     elapsedMs: previewElapsed,
@@ -648,7 +685,7 @@ export function MimicHistory({
   }, [sessionId, stopPreview]);
   const canPreview = (host && supports(state.companionVersion, 'preview')) || draftsOn;
 
-  // ---- Playing from the history (2.45): word clicks, waveform clicks and the playing word ------------------
+  // ---- Playing from the history (2.45): waveform clicks and the playing word ------------------
   const [chosenMode, setChosenMode] = useState<PlayMode>(readPlayMode);
   const gameWhy = gameBlocked({
     host,
@@ -776,7 +813,7 @@ export function MimicHistory({
       }
     })();
   }
-  /** Stop beside the mode switch: this window's preview, or what plays in the game (as the player's Stop). */
+  /** Stop the selection transport, whether it is previewing here or playing in Soundpad. */
   function stopPlaying() {
     const p = playing;
     setPlaying(null);
@@ -788,10 +825,7 @@ export function MimicHistory({
     if (!timeline) return;
     const cut = playFrom(start + msToFrames(ms, rate), timeline);
     // The press held a live view still; with nothing selected it follows live again.
-    if (!selection && frozenBySelection.current) {
-      frozenBySelection.current = false;
-      setFollow(true);
-    }
+    abandonTimeline();
     if ('reason' in cut) {
       controller.notify(cut.reason, 'error');
       return;
@@ -1105,20 +1139,19 @@ export function MimicHistory({
   }
   function previewNow() {
     if (previewing) {
-      stopPreview();
+      togglePreview();
       return;
     }
-    // The selection's words light up as they are heard (2.45).
-    if (selection) startPlaying(selection, 'preview');
-    if (open && !sameRange(open, selection)) {
-      // Edges still being saved: hear what is selected now.
-      const chosen = fields();
-      if (chosen) void preview('mimicPreview', chosen);
-    } else if (open) void preview('mimicPreview', { draftId: open.id, sourceId: open.sessionId });
-    else {
-      const chosen = fields();
-      if (chosen) void preview('mimicPreview', chosen);
+    if (open && sameRange(open, selection)) {
+      startPlaying(open, 'preview');
+      void preview('mimicPreview', { draftId: open.id, sourceId: open.sessionId });
+      return;
     }
+    // If the draft's edges are still being saved, use the same current cut for both sound and playhead.
+    const chosen = fields();
+    if (!chosen || !selection) return;
+    startPlaying(selection, 'preview');
+    void preview('mimicPreview', chosen);
   }
 
   // Shortcuts, as in the 30 s view: 3/5/0 select the last seconds, Enter captures (or with an old companion
@@ -1259,12 +1292,21 @@ export function MimicHistory({
     select(target.range, true);
   }, [timeline?.sessionId, jumpKick]);
 
-  if (!timeline) return <p className="muted">Loading the recording history…</p>;
+  if (!timeline)
+    return (
+      <div className="mimic-history">
+        <p className="muted">Loading the recording history…</p>
+        {recentClips}
+      </div>
+    );
   if (!timeline.sessionId)
     return (
-      <p className="muted">
-        {host ? 'Choose a source and start listening.' : 'Waiting for the host to start Mimic.'}
-      </p>
+      <div className="mimic-history">
+        <p className="muted">
+          {host ? 'Choose a source and start listening.' : 'Waiting for the host to start Mimic.'}
+        </p>
+        {recentClips}
+      </div>
     );
 
   const behind = behindLiveMs(timeline, end);
@@ -1291,14 +1333,13 @@ export function MimicHistory({
     color: bandColor(band.tag),
     label: bandLabel(band),
   }));
-  const recognising =
-    timeline.transcribing && pending.some((p) => p.endFrame - p.startFrame > rate / 2);
   const selectionClock = selection ? wallOf(timeline, selection.startFrame) : null;
   const playTitle = held
     ? HELD_BY_HOST
     : waiting
       ? 'Waiting for the host to allow more'
       : undefined;
+  const displayedSelection = selectionOn(wordDragRange, sessionId) ?? selection;
   const range =
     selection && selectedMs ? (
       <span className="mimic-range">
@@ -1307,13 +1348,105 @@ export function MimicHistory({
         {selectionClock !== null && <small> at {formatClock(selectionClock)}</small>}
       </span>
     ) : null;
-  const previewButton = canPreview && (
+  const wordAt = (e: PointerEvent<HTMLButtonElement>) => {
+    const hit = document.elementFromPoint(e.clientX, e.clientY);
+    const surface = e.currentTarget.closest('.mimic-word-track, .mimic-reading-body');
+    const word = hit?.closest<HTMLButtonElement>('button[data-word-id]');
+    if (word && surface?.contains(word)) return Number(word.dataset.wordId);
+    if (surface?.matches('.mimic-word-track') && surface.contains(hit)) {
+      // A horizontal drag can keep moving across the time track when labels alternate rows.
+      const at = e.clientX;
+      for (const timed of surface.querySelectorAll<HTMLButtonElement>('button[data-word-id]')) {
+        const box = timed.getBoundingClientRect();
+        if (at >= box.left && at <= box.right) return Number(timed.dataset.wordId);
+      }
+    }
+    return null;
+  };
+  const updateWordDrag = (e: PointerEvent<HTMLButtonElement>) => {
+    const gesture = wordDrag.current;
+    if (!gesture || gesture.pointer !== e.pointerId || gesture.sessionId !== sessionId) return;
+    if (!gesture.moved && Math.hypot(e.clientX - gesture.x, e.clientY - gesture.y) < 5) return;
+    gesture.moved = true;
+    const last = wordAt(e);
+    if (last === null) return;
+    const cut = wordCut(words, gesture.first, last, true, timeline);
+    if ('range' in cut) setWordDragRange(bind(cut.range, sessionId));
+    return cut;
+  };
+  const cancelWordDrag = (e: PointerEvent<HTMLButtonElement>) => {
+    if (wordDrag.current?.pointer !== e.pointerId) return;
+    wordDrag.current = null;
+    setWordDragRange(null);
+    abandonTimeline();
+  };
+  const wordButton = (w: Word, style?: CSSProperties, lane?: number) => (
     <button
+      key={w.id}
+      style={style}
+      data-word-id={w.id}
+      data-timed-lane={lane}
       type="button"
-      title="Hear it in this browser only; nobody else hears it and nothing plays in the game"
-      onClick={previewNow}
+      className={`mimic-word${w.status === 'uncertain' ? ' uncertain' : ''}${hover?.id === w.id && !wordDragRange ? ' hover' : ''}${playingIds.has(w.id) ? (reduced ? ' playing playing-static' : ' playing') : ''}`}
+      aria-pressed={wordSelected(w, displayedSelection)}
+      title={w.status === 'uncertain' ? `${w.text} · Timing uncertain` : style ? w.text : undefined}
+      onMouseEnter={() => setHover(w)}
+      onMouseLeave={() => setHover((h) => (h?.id === w.id ? null : h))}
+      onFocus={() => setHover(w)}
+      onBlur={() => setHover((h) => (h?.id === w.id ? null : h))}
+      onPointerDown={(e) => {
+        if (
+          !sessionId ||
+          e.button !== 0 ||
+          wordDrag.current ||
+          (e.pointerType === 'touch' && !style)
+        )
+          return;
+        draggedClick.current = null;
+        wordDrag.current = {
+          pointer: e.pointerId,
+          first: w.id,
+          x: e.clientX,
+          y: e.clientY,
+          sessionId,
+          moved: false,
+        };
+        e.currentTarget.setPointerCapture(e.pointerId);
+        if (style) holdTimeline();
+      }}
+      onPointerMove={updateWordDrag}
+      onPointerUp={(e) => {
+        const gesture = wordDrag.current;
+        if (gesture?.pointer !== e.pointerId) return;
+        const cut = updateWordDrag(e);
+        wordDrag.current = null;
+        if (!gesture.moved) return;
+        draggedClick.current = w.id;
+        const result = cut && 'range' in cut ? cut.range : selectionOn(wordDragRange, sessionId);
+        setWordDragRange(null);
+        if (result && gesture.sessionId === sessionId) {
+          select(result);
+          setAnchor(gesture.first);
+        } else abandonTimeline();
+      }}
+      onPointerCancel={cancelWordDrag}
+      onLostPointerCapture={cancelWordDrag}
+      onClick={(e) => {
+        if (e.detail > 0 && draggedClick.current === w.id) {
+          draggedClick.current = null;
+          return;
+        }
+        const cut = wordCut(words, anchor, w.id, e.shiftKey, timeline);
+        if ('reason' in cut) {
+          abandonTimeline();
+          controller.notify(cut.reason, 'error');
+          return;
+        }
+        select(cut.range);
+        if (!e.shiftKey || anchor === null) setAnchor(w.id);
+      }}
     >
-      <Headphones size={15} /> {previewing ? 'Stop preview' : 'Preview'}
+      <span className={style ? 'mimic-timed-label' : undefined}>{w.text}</span>
     </button>
   );
   return (
@@ -1324,240 +1457,229 @@ export function MimicHistory({
           {timeline.shared.length ? ', and the parts the host shared with guests' : ''}.
         </p>
       )}
-      {(libraryOn || mimic?.transcribing || words.length > 0 || canLoadOlder) && (
-        <section className="mimic-reading" aria-labelledby="mimic-transcript-title">
-          <div className="mimic-transcript-head">
-            <h2 id="mimic-transcript-title">Transcript</h2>
-            <div className="mimic-reading-actions">
-              <button
-                type="button"
-                onClick={loadOlderTranscript}
-                aria-disabled={!canLoadOlder || loadingOlder}
-                title={canLoadOlder ? undefined : 'The oldest available transcript is loaded'}
-              >
-                {loadingOlder ? 'Loading…' : 'Earlier words'}
-              </button>
-              {/* Always here (its label changes), so it keeps the keyboard when pressed. */}
-              <button
-                type="button"
-                className={following ? 'mimic-follow live' : 'mimic-follow primary'}
-                aria-pressed={following}
-                title="Show the newest words and follow them (End)"
-                aria-keyshortcuts="End"
-                onClick={jumpToNewest}
-              >
-                <ArrowDownToLine size={14} aria-hidden="true" />{' '}
-                {following ? 'Following latest' : 'Jump to latest'}
-                <kbd className="mimic-follow-key" aria-hidden="true">
-                  End
-                </kbd>
-              </button>
-            </div>
-          </div>
-          {libraryOn && (
-            <form
-              className="mimic-search"
-              role="search"
-              aria-label="Search this recording"
-              onSubmit={(e) => {
-                e.preventDefault();
-                void searchHistory();
-              }}
+      <section className="mimic-timeline" aria-labelledby="mimic-timeline-title">
+        <header className="mimic-section-head mimic-timeline-head">
+          <h2 id="mimic-timeline-title">Recording timeline</h2>
+          <div className="mimic-nav" role="group" aria-label="Move through the history">
+            <button
+              type="button"
+              onClick={() => step(-JUMP_SECONDS)}
+              disabled={end <= oldestFrame(timeline) + rate}
             >
-              <div className="mimic-quick">
-                <input
-                  type="search"
-                  aria-label="Words to find in the recording"
-                  placeholder="Find words"
-                  maxLength={100}
-                  value={query}
-                  onChange={(e) => setQuery(e.target.value)}
-                />
-                <button type="submit">
-                  <Search size={14} /> Find
+              <ChevronLeft size={15} /> Back {JUMP_SECONDS} s
+            </button>
+            <button type="button" onClick={() => step(JUMP_SECONDS)} disabled={atLive}>
+              Forward {JUMP_SECONDS} s <ChevronRight size={15} />
+            </button>
+            <button
+              type="button"
+              className={atLive ? 'live' : 'primary'}
+              aria-pressed={atLive}
+              onClick={goLive}
+            >
+              <Radio size={15} /> {atLive ? 'Live' : 'Go live'}
+            </button>
+            <span className="mimic-when">
+              {viewClock !== null && (
+                <time dateTime={new Date(viewClock).toISOString()}>{formatClock(viewClock)}</time>
+              )}
+              {atLive
+                ? timeline.recording
+                  ? ' · live'
+                  : ' · recording stopped'
+                : ` · ${formatSpan(behind)} behind live`}
+            </span>
+          </div>
+        </header>
+        {main && (
+          <MimicWave
+            peek={{ windowMs: WINDOW_MS, levels: main.peaks }}
+            selection={displayedSelection ? selectionMs(displayedSelection, start, rate) : null}
+            onSelect={onWaveSelect}
+            extras={{
+              storageKey: VIEW_KEY,
+              defaultView: DEFAULT_HISTORY_VIEW,
+              where: moved ? `ending ${formatSpan(behind)} before live` : undefined,
+              endLabel: atLive && timeline.recording ? 'Live' : 'View end',
+              marks,
+              hidden,
+              highlight,
+              bands,
+              playhead,
+              renderWords: words.length
+                ? (visibleStart, visibleEnd, width) => {
+                    const lanes = [0, 0, 0, 0];
+                    const span = visibleEnd - visibleStart;
+                    const visibleFrom = start + msToFrames(visibleStart, rate);
+                    const visibleTo = start + msToFrames(visibleEnd, rate);
+                    return words
+                      .filter((word) => word.start < visibleTo && word.end > visibleFrom)
+                      .map((word) => {
+                        const from = Math.max(visibleStart, framesToMs(word.start - start, rate));
+                        const to = Math.min(visibleEnd, framesToMs(word.end - start, rate));
+                        const left = ((from - visibleStart) / span) * width;
+                        const durationWidth = ((to - from) / span) * width;
+                        const labelWidth = Math.min(width, Math.ceil(word.text.length * 7.5 + 14));
+                        const labelLeft = Math.max(
+                          0,
+                          Math.min(width - labelWidth, left + (durationWidth - labelWidth) / 2),
+                        );
+                        // Each hit still starts and ends at the word's exact times. Offset the label
+                        // within its lane so short words stay readable without covering neighbours.
+                        const lane = lanes.findIndex((available) => available <= labelLeft);
+                        if (lane !== -1) lanes[lane] = labelLeft + labelWidth + 3;
+                        const row = lane === -1 ? lanes.length : lane;
+                        return wordButton(
+                          word,
+                          {
+                            left: `${(left / width) * 100}%`,
+                            width: `${(durationWidth / width) * 100}%`,
+                            '--label-x': lane === -1 ? '0px' : `${labelLeft - left}px`,
+                            '--label-w': lane === -1 ? '100%' : `${labelWidth}px`,
+                            '--label-y': `${8 + row * 20}px`,
+                          } as CSSProperties,
+                          row,
+                        );
+                      });
+                  }
+                : undefined,
+              ruler: true,
+              onPlayAt: playAt,
+              onGrab: holdTimeline,
+              onAbandon: abandonTimeline,
+            }}
+          />
+        )}
+        <div className="mimic-transport" role="group" aria-label="Selection playback">
+          {canPreview && (
+            <button
+              type="button"
+              className="primary"
+              disabled={!selection && !previewing}
+              data-playback-trigger
+              title="Hear the selection in this browser"
+              onClick={previewNow}
+            >
+              {previewing && !paused ? <Pause size={15} /> : <Play size={15} />}
+              {previewing ? (paused ? 'Resume preview' : 'Pause preview') : 'Preview'}
+            </button>
+          )}
+          <button
+            type="button"
+            data-playback-trigger
+            disabled={!canPlay || !selection}
+            aria-disabled={busy || held || !!waiting || undefined}
+            title={playTitle}
+            onClick={() => {
+              if (busy || held || waiting) return;
+              if (open) void playDraft(open);
+              else void clip(true);
+            }}
+          >
+            <Play size={15} /> {open ? 'Play into game' : 'Mimic & play'}
+          </button>
+          {range ?? <span className="muted">Select words or drag across the waveform</span>}
+          {(previewing || shownPlay?.mode === 'game') && (
+            <button type="button" className="mimic-transport-stop" onClick={stopPlaying}>
+              <Square size={13} /> Stop playing
+            </button>
+          )}
+        </div>
+        {overview && (
+          <MimicOverview
+            range={overview.range}
+            peaks={overview.peaks}
+            // The wanted view, not the one last fetched: the outline follows a drag at once (2.41).
+            view={{
+              startFrame: Math.max(overview.range.startFrame, windowStart(end, rate)),
+              endFrame: end,
+            }}
+            rate={rate}
+            gaps={timeline.gaps.map((g) => g.atFrame)}
+            shared={host ? timeline.shared : []}
+            behindMs={behind}
+            onMove={moveTo}
+          />
+        )}
+        <div className="mimic-timeline-options">
+          <PlayModeSwitch mode={playMode} set={chooseMode} blocked={gameWhy} />
+          <div className="mimic-timeline-tools">
+            <div className="mimic-quick" role="group" aria-label="Quick select">
+              {QUICK_SECONDS.map((s) => (
+                <button
+                  key={s}
+                  onClick={() => {
+                    if (open) closeDraft();
+                    select(
+                      selectionFrames(
+                        lastSeconds(s, WINDOW_MS),
+                        windowStart(displayEnd, rate),
+                        rate,
+                      ),
+                      true,
+                    );
+                  }}
+                >
+                  Last {s} s
                 </button>
-                {found && (
-                  <button type="button" onClick={() => setFound(null)}>
-                    <X size={14} /> Close results
+              ))}
+              {selection && !open && (
+                <button onClick={() => select(null)}>
+                  <X size={14} /> Clear
+                </button>
+              )}
+            </div>
+            {draftsOn && (
+              <div className="mimic-quick mimic-quick-drafts" role="group" aria-label="Quick Mimic">
+                <button
+                  type="button"
+                  aria-disabled={busy || undefined}
+                  title="A draft of the most recent finished phrase (skips what the companion itself played)"
+                  onClick={() => void capture('phrase')}
+                >
+                  <MessageSquareQuote size={15} /> Latest phrase
+                </button>
+                {!selection && !open && canPlay && !held && !waiting && (
+                  <button
+                    type="button"
+                    className="primary"
+                    aria-disabled={busy || undefined}
+                    onClick={() => void capture('phrase', true)}
+                  >
+                    <Play size={15} /> Play latest phrase
                   </button>
                 )}
+                <button
+                  type="button"
+                  aria-disabled={busy || undefined}
+                  title="A draft of the last ten seconds"
+                  onClick={() => void capture('recent')}
+                >
+                  <Scissors size={15} /> Last 10 seconds
+                </button>
+                {mine.length > 0 && (
+                  <label className="mimic-draft-history">
+                    <span>My drafts</span>
+                    <select
+                      aria-label="Draft history"
+                      value={open?.id ?? ''}
+                      onChange={(e) => openDraft(mine.find((d) => d.id === e.target.value) ?? null)}
+                    >
+                      <option value="">{open ? 'Close the draft' : `${mine.length} saved`}</option>
+                      {mine.map((d) => (
+                        <option key={d.id} value={d.id}>
+                          {draftLabel(d, rate)}
+                          {d.inTemp ? ' (in Temp)' : ''}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                )}
               </div>
-              {found &&
-                (found.matches.length ? (
-                  <ul aria-label="Found in the recording">
-                    {found.matches.map((m) => {
-                      const at = wallOf(timeline, m.startFrame);
-                      return (
-                        <li key={m.startFrame}>
-                          <button
-                            type="button"
-                            onClick={() => {
-                              if (open) closeDraft();
-                              select({ startFrame: m.startFrame, endFrame: m.endFrame }, true);
-                            }}
-                          >
-                            {at !== null && <time>{formatClock(at)}</time>} “{m.context || m.text}”
-                          </button>
-                        </li>
-                      );
-                    })}
-                  </ul>
-                ) : (
-                  <p className="muted">Not found in what you can see of the recording.</p>
-                ))}
-            </form>
-          )}
-          <ol
-            ref={(element) => {
-              newest.ref.current = element;
-              transcriptList.current = element;
-            }}
-            onScroll={newest.onScroll}
-            onPointerDown={newest.onPointerDown}
-            onPointerUp={newest.onPointerUp}
-            onPointerCancel={newest.onPointerUp}
-            onPointerLeave={newest.onPointerUp}
-            className="mimic-transcript mimic-words mimic-reading-body"
-            aria-label="Transcript"
-          >
-            {shown.length ? (
-              shown.map((sentence) => (
-                <li key={sentence[0].id} className="mimic-reading-line">
-                  <time>
-                    {formatClock(wallOf(timeline, sentence[0].start) ?? 0).replace(/\s[AP]M$/i, '')}
-                  </time>
-                  {speakers?.enabled && sentence[0].speaker != null && (
-                    <SpeakerChip id={sentence[0].speaker} groups={speakers} />
-                  )}
-                  <span className="mimic-sentence">
-                    {sentence.map((w) => (
-                      <button
-                        key={w.id}
-                        type="button"
-                        className={`mimic-word${w.status === 'uncertain' ? ' uncertain' : ''}${hover?.id === w.id ? ' hover' : ''}${playingIds.has(w.id) ? (reduced ? ' playing playing-static' : ' playing') : ''}`}
-                        aria-pressed={wordSelected(w, selection)}
-                        title={
-                          w.status === 'uncertain'
-                            ? 'Uncertain: check this word and its edges before using it'
-                            : undefined
-                        }
-                        onMouseEnter={() => setHover(w)}
-                        onMouseLeave={() => setHover((h) => (h?.id === w.id ? null : h))}
-                        onFocus={() => setHover(w)}
-                        onBlur={() => setHover((h) => (h?.id === w.id ? null : h))}
-                        onClick={(e) => {
-                          // Clamped to the audio this person may hear around the word (2.41).
-                          const cut = timeline
-                            ? wordCut(words, anchor, w.id, e.shiftKey, timeline)
-                            : { range: wordSelection(words, anchor, w.id, e.shiftKey, rate) };
-                          if ('reason' in cut) {
-                            controller.notify(cut.reason, 'error');
-                            return;
-                          }
-                          select(cut.range);
-                          if (!e.shiftKey || anchor === null) setAnchor(w.id);
-                          // A click (or Enter) plays the word in the person's mode; Shift-click only selects (2.45).
-                          if (!e.shiftKey && cut.range) playRange(cut.range);
-                        }}
-                      >
-                        {w.text}
-                      </button>
-                    ))}
-                  </span>
-                </li>
-              ))
-            ) : (
-              <li className="muted mimic-reading-empty">
-                {mimic?.transcribing
-                  ? 'Words will appear here a few seconds after they are said.'
-                  : host
-                    ? 'Enable subtitles in Mimic settings to see new words here.'
-                    : 'New words appear here when the host enables subtitles.'}
-              </li>
             )}
-            {recognising && <li className="muted mimic-pending">Recognising more of this part…</li>}
-          </ol>
-        </section>
-      )}
-      <div className="mimic-nav" role="group" aria-label="Move through the history">
-        <button
-          type="button"
-          onClick={() => step(-JUMP_SECONDS)}
-          disabled={end <= oldestFrame(timeline) + rate}
-        >
-          <ChevronLeft size={15} /> Back {JUMP_SECONDS} s
-        </button>
-        <button type="button" onClick={() => step(JUMP_SECONDS)} disabled={atLive}>
-          Forward {JUMP_SECONDS} s <ChevronRight size={15} />
-        </button>
-        <button
-          type="button"
-          className={atLive ? 'live' : 'primary'}
-          aria-pressed={atLive}
-          onClick={goLive}
-        >
-          <Radio size={15} /> {atLive ? 'Live' : 'Go live'}
-        </button>
-        <span className="mimic-when">
-          {viewClock !== null && (
-            <time dateTime={new Date(viewClock).toISOString()}>{formatClock(viewClock)}</time>
-          )}
-          {atLive
-            ? timeline.recording
-              ? ' · live'
-              : ' · recording stopped'
-            : ` · ${formatSpan(behind)} behind live`}
-        </span>
-      </div>
-      {overview && (
-        <MimicOverview
-          range={overview.range}
-          peaks={overview.peaks}
-          // The wanted view, not the one last fetched: the outline follows a drag at once (2.41).
-          view={{
-            startFrame: Math.max(overview.range.startFrame, windowStart(end, rate)),
-            endFrame: end,
-          }}
-          rate={rate}
-          gaps={timeline.gaps.map((g) => g.atFrame)}
-          shared={host ? timeline.shared : []}
-          behindMs={behind}
-          onMove={moveTo}
-        />
-      )}
-      <PlayModeSwitch
-        mode={playMode}
-        set={chooseMode}
-        blocked={gameWhy}
-        playing={shownPlay?.mode ?? null}
-        onStop={stopPlaying}
-      />
-      {main && (
-        <MimicWave
-          peek={{ windowMs: WINDOW_MS, levels: main.peaks }}
-          selection={selectedMs}
-          onSelect={onWaveSelect}
-          extras={{
-            storageKey: VIEW_KEY,
-            defaultView: DEFAULT_HISTORY_VIEW,
-            where: moved ? `ending ${formatSpan(behind)} before live` : undefined,
-            endLabel: moved ? `−${formatSpan(behind)}` : 'now',
-            marks,
-            hidden,
-            highlight,
-            bands,
-            playhead,
-            onPlayAt: playAt,
-            onGrab: () => {
-              // Hold the view still under the pointer; letting go without a selection follows live again.
-              if (!follow) return;
-              setFollow(false);
-              setViewEnd(displayEnd);
-              frozenBySelection.current = true;
-            },
-          }}
-        />
-      )}
+          </div>
+        </div>
+      </section>
       {marks.length > 0 && (
         <ul className="mimic-gaps" aria-label="Gaps in the recording">
           {marks.map((m) => (
@@ -1623,75 +1745,6 @@ export function MimicHistory({
           )}
         </div>
       )}
-      <div className="mimic-quick" role="group" aria-label="Quick select">
-        {QUICK_SECONDS.map((s) => (
-          <button
-            key={s}
-            onClick={() => {
-              if (open) closeDraft();
-              select(
-                selectionFrames(lastSeconds(s, WINDOW_MS), windowStart(displayEnd, rate), rate),
-                true,
-              );
-            }}
-          >
-            Last {s} s
-          </button>
-        ))}
-        {selection && !open && (
-          <button onClick={() => select(null)}>
-            <X size={14} /> Clear
-          </button>
-        )}
-      </div>
-      {draftsOn && (
-        <div className="mimic-quick mimic-quick-drafts" role="group" aria-label="Quick Mimic">
-          <button
-            type="button"
-            aria-disabled={busy || undefined}
-            title="A draft of the most recent finished phrase (skips what the companion itself played)"
-            onClick={() => void capture('phrase')}
-          >
-            <MessageSquareQuote size={15} /> Latest phrase
-          </button>
-          {!selection && !open && canPlay && !held && !waiting && (
-            <button
-              type="button"
-              className="primary"
-              aria-disabled={busy || undefined}
-              onClick={() => void capture('phrase', true)}
-            >
-              <Play size={15} /> Play latest phrase
-            </button>
-          )}
-          <button
-            type="button"
-            aria-disabled={busy || undefined}
-            title="A draft of the last ten seconds"
-            onClick={() => void capture('recent')}
-          >
-            <Scissors size={15} /> Last 10 seconds
-          </button>
-          {mine.length > 0 && (
-            <label className="mimic-draft-history">
-              <span>My drafts</span>
-              <select
-                aria-label="Draft history"
-                value={open?.id ?? ''}
-                onChange={(e) => openDraft(mine.find((d) => d.id === e.target.value) ?? null)}
-              >
-                <option value="">{open ? 'Close the draft' : `${mine.length} saved`}</option>
-                {mine.map((d) => (
-                  <option key={d.id} value={d.id}>
-                    {draftLabel(d, rate)}
-                    {d.inTemp ? ' (in Temp)' : ''}
-                  </option>
-                ))}
-              </select>
-            </label>
-          )}
-        </div>
-      )}
       {waiting && (
         <p className="warning mimic-waiting" role="status">
           Waiting for the host to allow more {waiting === 'kept' ? 'kept audio' : 'Temp space'}.
@@ -1709,168 +1762,273 @@ export function MimicHistory({
           </button>
         </p>
       )}
-      {open ? (
-        // The same element as the capture row below, so the name field keeps focus when Capture opens the draft.
-        <div className="mimic-actions mimic-draft" role="region" aria-label="Draft">
-          {range}
-          <input
-            ref={nameField}
-            aria-label="Clip name"
-            placeholder={suggestion || 'Name (optional)'}
-            maxLength={100}
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            onBlur={() => void saveName(open)}
-          />
-          {previewButton}
-          <button
-            type="button"
-            className="primary"
-            disabled={!canPlay}
-            aria-disabled={busy || held || !!waiting || undefined}
-            title={playTitle}
-            onClick={() => void playDraft(open)}
-          >
-            <Play size={15} /> Play into game
-          </button>
-          <button
-            type="button"
-            aria-disabled={busy || !!waiting || undefined}
-            title={waiting ? 'Waiting for the host to allow more' : undefined}
-            onClick={() => void keepDraft(open, false)}
-          >
-            <BookmarkPlus size={15} /> Keep in Temp
-          </button>
-          <button
-            type="button"
-            aria-disabled={busy || !!waiting || undefined}
-            title={waiting ? 'Waiting for the host to allow more' : undefined}
-            onClick={() => void keepDraft(open, true)}
-          >
-            Keep in Temp and close draft
-          </button>
-          {canLibraryKeep && (
-            <button
-              type="button"
-              aria-disabled={busy || !!waiting || undefined}
-              title="Keep it permanently as a voice-library recording, with its words"
-              onClick={() => void keepToLibrary(open)}
-            >
-              <BookAudio size={15} /> Keep in voice library
-            </button>
+      <div className="mimic-workbench">
+        {recentClips}
+        <div className="mimic-editor-column">
+          <div className="mimic-editor">
+            <header className="mimic-section-head">
+              <h2>{open ? 'Clip draft' : 'Clip selection'}</h2>
+            </header>
+            {open ? (
+              // The same element as the capture row below, so the name field keeps focus when Capture opens the draft.
+              <div className="mimic-actions mimic-draft" role="region" aria-label="Draft">
+                <input
+                  ref={nameField}
+                  aria-label="Clip name"
+                  placeholder={suggestion || 'Name (optional)'}
+                  maxLength={100}
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  onBlur={() => void saveName(open)}
+                />
+                <div className="mimic-primary-actions">
+                  <button
+                    type="button"
+                    aria-disabled={busy || !!waiting || undefined}
+                    title={waiting ? 'Waiting for the host to allow more' : undefined}
+                    onClick={() => void keepDraft(open, false)}
+                  >
+                    <BookmarkPlus size={15} /> Keep in Temp
+                  </button>
+                </div>
+                <button
+                  type="button"
+                  aria-disabled={busy || !!waiting || undefined}
+                  title={waiting ? 'Waiting for the host to allow more' : undefined}
+                  onClick={() => void keepDraft(open, true)}
+                >
+                  Keep in Temp and close draft
+                </button>
+                {canLibraryKeep && (
+                  <button
+                    type="button"
+                    aria-disabled={busy || !!waiting || undefined}
+                    title="Keep it permanently as a voice-library recording, with its words"
+                    onClick={() => void keepToLibrary(open)}
+                  >
+                    <BookAudio size={15} /> Keep in voice library
+                  </button>
+                )}
+                <button
+                  type="button"
+                  className="mimic-delete"
+                  aria-disabled={busy || undefined}
+                  title="Delete this draft (Undo brings it back)"
+                  onClick={(e) => deleteDraft(open, e.currentTarget)}
+                >
+                  <Trash2 size={15} /> Delete
+                </button>
+                <p className="muted mimic-draft-help">
+                  Drag an edge on the waveform, or click words, to change it; it can reach into the
+                  audio around it. Nobody else hears the preview.
+                </p>
+              </div>
+            ) : selection && selectedMs ? (
+              <div className="mimic-actions">
+                <input
+                  ref={nameField}
+                  aria-label="Clip name"
+                  placeholder={suggestion || 'Name (optional)'}
+                  maxLength={100}
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                />
+                <div className="mimic-primary-actions">
+                  {draftsOn ? (
+                    <button
+                      title="Open it as a draft you can adjust before keeping or playing it"
+                      aria-disabled={busy || undefined}
+                      onClick={() => !busy && void capture()}
+                    >
+                      <Scissors size={15} /> Capture
+                    </button>
+                  ) : (
+                    <button
+                      aria-disabled={busy || undefined}
+                      onClick={() => !busy && void clip(false)}
+                    >
+                      <Scissors size={15} /> Mimic it
+                    </button>
+                  )}
+                </div>
+                {host && !demo && timeline.fromFrame === null && (
+                  <button
+                    title="Let guests see and clip this part, although it is from before they joined"
+                    onClick={() => void share()}
+                  >
+                    <Share2 size={15} /> Share with guests
+                  </button>
+                )}
+                {canSave && (
+                  <button
+                    className="mimic-save"
+                    title="Save it to the voice library now, named from its words (kept where Keep puts files)"
+                    aria-disabled={busy || !!waiting || undefined}
+                    onClick={() => !busy && !waiting && void saveSelection()}
+                  >
+                    <BookAudio size={15} /> Save
+                  </button>
+                )}
+              </div>
+            ) : (
+              <>
+                <p className="muted mimic-help-keys">
+                  Drag across words or Shift-click to extend a selection. Use <kbd>3</kbd>{' '}
+                  <kbd>5</kbd> <kbd>0</kbd> for a quick cut and <kbd>Esc</kbd> to clear it.
+                </p>
+                <p className="muted mimic-help-touch">
+                  Tap a word, drag across the waveform, or choose a quick cut.
+                </p>
+              </>
+            )}
+          </div>
+          {(libraryOn || mimic?.transcribing || words.length > 0 || canLoadOlder) && (
+            <section className="mimic-reading" aria-labelledby="mimic-transcript-title">
+              <div className="mimic-transcript-head">
+                <h2 id="mimic-transcript-title">Transcript</h2>
+                <div className="mimic-reading-actions">
+                  <button
+                    type="button"
+                    onClick={loadOlderTranscript}
+                    aria-disabled={!canLoadOlder || loadingOlder}
+                    title={canLoadOlder ? undefined : 'The oldest available transcript is loaded'}
+                  >
+                    {loadingOlder ? 'Loading…' : 'Earlier words'}
+                  </button>
+                  {/* Always here (its label changes), so it keeps the keyboard when pressed. */}
+                  <button
+                    type="button"
+                    className={following ? 'mimic-follow live' : 'mimic-follow primary'}
+                    aria-pressed={following}
+                    title="Show the newest words and follow them (End)"
+                    aria-keyshortcuts="End"
+                    onClick={jumpToNewest}
+                  >
+                    <ArrowDownToLine size={14} aria-hidden="true" />{' '}
+                    {following ? 'Following latest' : 'Jump to latest'}
+                    <kbd className="mimic-follow-key" aria-hidden="true">
+                      End
+                    </kbd>
+                  </button>
+                </div>
+              </div>
+              {libraryOn && (
+                <form
+                  className="mimic-search"
+                  role="search"
+                  aria-label="Search this recording"
+                  onSubmit={(e) => {
+                    e.preventDefault();
+                    void searchHistory();
+                  }}
+                >
+                  <div className="mimic-quick">
+                    <input
+                      type="search"
+                      aria-label="Words to find in the recording"
+                      placeholder="Find words"
+                      maxLength={100}
+                      value={query}
+                      onChange={(e) => setQuery(e.target.value)}
+                    />
+                    <button type="submit">
+                      <Search size={14} /> Find
+                    </button>
+                    {found && (
+                      <button type="button" onClick={() => setFound(null)}>
+                        <X size={14} /> Close results
+                      </button>
+                    )}
+                  </div>
+                  {found &&
+                    (found.matches.length ? (
+                      <ul aria-label="Found in the recording">
+                        {found.matches.map((m) => {
+                          const at = wallOf(timeline, m.startFrame);
+                          return (
+                            <li key={m.startFrame}>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  if (open) closeDraft();
+                                  select({ startFrame: m.startFrame, endFrame: m.endFrame }, true);
+                                }}
+                              >
+                                {at !== null && <time>{formatClock(at)}</time>} “
+                                {m.context || m.text}”
+                              </button>
+                            </li>
+                          );
+                        })}
+                      </ul>
+                    ) : (
+                      <p className="muted">Not found in what you can see of the recording.</p>
+                    ))}
+                </form>
+              )}
+              <ol
+                ref={(element) => {
+                  newest.ref.current = element;
+                  transcriptList.current = element;
+                }}
+                onScroll={newest.onScroll}
+                onPointerDown={newest.onPointerDown}
+                onPointerUp={newest.onPointerUp}
+                onPointerCancel={newest.onPointerUp}
+                onPointerLeave={newest.onPointerUp}
+                className="mimic-transcript mimic-words mimic-reading-body"
+                aria-label="Transcript"
+              >
+                {shown.length ? (
+                  shown.map((sentence) => (
+                    <li key={sentence[0].id} className="mimic-reading-line">
+                      <time>
+                        {formatClock(wallOf(timeline, sentence[0].start) ?? 0).replace(
+                          /\s[AP]M$/i,
+                          '',
+                        )}
+                      </time>
+                      {speakers?.enabled && sentence[0].speaker != null && (
+                        <SpeakerChip id={sentence[0].speaker} groups={speakers} />
+                      )}
+                      <span className="mimic-sentence">{sentence.map((w) => wordButton(w))}</span>
+                    </li>
+                  ))
+                ) : (
+                  <li className="muted mimic-reading-empty">
+                    {mimic?.transcribing
+                      ? 'Words will appear here a few seconds after they are said.'
+                      : host
+                        ? 'Enable subtitles in Mimic settings to see new words here.'
+                        : 'New words appear here when the host enables subtitles.'}
+                  </li>
+                )}
+              </ol>
+            </section>
           )}
-          <button
-            type="button"
-            className="mimic-delete"
-            aria-disabled={busy || undefined}
-            title="Delete this draft (Undo brings it back)"
-            onClick={(e) => deleteDraft(open, e.currentTarget)}
-          >
-            <Trash2 size={15} /> Delete
-          </button>
-          <p className="muted mimic-draft-help">
-            Drag an edge on the waveform, or click words, to change it; it can reach into the audio
-            around it. Nobody else hears the preview.
-          </p>
         </div>
-      ) : selection && selectedMs ? (
-        <div className="mimic-actions">
-          {range}
-          <input
-            ref={nameField}
-            aria-label="Clip name"
-            placeholder={suggestion || 'Name (optional)'}
-            maxLength={100}
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-          />
-          {previewButton}
-          {host && timeline.fromFrame === null && (
-            <button
-              title="Let guests see and clip this part, although it is from before they joined"
-              onClick={() => void share()}
-            >
-              <Share2 size={15} /> Share with guests
-            </button>
-          )}
-          {canSave && (
-            <button
-              className="mimic-save"
-              title="Save it to the voice library now, named from its words (kept where Keep puts files)"
-              aria-disabled={busy || !!waiting || undefined}
-              onClick={() => !busy && !waiting && void saveSelection()}
-            >
-              <BookAudio size={15} /> Save
-            </button>
-          )}
-          {draftsOn ? (
-            <button
-              title="Open it as a draft you can adjust before keeping or playing it"
-              aria-disabled={busy || undefined}
-              onClick={() => !busy && void capture()}
-            >
-              <Scissors size={15} /> Capture
-            </button>
-          ) : (
-            <button aria-disabled={busy || undefined} onClick={() => !busy && void clip(false)}>
-              <Scissors size={15} /> Mimic it
-            </button>
-          )}
-          <button
-            className="primary"
-            disabled={!canPlay}
-            aria-disabled={busy || held || !!waiting || undefined}
-            title={playTitle}
-            onClick={() => !busy && !held && !waiting && void clip(true)}
-          >
-            <Play size={15} /> Mimic &amp; play
-          </button>
-        </div>
-      ) : (
-        <>
-          <p className="muted mimic-help-keys">
-            Click a word to hear it, or the waveform to hear from there (
-            {playMode === 'game' ? 'into the game' : 'here only'}, as chosen above). Drag across the
-            waveform, click a word (Shift-click another to select everything between), or press{' '}
-            <kbd>3</kbd> <kbd>5</kbd> <kbd>0</kbd> for the last 3, 5 or 10 seconds. Then{' '}
-            <kbd>Enter</kbd> {draftsOn ? 'captures a draft' : 'mimics'}, <kbd>Shift</kbd>+
-            <kbd>Enter</kbd> mimics and plays, <kbd>Esc</kbd> clears. Back, Forward and the overview
-            move through the last {formatSpan((history?.seconds ?? timeline.windowSeconds) * 1000)};
-            recording carries on.
-          </p>
-          <p className="muted mimic-help-touch">
-            Tap a word or the waveform to hear it (
-            {playMode === 'game' ? 'into the game' : 'here only'}). Drag across the waveform, tap a
-            transcript line's word, or tap Last 3 s, 5 s or 10 s. Then{' '}
-            {draftsOn ? 'Capture' : 'Mimic it'}. Drag the overview to go back in time.
-          </p>
-        </>
-      )}
+      </div>
     </div>
   );
 }
 
 /**
- * Where clicks on words and the waveform play (2.45): Preview here (this browser only) or Play into game, as in
+ * Where waveform clicks play (2.45): Preview here (this browser only) or Play into game, as in
  * the Voices window. Play into game is offered only while this person may play; Stop ends what this window plays.
  */
 function PlayModeSwitch({
   mode,
   set,
   blocked,
-  playing,
-  onStop,
 }: {
   mode: PlayMode;
   set: (mode: PlayMode) => void;
   blocked: string | null;
-  playing: PlayMode | null;
-  onStop: () => void;
 }) {
   return (
     <div className="mimic-play-mode">
-      <div role="radiogroup" aria-label="Word and waveform clicks">
-        <span>Clicks play:</span>
+      <div role="radiogroup" aria-label="Waveform clicks">
+        <span>Waveform click plays</span>
         <label title="Heard in this browser only; nobody else hears it and nothing plays in the game">
           <input
             type="radio"
@@ -1892,11 +2050,6 @@ function PlayModeSwitch({
         </label>
         {blocked && <span className="muted">{blocked}.</span>}
       </div>
-      {playing && (
-        <button type="button" onClick={onStop}>
-          <Square size={13} aria-hidden="true" /> Stop playing
-        </button>
-      )}
     </div>
   );
 }

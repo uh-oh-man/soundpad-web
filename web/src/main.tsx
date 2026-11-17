@@ -114,6 +114,7 @@ import './mimic.css';
 import './voices.css';
 import './sentences.css';
 import './shell.css';
+import { currentPreview } from './preview-audio';
 import './playback.css';
 import './surfaces.css';
 import './backups.css';
@@ -156,15 +157,24 @@ function useSpaceToggle() {
       if (organizeActive(event.target as Element)) return;
       if (!matchesShortcut('playPause', event) || event.defaultPrevented) return;
       const target = event.target;
+      const preview = currentPreview();
       if (target instanceof HTMLElement) {
         if (target.isContentEditable || target.closest('input,textarea,select,[role="dialog"]'))
           return;
         const media = target.closest(
           '.tile-play-strip,.tile-art-button,.tile-wave-surface,.wave-surface',
         );
-        if (target.closest('button,a,[role="slider"]') && !media) return;
-        const button = target.closest('button');
-        if (button && !button.matches('.tile-play-strip,.tile-art-button')) return;
+        const interactive = target.closest('button,a,[role="slider"]');
+        const playbackSurface = interactive?.matches(
+          '.mimic-wave canvas, .mimic-word, .voices-word, [data-playback-trigger]',
+        );
+        if (interactive && !media && !playbackSurface) return;
+      }
+      if (preview) {
+        event.preventDefault();
+        event.stopPropagation();
+        if (!event.repeat) preview.toggle();
+        return;
       }
       const current = controller.getSnapshot();
       if (
@@ -265,6 +275,12 @@ function useStopShortcut() {
           ))
       )
         return;
+      const preview = currentPreview();
+      if (preview) {
+        event.preventDefault();
+        if (!event.repeat) preview.stop();
+        return;
+      }
       const current = controller.getSnapshot();
       if (
         !current.state.available ||
@@ -965,9 +981,9 @@ function App() {
                   <p>
                     {search
                       ? `${sounds.length} matching sound${sounds.length === 1 ? '' : 's'}`
-                      : `${sounds.length} sound${sounds.length === 1 ? '' : 's'} · ${host ? 'Ready when your friends are' : 'Tap a sound to play on the host'}`}
+                      : `${sounds.length} sound${sounds.length === 1 ? '' : 's'} · ${view.demo ? 'Play sounds in this browser' : host ? 'Ready when your friends are' : 'Tap a sound to play on the host'}`}
                   </p>
-                  {host && (
+                  {host && !view.demo && (
                     // Who is connected, at the top where the host looks (it used to sit in the footer).
                     <p className="connected-guests" role="status" aria-live="polite">
                       <Users size={15} aria-hidden="true" />
@@ -983,7 +999,7 @@ function App() {
                       )}
                     </p>
                   )}
-                  {host && <LobbyRequests requests={view.requests} />}
+                  {host && !view.demo && <LobbyRequests requests={view.requests} />}
                   {host && budget?.host && (
                     <BudgetRequests
                       requests={budget.host.requests}

@@ -1,19 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { FakeEngine, HOST, id, setup } from './demo-engine';
-import {
-  ALEX,
-  DEMO_COMPANION,
-  ALEX_GAP_MS,
-  DemoModel,
-  GUEST_JOIN_MS,
-  MAX_COPY_MS,
-  SAM,
-  SAM_ASKS_MS,
-  UNAVAILABLE,
-} from '../../web/src/demo/model';
+import { DEMO_COMPANION, DemoModel, MAX_COPY_MS, UNAVAILABLE } from '../../web/src/demo/model';
 import { DEMO_SOUNDS, mimicLoopLines, wordLines } from '../../web/src/demo/library';
 import {
   applyEdit,
+  blockPeaks,
   loopLevels,
   loopSlice,
   resample,
@@ -338,87 +329,18 @@ describe('example session model', () => {
   });
 });
 
-describe('example session guests', () => {
-  it('Alex joins after a few seconds as a direct guest, named as simulated', () => {
-    const { model, session, notices } = setup();
+describe('solo example', () => {
+  it('stays silent and never adds guests or requests, even after changing admission or rotating the invite', async () => {
+    const { model, state, session, notices } = setup();
     model.begin();
-    vi.advanceTimersByTime(GUEST_JOIN_MS - 1);
-    expect(session().guests).toEqual([]);
-    vi.advanceTimersByTime(1);
-    expect(session().guests).toEqual([ALEX.peer]);
-    expect(session().people[ALEX.peer].name).toBe('Alex (simulated)');
-    expect(session().links[ALEX.peer]).toBe('direct');
-    expect(notices.at(-1)).toBe('Alex (simulated) joined (direct).');
-    model.close();
-  });
-
-  it('Alex plays now and then, only while the page is visible and nothing plays', async () => {
-    const { model, state, send, setVisible, notices } = setup({ visible: false });
-    model.begin();
-    // Hidden page: Alex stays quiet however long it is.
-    await vi.advanceTimersByTimeAsync(ALEX_GAP_MS * 3);
-    expect(state().playback.status).toBe('STOPPED');
-    setVisible(true);
-    // Something playing: Alex waits.
-    await send('region', { soundId: id('applause'), positionMs: 0, endMs: 9000, repeat: true });
-    await vi.advanceTimersByTimeAsync(ALEX_GAP_MS);
-    expect(state().playback.requester).toBe('Host');
-    await send('stop');
-    await vi.advanceTimersByTimeAsync(ALEX_GAP_MS);
-    expect(state().playback).toMatchObject({ status: 'PLAYING', requester: 'Alex (simulated)' });
-    expect(notices.at(-1)).toMatch(/^Alex \(simulated\) played “/);
-    const all = (await send('statistics')) as { recent: { name: string }[] };
-    expect(all.recent.at(-1)?.name).toBe('Alex (simulated)');
-    model.close();
-  });
-
-  it("follows the host's own setting for Alex", async () => {
-    const { model, state, send } = setup();
-    model.begin();
-    vi.advanceTimersByTime(GUEST_JOIN_MS);
-    model.setPolicy({
-      ...model.getPolicy(),
-      overrides: { [ALEX.person.id]: { remotePlayback: false } },
-    });
-    await vi.advanceTimersByTimeAsync(ALEX_GAP_MS * 3);
-    expect(state().playback.status).toBe('STOPPED');
-    await expect(
-      model.send(command('play', { soundId: id('rimshot') }), ALEX.person, ALEX),
-    ).rejects.toThrow('disabled');
-    await send('play', { soundId: id('rimshot') });
-    model.close();
-  });
-
-  it('Sam asks to join once the host chooses Ask me first, and can be let in or turned away', async () => {
-    const { model, session } = setup();
-    model.begin();
-    vi.advanceTimersByTime(GUEST_JOIN_MS);
     model.setPolicy({ ...model.getPolicy(), admission: 'ask' });
-    vi.advanceTimersByTime(SAM_ASKS_MS);
-    expect(session().requests).toMatchObject([
-      { id: SAM.person.id, name: 'Sam (simulated)', kind: 'admit' },
-    ]);
-    model.turnAway(SAM.person.id);
-    expect(session().requests).toEqual([]);
-    expect(session().policy.turnedAway).toEqual([SAM.person]);
-    // "Allow again" takes Sam off the turned-away list; Sam then has to open the invitation again.
-    await model.letIn(SAM.person.id);
-    expect(session().policy.turnedAway).toEqual([]);
-    // Replace invite: everyone is out, Alex comes back with the new invitation and has to ask.
+    await vi.advanceTimersByTimeAsync(90_000);
     model.rotate();
+    await vi.advanceTimersByTimeAsync(90_000);
     expect(session().guests).toEqual([]);
-    vi.advanceTimersByTime(GUEST_JOIN_MS);
-    expect(session().requests.map((r) => r.name)).toEqual(['Alex (simulated)']);
-    await model.letIn(ALEX.person.id);
-    expect(session().guests).toEqual([ALEX.peer]);
-    model.setPolicy({ ...model.getPolicy(), admission: 'open' });
-    model.setPolicy({ ...model.getPolicy(), admission: 'ask' });
-    vi.advanceTimersByTime(SAM_ASKS_MS);
-    await model.letIn(SAM.person.id);
-    expect(session().guests).toEqual([ALEX.peer, SAM.peer]);
-    expect(session().links[SAM.peer]).toBe('relay');
-    model.disconnect(SAM.peer);
-    expect(session().guests).toEqual([ALEX.peer]);
+    expect(session().requests).toEqual([]);
+    expect(state().playback.status).toBe('STOPPED');
+    expect(notices).toEqual([]);
     model.close();
   });
 
@@ -427,7 +349,7 @@ describe('example session guests', () => {
     model.begin();
     model.close();
     expect(engine.closed).toBe(true);
-    vi.advanceTimersByTime(GUEST_JOIN_MS * 10);
+    vi.advanceTimersByTime(40_000);
     expect(session().guests).toEqual([]);
     await expect(model.send(command('play', { soundId: id('rimshot') }), HOST)).rejects.toThrow(
       'ended',
@@ -466,8 +388,20 @@ describe('example session audio helpers', () => {
   it('reads an endless loop, silent before listening started', () => {
     const loop = pcm([1, 2, 3, 4]);
     expect(Array.from(loopSlice(loop, -2, 6).channels[0])).toEqual([0, 0, 1, 2, 3, 4, 1, 2]);
-    const levels = loopLevels({ blockMs: 1, peaks: Float32Array.from([0.1, 0.5]) }, -2, 2, 4);
+    const levels = loopLevels(blockPeaks(pcm([0.1, 0.5])), -2, 2, 4);
     expect(levels).toEqual([0, 0, 100, 500]);
+  });
+
+  it('matches the preview samples at partial peak blocks and the loop seam', () => {
+    const loop = pcm([0.8, 0.2, -0.6, 0.3, -1]);
+    const bins = loopLevels(blockPeaks(loop, 2), 1, 9, 4);
+    const preview = loopSlice(loop, 1, 9).channels[0];
+    expect(bins).toEqual([600, 1000, 800, 600]);
+    expect(bins).toEqual(
+      Array.from({ length: 4 }, (_, i) =>
+        Math.round(Math.max(...Array.from(preview.slice(i * 2, i * 2 + 2), Math.abs)) * 1000),
+      ),
+    );
   });
 
   it('groups the example words into transcript lines', () => {

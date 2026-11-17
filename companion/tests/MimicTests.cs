@@ -189,6 +189,7 @@ public sealed class MimicTests : IDisposable
         int calls = engine.Calls;
         store.AppendSilence(MimicFixture.Rate * 5);
         Assert.True(await transcriber.Step(store, false, default));
+        Assert.True(await transcriber.Step(store, true, default)); // flush the last second when recording stops
         Assert.Equal(calls, engine.Calls); // silent chunks never reach the recognizer
         Assert.Empty(transcriber.PendingBetween(store, [new(0, store.LiveFrame)], 1000, store.LiveFrame)); // all of it is recognised now
         var (other, otherWords) = NewHistory("other"); using var closeOther = other;
@@ -235,20 +236,23 @@ public sealed class MimicTests : IDisposable
         transcriber.Attach(store, words);
         Assert.False(await transcriber.Step(store, false, default));
         float[] Tone(double seconds) => Enumerable.Range(0, (int)(seconds * MimicFixture.Rate)).Select(i => 0.5f * MathF.Sin(i * 0.17f)).ToArray();
-        store.Append(Tone(5));
+        store.Append(Tone(3));
         Assert.False(await transcriber.Step(store, false, default)); // still talking: wait
         Assert.Equal(0, engine.Calls);
         store.AppendSilence(MimicFixture.Rate / 2);
         Assert.True(await transcriber.Step(store, false, default)); // pause: transcribe the whole sentence
         Assert.Single(transcriber.Lines(store, HistoryAccess.Host, 0, store.LiveFrame));
-        store.Append(Tone(16));
-        Assert.True(await transcriber.Step(store, false, default)); // 15 s without a pause forces a cut
+        store.Append(Tone(4));
+        Assert.True(await transcriber.Step(store, false, default)); // continuous speech publishes a cut within four seconds
         Assert.Equal(2, engine.Calls);
         // The words at a forced cut that was not at a pause are marked uncertain, never "done".
         var last = transcriber.WordsBetween(store, HistoryAccess.Host, 0, store.LiveFrame).Select(w => w.Word).Last();
         Assert.Equal(WordStatus.Uncertain, last.Status);
-        // The cut came at the quietest moment of the last five seconds, so what follows it waits for the next chunk.
-        Assert.All(transcriber.PendingBetween(store, [new(0, store.LiveFrame)], 0, store.LiveFrame), p => Assert.True(p.StartFrame >= MimicFixture.Rate * 15L));
+        var pending = transcriber.PendingBetween(store, [new(0, store.LiveFrame)], 0, store.LiveFrame);
+        Assert.All(pending, p => Assert.InRange(p.EndFrame - p.StartFrame, 0, MimicFixture.Rate));
+        store.Append(Tone(4));
+        Assert.True(await transcriber.Step(store, false, default));
+        Assert.Equal(3, engine.Calls);
     }
 
     [Fact]
@@ -263,7 +267,7 @@ public sealed class MimicTests : IDisposable
         Assert.False(await transcriber.Step(store, false, default));
         var random = new Random(7);
         float Bed() => (float)(random.NextDouble() * 2 - 1) * 0.03f;
-        store.Append(Enumerable.Range(0, MimicFixture.Rate * 4).Select(i => 0.5f * MathF.Sin(i * 0.17f) + Bed()).ToArray());
+        store.Append(Enumerable.Range(0, MimicFixture.Rate * 3).Select(i => 0.5f * MathF.Sin(i * 0.17f) + Bed()).ToArray());
         Assert.False(await transcriber.Step(store, false, default)); // still talking
         store.Append(Enumerable.Range(0, MimicFixture.Rate / 2).Select(_ => Bed()).ToArray());
         Assert.True(await transcriber.Step(store, false, default)); // a pause, although the background never went quiet

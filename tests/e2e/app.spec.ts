@@ -1324,7 +1324,7 @@ test('Mimic: host listens, everyone sees it, and a selection becomes a playable 
   if (browserName !== 'webkit') {
     const playsBefore = harness.plays.length;
     await dialog.getByRole('button', { name: 'Preview' }).click();
-    await expect(dialog.getByRole('button', { name: 'Stop preview' })).toBeVisible();
+    await expect(dialog.getByRole('button', { name: 'Stop playing', exact: true })).toBeVisible();
     await expect(dialog.getByRole('button', { name: 'Preview' })).toBeVisible({ timeout: 8000 });
     expect(harness.plays.length).toBe(playsBefore);
   }
@@ -1649,9 +1649,7 @@ test('Mimic history: go back, select words in older audio, clip them, and see ga
   await buttons.nth(1).hover();
   await expect(buttons.nth(1)).toHaveClass(/hover/);
   await captureAndKeep(dialog);
-  await expect(
-    dialog.getByRole('button', { name: `Replay ${words}` }),
-  ).toBeEnabled();
+  await expect(dialog.getByRole('button', { name: `Replay ${words}` })).toBeEnabled();
   // The draft goes; the clip stays in Temp (an open draft keeps its audio in view).
   await dialog.getByRole('button', { name: 'Delete', exact: true }).click();
   // Go live returns to the newest audio.
@@ -1759,12 +1757,13 @@ test('Mimic drafts: Capture opens a draft, an edge drags into the audio around i
   const playsBefore = harness.plays.length;
   await dialog.getByRole('button', { name: 'Capture', exact: true }).click();
   const draft = dialog.getByRole('region', { name: 'Draft' });
-  await expect(draft.locator('.mimic-range')).toContainText('3.0 s');
+  await expect(dialog.locator('.mimic-range')).toContainText('3.0 s');
   // Capture never imports or plays anything: it is a draft until someone keeps or plays it.
   await expect(playButton(page, 'Draft one')).toHaveCount(0);
   expect(harness.plays.length).toBe(playsBefore);
   // Drag its start edge 2 s to the left, into the audio before it (the view shows 10 s; the draft is its last 3 s).
   const wave = dialog.getByRole('slider', { name: /^Mimic buffer, showing/ });
+  await wave.scrollIntoViewIfNeeded();
   const box = (await wave.boundingBox())!;
   const y = box.y + box.height / 2;
   await page.mouse.move(box.x + box.width * 0.7, y);
@@ -1772,7 +1771,7 @@ test('Mimic drafts: Capture opens a draft, an edge drags into the audio around i
   await page.mouse.move(box.x + box.width * 0.6, y, { steps: 4 });
   await page.mouse.move(box.x + box.width * 0.5, y, { steps: 4 });
   await page.mouse.up();
-  await expect(draft.locator('.mimic-range')).toContainText(/(4\.9|5\.0|5\.1) s/);
+  await expect(dialog.locator('.mimic-range')).toContainText(/(4\.9|5\.0|5\.1) s/);
   // The companion has the new edges (and pinned the audio they cover).
   await expect
     .poll(async () => {
@@ -1785,9 +1784,16 @@ test('Mimic drafts: Capture opens a draft, an edge drags into the audio around i
     .toBeGreaterThanOrEqual(49);
   // Private preview: heard in this tab only; Soundpad plays nothing.
   if (browserName !== 'webkit') {
-    await draft.getByRole('button', { name: 'Preview' }).click();
-    await expect(draft.getByRole('button', { name: 'Stop preview' })).toBeVisible();
-    await expect(draft.getByRole('button', { name: 'Preview' })).toBeVisible({ timeout: 10000 });
+    await dialog
+      .getByRole('group', { name: 'Selection playback' })
+      .getByRole('button', { name: 'Preview', exact: true })
+      .click();
+    await expect(dialog.getByRole('button', { name: 'Stop playing', exact: true })).toBeVisible();
+    await expect(
+      dialog
+        .getByRole('group', { name: 'Selection playback' })
+        .getByRole('button', { name: 'Preview', exact: true }),
+    ).toBeVisible({ timeout: 10000 });
     expect(harness.plays.length).toBe(playsBefore);
   }
   await draft.getByRole('button', { name: 'Keep in Temp', exact: true }).click();
@@ -1801,7 +1807,7 @@ test('Mimic drafts: Capture opens a draft, an edge drags into the audio around i
   await page.getByRole('button', { name: 'Mimic', exact: true }).click();
   await expect(draft).toBeVisible();
   await expect(draft.getByLabel('Clip name')).toHaveValue('Draft one');
-  await expect(draft.locator('.mimic-range')).toContainText(/(4\.9|5\.0|5\.1) s/);
+  await expect(dialog.locator('.mimic-range')).toContainText(/(4\.9|5\.0|5\.1) s/);
   // Kept again with the same edges: the same clip, not a second one. Closing it ends the draft.
   await draft.getByRole('button', { name: 'Keep in Temp and close draft' }).click();
   await expect(draft).toHaveCount(0);
@@ -1823,7 +1829,7 @@ test('Mimic drafts: Last N s with a draft open puts the draft away and never mov
   await dialog.getByRole('button', { name: 'Last 3 s', exact: true }).click();
   await dialog.getByRole('button', { name: 'Capture', exact: true }).click();
   const draft = dialog.getByRole('region', { name: 'Draft' });
-  await expect(draft.locator('.mimic-range')).toContainText('3.0 s');
+  await expect(dialog.locator('.mimic-range')).toContainText('3.0 s');
   const before = ((await sendCommand(page, 'draftList')).data as DraftReply).drafts;
   expect(before).toHaveLength(1);
   await dialog.getByRole('button', { name: 'Last 5 s', exact: true }).click();
@@ -2933,8 +2939,10 @@ test('Mimic help shows keyboard shortcuts with a mouse', async ({ page, harness 
   await page.getByRole('button', { name: 'Mimic', exact: true }).click();
   const dialog = page.getByRole('main', { name: 'Mimic', exact: true });
   await dialog.getByRole('button', { name: 'Start listening' }).click();
-  await expect(dialog.getByText('or press', { exact: false })).toBeVisible();
-  await expect(dialog.getByText('tap a transcript line', { exact: false })).toBeHidden();
+  await expect(dialog.getByText('Shift-click to extend', { exact: false })).toBeVisible();
+  await expect(
+    dialog.getByText('Tap a word, drag across the waveform', { exact: false }),
+  ).toBeHidden();
 });
 
 test.describe('on a touch phone', () => {
@@ -2944,8 +2952,10 @@ test.describe('on a touch phone', () => {
     await page.getByRole('button', { name: 'Mimic', exact: true }).click();
     const dialog = page.getByRole('main', { name: 'Mimic', exact: true });
     await dialog.getByRole('button', { name: 'Start listening' }).click();
-    await expect(dialog.getByText('tap a transcript line', { exact: false })).toBeVisible();
-    await expect(dialog.getByText('or press', { exact: false })).toBeHidden();
+    await expect(
+      dialog.getByText('Tap a word, drag across the waveform', { exact: false }),
+    ).toBeVisible();
+    await expect(dialog.getByText('Shift-click to extend', { exact: false })).toBeHidden();
   });
 });
 
@@ -4340,7 +4350,7 @@ test('example session: plays example sounds in this browser, edits a copy, and l
   await expect(page.getByRole('button', { name: /Play / })).toHaveCount(0);
   await expect(page.locator('#try-example-note')).toHaveText(
     // What can actually be tried (2.41), not "every feature".
-    'Try the example: sounds, Mimic history and drafts, voices, sentences and simulated guests. Nothing is sent to Soundpad; sounds play in this browser.',
+    'Try the example: sounds, Mimic history and drafts, voices and sentences. Nothing is sent to Soundpad; sounds play in this browser.',
   );
   await page.getByRole('button', { name: 'Try the example' }).click();
   // Playwright's Windows WebKit has no Web Audio at all (real Safari has it): the example must say it cannot
@@ -4361,11 +4371,11 @@ test('example session: plays example sounds in this browser, edits a copy, and l
     return;
   }
   await expect(page.getByRole('complementary', { name: 'Example session' })).toContainText(
-    'Example session: nothing here reaches Soundpad.',
+    'Solo example.',
   );
   // Leaving clears the example's audio; favourites and view settings stay (2.41).
   await expect(page.getByRole('complementary', { name: 'Example session' })).toContainText(
-    'leaving clears the example’s recordings, drafts and clips. Favourites and view settings stay on this browser.',
+    'Leaving clears the example’s recordings, drafts and clips.',
   );
   await expect(page.locator('header .status')).toHaveText('Example session');
   // Mimic in the example (Stage G: the 2.40 history and drafts) says what it listens to, and its hotkey

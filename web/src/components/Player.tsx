@@ -18,6 +18,7 @@ import { guestHeld, HELD_BY_HOST, intentKey, playback, usePendingIntent } from '
 import { supports } from '../version';
 import { useSentenceStore } from '../library/sentence-store';
 import { requestEditor } from '../shell';
+import { usePreviewTransport } from '../preview-audio';
 import { ariaChord, formatChord, useShortcut } from '../shortcuts';
 /** Panic's accessible name; its title adds the shortcut. */
 export const PANIC_LABEL = 'Panic: stop audio and pause guest playback';
@@ -80,6 +81,8 @@ export function Player({
       : null;
   // A click this page sent and the companion has not answered yet (2.35). "Playing" is the report.
   const pending = usePendingIntent();
+  const preview = usePreviewTransport();
+  const paused = preview ? preview.paused : current.status === 'PAUSED';
   const held = guestHeld(state, host);
   const canPanic = host && supports(state.companionVersion, 'intents');
   // 2.44: this browser's keys (Settings → Keyboard) for the titles and aria-keyshortcuts.
@@ -106,22 +109,28 @@ export function Player({
         </span>
         <div>
           <strong>
-            {sound
-              ? known
-                ? sound.name
-                : `Last selection: ${sound.name}`
-              : composed && (current.status === 'PLAYING' || current.status === 'PAUSED')
-                ? composed
-                : current.status === 'PLAYING' || current.status === 'PAUSED'
-                  ? 'Soundpad playback · sound unknown'
-                  : current.status === 'STOPPED'
-                    ? 'Ready to make some noise'
-                    : 'Playback status unavailable'}
+            {preview
+              ? 'Browser preview'
+              : sound
+                ? known
+                  ? sound.name
+                  : `Last selection: ${sound.name}`
+                : composed && (current.status === 'PLAYING' || current.status === 'PAUSED')
+                  ? composed
+                  : current.status === 'PLAYING' || current.status === 'PAUSED'
+                    ? 'Soundpad playback · sound unknown'
+                    : current.status === 'STOPPED'
+                      ? 'Ready to make some noise'
+                      : 'Playback status unavailable'}
           </strong>
           <small>
-            {(sound || composed) && known
-              ? `Requested by ${current.requester ?? 'Host'} · ${current.status.toLowerCase()}`
-              : 'Direct Soundpad playback remains independent.'}
+            {preview
+              ? preview.paused
+                ? 'Paused'
+                : 'Local playback'
+              : (sound || composed) && known
+                ? `Requested by ${current.requester ?? 'Host'} · ${current.status.toLowerCase()}`
+                : 'Direct Soundpad playback remains independent.'}
           </small>
         </div>
         <button
@@ -161,22 +170,24 @@ export function Player({
       <div className="transport">
         <button
           className="icon-button"
-          aria-label={current.status === 'PAUSED' ? 'Resume playback' : 'Pause playback'}
-          disabled={disabled || !canSeek || !sound || !current.epoch}
+          aria-label={paused ? 'Resume playback' : 'Pause playback'}
+          disabled={!preview && (disabled || !canSeek || !sound || !current.epoch)}
           // Held by the host's Panic: aria-disabled keeps focus, and the press is ignored.
-          aria-disabled={held || undefined}
-          title={held ? HELD_BY_HOST : undefined}
-          onClick={() => !held && void playback.pause()}
+          aria-disabled={(!preview && held) || undefined}
+          title={!preview && held ? HELD_BY_HOST : undefined}
+          onClick={() => (preview ? preview.toggle() : !held && void playback.pause())}
         >
-          {current.status === 'PAUSED' ? <Play size={18} /> : <Pause size={18} />}
+          {paused ? <Play size={18} /> : <Pause size={18} />}
         </button>
         <button
           className="stop btn btn-danger"
-          disabled={disabled}
-          aria-disabled={held || undefined}
+          disabled={!preview && disabled}
+          aria-disabled={(!preview && held) || undefined}
           aria-keyshortcuts={ariaChord(stopKey)}
-          title={held ? HELD_BY_HOST : stopKey ? `Stop (${formatChord(stopKey)})` : undefined}
-          onClick={() => !held && void playback.stop()}
+          title={
+            !preview && held ? HELD_BY_HOST : stopKey ? `Stop (${formatChord(stopKey)})` : undefined
+          }
+          onClick={() => (preview ? preview.stop() : !held && void playback.stop())}
         >
           <Square size={15} fill="currentColor" aria-hidden="true" /> Stop
         </button>

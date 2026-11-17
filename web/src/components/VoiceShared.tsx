@@ -1,11 +1,11 @@
-import { useEffect, useRef, useState, type RefObject } from 'react';
+import { useEffect, useId, useRef, useState, type RefObject } from 'react';
 import { recall, remember } from '../sections';
-import { Headphones, Play } from 'lucide-react';
+import { Headphones, Pause, Play, Square } from 'lucide-react';
 import { z } from 'zod';
 import { controller } from '../controller';
 import type { Command } from '../protocol';
 import { playback } from '../playback';
-import { usePreviewAudio } from '../preview-audio';
+import { usePreviewAudio, usePreviewTransport } from '../preview-audio';
 import { initials, playRange, type Voice } from '../library/voices';
 import { refreshLibrary } from '../library/voice-store';
 
@@ -113,6 +113,22 @@ export function useWordPlayer(canPlay: boolean, canRegion = canPlay) {
   };
 }
 
+export function VoicePreviewControls() {
+  const preview = usePreviewTransport();
+  if (!preview) return null;
+  return (
+    <div className="voices-preview-controls" role="group" aria-label="Voice preview">
+      <button type="button" data-playback-trigger onClick={preview.toggle}>
+        {preview.paused ? <Play size={14} /> : <Pause size={14} />}
+        {preview.paused ? 'Resume preview' : 'Pause preview'}
+      </button>
+      <button type="button" onClick={preview.stop}>
+        <Square size={13} /> Stop preview
+      </button>
+    </div>
+  );
+}
+
 export function WordModeSwitch({
   mode,
   set,
@@ -125,13 +141,14 @@ export function WordModeSwitch({
   /** Single words into the game (a region play); see useWordPlayer. */
   canRegion?: boolean;
 }) {
+  const group = useId();
   return (
     <div className="voices-mode" role="radiogroup" aria-label="Word clicks">
-      <span>Word clicks:</span>
+      <span>Playback</span>
       <label>
         <input
           type="radio"
-          name="voices-mode"
+          name={group}
           checked={mode === 'preview'}
           onChange={() => set('preview')}
         />
@@ -140,7 +157,7 @@ export function WordModeSwitch({
       <label title={canPlay ? undefined : 'Playback is not available'}>
         <input
           type="radio"
-          name="voices-mode"
+          name={group}
           checked={mode === 'game'}
           disabled={!canPlay}
           onChange={() => set('game')}

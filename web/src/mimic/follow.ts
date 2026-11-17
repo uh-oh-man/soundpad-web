@@ -31,6 +31,7 @@ export function useFollowNewest<T extends HTMLElement>() {
   const ref = useRef<T>(null);
   const following = useRef(true);
   const lastScroll = useRef(0);
+  const pausedForEarlierWords = useRef(false);
   const aimed = useRef(-Infinity);
   const [shown, setShown] = useState(true);
   const set = (on: boolean) => {
@@ -53,12 +54,19 @@ export function useFollowNewest<T extends HTMLElement>() {
   return {
     ref,
     following: shown,
-    pause: () => set(false),
+    pause: () => {
+      pausedForEarlierWords.current = true;
+      set(false);
+    },
     onScroll: () => {
       const el = ref.current;
       if (el) {
         lastScroll.current = el.scrollTop;
-        if (!following.current || performance.now() - aimed.current >= AIM_HOLD_MS) set(atEnd(el));
+        const atNewest = atEnd(el);
+        // Prepending a page restores the visible line and may generate a scroll event near the bottom.
+        if (pausedForEarlierWords.current && atNewest) return;
+        pausedForEarlierWords.current = false;
+        if (!following.current || performance.now() - aimed.current >= AIM_HOLD_MS) set(atNewest);
       }
     },
     onPointerDown: (event: PointerEvent<T>) => {
@@ -73,6 +81,7 @@ export function useFollowNewest<T extends HTMLElement>() {
       if (aimed.current === Infinity) aimed.current = performance.now();
     },
     jump: () => {
+      pausedForEarlierWords.current = false;
       aimed.current = -Infinity;
       set(true);
       const el = ref.current;

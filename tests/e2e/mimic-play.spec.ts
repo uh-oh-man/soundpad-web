@@ -1,5 +1,5 @@
 /**
- * Mimic history playback (2.45, WP1): the personal Preview here / Play into game switch, word clicks that play,
+ * Mimic history playback (2.45, WP1): the personal Preview here / Play into game switch, word selection,
  * waveform clicks that play from a point while a drag only selects, and the playing-word highlight.
  */
 import type { Locator, Page } from '@playwright/test';
@@ -38,8 +38,7 @@ async function firstSentence(dialog: Locator) {
   await expect(words).toHaveCount(3);
   return words;
 }
-const mode = (dialog: Locator) =>
-  dialog.getByRole('radiogroup', { name: 'Word and waveform clicks' });
+const mode = (dialog: Locator) => dialog.getByRole('radiogroup', { name: 'Waveform clicks' });
 const playingWords = (dialog: Locator) =>
   dialog.getByRole('list', { name: 'Transcript' }).locator('.mimic-word.playing');
 /** Plays that reached Soundpad since `from` (an index into harness.plays). */
@@ -54,107 +53,63 @@ async function clickWave(page: Page, dialog: Locator, fraction: number) {
   return { canvas, box };
 }
 
-test('Mimic play mode: Preview by default and remembered; a word click plays exactly that word, Shift-click only selects', async ({
+test('Mimic words select silently in both views and Shift extends the range', async ({
   page,
   harness,
-  browserName,
 }) => {
   await host(page, harness);
   const dialog = await listen(page);
   const switcher = mode(dialog);
   await expect(switcher.getByRole('radio', { name: 'Preview here' })).toBeChecked();
-  await expect(switcher.getByRole('radio', { name: 'Play into game' })).not.toBeChecked();
-  const words = await firstSentence(dialog);
+  await firstSentence(dialog);
+  const track = dialog.getByRole('group', { name: 'Words on the waveform' });
+  const first = track.getByRole('button', { name: 'Fixture', exact: true }).last();
+  const id = await first.getAttribute('data-word-id');
+  const transcript = dialog.getByRole('list', { name: 'Transcript' });
+  const sentence = transcript.locator('li').filter({
+    has: page.locator(`button[data-word-id="${id}"]`),
+  });
+  const words = sentence.getByRole('button');
+  const timedWord = (wordId: string | null) => track.locator(`button[data-word-id="${wordId}"]`);
+  const before = harness.plays.length;
 
-  // Preview (headless WebKit often refuses to play audio, and hosts never use Safari): the word is selected and
-  // heard in this browser only, lit while it plays; Soundpad plays nothing.
-  if (browserName !== 'webkit') {
-    const before = harness.plays.length;
-    await words.first().click();
-    await expect(words.first()).toHaveAttribute('aria-pressed', 'true');
-    await expect(words.first()).toHaveClass(/\bplaying\b/);
-    await expect(playingWords(dialog)).toHaveCount(0, { timeout: 8000 });
-    await page.waitForTimeout(500);
-    expect(playsSince(harness, before)).toEqual([]);
-  }
+  await timedWord(id).locator('.mimic-timed-label').click();
+  await expect(words.first()).toHaveAttribute('aria-pressed', 'true');
+  await expect(playingWords(dialog)).toHaveCount(0);
+  const wave = dialog.getByRole('slider', { name: /Mimic buffer/ });
+  const beforeZoom = (await timedWord(id).boundingBox())!;
+  const waveBox = (await wave.boundingBox())!;
+  expect(beforeZoom.x).toBeGreaterThanOrEqual(waveBox.x - 1);
+  expect(beforeZoom.x + beforeZoom.width).toBeLessThanOrEqual(waveBox.x + waveBox.width + 1);
+  await dialog
+    .getByRole('group', { name: 'Waveform zoom' })
+    .getByRole('button', { name: '30 s' })
+    .click();
+  const afterZoom = (await timedWord(id).boundingBox())!;
+  expect(afterZoom.width).toBeLessThan(beforeZoom.width);
 
-  // Play into game is remembered in this browser, also after the window closes.
   await switcher.getByRole('radio', { name: 'Play into game' }).check();
   expect(await page.evaluate((key) => localStorage.getItem(key), MODE_KEY)).toBe('game');
-  await page.keyboard.press('Escape');
-  await page.getByRole('button', { name: 'Mimic', exact: true }).click();
-  await expect(mode(dialog).getByRole('radio', { name: 'Play into game' })).toBeChecked();
+  await words.last().click({ modifiers: ['Shift'] });
+  await expect(words.first()).toHaveAttribute('aria-pressed', 'true');
+  await expect(words.nth(1)).toHaveAttribute('aria-pressed', 'true');
+  await expect(words.last()).toHaveAttribute('aria-pressed', 'true');
 
-  // One click, one Soundpad play: the word becomes a Temp clip named after it and plays at once.
-  let before = harness.plays.length;
-  const first = (await firstSentence(dialog)).first();
-  await first.click();
-  await expect(first).toHaveAttribute('aria-pressed', 'true');
-  await expect.poll(() => playsSince(harness, before)).toHaveLength(1);
-  await expect(dialog.getByRole('button', { name: /Replay Fixture ·/ }).first()).toBeEnabled();
-  await page.waitForTimeout(800);
-  expect(playsSince(harness, before)).toHaveLength(1);
-
-  // The same word again replays its clip rather than making another.
-  before = harness.plays.length;
-  const clipsBefore = await dialog.getByRole('button', { name: /Replay Fixture ·/ }).count();
-  await first.click();
-  await expect.poll(() => playsSince(harness, before)).toHaveLength(1);
-  await page.waitForTimeout(500);
-  expect(await dialog.getByRole('button', { name: /Replay Fixture ·/ }).count()).toBe(clipsBefore);
-
-  // Enter on a focused word plays it too.
-  before = harness.plays.length;
-  const tone = (await firstSentence(dialog)).nth(1);
-  await tone.focus();
-  await page.keyboard.press('Enter');
-  await expect.poll(() => playsSince(harness, before)).toHaveLength(1);
-  await expect(page.locator('.player-track')).toContainText('tone');
-
-  // Shift-click selects everything from the anchor ("tone") to it, and plays nothing.
-  await page.waitForTimeout(800);
-  before = harness.plays.length;
-  const all = await firstSentence(dialog);
-  await all.first().click({ modifiers: ['Shift'] });
-  await expect(all.first()).toHaveAttribute('aria-pressed', 'true');
-  await expect(all.nth(1)).toHaveAttribute('aria-pressed', 'true');
-  await expect(all.last()).toHaveAttribute('aria-pressed', 'false');
-  await page.waitForTimeout(800);
+  const range = dialog.locator('.mimic-range');
+  const phrase = await range.textContent();
+  await words.nth(1).press('Enter');
+  await expect(range).not.toHaveText(phrase ?? '');
+  await expect(words.first()).toHaveAttribute('aria-pressed', 'false');
+  await expect(timedWord(await words.nth(1).getAttribute('data-word-id'))).toHaveAttribute(
+    'aria-pressed',
+    'true',
+  );
+  await expect(playingWords(dialog)).toHaveCount(0);
   expect(playsSince(harness, before)).toEqual([]);
-});
 
-test('Mimic play into game: a newer word click supersedes the older one, with no obsolete play', async ({
-  page,
-  harness,
-}) => {
-  await page.addInitScript((key) => localStorage.setItem(key, 'game'), MODE_KEY);
-  await host(page, harness);
-  const dialog = await listen(page);
-  const words = await firstSentence(dialog);
-  // Watch the first word: an obsolete play would light it.
-  await words.first().evaluate((el) => {
-    const w = window as unknown as { litObsolete: boolean };
-    w.litObsolete = false;
-    new MutationObserver(() => {
-      if (el.classList.contains('playing')) w.litObsolete = true;
-    }).observe(el, { attributes: true, attributeFilter: ['class'] });
-  });
-  const before = harness.plays.length;
-  // Two clicks in a row, the second while the first clip is still being made.
-  await words.evaluateAll((buttons) => {
-    (buttons[0] as HTMLButtonElement).click();
-    (buttons[1] as HTMLButtonElement).click();
-  });
+  await dialog.getByRole('button', { name: 'Mimic & play', exact: true }).click();
   await expect.poll(() => playsSince(harness, before)).toHaveLength(1);
   await expect(page.locator('.player-track')).toContainText('tone');
-  // Both clips were made; only the newer one was heard, and only it was lit.
-  await expect(dialog.getByRole('button', { name: /Replay Fixture ·/ }).first()).toBeEnabled();
-  await expect(dialog.getByRole('button', { name: /Replay tone ·/ }).first()).toBeEnabled();
-  await page.waitForTimeout(1500);
-  expect(playsSince(harness, before)).toHaveLength(1);
-  expect(
-    await page.evaluate(() => (window as unknown as { litObsolete: boolean }).litObsolete),
-  ).toBe(false);
 });
 
 test('Mimic waveform: a click plays from that point in the chosen mode, a drag only selects; the playing word clears on Stop and Panic', async ({
@@ -210,9 +165,12 @@ test('Mimic waveform: a click plays from that point in the chosen mode, a drag o
   await page.waitForTimeout(300);
   before = harness.plays.length;
   const canvas = dialog.getByRole('slider', { name: /Mimic buffer/ });
+  await canvas.scrollIntoViewIfNeeded();
   let box = (await canvas.boundingBox())!;
   await page.mouse.move(box.x + box.width * 0.4, box.y + box.height / 2);
   await page.mouse.down();
+  harness.send('advance-mimic 3');
+  await page.waitForTimeout(600); // an in-flight live refresh must not move the drag's frame origin
   await page.mouse.move(box.x + box.width * 0.6, box.y + box.height / 2);
   await page.mouse.up();
   await expect(dialog.locator('.mimic-range')).toContainText('2.0 s');
@@ -319,13 +277,16 @@ test('Mimic play mode for a guest: Play into game needs remote playback, and not
   await expect(guest.getByText(/recorded before you joined/).first()).toBeVisible();
   expect(playsSince(harness, before)).toEqual([]);
 
-  // With remote playback on, the guest's remembered Play into game applies: one word, one play.
+  // With remote playback restored, select a word and explicitly play the cut.
   await page.getByRole('button', { name: 'Access settings' }).click();
   await page.getByLabel('Allow remote playback').check();
   await page.keyboard.press('Escape');
   await expect(switcher.getByRole('radio', { name: 'Play into game' })).toBeChecked();
   const words = await firstSentence(dialog);
   await words.first().click();
+  await expect(words.first()).toHaveAttribute('aria-pressed', 'true');
+  expect(playsSince(harness, before)).toEqual([]);
+  await dialog.getByRole('button', { name: 'Mimic & play', exact: true }).click();
   await expect.poll(() => playsSince(harness, before)).toHaveLength(1);
   await guest.waitForTimeout(800);
   expect(playsSince(harness, before)).toHaveLength(1);

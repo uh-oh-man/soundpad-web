@@ -11,9 +11,8 @@ export function DemoBanner({ inert }: { inert?: boolean }) {
     <aside className="demo-banner" aria-label="Example session" inert={inert}>
       <Sparkles size={18} aria-hidden="true" />
       <span>
-        <strong>Example session: nothing here reaches Soundpad.</strong> Sounds play in this
-        browser, the guests are simulated, and leaving clears the example’s recordings, drafts and
-        clips. Favourites and view settings stay on this browser.
+        <strong>Solo example.</strong> Sounds play only in this browser when you choose to play
+        them. Leaving clears the example’s recordings, drafts and clips.
       </span>
       <button className="btn" onClick={() => void controller.leave()}>
         <LogOut size={15} aria-hidden="true" /> Leave example

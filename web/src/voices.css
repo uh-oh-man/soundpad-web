@@ -61,8 +61,6 @@
   display: flex;
   flex-wrap: wrap;
   gap: var(--space-1);
-  padding-bottom: 6px;
-  border-bottom: 1px solid var(--line);
 }
 .voices-tabs [role='tab'] {
   min-height: 36px;
@@ -97,10 +95,6 @@
   padding: 0;
   border: 0;
   background: transparent;
-}
-/* The search, the filters and the word-click switch are rows of their own, spaced as the board toolbar. */
-.voices-library > :is(.voices-search, .voices-filters, .voices-mode) {
-  margin-bottom: 10px;
 }
 .voices-filters,
 .voices-types,
@@ -434,20 +428,18 @@
   font-size: 12px;
 }
 @container board (max-width: 560px) {
-  .voices-list li {
-    flex-wrap: wrap;
-  }
   .voices-filters > * {
     flex: 1 1 140px;
   }
 }
-/* One-press Save (2.46): the newest clips still only in Temp, each with Save, above the recordings. */
+/* Clips available to save from Temp. */
 .voices-unsaved {
   display: grid;
   gap: var(--space-2);
   padding: var(--space-2) 10px;
-  border: 1px dashed var(--line-strong);
+  border: 1px solid var(--line);
   border-radius: var(--radius);
+  background: var(--surface-1);
 }
 .voices-unsaved h3 {
   margin: 0;
@@ -472,4 +464,108 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.voices-navbar,
+.voices-browse-filters,
+.voices-list-head,
+.voices-detail-nav,
+.voices-detail-transport,
+.voices-preview-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+}
+
+.voices-navbar {
+  justify-content: space-between;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--line);
+}
+
+.voices-list-head h2,
+.voices-library-results > h2,
+.voices-detail-nav h2,
+.voices-detail-transport h3 {
+  margin: 0;
+  color: var(--text-primary);
+}
+
+.voices-library,
+.voices-browse-tools,
+.voices-browse-body,
+.voices-library-results,
+.voices-detail-audio {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+}
+
+.voices-browse-tools,
+.voices-library-results,
+.voices-detail-audio {
+  padding: clamp(10px, 1.6vw, 16px);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface-1);
+}
+
+.voices-browse-filters {
+  justify-content: space-between;
+}
+
+.voices-browse-filters .voices-mode {
+  padding-block: 2px;
+  margin: 0;
+}
+
+.voices-browse-body {
+  align-items: start;
+  grid-template-columns: minmax(0, 1fr);
+}
+
+@container board (min-width: 870px) {
+  .voices-browse-body:has(.voices-unsaved) {
+    grid-template-columns: minmax(0, 1fr) minmax(235px, 0.5fr);
+  }
+}
+
+.voices-list-head,
+.voices-detail-transport {
+  justify-content: space-between;
+}
+
+.voices-list-head h2,
+.voices-library-results > h2,
+.voices-detail-nav h2,
+.voices-detail-transport h3 {
+  font-size: 16px;
+  font-weight: 650;
+}
+
+.voices-list li {
+  display: grid;
+  grid-template-columns: auto auto minmax(0, 1fr) auto;
+  min-height: 54px;
+}
+
+.voices-list li > button,
+.voices-result > button:last-child {
+  min-width: 36px;
+  min-height: 36px;
+}
+
+.voices-detail-nav {
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--line);
+}
+
+.voices-detail-audio .voices-words {
+  padding-top: 8px;
+  border-top: 1px solid var(--line);
+}
+
+.voices-preview-controls button {
+  min-height: 34px;
 }

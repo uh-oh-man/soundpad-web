@@ -19,7 +19,7 @@ import {
   type Recording,
 } from '../library/voices';
 import { refreshLibrary } from '../library/voice-store';
-import { VoiceAvatar, libraryChange, useWordPlayer } from './VoiceShared';
+import { VoiceAvatar, VoicePreviewControls, libraryChange, useWordPlayer } from './VoiceShared';
 import { HostOnlyTag } from './SimulatedBadge';
 
 /** Why the word index and speaker groups do nothing in the example (Stage G spec 11.5). */
@@ -163,9 +163,10 @@ export function ReviewQueue({ status, canPlay }: { status: LibraryStatus; canPla
       }}
     >
       <p className="muted">
-        {queue.at + 1} of {queue.ids.length} · Space listens, Enter keeps, S skips, ← goes back, F
-        favourite, 1–9 sets the voice.
+        {queue.at + 1} of {queue.ids.length} · Space plays or pauses, Enter keeps, S skips, ← goes
+        back, F favourite, 1–9 sets the voice.
       </p>
+      <VoicePreviewControls />
       <div className="voices-review-card">
         <VoiceAvatar voice={voice} size={40} />
         <div>

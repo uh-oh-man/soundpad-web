@@ -1,6 +1,6 @@
 /**
  * The example session (Stage G, WP-C, spec 12.4): honest copy, the virtual Mimic history with drafts and a
- * simulated guest's selection, voices and sentences from the example's own material, and the look of the
+ * local preview, voices and sentences from the example's own material, and the look of the
  * dialogs. Everything here runs in the browser alone: no companion, Soundpad or relay.
  */
 import { expect, test, type Page } from '@playwright/test';
@@ -42,18 +42,15 @@ test('example copy: the start page says what can be tried, and the banner what l
   await page.goto('/');
   await expect(page.getByText('See every feature')).toHaveCount(0);
   await expect(page.locator('#try-example-note')).toHaveText(
-    'Try the example: sounds, Mimic history and drafts, voices, sentences and simulated guests. Nothing is sent to Soundpad; sounds play in this browser.',
+    'Try the example: sounds, Mimic history and drafts, voices and sentences. Nothing is sent to Soundpad; sounds play in this browser.',
   );
   expect(await axe(page)).toEqual([]);
   if (!(await startExample(page))) return;
   const banner = page.getByRole('complementary', { name: 'Example session' });
   await expect(banner.locator('span')).toHaveText(
-    'Example session: nothing here reaches Soundpad. Sounds play in this browser, the guests are simulated, and leaving clears the example’s recordings, drafts and clips. Favourites and view settings stay on this browser.',
+    'Solo example. Sounds play only in this browser when you choose to play them. Leaving clears the example’s recordings, drafts and clips.',
   );
-  // The simulated guest says so wherever the page names them.
-  await expect(page.locator('.connected-guests')).toContainText('Alex (simulated)', {
-    timeout: 10000,
-  });
+  await expect(page.locator('.connected-guests')).toHaveCount(0);
   // The restyled dialogs (Stage G C3): Session & access with the appearance choices, then the board again.
   await page.getByRole('button', { name: 'Access settings' }).click();
   const settings = page.getByRole('dialog', { name: 'Session & access' });
@@ -71,7 +68,7 @@ test('example copy: the start page says what can be tried, and the banner what l
   await expect(page.getByRole('button', { name: 'Try the example' })).toBeVisible();
 });
 
-test('example Mimic: rolling history, a Latest phrase draft, preview and play, the simulated guest’s selection, Keep in Temp', async ({
+test('example Mimic: rolling history, a Latest phrase draft, preview and play, and Keep in Temp', async ({
   page,
 }) => {
   if (!(await startExample(page))) return;
@@ -83,6 +80,21 @@ test('example Mimic: rolling history, a Latest phrase draft, preview and play, t
   await expect(
     mimic.getByRole('list', { name: 'Transcript' }).getByRole('button', { name: 'man,' }).first(),
   ).toBeVisible({ timeout: 15000 });
+  const timed = mimic.getByRole('group', { name: 'Words on the waveform' });
+  const first = timed.getByRole('button', { name: 'man,', exact: true }).first();
+  await first.scrollIntoViewIfNeeded();
+  const last = timed.getByRole('button', { name: 'step', exact: true }).first();
+  await expect(last).toBeVisible();
+  // Drag through the words in their timed lane and leave the selection silent.
+  const start = (await first.locator('.mimic-timed-label').boundingBox())!;
+  const end = (await last.locator('.mimic-timed-label').boundingBox())!;
+  await page.mouse.move(start.x + start.width / 2, start.y + start.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(end.x + end.width / 2, end.y + end.height / 2, { steps: 12 });
+  await page.mouse.up();
+  await expect(first).toHaveAttribute('aria-pressed', 'true');
+  await expect(last).toHaveAttribute('aria-pressed', 'true');
+  await expect(mimic.getByRole('button', { name: 'Stop playing' })).toHaveCount(0);
   await expect(mimic.getByRole('button', { name: 'Back 10 s' })).toBeVisible();
   await mimic.getByRole('button', { name: 'Latest phrase', exact: true }).click();
   const draft = mimic.getByRole('region', { name: 'Draft' });
@@ -90,19 +102,18 @@ test('example Mimic: rolling history, a Latest phrase draft, preview and play, t
   const name = await draft.getByLabel('Clip name').inputValue();
   expect(name.length).toBeGreaterThan(0);
   // Preview is heard in this browser only: the player stays idle.
-  await draft.getByRole('button', { name: 'Preview' }).click();
+  await mimic
+    .getByRole('group', { name: 'Selection playback' })
+    .getByRole('button', { name: 'Preview', exact: true })
+    .click();
   await expect(page.locator('.player-track')).not.toContainText('playing');
-  await draft.getByRole('button', { name: 'Play into game' }).click();
+  await mimic
+    .getByRole('group', { name: 'Selection playback' })
+    .getByRole('button', { name: 'Play into game' })
+    .click();
   await expect(page.locator('.player-track strong')).toHaveText(name);
   await expect(page.locator('.player-track')).toContainText('Requested by Host');
-  // A few seconds after the first draft, the simulated guest captures an older phrase.
-  const bands = mimic.getByRole('list', { name: "Other people's selections" });
-  await expect(bands).toContainText('Alex (simulated)’s selection', { timeout: 15000 });
-  await expect(page.locator('.notification-stack')).toContainText(
-    'Alex (simulated) captured a clip',
-  );
-  await bands.getByRole('button', { name: /^Copy Alex \(simulated\)’s selection/ }).click();
-  await expect(mimic.getByLabel('Draft history')).toBeVisible();
+  await expect(mimic.getByRole('list', { name: "Other people's selections" })).toHaveCount(0);
   // Keep in Temp works; keeping permanently needs the host's PC, and says so.
   await mimic.getByRole('button', { name: 'Keep in Temp and close draft' }).click();
   await expect(page.locator('.notification-stack')).toContainText('is in Temp');
@@ -142,6 +153,18 @@ test('example voices and sentences: search finds a word; "hello [laugh]" with a 
   await expect(result.getByText('Voice clip', { exact: true })).toBeVisible();
   await expect(result.locator('mark').first()).toHaveText('Eagle');
   expect(await axe(page)).toEqual([]);
+  await result
+    .getByRole('button', { name: 'The Eagle has landed (Apollo 11)', exact: true })
+    .click();
+  await voices.getByRole('button', { name: 'Preview all of it' }).click();
+  const player = page.locator('.player');
+  await expect(player.getByText('Browser preview')).toBeVisible();
+  await page.keyboard.press('Space');
+  await expect(player.getByRole('button', { name: 'Resume playback' })).toBeEnabled();
+  await player.getByRole('button', { name: 'Stop', exact: true }).click();
+  await expect(player.getByText('Browser preview')).toHaveCount(0);
+  await voices.getByRole('button', { name: 'All recordings' }).click();
+  await expect(voices.getByLabel('Search the voice library')).toHaveValue('eagle');
   // Section memory: the tab shown comes back when Voices is shown again.
   await voices.getByRole('tab', { name: 'Words' }).click();
   await closeSection(page, 'Voices');

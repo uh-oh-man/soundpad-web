@@ -1,5 +1,4 @@
 import {
-  command,
   isGuestAllowed,
   type Category,
   type Command,
@@ -8,14 +7,9 @@ import {
   type Sound,
 } from '../protocol';
 import {
-  bounded,
   DEFAULT_POLICY,
   effectivePermissions,
   forNewInvite,
-  MAX_EXTRA,
-  MAX_PLACES,
-  places,
-  REQUEST_MS,
   type SessionPolicy,
 } from '../network/policy';
 import type { LobbyRequest, Transport } from '../network/session';
@@ -38,7 +32,7 @@ import {
   type MixPart,
 } from './dsp';
 import { DemoHistory, loopMs, type Range } from './history';
-import { ALEX_BAND_MS, DemoDrafts } from './drafts';
+import { DemoDrafts } from './drafts';
 import { DemoVoices, LIBRARY_UNAVAILABLE } from './voices';
 import { HOST_ONLY } from '../hosting';
 import { DemoSentences } from './sentences';
@@ -108,16 +102,12 @@ export type DemoHooks = {
 export type DemoOptions = {
   /** Artwork as PNG data URLs, by sound key. */
   art?: Record<string, string>;
-  /** 0 to 1; the tests fix it. */
-  random?: () => number;
-  /** Whether the page is on screen; the simulated guest only plays while it is. */
-  visible?: () => boolean;
 };
 
 /**
  * The companion version the example reports, so the page shows the controls of that version. Stage G raised it
  * from 2.37 to 2.40 with the recording history (2.39: a virtual history over the example's loop, see
- * `history.ts`) and drafts (2.40: `drafts.ts`, with a simulated guest's selection), then to 2.42 with the voice
+ * `history.ts`) and drafts (2.40: `drafts.ts`), then to 2.42 with the voice
  * library (2.41: `voices.ts`, three simulated voices from the example's own clips) and sentences with the
  * speaking palette (2.42: `sentences.ts`), then to 2.43 with Stage G's companion features: Kick's session
  * count (`counterSession`, kept like the companion does), Speed and effects on any example sound (trimAudio and
@@ -131,8 +121,7 @@ export const DEMO_HOST_ID = 'de30'.padEnd(64, '0');
 /** Features that need the host's PC: the example says so instead of pretending. */
 export const UNAVAILABLE = {
   ...HOST_ONLY,
-  share:
-    'Not available in the example: its guests are simulated and never see Mimic, so there is nobody to share the history with.',
+  share: 'Not available in the example: the example is a solo session.',
   other: 'Not available in the example.',
 } as const;
 export const TRANSCRIPT_NOTE =
@@ -143,13 +132,6 @@ const MIMIC_RATE = 48000;
 const MIMIC_BARS = 300;
 /** Words show in the transcript this long after they are said, as with live recognition. */
 const HEARD_MS = 1500;
-/** Simulated guests: Alex joins after a few seconds; Sam asks to join once the host chooses Ask me first. */
-export const GUEST_JOIN_MS = 4000;
-export const SAM_ASKS_MS = 3000;
-/** Alex plays something at most this often, and only while nothing plays and the page is visible. */
-export const ALEX_GAP_MS = 20000;
-const ALEX_SPREAD_MS = 15000;
-const ALEX_PICKS = ['rimshot', 'air-horn', 'boing', 'cat-meow', 'wrong-buzzer', 'door-knock'];
 const TEMP_CATEGORY = { id: '90', name: 'Temp - Soundpad Web [example]' };
 /** The storage figures the example reports (budgetStatus): fixed, since nothing is written to a disk. */
 const TEMP_MB = 100,
@@ -166,18 +148,7 @@ const PLAYBACK_OPS: Command['op'][] = [
   'seek',
 ];
 
-/** A simulated guest. Their names say so (Stage G, spec 11.5), wherever the page shows them. */
 type Guest = { peer: string; person: Participant; link: Transport };
-export const ALEX: Guest = {
-  peer: 'a1e5c0de-example',
-  person: { id: '0e7a3b1e-0000-4000-8000-00000000a1e5', name: 'Alex (simulated)' },
-  link: 'direct',
-};
-export const SAM: Guest = {
-  peer: '5a3c0de5-example',
-  person: { id: '0e7a3b1e-0000-4000-8000-0000000005a3', name: 'Sam (simulated)' },
-  link: 'relay',
-};
 
 type Asset = {
   id: string;
@@ -273,25 +244,15 @@ export class DemoModel {
     transcribing: false,
     recent: [] as { assetId: string; name: string; by: string; at: number }[],
   };
-  private guests: Guest[] = [];
-  private requests: (LobbyRequest & { guest: Guest })[] = [];
   private policy: SessionPolicy = { ...DEFAULT_POLICY };
-  private samAsked = false;
-  private timers = new Set<ReturnType<typeof setTimeout>>();
   private tickTimer?: ReturnType<typeof setTimeout>;
   private closed = false;
-  private random: () => number;
-  private visible: () => boolean;
 
   constructor(
     private engine: DemoEngine,
     private hooks: DemoHooks,
     options: DemoOptions = {},
   ) {
-    this.random = options.random ?? Math.random;
-    this.visible =
-      options.visible ??
-      (() => typeof document === 'undefined' || document.visibilityState === 'visible');
     const art = options.art ?? {};
     // A sound this browser could not decode is left out of the library.
     const loaded = (key: string) => engine.duration(DemoModel.soundId(key)) > 0;
@@ -330,28 +291,16 @@ export class DemoModel {
     return soundIdFor(index + 1);
   }
 
-  /** Shows the session and starts the simulated guests. */
+  /** Shows the solo example. */
   begin() {
     this.publish();
     this.publishSession();
-    this.later(GUEST_JOIN_MS, () => this.arrive(ALEX));
-    this.scheduleAlex();
   }
 
   close() {
     this.closed = true;
-    for (const timer of this.timers) clearTimeout(timer);
-    this.timers.clear();
     clearTimeout(this.tickTimer);
     this.engine.close();
-  }
-
-  private later(ms: number, run: () => void) {
-    const timer = setTimeout(() => {
-      this.timers.delete(timer);
-      if (!this.closed) run();
-    }, ms);
-    this.timers.add(timer);
   }
 
   // ---- What the page sees -------------------------------------------------------------------
@@ -442,16 +391,10 @@ export class DemoModel {
   private publishSession() {
     if (this.closed) return;
     this.hooks.session({
-      guests: this.guests.map((g) => g.peer),
-      people: Object.fromEntries(this.guests.map((g) => [g.peer, g.person])),
-      links: Object.fromEntries(this.guests.map((g) => [g.peer, g.link])),
-      requests: this.requests.map(({ id, name, kind, at, expiresAt }) => ({
-        id,
-        name,
-        kind,
-        at,
-        expiresAt,
-      })),
+      guests: [],
+      people: {},
+      links: {},
+      requests: [],
       policy: this.policy,
     });
   }
@@ -462,7 +405,7 @@ export class DemoModel {
 
   // ---- Commands -----------------------------------------------------------------------------
 
-  /** Runs one command for the host (no `guest`) or a simulated guest; resolves with the ack data. */
+  /** Runs an example command. Tests can supply a guest to exercise permission checks. */
   async send(c: Command, person: Participant, guest?: Guest): Promise<unknown> {
     if (this.closed) throw Error('The example has ended.');
     if (guest) {
@@ -662,7 +605,7 @@ export class DemoModel {
         return undefined; // Nothing is ever shared in the example.
       case 'revokePeer':
         this.hostOnly(host);
-        return undefined; // Simulated guests see no history, so there is no join time to end.
+        return undefined; // The solo example has no guest join time to end.
       case 'draftCreate':
         return this.draftCreate(c);
       case 'draftList':
@@ -677,11 +620,8 @@ export class DemoModel {
         this.publish();
         return result;
       }
-      case 'draftCopy': {
-        const draft = this.drafts.copy(c.draftId, Date.now());
-        this.publish();
-        return draft;
-      }
+      case 'draftCopy':
+        throw Error(UNAVAILABLE.share);
       case 'draftKeep':
         // Into the voice library is a permanent keep: it writes files on the host's PC.
         if (c.action === 'library') throw Error(UNAVAILABLE.keep);
@@ -1380,12 +1320,7 @@ export class DemoModel {
   }
 
   private draftCreate(c: Command) {
-    const { draft, first } = this.drafts.create(c, Date.now());
-    // A few seconds after the first draft, the simulated guest captures an older phrase (if they are in).
-    if (first)
-      this.later(ALEX_BAND_MS, () => {
-        if (this.present(ALEX) && this.drafts.addBand(Date.now())) this.publish();
-      });
+    const draft = this.drafts.create(c, Date.now());
     this.publish();
     return draft;
   }
@@ -1554,7 +1489,7 @@ export class DemoModel {
         keptMb: KEPT_MB,
         budgetMode: 'session',
       },
-      guests: this.guests.map((g) => usage(g.person)),
+      guests: [],
       requests: [],
     };
   }
@@ -1566,146 +1501,16 @@ export class DemoModel {
   }
 
   setPolicy(policy: SessionPolicy) {
-    const asking = policy.admission === 'ask' && this.policy.admission !== 'ask';
     this.policy = policy;
     this.publishSession();
-    // The example's second friend asks to join once the host wants to be asked first.
-    if (asking && !this.samAsked && !this.present(SAM)) {
-      this.samAsked = true;
-      this.later(SAM_ASKS_MS, () => this.arrive(SAM));
-    }
   }
 
-  private present(guest: Guest) {
-    return this.guests.some((g) => g.peer === guest.peer);
-  }
+  // The controller exposes the same room interface, but the example has no guest peers.
+  async letIn() {}
+  turnAway() {}
+  disconnect() {}
 
-  private arrive(guest: Guest) {
-    if (this.present(guest) || this.requests.some((r) => r.id === guest.person.id)) return;
-    if (this.policy.turnedAway.some((p) => p.id === guest.person.id)) return;
-    const admitted = this.policy.admitted.includes(guest.person.id);
-    if (
-      (this.policy.admission === 'ask' && !admitted) ||
-      this.guests.length >= places(this.policy)
-    ) {
-      const at = Date.now();
-      const full = this.guests.length >= places(this.policy);
-      this.requests = [
-        ...this.requests,
-        {
-          id: guest.person.id,
-          name: guest.person.name,
-          kind: full ? 'extra' : 'admit',
-          at,
-          expiresAt: at + REQUEST_MS,
-          guest,
-        },
-      ];
-      this.later(REQUEST_MS, () => {
-        if (!this.requests.some((r) => r.id === guest.person.id)) return;
-        this.requests = this.requests.filter((r) => r.id !== guest.person.id);
-        this.publishSession();
-      });
-      this.hooks.notify(
-        `${guest.person.name} ${full ? 'asks for an extra place' : 'wants to join'}. Let them in or turn them away.`,
-      );
-      this.publishSession();
-      return;
-    }
-    this.join(guest);
-  }
-
-  private join(guest: Guest) {
-    this.guests = [...this.guests, guest];
-    this.policy = {
-      ...this.policy,
-      admitted: bounded([
-        ...this.policy.admitted.filter((id) => id !== guest.person.id),
-        guest.person.id,
-      ]),
-    };
-    this.hooks.notify(
-      `${guest.person.name} joined (${guest.link === 'relay' ? 'relayed' : 'direct'}).`,
-      'success',
-    );
-    this.publishSession();
-  }
-
-  async letIn(id: string) {
-    const request = this.requests.find((r) => r.id === id);
-    const away = this.policy.turnedAway.find((p) => p.id === id);
-    if (!request && !away) return;
-    let policy: SessionPolicy = {
-      ...this.policy,
-      turnedAway: this.policy.turnedAway.filter((p) => p.id !== id),
-    };
-    if (request && this.guests.length >= places(policy)) {
-      if (places(policy) >= MAX_PLACES + MAX_EXTRA)
-        throw Error(`The session is at its largest (${MAX_PLACES + MAX_EXTRA} guests).`);
-      policy = { ...policy, extra: policy.extra + 1 };
-    }
-    this.policy = policy;
-    this.requests = this.requests.filter((r) => r.id !== id);
-    if (request) this.join(request.guest);
-    else this.publishSession();
-  }
-
-  turnAway(id: string) {
-    const request = this.requests.find((r) => r.id === id);
-    if (!request) return;
-    this.requests = this.requests.filter((r) => r.id !== id);
-    this.policy = {
-      ...this.policy,
-      turnedAway: bounded([
-        ...this.policy.turnedAway.filter((p) => p.id !== id),
-        request.guest.person,
-      ]),
-      admitted: this.policy.admitted.filter((a) => a !== id),
-    };
-    this.publishSession();
-  }
-
-  disconnect(peer: string) {
-    const guest = this.guests.find((g) => g.peer === peer);
-    if (!guest) return;
-    this.guests = this.guests.filter((g) => g !== guest);
-    this.hooks.notify(`${guest.person.name} was disconnected.`);
-    this.publishSession();
-  }
-
-  /** Replace invite: everyone is disconnected; Alex comes back with the new invitation. */
   rotate() {
-    this.guests = [];
-    this.requests = [];
-    this.policy = forNewInvite(this.policy);
-    this.samAsked = false;
-    this.publishSession();
-    this.later(GUEST_JOIN_MS, () => this.arrive(ALEX));
-  }
-
-  private scheduleAlex() {
-    this.later(ALEX_GAP_MS + this.random() * ALEX_SPREAD_MS, () => {
-      this.alexTurn();
-      this.scheduleAlex();
-    });
-  }
-
-  /** Alex plays a short sound now and then: only while the page is visible and nothing plays. */
-  private alexTurn() {
-    const alex = this.guests.find((g) => g.peer === ALEX.peer);
-    if (!alex || !this.visible() || this.playing || this.suspended) return;
-    const allowed = effectivePermissions(this.permissions, this.policy.overrides[alex.person.id]);
-    if (!allowed.remotePlayback) return;
-    const picks = ALEX_PICKS.map((key) => DemoModel.soundId(key)).filter((id) =>
-      this.sounds.some((s) => s.id === id),
-    );
-    if (!picks.length) return;
-    const sound = this.sound(picks[Math.floor(this.random() * picks.length) % picks.length]);
-    void this.send(command('play', { soundId: sound.id }), alex.person, alex)
-      .then((result) => {
-        if ((result as { played?: boolean })?.played)
-          this.hooks.notify(`${alex.person.name} played “${sound.name}”.`);
-      })
-      .catch(() => {});
+    this.setPolicy(forNewInvite(this.policy));
   }
 }

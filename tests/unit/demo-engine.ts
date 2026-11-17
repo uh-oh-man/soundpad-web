@@ -12,7 +12,6 @@ import {
   type MixPart,
 } from '../../web/src/demo/dsp';
 import { command, type Command, type Snapshot } from '../../web/src/protocol';
-import { ALEX } from '../../web/src/demo/model';
 
 export const HOST = { id: '33333333-3333-4333-8333-333333333333', name: 'Host' };
 export const id = (key: string) => DemoModel.soundId(key);
@@ -118,23 +117,23 @@ export class FakeEngine implements DemoEngine {
   }
 }
 
-export function setup({ visible = true } = {}) {
+export function setup() {
   const engine = new FakeEngine();
   const states: Snapshot[] = [];
   const sessions: DemoSessionInfo[] = [];
   const notices: string[] = [];
-  let shown = visible;
-  const model = new DemoModel(
-    engine,
-    {
-      state: (s) => states.push(s),
-      session: (s) => sessions.push(s),
-      notify: (message) => notices.push(message),
-    },
-    { random: () => 0, visible: () => shown },
-  );
+  const model = new DemoModel(engine, {
+    state: (s) => states.push(s),
+    session: (s) => sessions.push(s),
+    notify: (message) => notices.push(message),
+  });
   const send = (op: Command['op'], fields: Partial<Command> = {}) =>
     model.send(command(op, fields), HOST);
+  const ALEX = {
+    peer: 'test-guest',
+    person: { id: '0e7a3b1e-0000-4000-8000-00000000a1e5', name: 'Alex (simulated)' },
+    link: 'direct' as const,
+  };
   const asAlex = (op: Command['op'], fields: Partial<Command> = {}) =>
     model.send(command(op, fields), ALEX.person, ALEX);
   return {
@@ -145,6 +144,5 @@ export function setup({ visible = true } = {}) {
     notices,
     state: () => states[states.length - 1],
     session: () => sessions[sessions.length - 1],
-    setVisible: (on: boolean) => (shown = on),
   };
 }

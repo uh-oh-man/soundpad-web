@@ -10,8 +10,7 @@ import { readdirSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { commandSchema, command, type Command } from '../../web/src/protocol';
 import { FEATURES, supports } from '../../web/src/version';
-import { DEMO_COMPANION, UNAVAILABLE, GUEST_JOIN_MS } from '../../web/src/demo/model';
-import { ALEX_BAND_MS } from '../../web/src/demo/drafts';
+import { DEMO_COMPANION, UNAVAILABLE } from '../../web/src/demo/model';
 import { LOOP_FRAMES, msToFrames } from '../../web/src/demo/history';
 import { levelsSchema, timelineSchema, transcriptSchema } from '../../web/src/mimic/history';
 import {
@@ -225,6 +224,7 @@ const FEATURE_OPS: Record<Feature, Op[]> = {
 
 /** What the example honestly cannot do, and the reason it gives. Each must be refused with exactly that. */
 const HONESTLY_UNAVAILABLE: Partial<Record<Op, string>> = {
+  draftCopy: UNAVAILABLE.share,
   mimicHotkey: UNAVAILABLE.hotkey,
   mimicLibrary: UNAVAILABLE.library,
   mimicLibraryImport: UNAVAILABLE.library,
@@ -251,7 +251,6 @@ type Context = {
   live: number;
   clip: string;
   draft: z.infer<typeof draftSchema>;
-  band: string;
   recording: string;
   voice: string;
   sentence: z.infer<typeof sentenceSchema>;
@@ -330,7 +329,6 @@ const CHECKS: [Op, Check][] = [
       schema: draftSchema,
     }),
   ],
-  ['draftCopy', (c) => ({ fields: { draftId: c.band }, schema: draftSchema })],
   [
     'draftPlay',
     (c) => ({
@@ -543,15 +541,12 @@ describe('example coverage of DEMO_COMPANION', () => {
         (data) => ({ ok: true as const, data }),
         (e: Error) => ({ ok: false as const, error: e.message }),
       );
-    // Mimic listens for half a minute; Alex joins, and captures a phrase after the host's first draft.
+    // Mimic listens for half a minute so a phrase can be captured.
     expect(await send('mimicStart', { sourceId: 'example:apollo-11' })).toBeUndefined();
-    vi.advanceTimersByTime(GUEST_JOIN_MS);
-    vi.setSystemTime(Date.now() + 26000);
+    vi.setSystemTime(Date.now() + 30000);
     const draft = draftSchema.parse(await send('draftCreate', { action: 'phrase' }));
-    await vi.advanceTimersByTimeAsync(ALEX_BAND_MS);
     const timeline = timelineSchema.parse(await send('historyTimeline'));
-    const band = draftListSchema.parse(await send('draftList')).others[0];
-    expect(band).toBeDefined();
+    expect(draftListSchema.parse(await send('draftList')).others).toEqual([]);
     const clip = temp.parse(
       await send('mimicClip', {
         startFrame: LOOP_FRAMES / 4,
@@ -572,7 +567,6 @@ describe('example coverage of DEMO_COMPANION', () => {
       live: timeline.liveFrame,
       clip,
       draft,
-      band: band.id,
       recording: recordings.items.find((r) => r.voiceId === status.voices[0].id)!.id,
       voice: status.voices[0].id,
       sentence,

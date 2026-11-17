@@ -1,5 +1,14 @@
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
-import { ArrowDownToLine, Expand, Headphones, Play, Scissors, Shrink, X } from 'lucide-react';
+import {
+  Activity,
+  ArrowDownToLine,
+  Expand,
+  Headphones,
+  Play,
+  Scissors,
+  Shrink,
+  X,
+} from 'lucide-react';
 import { z } from 'zod';
 import { controller } from '../controller';
 import type { Snapshot } from '../protocol';
@@ -202,9 +211,21 @@ export function MimicPanel({
     return () => document.removeEventListener('keydown', listener, true);
   }, []);
 
+  const showHistory = allowed && historyMode && (active || recorded);
+  const clips = allowed && (
+    <aside className="mimic-page-clips" aria-label="Clips">
+      <h2>Recent clips</h2>
+      <MimicRecent state={state} host={host} canPlay={canPlay} onTempRequest={onTempRequest} />
+      {host && supports(state.companionVersion, 'voiceReplayLibrary') && (
+        <MimicLibrary connected={connected} canPlay={canPlay} />
+      )}
+    </aside>
+  );
+
   return (
     <div id="mimic-page" className="mimic-panel mimic-page" data-tab={tab}>
       <header className="mimic-page-head">
+        <Activity className="mimic-page-icon" size={32} aria-hidden="true" />
         <h1 id="mimic-title" tabIndex={-1}>
           Mimic
         </h1>
@@ -240,8 +261,14 @@ export function MimicPanel({
         {host && <MimicHostControls state={state} connected={connected} />}
         {!allowed ? (
           <p className="muted">The host has not enabled Mimic for guests.</p>
-        ) : historyMode && (active || recorded) ? (
-          <MimicHistory state={state} host={host} connected={connected} canPlay={canPlay} />
+        ) : showHistory ? (
+          <MimicHistory
+            state={state}
+            host={host}
+            connected={connected}
+            canPlay={canPlay}
+            recentClips={clips}
+          />
         ) : !active ? (
           <p className="muted">
             {host ? 'Choose a source and start listening.' : 'Waiting for the host to start Mimic.'}
@@ -371,15 +398,7 @@ export function MimicPanel({
           <p className="muted">Loading the live buffer…</p>
         )}
       </div>
-      {allowed && (
-        <aside className="mimic-page-clips" aria-label="Clips">
-          <h2>Clips</h2>
-          <MimicRecent state={state} host={host} canPlay={canPlay} onTempRequest={onTempRequest} />
-          {host && supports(state.companionVersion, 'voiceReplayLibrary') && (
-            <MimicLibrary connected={connected} canPlay={canPlay} />
-          )}
-        </aside>
-      )}
+      {!showHistory && clips}
     </div>
   );
 }

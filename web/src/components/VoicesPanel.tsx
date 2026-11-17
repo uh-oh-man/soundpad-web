@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type RefObject } from 'react';
 import {
   BookAudio,
   ChevronLeft,
@@ -45,10 +45,12 @@ import { refreshLibrary, takeOpen, useOpenRequests, useVoiceStore } from '../lib
 import { ReviewQueue, VoiceManager, WordIndexSettings, WordsAndWanted } from './VoicesTabs';
 import {
   VoiceAvatar,
+  VoicePreviewControls,
   WordModeSwitch,
   libraryChange,
   useWordMode,
   useWordPlayer,
+  type WordMode,
 } from './VoiceShared';
 import { PAGE, useSectionScroll } from './VoiceShared';
 import { recall, remember } from '../sections';
@@ -70,6 +72,7 @@ const TABS: Tab[] = ['library', 'review', 'words', 'voices', 'index'];
  */
 export function VoicesPanel({ state, host, connected, canPlay }: Props) {
   const { status: shared } = useVoiceStore();
+  const [mode, setMode] = useWordMode();
   // Section memory (Stage G): the tab and open recording come back when Voices is shown again.
   const [tab, setTab] = useState<Tab>(() => {
     const saved = recall('voices').tab;
@@ -80,10 +83,26 @@ export function VoicesPanel({ state, host, connected, canPlay }: Props) {
   const [renameId, setRenameId] = useState<string | null>(null);
   useEffect(() => remember('voices', { tab, recordingId: openId ?? undefined }), [tab, openId]);
   const panel = useRef<HTMLDivElement>(null);
+  const browsePosition = useRef<{ top: number; trigger: HTMLElement | null } | null>(null);
+  const detailHeading = useRef<HTMLHeadingElement>(null);
+  const board = () => panel.current?.closest<HTMLElement>('#board');
+  useEffect(() => {
+    const scroller = board();
+    if (!scroller || tab !== 'library') return;
+    if (openId) {
+      scroller.scrollTop = 0;
+    } else if (browsePosition.current) {
+      const { top, trigger } = browsePosition.current;
+      scroller.scrollTop = top;
+      trigger?.focus({ preventScroll: true });
+      browsePosition.current = null;
+    }
+  }, [openId, tab]);
   useSectionScroll('voices', panel, !!shared);
   useEffect(() => {
     const waiting = takeOpen('recording');
     if (waiting?.kind === 'recording') {
+      setTab('library');
       setOpenId(waiting.recordingId);
       if (waiting.rename) setRenameId(waiting.recordingId);
     }
@@ -110,54 +129,73 @@ export function VoicesPanel({ state, host, connected, canPlay }: Props) {
   ];
   return (
     <div className="voices-panel" ref={panel}>
-      <p className="muted voices-intro">
-        {status.count} recording{status.count === 1 ? '' : 's'} kept
-        {status.pending ? ` · finding the words of ${status.pending}` : ''}
-        {!status.canEdit && ' · the host lets guests look and listen, not change'}
-      </p>
       {status.problem && (
         <p className="warning" role="status">
           {status.problem}
         </p>
       )}
       {status.worker && host && <p className="muted voices-worker">{status.worker}</p>}
-      <div className="voices-tabs" role="tablist" aria-label="Voice library sections">
-        {tabs.map(([key, label]) => (
-          <button
-            key={key}
-            type="button"
-            role="tab"
-            aria-selected={tab === key}
-            onClick={() => {
-              setTab(key);
-              setOpenId(null);
-            }}
-          >
-            {label}
-          </button>
-        ))}
+      <div className="voices-navbar">
+        <div className="voices-tabs" role="tablist" aria-label="Voice library sections">
+          {tabs.map(([key, label]) => (
+            <button
+              key={key}
+              type="button"
+              role="tab"
+              aria-selected={tab === key}
+              onClick={() => {
+                setTab(key);
+                setOpenId(null);
+              }}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+        <p className="muted voices-intro">
+          {status.count} saved recording{status.count === 1 ? '' : 's'}
+          {status.pending ? ` · ${status.pending} awaiting transcription` : ''}
+          {!status.canEdit && ' · Read-only access'}
+        </p>
       </div>
-      {tab === 'library' &&
-        (openId ? (
-          <RecordingDetail
-            id={openId}
-            rename={renameId === openId}
-            renamed={() => setRenameId(null)}
-            status={status}
-            canPlay={canPlay && connected}
-            canRegion={canRegion}
-            back={() => setOpenId(null)}
-          />
-        ) : (
-          <LibraryView
-            state={state}
-            host={host}
-            status={status}
-            canPlay={canPlay && connected}
-            canRegion={canRegion}
-            open={setOpenId}
-          />
-        ))}
+      {tab === 'library' && (
+        <>
+          <div hidden={!!openId}>
+            <LibraryView
+              state={state}
+              host={host}
+              status={status}
+              canPlay={canPlay && connected}
+              canRegion={canRegion}
+              mode={mode}
+              setMode={setMode}
+              open={(id) => {
+                browsePosition.current = {
+                  top: board()?.scrollTop ?? 0,
+                  trigger:
+                    document.activeElement instanceof HTMLElement ? document.activeElement : null,
+                };
+                setOpenId(id);
+              }}
+            />
+          </div>
+          {openId && (
+            <RecordingDetail
+              key={openId}
+              id={openId}
+              heading={detailHeading}
+              rename={renameId === openId}
+              renamed={() => setRenameId(null)}
+              status={status}
+              canPlay={canPlay && connected}
+              canRegion={canRegion}
+              mode={mode}
+              setMode={setMode}
+              back={() => setOpenId(null)}
+            />
+          )}
+        </>
+      )}
       {tab === 'review' && <ReviewQueue status={status} canPlay={canPlay && connected} />}
       {tab === 'words' && <WordsAndWanted status={status} />}
       {tab === 'voices' && <VoiceManager status={status} />}
@@ -253,6 +291,8 @@ function LibraryView({
   status,
   canPlay,
   canRegion,
+  mode,
+  setMode,
   open,
 }: {
   state: Snapshot;
@@ -260,6 +300,8 @@ function LibraryView({
   status: LibraryStatus;
   canPlay: boolean;
   canRegion: boolean;
+  mode: WordMode;
+  setMode: (mode: WordMode) => void;
   open: (id: string) => void;
 }) {
   const [filters, setFilters] = useState<Filters>(NO_FILTERS);
@@ -271,7 +313,6 @@ function LibraryView({
   const [list, setList] = useState<{ total: number; items: Recording[] } | null>(null);
   const [results, setResults] = useState<SearchResult[] | null>(null);
   const [picked, setPicked] = useState<Picked>(NOTHING_PICKED);
-  const [mode, setMode] = useWordMode();
   const player = useWordPlayer(canPlay, canRegion);
   // The search runs a moment after typing stops.
   useEffect(() => {
@@ -352,33 +393,39 @@ function LibraryView({
   const canSave = canQuickSave(state, host, controller.hostSite());
   return (
     <section className="voices-library" aria-label="Voice library">
-      <label className="search voices-search">
-        <Search size={16} aria-hidden="true" />
-        <input
-          aria-label="Search the voice library"
-          data-view-search
-          placeholder="Search sounds, voice clips and sentences by name or exact words…"
-          value={typed}
-          maxLength={200}
-          onChange={(e) => setTyped(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === 'Escape' && typed) {
-              e.preventDefault();
-              e.stopPropagation();
-              setTyped('');
-            }
-          }}
-        />
-        {typed && (
-          <button type="button" aria-label="Clear search" onClick={() => setTyped('')}>
-            <X size={14} />
-          </button>
-        )}
-      </label>
-      <FilterBar status={status} filters={filters} set={setFilters} />
-      <WordModeSwitch mode={mode} set={setMode} canPlay={canPlay} canRegion={canRegion} />
+      <div className="voices-browse-tools">
+        <label className="search voices-search">
+          <Search size={16} aria-hidden="true" />
+          <input
+            aria-label="Search the voice library"
+            data-view-search
+            placeholder="Search sounds, voice clips and sentences by name or exact words…"
+            value={typed}
+            maxLength={200}
+            onChange={(e) => setTyped(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Escape' && typed) {
+                e.preventDefault();
+                e.stopPropagation();
+                setTyped('');
+              }
+            }}
+          />
+          {typed && (
+            <button type="button" aria-label="Clear search" onClick={() => setTyped('')}>
+              <X size={14} />
+            </button>
+          )}
+        </label>
+        <div className="voices-browse-filters">
+          <FilterBar status={status} filters={filters} set={setFilters} />
+          <WordModeSwitch mode={mode} set={setMode} canPlay={canPlay} canRegion={canRegion} />
+        </div>
+        <VoicePreviewControls />
+      </div>
       {filters.query ? (
-        <>
+        <div className="voices-library-results">
+          <h2>Search results</h2>
           <div className="voices-types" role="group" aria-label="Result types">
             {(['sound', 'clip', 'sentence'] as ResultType[]).map((t) => (
               <button
@@ -419,6 +466,7 @@ function LibraryView({
                       )}
                       <button
                         type="button"
+                        data-playback-trigger
                         aria-label={`${mode === 'game' ? 'Play' : 'Preview'} ${item.title}`}
                         onClick={() => player.whole(mode, { soundId: item.soundId })}
                       >
@@ -436,7 +484,11 @@ function LibraryView({
                       <button
                         type="button"
                         className="link voices-title"
-                        onClick={() => open(r.id)}
+                        onClick={() => {
+                          player.stop();
+                          sentencePreview.stop();
+                          open(r.id);
+                        }}
                       >
                         {r.title || 'Untitled'}
                       </button>
@@ -451,6 +503,7 @@ function LibraryView({
                       )}
                       <button
                         type="button"
+                        data-playback-trigger
                         aria-label={`${mode === 'game' ? 'Play' : 'Preview'} ${r.title}`}
                         onClick={() =>
                           player.whole(mode, { recordingId: r.id, soundId: r.soundId })
@@ -469,6 +522,7 @@ function LibraryView({
                       {item.text !== item.title && <span className="muted">{item.text}</span>}
                       <button
                         type="button"
+                        data-playback-trigger
                         aria-label={`${mode === 'game' ? 'Play' : 'Preview'} sentence ${item.title}`}
                         onClick={() =>
                           mode === 'game' && canPlay
@@ -492,85 +546,102 @@ function LibraryView({
               })}
             </ul>
           )}
-        </>
+        </div>
       ) : (
-        <>
-          {canSave && <SaveFromTemp canEdit={status.canEdit} />}
-          {picked.ids.length > 0 && (
-            <BulkBar status={status} ids={picked.ids} clear={() => setPicked(NOTHING_PICKED)} />
-          )}
-          {!list ? (
-            <p className="muted">Loading…</p>
-          ) : list.items.length === 0 ? (
-            <p className="muted">
-              {hasFilters(filters)
-                ? 'No recordings match these filters.'
-                : canSave
-                  ? 'Nothing saved yet. Press Save on a clip above, in Mimic or in Temp, and it appears here with its words.'
-                  : 'Nothing kept yet. Keep a clip (from Mimic or Temp) and it appears here with its words.'}
-            </p>
-          ) : (
-            <ul className="voices-list" aria-label="Recordings">
-              {list.items.map((r) => {
-                const voice = voiceOf(voices, r.voiceId);
-                return (
-                  <li key={r.id} className={picked.ids.includes(r.id) ? 'picked' : undefined}>
-                    <input
-                      type="checkbox"
-                      aria-label={`Select ${r.title || 'recording'}`}
-                      checked={picked.ids.includes(r.id)}
-                      onChange={() => {}}
-                      onClick={(e) => setPicked((p) => pick(p, order, r.id, e.shiftKey))}
-                    />
-                    <VoiceAvatar voice={voice} />
-                    <span className="voices-row">
+        <div className="voices-browse-body">
+          <div className="voices-library-results">
+            <div className="voices-list-head">
+              <h2>Recordings</h2>
+              {list && (
+                <span className="muted">
+                  {list.total} {hasFilters(filters) ? 'matching' : 'saved'}
+                </span>
+              )}
+            </div>
+            {picked.ids.length > 0 && (
+              <BulkBar status={status} ids={picked.ids} clear={() => setPicked(NOTHING_PICKED)} />
+            )}
+            {!list ? (
+              <p className="muted">Loading…</p>
+            ) : list.items.length === 0 ? (
+              <p className="muted">
+                {hasFilters(filters)
+                  ? 'No recordings match these filters.'
+                  : canSave
+                    ? 'Nothing saved yet. Press Save on a clip above, in Mimic or in Temp, and it appears here with its words.'
+                    : 'Nothing kept yet. Keep a clip (from Mimic or Temp) and it appears here with its words.'}
+              </p>
+            ) : (
+              <ul className="voices-list" aria-label="Recordings">
+                {list.items.map((r) => {
+                  const voice = voiceOf(voices, r.voiceId);
+                  return (
+                    <li key={r.id} className={picked.ids.includes(r.id) ? 'picked' : undefined}>
+                      <input
+                        type="checkbox"
+                        aria-label={`Select ${r.title || 'recording'}`}
+                        checked={picked.ids.includes(r.id)}
+                        onChange={() => {}}
+                        onClick={(e) => setPicked((p) => pick(p, order, r.id, e.shiftKey))}
+                      />
+                      <VoiceAvatar voice={voice} />
+                      <span className="voices-row">
+                        <button
+                          type="button"
+                          className="link voices-title"
+                          onClick={() => {
+                            player.stop();
+                            sentencePreview.stop();
+                            open(r.id);
+                          }}
+                        >
+                          {r.favorite && <Star size={12} className="fav" aria-label="Favourite" />}
+                          {r.title || 'Untitled'}
+                        </button>
+                        <small>
+                          {voice?.name ?? 'Unassigned'} · {formatDuration(r.durationMs)}
+                          {r.tags.length > 0 && ` · ${r.tags.join(', ')}`}
+                          {r.wordsState === 'pending' && ' · finding words…'}
+                          {r.wordsState === 'failed' && ' · words could not be found'}
+                          {!r.reviewed && ' · new'}
+                        </small>
+                        {r.text && <span className="voices-text">{r.text}</span>}
+                      </span>
                       <button
                         type="button"
-                        className="link voices-title"
-                        onClick={() => open(r.id)}
+                        data-playback-trigger
+                        aria-label={`${mode === 'game' ? 'Play' : 'Preview'} ${r.title}`}
+                        onClick={() =>
+                          player.whole(mode, { recordingId: r.id, soundId: r.soundId })
+                        }
                       >
-                        {r.favorite && <Star size={12} className="fav" aria-label="Favourite" />}
-                        {r.title || 'Untitled'}
+                        {mode === 'game' ? <Play size={14} /> : <Headphones size={14} />}
                       </button>
-                      <small>
-                        {voice?.name ?? 'Unassigned'} · {formatDuration(r.durationMs)}
-                        {r.tags.length > 0 && ` · ${r.tags.join(', ')}`}
-                        {r.wordsState === 'pending' && ' · finding words…'}
-                        {r.wordsState === 'failed' && ' · words could not be found'}
-                        {!r.reviewed && ' · new'}
-                      </small>
-                      {r.text && <span className="voices-text">{r.text}</span>}
-                    </span>
-                    <button
-                      type="button"
-                      aria-label={`${mode === 'game' ? 'Play' : 'Preview'} ${r.title}`}
-                      onClick={() => player.whole(mode, { recordingId: r.id, soundId: r.soundId })}
-                    >
-                      {mode === 'game' ? <Play size={14} /> : <Headphones size={14} />}
-                    </button>
-                  </li>
-                );
-              })}
-            </ul>
-          )}
-          {list && list.total > PAGE && (
-            <div className="voices-pages" role="group" aria-label="Pages">
-              <button type="button" disabled={page === 0} onClick={() => setPage((p) => p - 1)}>
-                <ChevronLeft size={14} /> Newer
-              </button>
-              <span>
-                {page * PAGE + 1}–{Math.min(list.total, (page + 1) * PAGE)} of {list.total}
-              </span>
-              <button
-                type="button"
-                disabled={(page + 1) * PAGE >= list.total}
-                onClick={() => setPage((p) => p + 1)}
-              >
-                Older <ChevronRight size={14} />
-              </button>
-            </div>
-          )}
-        </>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+            {list && list.total > PAGE && (
+              <div className="voices-pages" role="group" aria-label="Pages">
+                <button type="button" disabled={page === 0} onClick={() => setPage((p) => p - 1)}>
+                  <ChevronLeft size={14} /> Newer
+                </button>
+                <span>
+                  {page * PAGE + 1}–{Math.min(list.total, (page + 1) * PAGE)} of {list.total}
+                </span>
+                <button
+                  type="button"
+                  disabled={(page + 1) * PAGE >= list.total}
+                  onClick={() => setPage((p) => p + 1)}
+                >
+                  Older <ChevronRight size={14} />
+                </button>
+              </div>
+            )}
+          </div>
+          {canSave && <SaveFromTemp canEdit={status.canEdit} />}
+        </div>
       )}
     </section>
   );
@@ -586,7 +657,7 @@ function SaveFromTemp({ canEdit }: { canEdit: boolean }) {
   const clips = unsavedClips(data?.manager.assets ?? []);
   if (!clips.length) return null;
   return (
-    <section className="voices-unsaved" aria-label="In Temp, not saved yet">
+    <aside className="voices-unsaved" aria-label="In Temp, not saved yet">
       <h3>In Temp, not saved yet</h3>
       <ul>
         {clips.map((a) => (
@@ -612,7 +683,7 @@ function SaveFromTemp({ canEdit }: { canEdit: boolean }) {
           </li>
         ))}
       </ul>
-    </section>
+    </aside>
   );
 }
 
@@ -709,25 +780,30 @@ function BulkBar({
 /** One recording: its words (each plays), title, voice, tags, favourite, corrected text, where it came from and its history. */
 function RecordingDetail({
   id,
+  heading,
   rename = false,
   renamed,
   status,
   canPlay,
   canRegion,
+  mode,
+  setMode,
   back,
 }: {
   id: string;
+  heading: RefObject<HTMLHeadingElement | null>;
   /** Opened by Rename after a Save (2.46): the title field takes the keyboard once it is shown. */
   rename?: boolean;
   renamed?: () => void;
   status: LibraryStatus;
   canPlay: boolean;
   canRegion: boolean;
+  mode: WordMode;
+  setMode: (mode: WordMode) => void;
   back: () => void;
 }) {
   const [data, setData] = useState<z.infer<typeof getSchema> | null>(null);
   const [gone, setGone] = useState(false);
-  const [mode, setMode] = useWordMode();
   const player = useWordPlayer(canPlay, canRegion);
   const [title, setTitle] = useState('');
   const [text, setText] = useState('');
@@ -736,10 +812,12 @@ function RecordingDetail({
   const titleField = useRef<HTMLInputElement>(null);
   const ready = !!data && data.recording.id === id;
   useEffect(() => {
-    if (!rename || !ready) return;
-    titleField.current?.focus();
-    titleField.current?.select();
-    renamed?.();
+    if (!ready) return;
+    if (rename) {
+      titleField.current?.focus();
+      titleField.current?.select();
+      renamed?.();
+    } else if (document.activeElement === document.body) heading.current?.focus();
   }, [rename, ready]);
   useEffect(() => {
     let live = true;
@@ -786,10 +864,15 @@ function RecordingDetail({
             : 'Uploaded';
   return (
     <section className="voices-detail" aria-label={`Recording ${r.title}`}>
-      <div className="voices-detail-head">
+      <div className="voices-detail-nav">
         <button type="button" onClick={back}>
           <ChevronLeft size={14} /> All recordings
         </button>
+        <h2 ref={heading} tabIndex={-1}>
+          {r.title || 'Untitled'}
+        </h2>
+      </div>
+      <div className="voices-detail-head">
         <VoiceAvatar voice={voice} size={32} />
         <form
           className="voices-inline grow"
@@ -831,53 +914,60 @@ function RecordingDetail({
         {source}, kept by {r.byName} · {formatDuration(r.durationMs)}
         {!r.soundId && ' · not in Soundpad right now (preview only)'}
       </p>
-      <WordModeSwitch
-        mode={mode}
-        set={setMode}
-        canPlay={canPlay && !!r.soundId}
-        canRegion={canRegion && !!r.soundId}
-      />
-      <div className="voices-words" aria-label="Words">
-        {data.words.length ? (
-          data.words.map((w, i) => (
-            <button
-              key={i}
-              type="button"
-              className={`voices-word${w.u ? ' uncertain' : ''}`}
-              aria-label={`Play “${w.t}”`}
-              onClick={() => player.play(mode, { recordingId: r.id, soundId: r.soundId }, w)}
-            >
-              {w.t}
-            </button>
-          ))
-        ) : (
-          <span className="muted">
-            {r.wordsState === 'pending'
-              ? 'Finding its words in the background…'
-              : r.wordsState === 'failed'
-                ? `Its words could not be found${r.wordsError ? `: ${r.wordsError}` : ''}.`
-                : 'No words in this recording.'}
-          </span>
-        )}
-        <button
-          type="button"
-          aria-label={`${mode === 'game' ? 'Play' : 'Preview'} all of it`}
-          onClick={() => player.whole(mode, { recordingId: r.id, soundId: r.soundId })}
-        >
-          {mode === 'game' ? <Play size={14} /> : <Headphones size={14} />} All
-        </button>
-        {r.wordsState === 'failed' && status.canEdit && (
+      <div className="voices-detail-audio">
+        <div className="voices-detail-transport">
+          <h3>Transcript</h3>
           <button
             type="button"
-            onClick={() =>
-              void controller
-                .run('libraryRetry', { recordingId: r.id })
-                .then(() => refreshLibrary())
-            }
+            data-playback-trigger
+            aria-label={`${mode === 'game' ? 'Play' : 'Preview'} all of it`}
+            onClick={() => player.whole(mode, { recordingId: r.id, soundId: r.soundId })}
           >
-            <RotateCcw size={13} /> Try again
+            {mode === 'game' ? <Play size={14} /> : <Headphones size={14} />} Entire recording
           </button>
-        )}
+        </div>
+        <VoicePreviewControls />
+        <WordModeSwitch
+          mode={mode}
+          set={setMode}
+          canPlay={canPlay && !!r.soundId}
+          canRegion={canRegion && !!r.soundId}
+        />
+        <div className="voices-words" aria-label="Words">
+          {data.words.length ? (
+            data.words.map((w, i) => (
+              <button
+                key={i}
+                type="button"
+                className={`voices-word${w.u ? ' uncertain' : ''}`}
+                aria-label={`Play “${w.t}”`}
+                onClick={() => player.play(mode, { recordingId: r.id, soundId: r.soundId }, w)}
+              >
+                {w.t}
+              </button>
+            ))
+          ) : (
+            <span className="muted">
+              {r.wordsState === 'pending'
+                ? 'Finding its words in the background…'
+                : r.wordsState === 'failed'
+                  ? `Its words could not be found${r.wordsError ? `: ${r.wordsError}` : ''}.`
+                  : 'No words in this recording.'}
+            </span>
+          )}
+          {r.wordsState === 'failed' && status.canEdit && (
+            <button
+              type="button"
+              onClick={() =>
+                void controller
+                  .run('libraryRetry', { recordingId: r.id })
+                  .then(() => refreshLibrary())
+              }
+            >
+              <RotateCcw size={13} /> Try again
+            </button>
+          )}
+        </div>
       </div>
       <div className="setting-row">
         <label htmlFor="voices-voice">Voice</label>

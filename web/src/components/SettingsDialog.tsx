@@ -262,56 +262,66 @@ export function SettingsDialog({
               {copy.note}
             </p>
           )}
-          {permissionToggles
-            .filter(
-              (toggle) =>
-                (v2 || !toggle.v2) &&
-                (!toggle.feature || supports(state.companionVersion, toggle.feature)),
-            )
-            .map(({ key, title, description, label }) => (
-              <div className="setting-row" key={key}>
-                <div>
-                  <strong>{title}</strong>
-                  <p>{description}</p>
+          {!view.demo &&
+            permissionToggles
+              .filter(
+                (toggle) =>
+                  (v2 || !toggle.v2) &&
+                  (!toggle.feature || supports(state.companionVersion, toggle.feature)),
+              )
+              .map(({ key, title, description, label }) => (
+                <div className="setting-row" key={key}>
+                  <div>
+                    <strong>{title}</strong>
+                    <p>{description}</p>
+                  </div>
+                  <input
+                    type="checkbox"
+                    aria-label={label}
+                    checked={state.permissions[key] !== false}
+                    onChange={(e) =>
+                      void run('permissions', {
+                        permissions: { ...state.permissions, [key]: e.target.checked },
+                      })
+                    }
+                  />
                 </div>
-                <input
-                  type="checkbox"
-                  aria-label={label}
-                  checked={state.permissions[key] !== false}
-                  onChange={(e) =>
-                    void run('permissions', {
-                      permissions: { ...state.permissions, [key]: e.target.checked },
-                    })
-                  }
-                />
-              </div>
-            ))}
+              ))}
           <GuestOrganizeToggle state={state} demo={view.demo} />
           {!view.demo && supports(state.companionVersion, 'drafts') && (
             <KeepSettingsForm state={state} connected={connected} />
           )}
           {/* Stage H (2.44): hidden for guests, the example and older companions (it checks the gate). */}
           <BackupsSection />
-          <div className="invite-field">
-            <label htmlFor="invite">Invitation link · anyone with this link can join</label>
-            <input id="invite" value={view.invite} readOnly onFocus={(e) => e.target.select()} />
-            <button disabled={!view.invite} onClick={() => void controller.copyInvite()}>
-              <Link size={15} /> Copy Invite
-            </button>
-            <button
-              onClick={() => {
-                if (confirm('Revoke the current invite and disconnect all guests?'))
-                  void controller.rotate();
-              }}
-            >
-              <RotateCcw size={15} /> Replace invite
-            </button>
-          </div>
-          <p className="muted">
-            Disconnect removes this connection only. Replace invite revokes the bearer link; a
-            disconnected guest can otherwise rejoin.
-          </p>
-          <SessionAccess view={view} />
+          {!view.demo && (
+            <>
+              <div className="invite-field">
+                <label htmlFor="invite">Invitation link · anyone with this link can join</label>
+                <input
+                  id="invite"
+                  value={view.invite}
+                  readOnly
+                  onFocus={(e) => e.target.select()}
+                />
+                <button disabled={!view.invite} onClick={() => void controller.copyInvite()}>
+                  <Link size={15} /> Copy Invite
+                </button>
+                <button
+                  onClick={() => {
+                    if (confirm('Revoke the current invite and disconnect all guests?'))
+                      void controller.rotate();
+                  }}
+                >
+                  <RotateCcw size={15} /> Replace invite
+                </button>
+              </div>
+              <p className="muted">
+                Disconnect removes this connection only. Replace invite revokes the bearer link; a
+                disconnected guest can otherwise rejoin.
+              </p>
+              <SessionAccess view={view} />
+            </>
+          )}
           <button
             className="danger-link"
             disabled={!connected}

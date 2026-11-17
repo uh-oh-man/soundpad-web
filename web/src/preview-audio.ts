@@ -1,7 +1,21 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { z } from 'zod';
 import { controller } from './controller';
 import type { Command } from './protocol';
+
+type PreviewTransport = { stop: () => void; toggle: () => void; paused: boolean };
+let active: PreviewTransport | null = null;
+const listeners = new Set<() => void>();
+const publish = (next: PreviewTransport | null) => {
+  active = next;
+  for (const listener of listeners) listener();
+};
+const subscribe = (listener: () => void) => {
+  listeners.add(listener);
+  return () => listeners.delete(listener);
+};
+export const currentPreview = () => active;
+export const usePreviewTransport = () => useSyncExternalStore(subscribe, currentPreview);
 
 type Request = { op: Command['op']; fields: Partial<Command>; loop: boolean; keep?: boolean };
 
@@ -20,6 +34,7 @@ type Request = { op: Command['op']; fields: Partial<Command>; loop: boolean; kee
 export function usePreviewAudio() {
   const audio = useRef<HTMLAudioElement | null>(null);
   const generation = useRef(0);
+  const audioGeneration = useRef(0);
   const busy = useRef(false);
   const waiting = useRef<Request[]>([]);
   const idle = useRef<(() => void)[]>([]);
@@ -30,6 +45,8 @@ export function usePreviewAudio() {
     for (const r of resolve) r();
   }, []);
   const [previewing, setPreviewing] = useState(false);
+  const [paused, setPaused] = useState(false);
+  const pausedRef = useRef(false);
   const release = useCallback(() => {
     if (!audio.current) return;
     audio.current.pause();
@@ -42,9 +59,26 @@ export function usePreviewAudio() {
     waiting.current = waiting.current.filter((w) => w.keep);
     release();
     setPreviewing(false);
+    setPaused(false);
+    pausedRef.current = false;
+    if (active?.stop === stop) publish(null);
     if (!busy.current) wake();
   }, [release, wake]);
   useEffect(() => stop, [stop]);
+  const toggle = useCallback(() => {
+    if (active?.stop !== stop) return;
+    const next = !pausedRef.current;
+    pausedRef.current = next;
+    setPaused(next);
+    publish({ ...active, paused: next });
+    const sound = audio.current;
+    if (!sound || audioGeneration.current !== generation.current) return;
+    if (next) sound.pause();
+    else
+      void sound.play().catch(() => {
+        if (audio.current === sound && !pausedRef.current) stop();
+      });
+  }, [stop]);
   const fetchAndPlay = useCallback(
     async ({ op, fields, loop }: Request, mine: number) => {
       busy.current = true;
@@ -67,7 +101,7 @@ export function usePreviewAudio() {
           next();
         }
         const result = z.object({ wav: z.string().max(8_000_000) }).parse(answer);
-        if (mine !== generation.current) return; // stopped or replaced meanwhile
+        if (mine !== generation.current || active?.stop !== stop) return; // stopped or replaced meanwhile
         release();
         const bytes = Uint8Array.from(atob(result.wav), (c) => c.charCodeAt(0));
         const sound = new Audio(URL.createObjectURL(new Blob([bytes], { type: 'audio/wav' })));
@@ -76,11 +110,12 @@ export function usePreviewAudio() {
           if (mine === generation.current) stop();
         };
         audio.current = sound;
+        audioGeneration.current = mine;
         try {
-          await sound.play();
+          if (!pausedRef.current) await sound.play();
         } catch {
           // The browser refused to play (no output device, or it decided the click was too long ago).
-          if (mine !== generation.current) return;
+          if (mine !== generation.current || pausedRef.current) return;
           stop();
           controller.notify(
             'This browser blocked the preview sound. Press Preview again.',
@@ -99,7 +134,12 @@ export function usePreviewAudio() {
       fields: Partial<Command>,
       { loop = false, keep = false }: { loop?: boolean; keep?: boolean } = {},
     ) => {
+      if (active && active.stop !== stop) active.stop();
       const mine = ++generation.current;
+      release();
+      pausedRef.current = false;
+      setPaused(false);
+      publish({ stop, toggle, paused: false });
       setPreviewing(true);
       // One at a time: the newest request waits for the one being made. Older waiting ones are dropped,
       // except those made with keep, which each still go in their turn.
@@ -107,7 +147,7 @@ export function usePreviewAudio() {
         waiting.current = [...waiting.current.filter((w) => w.keep), { op, fields, loop, keep }];
       } else await fetchAndPlay({ op, fields, loop, keep }, mine);
     },
-    [fetchAndPlay],
+    [fetchAndPlay, release, stop, toggle],
   );
   /** Resolves once no preview is being made and none waits (each has been answered). */
   const settled = useCallback(
@@ -128,7 +168,9 @@ export function usePreviewAudio() {
    */
   const elapsedMs = useCallback(() => {
     const sound = audio.current;
-    return sound && !sound.paused ? sound.currentTime * 1000 : null;
+    return sound && audioGeneration.current === generation.current
+      ? sound.currentTime * 1000
+      : null;
   }, []);
-  return { previewing, play, stop, setLooping, settled, elapsedMs };
+  return { previewing, paused, toggle, play, stop, setLooping, settled, elapsedMs };
 }

@@ -235,7 +235,7 @@ export function blockPeaks(pcm: Pcm, blockMs = 10) {
     const b = Math.floor(i / block);
     if (v > peaks[b]) peaks[b] = v;
   }
-  return { blockMs, peaks };
+  return { samples: source, rate: pcm.rate, block, peaks };
 }
 
 /**
@@ -243,7 +243,7 @@ export function blockPeaks(pcm: Pcm, blockMs = 10) {
  * before 0 ms (before listening started) are empty.
  */
 export function loopLevels(
-  { blockMs, peaks }: { blockMs: number; peaks: Float32Array },
+  { samples, rate, block, peaks }: ReturnType<typeof blockPeaks>,
   fromMs: number,
   toMs: number,
   count: number,
@@ -251,16 +251,19 @@ export function loopLevels(
   const levels: number[] = [];
   const width = (toMs - fromMs) / count;
   for (let i = 0; i < count; i++) {
-    const a = fromMs + i * width,
-      b = a + width;
-    if (b <= 0) {
-      levels.push(0);
-      continue;
-    }
+    const start = Math.max(0, Math.round(((fromMs + i * width) * rate) / 1000));
+    const end = Math.round(((fromMs + (i + 1) * width) * rate) / 1000);
     let loudest = 0;
-    for (let t = Math.max(0, a); t < b; t += blockMs) {
-      const index = Math.floor(t / blockMs) % peaks.length;
-      loudest = Math.max(loudest, peaks[index]);
+    for (let at = start; samples.length && at < end;) {
+      const offset = at % samples.length;
+      // Reuse whole blocks. On either edge, read only the actual samples inside this bin.
+      if (offset % block === 0 && offset + block <= samples.length && at + block <= end) {
+        loudest = Math.max(loudest, peaks[offset / block]);
+        at += block;
+      } else {
+        loudest = Math.max(loudest, Math.abs(samples[offset]));
+        at++;
+      }
     }
     levels.push(Math.max(0, Math.min(1000, Math.round(loudest * 1000))));
   }

@@ -104,8 +104,8 @@ export function TryExample({ loading }: { loading: boolean }) {
         {loading ? 'Loading the example…' : 'Try the example'}
       </button>
       <p id="try-example-note">
-        Try the example: sounds, Mimic history and drafts, voices, sentences and simulated guests.
-        Nothing is sent to Soundpad; sounds play in this browser.
+        Try the example: sounds, Mimic history and drafts, voices and sentences. Nothing is sent to
+        Soundpad; sounds play in this browser.
       </p>
     </div>
   );

@@ -218,7 +218,7 @@ public sealed class WhisperEngine(string modelPath, string? sharedModelPath = nu
 public sealed class MimicTranscriber(ITranscriptEngine engine) : IDisposable
 {
     public const int SpeechRate = 16000;
-    private const double BackfillChunkSeconds = 15, PauseSeconds = 0.35, CutSearchSeconds = 3, CutWindowMs = 300, EdgeMs = 50;
+    private const double BackfillChunkSeconds = 15, PauseSeconds = 0.35, CutSearchSeconds = 3, LiveCutSearchMs = 800, CutWindowMs = 300, EdgeMs = 50;
     private const int MaxRequests = 8;
     private readonly object gate = new();
     private HistoryStore? store;
@@ -436,12 +436,12 @@ public sealed class MimicTranscriber(ITranscriptEngine engine) : IDisposable
         long rate = history.Rate, length = live - start;
         var (minSeconds, maxSeconds) = Mode switch
         {
-            SubtitleMode.Fast => (1.0, 7),
-            SubtitleMode.Balanced => (1.25, 9),
-            _ => (1.5, 10)
+            SubtitleMode.Fast => (1.0, 3.0),
+            SubtitleMode.Balanced => (1.25, 3.5),
+            _ => (1.5, 4.0)
         };
         if (length < minSeconds * rate && !(force && length >= rate * 3 / 10)) return false;
-        long end = start + Math.Min(length, maxSeconds * rate);
+        long end = start + Math.Min(length, (long)(maxSeconds * rate));
         float[] audio;
         try { audio = history.Read(HistoryAccess.Host, start, (int)(end - start)); }
         catch (HistoryUnavailableException ex)
@@ -465,8 +465,8 @@ public sealed class MimicTranscriber(ITranscriptEngine engine) : IDisposable
         long cut = end; bool forced = false;
         if (!pause && full)
         {
-            // No pause in this window: cut at the quietest moment of the last few seconds rather than at the hard end.
-            double at = energy.QuietestBetween(energy.DurationMs - CutSearchSeconds * 1000, energy.DurationMs, CutWindowMs);
+            // No pause in this window: look near the end so the cut still makes timely progress.
+            double at = energy.QuietestBetween(energy.DurationMs - LiveCutSearchMs, energy.DurationMs, CutWindowMs);
             if (at > 1000 && at < energy.DurationMs) cut = start + (long)(at * rate / 1000);
             forced = !energy.QuietBetween(at - CutWindowMs / 2, at + CutWindowMs / 2);
         }
@@ -587,7 +587,7 @@ public sealed class MimicTranscriber(ITranscriptEngine engine) : IDisposable
             double from = aligned.Where(w => w.Phrase == last).Select(w => w.StartMs).DefaultIfEmpty(spans[^1].Start.TotalMilliseconds).Min();
             from = Math.Min(from, spans[^1].Start.TotalMilliseconds);
             long held = start + (long)(Math.Max(0, from) * rate / 1000);
-            if (held > start) { next = held; aligned.RemoveAll(w => w.Phrase == last); }
+            if (held > start && cut - held <= rate) { next = held; aligned.RemoveAll(w => w.Phrase == last); }
         }
         double snr = energy.PeakDb - energy.FloorDb;
         var phrases = new Dictionary<int, long>();
