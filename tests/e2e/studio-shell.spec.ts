@@ -521,10 +521,18 @@ test('keyboard order: skip links, topbar, nav, search, tiles, then the player; S
     if (order.at(-1) === 'player') break;
   }
   const first = (kind: string) => order.indexOf(kind);
-  expect(order[0]).toBe(linksTab ? 'skip' : 'topbar');
+  const navInTopbar = await page
+    .locator('header.topbar nav[aria-label="Sections"]')
+    .count()
+    .then((n) => n > 0);
+  // Without links in the Tab order (Safari) the first stop is in the topbar: with top tabs (the default since
+  // 2.47) that is the section nav inside it.
+  if (linksTab) expect(order[0]).toBe('skip');
+  else expect(['topbar', 'nav']).toContain(order[0]);
   for (const [a, b] of [
     ...(linksTab ? [['skip', 'topbar']] : []),
-    ['topbar', 'nav'],
+    // A sidebar nav comes after the whole topbar; top tabs sit inside it (checked by the order inside it).
+    ...(navInTopbar ? [] : [['topbar', 'nav']]),
     ['nav', 'search'],
     ['search', 'tile'],
     ['tile', 'player'],
