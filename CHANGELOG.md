@@ -2,6 +2,16 @@
 
 Notable changes to Soundpad Web. Versions follow the website's `package.json`; the Windows companion is versioned separately and only needs updating when a release says so.
 
+## Unreleased
+
+### Changed
+
+- **A new start page.** The screen you see before connecting is redesigned, after an AI-generated mockup the owner made. It has its own header with the app's icon, name, version and connection status, and links to **How it works**, **Try the real demo** and GitHub. Connected screens keep the usual header.
+- **"Give your friends the soundboard."** The top of the page says what the app is in one line, with **Mess with the demo** (the example session; it was called **Try the example**) and **Host from your PC**, which opens the latest release.
+- **A tiny soundboard you can press right away.** Six pretend pads (Vine boom, Bruh, Victory, Airhorn, Wow, Applause) play a short tone in your browser, with categories, a Now playing bar with a moving waveform, and Stop. Keys 1 to 6 press them too. It downloads nothing and sends nothing anywhere. With reduced motion the card stays level and the waveform stays still.
+- **How it works and the features, explained.** Three steps for hosting, then short notes on Mimic, the voice library, Sentences, Organize, backups and updates, and privacy and Panic.
+- **Credits for the AI that made it.** A credits section says the app and the page are written by AI (Codex and Claude), directed by the owner, and that the page's look started as an AI-made image.
+
 ## 2.47.0 — A new Mimic page, and fixes from a full review
 
 Mimic is one full page with the live transcript first and a smoothly moving waveform; top tabs are the default navigation; and the fixes from a review of 2.46. **Update the companion** for the Temp and live-subtitle fixes and the count of removed files waiting to be freed; with an older companion everything else in this release works.

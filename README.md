@@ -20,7 +20,7 @@ You can still open the website in Chrome or Edge on the same PC as an extra view
 
 ## Try it first
 
-Press **Try the example** on the [website](https://uh-oh-man.github.io/soundpad-web/) to try the soundboard, edited copies, Mimic's recording history with drafts, voices and sentences with example sounds, in your browser only. Nothing is sent to Soundpad and you need no companion for it. Controls that only work on the host's PC are marked **Host's PC only** and say why; leaving the example says what it clears.
+Press **Mess with the demo** (or **Try the real demo** at the top) on the [website](https://uh-oh-man.github.io/soundpad-web/) to try the soundboard, edited copies, Mimic's recording history with drafts, voices and sentences with example sounds, in your browser only. Nothing is sent to Soundpad and you need no companion for it. Controls that only work on the host's PC are marked **Host's PC only** and say why; leaving the example says what it clears.
 
 ## Join a session
 
