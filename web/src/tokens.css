@@ -49,6 +49,10 @@
   --warning: #ffb547;
   --warning-soft: #2a1d06;
   --success: #45d69b;
+  /* The app icon's colours ("Minimal orbit"): the start page's orbit, ribbon and accents in every theme. */
+  --brand-cyan: #3ff0ff;
+  --brand-violet: #a66bff;
+  --brand-navy: #0f1430;
   --voice-1: #f2a65a;
   --voice-2: #7fd1ae;
   --voice-3: #c792ea;

@@ -55,7 +55,7 @@ test('the start page header: name, version, status and links, and only before co
   await expect(page.locator('header.home-bar .status')).toHaveText('Not connected');
 });
 
-test('the pretend soundboard plays in this browser, filters, and Stop ends it', async ({
+test('the pretend soundboard plays in this browser, says who pressed what, filters, and Stop ends it', async ({
   page,
 }) => {
   // Count what the page asks Web Audio to play, without hearing it.
@@ -71,14 +71,24 @@ test('the pretend soundboard plays in this browser, filters, and Stop ends it', 
   page.on('request', (r) => requests.push(r.url()));
   await page.goto('/');
   const board = page.getByRole('region', { name: 'Go on. Press something.' });
-  const now = board.locator('.home-now strong');
+  const now = board.locator('.home-now');
+  const feed = board.getByRole('list', { name: 'Who pressed what' });
   await expect(now).toHaveText('Nothing yet. Go ahead.');
   // Pads are not the real board's "Play …" buttons.
   await expect(page.getByRole('button', { name: /Play / })).toHaveCount(0);
   const before = requests.length;
+  // Press as a friend: the feed says who pressed what, newest first.
+  await board.getByRole('button', { name: 'Sam', exact: true }).click();
+  await expect(board.getByRole('button', { name: 'Sam', exact: true })).toHaveAttribute(
+    'aria-pressed',
+    'true',
+  );
   await board.getByRole('button', { name: /^Airhorn/ }).click();
   await expect(now).toHaveText('Airhorn');
-  await expect(board.locator('.home-now')).toHaveClass(/is-live/);
+  await expect(board).toHaveClass(/is-live/);
+  await expect(board.getByText('pressed by Sam')).toBeVisible();
+  await expect(feed.getByRole('listitem').first()).toHaveText('Sam pressed Airhorn');
+  await expect(feed.getByRole('listitem')).toHaveCount(3);
   expect(await page.evaluate(() => (window as unknown as { tones: number[] }).tones)).toEqual([
     260,
   ]);
@@ -88,6 +98,7 @@ test('the pretend soundboard plays in this browser, filters, and Stop ends it', 
   await board.getByRole('button', { name: /^Bruh/ }).click();
   await expect(now).toHaveText('Bruh');
   await expect(now).toHaveText('Nothing yet. Go ahead.', { timeout: 3000 });
+  await expect(board).not.toHaveClass(/is-live/);
   // The keys 1 to 6 press the pads while the keyboard is in the board.
   await board.getByRole('button', { name: /^Vine boom/ }).focus();
   await page.keyboard.press('3');
@@ -106,7 +117,7 @@ test('the pretend soundboard plays in this browser, filters, and Stop ends it', 
   expect(requests.slice(before)).toEqual([]);
 });
 
-test('the start page never scrolls sideways, and reduced motion keeps the card still', async ({
+test('the start page never scrolls sideways, and reduced motion keeps it a still picture', async ({
   page,
 }) => {
   for (const [width, height] of [
@@ -128,14 +139,19 @@ test('the start page never scrolls sideways, and reduced motion keeps the card s
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.emulateMedia({ reducedMotion: 'reduce' });
   await page.goto('/');
-  expect(await page.locator('.home-board').evaluate((el) => getComputedStyle(el).transform)).toBe(
-    'none',
-  );
   await page.getByRole('button', { name: /^Wow/ }).click();
-  expect(
-    await page
-      .locator('.home-wave i')
-      .first()
-      .evaluate((el) => getComputedStyle(el).animationName),
-  ).toBe('none');
+  await expect(page.locator('.home-orbit')).toHaveClass(/is-live/);
+  // Nothing moves: the hub's bars, the outer ring, the pad's ripple and the spark stay still.
+  for (const selector of ['.home-hub-mark rect', '.home-ring-outer', '.home-pad-ripple']) {
+    expect(
+      await page
+        .locator(selector)
+        .first()
+        .evaluate((el) => getComputedStyle(el).animationName),
+      selector,
+    ).toBe('none');
+  }
+  await expect(page.locator('.home-spark')).toBeHidden();
+  // The ribbon is still drawn (a still frame), and stays out of the accessibility tree.
+  await expect(page.locator('canvas.home-ribbon')).toHaveAttribute('aria-hidden', 'true');
 });
