@@ -55,7 +55,7 @@ test('the start page header: name, version, status and links, and only before co
   await expect(page.locator('header.home-bar .status')).toHaveText('Not connected');
 });
 
-test('the pretend soundboard plays in this browser, says who pressed what, filters, and Stop ends it', async ({
+test('the pretend soundboard plays in this browser, filters, and Stop ends it', async ({
   page,
 }) => {
   // Count what the page asks Web Audio to play, without hearing it.
@@ -72,23 +72,14 @@ test('the pretend soundboard plays in this browser, says who pressed what, filte
   await page.goto('/');
   const board = page.getByRole('region', { name: 'Go on. Press something.' });
   const now = board.locator('.home-now');
-  const feed = board.getByRole('list', { name: 'Who pressed what' });
   await expect(now).toHaveText('Nothing yet. Go ahead.');
   // Pads are not the real board's "Play …" buttons.
   await expect(page.getByRole('button', { name: /Play / })).toHaveCount(0);
   const before = requests.length;
-  // Press as a friend: the feed says who pressed what, newest first.
-  await board.getByRole('button', { name: 'Sam', exact: true }).click();
-  await expect(board.getByRole('button', { name: 'Sam', exact: true })).toHaveAttribute(
-    'aria-pressed',
-    'true',
-  );
   await board.getByRole('button', { name: /^Airhorn/ }).click();
   await expect(now).toHaveText('Airhorn');
   await expect(board).toHaveClass(/is-live/);
-  await expect(board.getByText('pressed by Sam')).toBeVisible();
-  await expect(feed.getByRole('listitem').first()).toHaveText('Sam pressed Airhorn');
-  await expect(feed.getByRole('listitem')).toHaveCount(3);
+  await expect(board.getByRole('button', { name: /^Airhorn/ })).toHaveClass(/is-playing/);
   expect(await page.evaluate(() => (window as unknown as { tones: number[] }).tones)).toEqual([
     260,
   ]);
@@ -139,10 +130,17 @@ test('the start page never scrolls sideways, and reduced motion keeps it a still
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.emulateMedia({ reducedMotion: 'reduce' });
   await page.goto('/');
+  // The card and its slab stand straight.
+  for (const selector of ['.home-board', '.home-board-slab']) {
+    expect(
+      await page.locator(selector).evaluate((el) => getComputedStyle(el).transform),
+      selector,
+    ).toBe('none');
+  }
   await page.getByRole('button', { name: /^Wow/ }).click();
-  await expect(page.locator('.home-orbit')).toHaveClass(/is-live/);
-  // Nothing moves: the hub's bars, the outer ring, the pad's ripple and the spark stay still.
-  for (const selector of ['.home-hub-mark rect', '.home-ring-outer', '.home-pad-ripple']) {
+  await expect(page.locator('.home-board')).toHaveClass(/is-live/);
+  // Nothing moves: the waveform's bars and the pad's ripple stay still.
+  for (const selector of ['.home-wave i', '.home-pad-ripple']) {
     expect(
       await page
         .locator(selector)
@@ -151,7 +149,6 @@ test('the start page never scrolls sideways, and reduced motion keeps it a still
       selector,
     ).toBe('none');
   }
-  await expect(page.locator('.home-spark')).toBeHidden();
   // The ribbon is still drawn (a still frame), and stays out of the accessibility tree.
   await expect(page.locator('canvas.home-ribbon')).toHaveAttribute('aria-hidden', 'true');
 });

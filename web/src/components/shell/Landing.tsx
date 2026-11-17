@@ -2,7 +2,7 @@ import { ArrowUpRight, Play, ShieldCheck } from 'lucide-react';
 import type { CSSProperties, ReactNode } from 'react';
 import { controller } from '../../controller';
 import { APP_VERSION_LABEL } from '../../version';
-import { HomeOrbit } from '../home/HomeOrbit';
+import { HomeBoard } from '../home/HomeBoard';
 import { HomeRibbon } from '../home/HomeRibbon';
 import { demoLoading, startDemo } from '../home/HomeBar';
 
@@ -221,8 +221,17 @@ export function Landing({ view }: { view: ReturnType<typeof controller.getSnapsh
   const loading = demoLoading(view);
   return (
     <main className="home" aria-labelledby="home-title">
+      {/* The icon's gradients, shared by the page's drawings (an svg that is never display:none). */}
+      <svg className="home-defs" width="0" height="0" aria-hidden="true" focusable="false">
+        <defs>
+          <linearGradient id="home-ring" x1="0" y1="0" x2="1" y2="1">
+            <stop offset="0" stopColor="var(--brand-cyan)" />
+            <stop offset="1" stopColor="var(--brand-violet)" />
+          </linearGradient>
+        </defs>
+      </svg>
       <div className="home-hero-band">
-        <HomeRibbon anchor="#home-hub" />
+        <HomeRibbon anchor="#home-now-bar" at="start" clear=".home-hero-copy" />
         <section className="home-hero">
           <div className="home-hero-copy">
             {view.resumeAvailable && (
@@ -238,7 +247,9 @@ export function Landing({ view }: { view: ReturnType<typeof controller.getSnapsh
             <p className="home-eyebrow">The group chat, but louder.</p>
             <h1 id="home-title">
               <span>Give your</span> <span>friends the</span>{' '}
-              <span className="home-highlight">soundboard.</span>
+              <span className="home-highlight">
+                <span>soundboard.</span>
+              </span>
             </h1>
             <p className="home-intro">They click a sound. Your PC plays it.</p>
             <p className="home-lede">
@@ -277,14 +288,17 @@ export function Landing({ view }: { view: ReturnType<typeof controller.getSnapsh
             </p>
           </div>
           <div className="home-hero-demo">
-            <HomeOrbit />
-            <p className="home-scribble" aria-hidden="true">
-              <svg viewBox="0 0 100 56">
-                <path d="M6 52C10 26 52 42 88 9" />
-                <path d="M73 9 89 7 88 23" />
-              </svg>
-              yes, these buttons work
-            </p>
+            <div className="home-board-wrap">
+              <span className="home-board-slab" aria-hidden="true" />
+              <HomeBoard />
+              <p className="home-scribble" aria-hidden="true">
+                <svg viewBox="0 0 100 56">
+                  <path d="M6 52C10 26 52 42 88 9" />
+                  <path d="M73 9 89 7 88 23" />
+                </svg>
+                ↖ yes, these buttons work
+              </p>
+            </div>
           </div>
         </section>
       </div>
@@ -383,8 +397,8 @@ export function Landing({ view }: { view: ReturnType<typeof controller.getSnapsh
           <div>
             <dt>Look of this page</dt>
             <dd>
-              Started as an AI-made image the owner liked, then grew its own orbit, after the app’s
-              icon.
+              Started as an AI-made image the owner liked, then rebuilt here for real, in the app’s
+              own colours.
             </dd>
           </div>
           <div>

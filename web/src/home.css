@@ -1,6 +1,6 @@
 /*
  * The start page (homepage): its own header (HomeBar), the hero with the ribbon (HomeRibbon) and the
- * orbit soundboard (HomeOrbit), the promises strip, How it works as a path, the features bento with
+ * pretend soundboard window (HomeBoard), the promises strip, How it works as a path, the features bento with
  * small previews and the credits roll (Landing), and the footer row under them. Owns every `.home*`
  * selector and `.is-landing > .project-footer`; nothing here styles a connected screen. Colours come
  * from tokens.css only (the icon's --brand-* colours, the theme and the voice colours). Rules sit under
@@ -210,16 +210,16 @@
   left: 0;
   z-index: 0;
   pointer-events: none;
-  /* Faint behind the words on the left, full strength through the orbit. */
-  mask-image: linear-gradient(90deg, transparent 18%, var(--surface-0) 58%);
+  /* HomeRibbon masks it so it never runs behind the words; this fades its far left end. */
+  mask-image: linear-gradient(90deg, transparent 20%, var(--surface-0) 60%);
 }
 .home-hero {
   position: relative;
   z-index: 1;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 600px);
+  grid-template-columns: minmax(0, 0.95fr) minmax(0, 1.05fr);
   align-items: center;
-  gap: 56px;
+  gap: 88px;
   padding-block: 56px 72px;
 }
 .home .home-eyebrow {
@@ -243,30 +243,22 @@
 .home h1 > span {
   display: block;
 }
-/* "soundboard." in the icon's two colours, with an orbit swung under it. */
+/* "soundboard." on a tilted slab in the icon's two colours; the word is tilted back to read level. */
 .home h1 > .home-highlight {
-  position: relative;
+  display: inline-block;
   width: fit-content;
-  padding: 0.04em 0.06em 0.12em 0;
+  margin: 0.1em 0 0 -0.1em;
+  padding: 0.02em 0.14em 0.1em 0.1em;
   background: var(--home-grad);
-  background-clip: text;
-  -webkit-background-clip: text;
-  color: transparent;
-  -webkit-text-fill-color: transparent;
+  box-shadow: 0.08em 0.08em 0 color-mix(in srgb, var(--brand-violet) 35%, transparent);
+  transform: rotate(-1.4deg);
 }
-.home h1 > .home-highlight::after {
-  content: '';
-  position: absolute;
-  z-index: -1;
-  left: -4%;
-  right: -6%;
-  bottom: -0.02em;
-  height: 0.42em;
-  border: 0.05em solid transparent;
-  border-bottom-color: color-mix(in srgb, var(--brand-violet) 75%, transparent);
-  border-left-color: color-mix(in srgb, var(--brand-violet) 35%, transparent);
-  border-radius: 50%;
-  transform: rotate(-3deg);
+.home-highlight > span {
+  display: inline-block;
+  color: var(--home-ink);
+  letter-spacing: -0.065em;
+  white-space: nowrap;
+  transform: rotate(1.4deg);
 }
 .home .home-intro {
   margin: 0 0 12px;
@@ -406,35 +398,132 @@
   filter: brightness(1.08);
 }
 
-/* ---- The orbit soundboard ----------------------------------------------------------------------- */
+/* ---- The pretend soundboard: a small app window, tilted, on a back slab ------------------------- */
 
+.home-defs {
+  position: absolute;
+  width: 0;
+  height: 0;
+  overflow: hidden;
+}
 .home-hero-demo {
   position: relative;
+  padding: 18px 0 56px;
 }
-.home-orbit {
+.home-board-wrap {
+  --pad-h: 118px;
   position: relative;
   width: 100%;
-  max-width: 600px;
+  max-width: 640px;
   margin-inline: auto;
 }
-.home-orbit-head {
+.home-board-slab {
+  position: absolute;
+  inset: 44px -10px -22px 30px;
+  border: 1px solid color-mix(in srgb, var(--brand-violet) 30%, transparent);
+  border-radius: 22px;
+  background: linear-gradient(
+    160deg,
+    color-mix(in srgb, var(--brand-violet) 14%, var(--surface-0)),
+    var(--surface-0)
+  );
+}
+.home-board {
+  position: relative;
+  z-index: 1;
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--brand-cyan) 18%, var(--line-strong));
+  border-radius: 18px;
+  background: var(--surface-1);
+  box-shadow:
+    0 30px 70px var(--shadow),
+    0 0 80px color-mix(in srgb, var(--brand-violet) 12%, transparent);
+  transition: transform 0.35s var(--ease-out);
+}
+@media (prefers-reduced-motion: no-preference) {
+  html:not([data-motion='reduce']) .home-board-slab {
+    transform: rotate(3deg);
+  }
+  html:not([data-motion='reduce']) .home-board {
+    transform: rotate(1.5deg);
+  }
+  html:not([data-motion='reduce']) .home-board:is(:hover, :focus-within) {
+    transform: rotate(0) translateY(-2px);
+  }
+}
+.home-board-top {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 14px 20px;
+  border-bottom: 1px solid var(--line);
+  background: var(--surface-2);
+}
+.home-board-dots {
+  display: flex;
+  gap: 6px;
+  margin-right: 8px;
+}
+.home-board-dots b {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--line-strong);
+}
+.home-board-dots b:first-child {
+  background: var(--brand-cyan);
+}
+.home-board-dots b:nth-child(2) {
+  background: var(--brand-violet);
+}
+.home .home-board-crumb {
+  color: var(--text-muted);
+  font-size: 14px;
+  line-height: 1.3;
+}
+.home-board-crumb strong {
+  color: var(--text-primary);
+  font-weight: 850;
+}
+.home-board-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+  padding: 6px 10px;
+  border: 1px solid color-mix(in srgb, var(--success) 45%, transparent);
+  border-radius: var(--radius-pill);
+  background: color-mix(in srgb, var(--success) 12%, var(--surface-1));
+  color: var(--success);
+  font: 700 11px/1 var(--font-mono);
+}
+.home-board-badge i {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+}
+.home-board-main {
+  padding: 20px 20px 18px;
+}
+.home-board-info {
   display: flex;
   align-items: flex-end;
   justify-content: space-between;
   gap: 12px;
 }
-.home .home-orbit-head h2 {
+.home .home-board-info h2 {
   font-size: 22px;
   font-weight: 850;
   letter-spacing: -0.6px;
 }
-.home .home-orbit-head p {
-  margin-top: 2px;
+.home .home-board-info p {
+  margin-top: 3px;
   color: var(--text-muted);
-  font-size: 13px;
+  font-size: 12.5px;
   line-height: 1.45;
 }
-.home-orbit-count {
+.home-board-count {
   flex: none;
   color: var(--text-dim);
   font: 11px/1.6 var(--font-mono);
@@ -447,19 +536,18 @@
   margin-top: 14px;
 }
 .home .home-chips button {
-  gap: 7px;
   min-height: 32px;
   padding: 0 13px;
   border: 1px solid var(--line);
   border-radius: var(--radius-pill);
-  background: color-mix(in srgb, var(--surface-1) 80%, transparent);
+  background: var(--surface-2);
   color: var(--text-muted);
   font-size: 12px;
   font-weight: 700;
 }
 .home .home-chips button:hover {
   border-color: color-mix(in srgb, var(--brand-cyan) 55%, var(--line));
-  background: color-mix(in srgb, var(--surface-2) 80%, transparent);
+  background: var(--surface-2);
   color: var(--text-primary);
 }
 .home .home-chips button[aria-pressed='true'] {
@@ -467,287 +555,205 @@
   background: var(--text-primary);
   color: var(--home-ink);
 }
-.home .home-chips.is-friends button i {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: var(--dot);
-}
-.home .home-chips.is-friends button[aria-pressed='true'] {
-  border-color: var(--dot);
-  background: color-mix(in srgb, var(--dot) 18%, var(--surface-1));
-  color: var(--text-primary);
-}
-.home-friends-label {
-  margin-right: 4px;
-  color: var(--text-dim);
-  font: 11px/1 var(--font-mono);
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-}
 
-/* The stage: rings, the empty slots, the pads on the orbit and the hub in the middle. */
-.home-stage {
-  --pad-w: 25%;
-  position: relative;
-  aspect-ratio: 1.22;
-  margin: 22px 0 16px;
-}
-.home-defs {
-  position: absolute;
-  width: 0;
-  height: 0;
-  overflow: hidden;
-}
-.home-rings {
-  position: absolute;
-  inset: 0;
-  width: 100%;
-  height: 100%;
-  overflow: visible;
-}
-.home-rings ellipse {
-  fill: none;
-  vector-effect: non-scaling-stroke;
-}
-.home-ring {
-  stroke: url(#home-ring);
-  stroke-width: 1.5;
-  opacity: 0.75;
-  transition:
-    opacity 0.3s,
-    stroke-width 0.3s;
-}
-.home-ring-outer {
-  stroke: var(--line-strong);
-  stroke-width: 1;
-  stroke-dasharray: 2 7;
-  opacity: 0.6;
-  transform-box: fill-box;
-  transform-origin: center;
-}
-.home-orbit.is-live .home-ring {
-  opacity: 1;
-  stroke-width: 2.5;
-}
-.home-orbit.is-live .home-rings {
-  filter: drop-shadow(0 0 10px var(--home-cyan-soft));
-}
-.home-slot {
-  position: absolute;
-  left: var(--x);
-  top: var(--y);
-  width: 9px;
-  height: 9px;
-  border: 1.5px solid var(--line-strong);
-  border-radius: 50%;
-  background: var(--surface-0);
-  transform: translate(-50%, -50%);
-}
-
-.home .home-pad {
-  position: absolute;
-  z-index: 2;
-  left: var(--x);
-  top: var(--y);
+/* The pads. */
+.home-pads {
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
-  align-items: center;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-auto-rows: var(--pad-h);
+  align-content: start;
   gap: 10px;
-  width: var(--pad-w);
-  min-width: 132px;
-  min-height: 64px;
-  padding: 10px 12px;
-  border: 1px solid color-mix(in srgb, var(--brand-cyan) 22%, var(--line));
-  border-radius: 18px;
+  margin-top: 16px;
+  /* Two rows always, so a filter with fewer sounds doesn't make the card jump. */
+  min-height: calc(var(--pad-h) * 2 + 10px);
+}
+.home .home-pad {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: flex-start;
+  gap: 0;
+  min-width: 0;
+  padding: 14px 14px 13px;
+  border: 1px solid color-mix(in srgb, var(--brand-cyan) 16%, var(--line));
+  border-radius: 14px;
   background: linear-gradient(
     165deg,
-    color-mix(in srgb, var(--brand-violet) 16%, var(--surface-2)),
-    var(--surface-1) 70%
+    color-mix(in srgb, var(--brand-violet) 12%, var(--surface-2)),
+    var(--surface-2) 75%
   );
   color: var(--text-primary);
   text-align: left;
   box-shadow:
-    inset 0 1px 0 color-mix(in srgb, var(--text-primary) 10%, transparent),
-    0 5px 0 color-mix(in srgb, var(--surface-0) 85%, transparent),
-    0 14px 30px var(--shadow);
-  transform: translate(-50%, -50%);
+    inset 0 1px 0 color-mix(in srgb, var(--text-primary) 8%, transparent),
+    0 4px 0 color-mix(in srgb, var(--surface-0) 85%, transparent);
   transition:
     transform var(--dur-press) var(--ease-out),
     border-color var(--dur-fast),
-    background var(--dur-fast),
     box-shadow var(--dur-press);
 }
 .home .home-pad:hover {
-  border-color: color-mix(in srgb, var(--brand-cyan) 65%, var(--line));
+  border-color: color-mix(in srgb, var(--brand-cyan) 55%, var(--line));
   background: linear-gradient(
     165deg,
-    color-mix(in srgb, var(--brand-violet) 26%, var(--surface-2)),
-    var(--surface-2) 70%
+    color-mix(in srgb, var(--brand-violet) 22%, var(--surface-2)),
+    var(--surface-3) 75%
   );
-  transform: translate(-50%, calc(-50% - 2px));
+  transform: translateY(-2px);
 }
+/* Pressed or playing: down onto its shadow, with the icon's gradient as the edge. */
 .home .home-pad:active,
 .home .home-pad.is-playing {
-  border-color: var(--brand-cyan);
-  background: linear-gradient(
-    165deg,
-    color-mix(in srgb, var(--brand-cyan) 26%, var(--surface-2)),
-    color-mix(in srgb, var(--brand-violet) 24%, var(--surface-1))
-  );
-  transform: translate(-50%, calc(-50% + 4px));
+  border-color: transparent;
+  background:
+    linear-gradient(
+        165deg,
+        color-mix(in srgb, var(--brand-cyan) 18%, var(--surface-2)),
+        color-mix(in srgb, var(--brand-violet) 20%, var(--surface-1))
+      )
+      padding-box,
+    var(--home-grad) border-box;
+  transform: translateY(4px);
   box-shadow:
-    inset 0 2px 8px color-mix(in srgb, var(--surface-0) 60%, transparent),
-    0 1px 0 color-mix(in srgb, var(--surface-0) 85%, transparent),
-    0 0 28px var(--home-cyan-soft);
+    inset 0 2px 8px color-mix(in srgb, var(--surface-0) 55%, transparent),
+    0 0 26px var(--home-cyan-soft);
 }
 .home .home-pad:focus-visible {
   box-shadow:
     var(--focus-ring),
-    0 5px 0 color-mix(in srgb, var(--surface-0) 85%, transparent);
+    0 4px 0 color-mix(in srgb, var(--surface-0) 85%, transparent);
+}
+.home-pad-key {
+  position: absolute;
+  top: 11px;
+  right: 12px;
+  color: var(--text-muted);
+  font: 11px/1 var(--font-mono);
 }
 .home-pad-icon {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 34px;
-  height: 34px;
-  border-radius: 50%;
-  background: color-mix(in srgb, var(--brand-cyan) 14%, var(--surface-0));
+  width: 32px;
+  height: 32px;
+  margin-bottom: auto;
+  border-radius: 9px;
+  background: color-mix(in srgb, var(--brand-cyan) 12%, var(--surface-0));
   color: var(--brand-cyan);
 }
 .home-pad.is-playing .home-pad-icon {
-  background: var(--brand-cyan);
+  background: var(--home-grad);
   color: var(--home-ink);
 }
-.home-pad-text {
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-}
 .home-pad-title {
+  max-width: 100%;
+  margin-top: 10px;
   overflow: hidden;
-  font-size: 15px;
+  font-size: 16px;
   font-weight: 850;
   letter-spacing: -0.2px;
-  line-height: 1.2;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 .home-pad-time {
+  margin-top: 2px;
   color: var(--text-muted);
-  font: 11px/1.4 var(--font-mono);
+  font: 11px/1.3 var(--font-mono);
 }
-.home-pad-key {
-  position: absolute;
-  top: -7px;
-  right: 10px;
-  min-width: 18px;
-  padding: 2px 5px;
-  border: 1px solid var(--line-strong);
-  border-radius: 5px;
-  background: var(--surface-0);
-  color: var(--text-muted);
-  font: 700 10px/1.2 var(--font-mono);
-  text-align: center;
+.home-pad.is-playing :is(.home-pad-key, .home-pad-time) {
+  color: var(--text-primary);
 }
 .home-pad-ripple {
   position: absolute;
   inset: -1px;
-  border: 2px solid var(--who);
+  border: 2px solid var(--brand-cyan);
   border-radius: inherit;
   opacity: 0;
   pointer-events: none;
 }
 
-/* The hub: the icon's bars and orbit, what is playing and Stop. */
-.home .home-hub {
-  position: absolute;
-  z-index: 1;
-  left: 50%;
-  top: 50%;
+/* Now playing: the ribbon flows out of its left end into the page. */
+.home-now-bar {
   display: flex;
-  flex-direction: column;
+  align-items: center;
+  gap: 13px;
+  padding: 13px 20px 15px;
+  border-top: 1px solid var(--line);
+  background: var(--surface-0);
+}
+.home-now-icon {
+  display: flex;
+  flex: none;
   align-items: center;
   justify-content: center;
-  gap: 6px;
-  width: 38%;
-  aspect-ratio: 1;
-  padding: 14px;
-  border: 1px solid color-mix(in srgb, var(--brand-cyan) 25%, var(--line));
+  width: 38px;
+  height: 38px;
+  border: 2px solid transparent;
   border-radius: 50%;
-  background: radial-gradient(
-    circle at 50% 30%,
-    color-mix(in srgb, var(--brand-navy) 70%, var(--surface-2)),
-    var(--surface-0) 72%
-  );
-  box-shadow:
-    inset 0 0 40px color-mix(in srgb, var(--brand-violet) 16%, transparent),
-    0 0 0 10px color-mix(in srgb, var(--surface-0) 50%, transparent),
-    0 0 70px var(--home-glow);
-  text-align: center;
-  transform: translate(-50%, -50%);
-  transition: box-shadow 0.3s;
+  background:
+    linear-gradient(var(--surface-0), var(--surface-0)) padding-box,
+    var(--home-grad) border-box;
+  color: var(--brand-cyan);
 }
-.home-orbit.is-live .home-hub {
-  box-shadow:
-    inset 0 0 50px color-mix(in srgb, var(--brand-cyan) 22%, transparent),
-    0 0 0 10px color-mix(in srgb, var(--surface-0) 50%, transparent),
-    0 0 90px color-mix(in srgb, var(--brand-cyan) 22%, transparent);
+.home-board.is-live .home-now-icon {
+  background: var(--home-grad) border-box;
+  color: var(--home-ink);
+  box-shadow: 0 0 22px var(--home-cyan-soft);
 }
-.home-hub-mark {
-  width: 46%;
-  height: auto;
-  overflow: visible;
-}
-.home-hub-mark rect {
-  fill: url(#home-bar);
-  opacity: 0.85;
-  transform-box: fill-box;
-  transform-origin: center;
-}
-.home-orbit.is-live .home-hub-mark rect {
-  opacity: 1;
-}
-.home-hub-orbit {
-  fill: none;
-  stroke: url(#home-ring);
-  stroke-width: 4;
-  stroke-linecap: round;
-}
-.home-hub-orbit.is-back {
-  opacity: 0.45;
-}
-.home .home-hub-label {
+.home .home-now-label {
   display: flex;
   flex-direction: column;
-  align-items: center;
-  max-width: 100%;
+  min-width: 0;
   color: var(--text-dim);
-  font: 10px/1.5 var(--font-mono);
-  letter-spacing: 0.12em;
+  font: 10.5px/1.5 var(--font-mono);
+  letter-spacing: 0.08em;
 }
-.home-hub-label strong {
-  max-width: 100%;
+.home-now-label strong {
   overflow: hidden;
   color: var(--text-primary);
-  font: 800 15px/1.3 var(--font-ui);
-  letter-spacing: -0.2px;
+  font: 800 14px/1.3 var(--font-ui);
+  letter-spacing: 0;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.home-hub-by {
-  letter-spacing: 0.02em;
+.home-wave {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: 3px;
+  min-width: 40px;
+  height: 30px;
+  overflow: hidden;
+}
+.home-wave i {
+  flex: none;
+  width: 3px;
+  height: var(--h);
+  border-radius: 3px;
+  background: var(--wave);
+  opacity: 0.7;
+  transition:
+    background var(--dur-fast),
+    opacity var(--dur-fast);
+}
+.home-board.is-live .home-wave i {
+  background: var(--brand-cyan);
+  opacity: 1;
+}
+.home-board.is-live .home-wave i:nth-child(n + 23) {
+  background: var(--brand-violet);
 }
 .home .home-stop {
+  flex: none;
   gap: 6px;
-  min-height: 30px;
+  min-height: 34px;
   padding: 0 12px;
   border: 1px solid var(--line-strong);
-  border-radius: var(--radius-pill);
-  background: var(--surface-1);
+  border-radius: 8px;
+  background: var(--surface-2);
   color: var(--text-primary);
-  font-size: 11px;
+  font-size: 11.5px;
   font-weight: 850;
   letter-spacing: 0.06em;
 }
@@ -755,73 +761,13 @@
   border-color: var(--danger);
   background: var(--danger-soft);
 }
-.home-spark {
-  /* Shown only with motion (below): without it a spark would be a dot that never moves. */
-  display: none;
-  position: absolute;
-  z-index: 3;
-  left: var(--x);
-  top: var(--y);
-  width: 12px;
-  height: 12px;
-  margin: -6px 0 0 -6px;
-  border-radius: 50%;
-  background: var(--who);
-  box-shadow: 0 0 16px var(--who);
-  opacity: 0;
-  pointer-events: none;
-}
 
-/* Who pressed what. */
-.home-friends {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-.home .home-friends .home-chips {
-  margin-top: 0;
-}
-.home .home-feed {
-  display: flex;
-  gap: 8px;
-  margin: 0;
-  padding: 0;
-  overflow: hidden;
-  list-style: none;
-  mask-image: linear-gradient(90deg, var(--surface-0) 80%, transparent);
-}
-.home-feed li {
-  display: inline-flex;
-  flex: none;
-  align-items: center;
-  gap: 7px;
-  padding: 6px 12px 6px 9px;
-  border: 1px solid color-mix(in srgb, var(--dot) 40%, var(--line));
-  border-radius: var(--radius-pill);
-  background: color-mix(in srgb, var(--dot) 9%, var(--surface-0));
-  color: var(--text-muted);
-  font-size: 12px;
-  white-space: nowrap;
-}
-.home-feed li:not(:first-child) {
-  opacity: 0.7;
-}
-.home-feed li i {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: var(--dot);
-}
-.home-feed li b {
-  color: var(--text-primary);
-}
-
-/* The hand-written note. */
+/* The hand-written note under the card. */
 .home .home-scribble {
   position: absolute;
-  z-index: 3;
-  left: -118px;
-  top: 64%;
+  z-index: 2;
+  bottom: -66px;
+  left: -64px;
   color: var(--brand-cyan);
   font: 700 14px/1 var(--font-mono);
   white-space: nowrap;
@@ -829,10 +775,10 @@
 }
 .home-scribble svg {
   position: absolute;
-  top: -44px;
-  left: 120px;
-  width: 70px;
-  height: 40px;
+  top: -46px;
+  left: 150px;
+  width: 80px;
+  height: 45px;
   fill: none;
   stroke: var(--brand-cyan);
   stroke-width: 2.4;
@@ -843,49 +789,19 @@
 /* ---- Motion (only when it is welcome) ----------------------------------------------------------- */
 
 @media (prefers-reduced-motion: no-preference) {
-  html:not([data-motion='reduce']) .home-ring-outer {
-    animation: home-turn 120s linear infinite;
-  }
-  html:not([data-motion='reduce']) .home-orbit.is-live .home-hub-mark rect {
-    animation: home-bar 0.42s ease-in-out infinite alternate;
-  }
-  html:not([data-motion='reduce']) .home-hub-mark rect:nth-of-type(2) {
-    animation-delay: -0.15s;
-  }
-  html:not([data-motion='reduce']) .home-hub-mark rect:nth-of-type(3) {
-    animation-delay: -0.3s;
-  }
-  html:not([data-motion='reduce']) .home-hub-mark rect:nth-of-type(4) {
-    animation-delay: -0.08s;
-  }
-  html:not([data-motion='reduce']) .home-hub-mark rect:nth-of-type(5) {
-    animation-delay: -0.22s;
+  html:not([data-motion='reduce']) .home-board.is-live .home-wave i {
+    animation: home-wave 0.7s ease-in-out var(--delay) infinite alternate;
   }
   html:not([data-motion='reduce']) .home-pad-ripple {
     animation: home-ripple 0.6s var(--ease-out);
-  }
-  html:not([data-motion='reduce']) .home-spark {
-    display: block;
-    animation: home-spark 0.5s ease-in;
-  }
-  html:not([data-motion='reduce']) .home-feed li:first-child {
-    animation: home-feed-in 0.35s var(--ease-out);
   }
   html:not([data-motion='reduce']) .home-pv-head {
     animation: home-playhead 2.6s linear infinite;
   }
 }
-@keyframes home-turn {
+@keyframes home-wave {
   to {
-    transform: rotate(360deg);
-  }
-}
-@keyframes home-bar {
-  from {
-    transform: scaleY(0.45);
-  }
-  to {
-    transform: scaleY(1.15);
+    height: 5px;
   }
 }
 @keyframes home-ripple {
@@ -895,24 +811,7 @@
   }
   to {
     opacity: 0;
-    transform: scale(1.3);
-  }
-}
-@keyframes home-spark {
-  from {
-    opacity: 1;
-  }
-  to {
-    left: 50%;
-    top: 50%;
-    opacity: 0;
-    transform: scale(0.4);
-  }
-}
-@keyframes home-feed-in {
-  from {
-    opacity: 0;
-    transform: translateX(-12px);
+    transform: scale(1.18);
   }
 }
 @keyframes home-playhead {
@@ -1199,14 +1098,13 @@
 .home-pv-mimic .home-mini-wave {
   height: 84px;
 }
-.home-pv-source {
-  display: flex;
-  align-items: center;
-  gap: 8px;
+.home .home-pv-source {
   margin-bottom: 16px;
   color: var(--text-dim);
 }
 .home-pv-source i {
+  display: inline-block;
+  margin-right: 6px;
   width: 8px;
   height: 8px;
   border-radius: 50%;
@@ -1503,29 +1401,16 @@
   font-size: 11px;
 }
 
-/* More contrast: no glow, grain or gradient text; solid lines. */
+/* More contrast: no grain behind the words. */
 :root[data-contrast='high'] .home-hero-band::after {
   display: none;
-}
-:root[data-contrast='high'] .home h1 > .home-highlight {
-  background: none;
-  color: var(--brand-cyan);
-  -webkit-text-fill-color: currentColor;
 }
 @media (prefers-contrast: more) {
   .home-hero-band::after {
     display: none;
   }
-  .home h1 > .home-highlight {
-    background: none;
-    color: var(--brand-cyan);
-    -webkit-text-fill-color: currentColor;
-  }
 }
 @media (forced-colors: active) {
-  .home h1 > .home-highlight {
-    -webkit-text-fill-color: currentColor;
-  }
   .home-ribbon,
   .home-hero-band::after {
     display: none;
@@ -1539,25 +1424,23 @@
     display: none;
   }
   .home-hero {
-    grid-template-columns: minmax(0, 1fr) minmax(0, 540px);
+    grid-template-columns: minmax(0, 0.92fr) minmax(0, 1.08fr);
     gap: 40px;
   }
   .home h1 {
     font-size: clamp(50px, 6vw, 78px);
   }
-  .home .home-pad {
-    min-width: 124px;
-    padding: 9px 10px;
+  .home-board-wrap {
+    --pad-h: 106px;
   }
-  .home-pad-icon {
-    width: 30px;
-    height: 30px;
+  .home .home-pad {
+    padding: 12px 12px 11px;
   }
   .home-pad-title {
-    font-size: 14px;
+    font-size: 14.5px;
   }
   .home .home-scribble {
-    display: none;
+    left: -24px;
   }
 }
 @media (max-width: 1000px) {
@@ -1651,76 +1534,50 @@
     grid-column: 1 / -1;
   }
 }
-/* Phones: the orbit folds into a hub bar over a 3 × 2 pad grid. */
+/* Phones: the card stands straight, without its slab or note, and the pads get smaller. */
 @media (max-width: 640px) {
-  .home-stage {
-    display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-    gap: 8px;
-    aspect-ratio: auto;
-    margin: 18px 0 14px;
+  .home-hero-demo {
+    padding: 0;
   }
-  .home-rings,
-  .home-slot,
-  .home-spark {
+  .home-board-slab,
+  .home .home-scribble {
     display: none;
   }
-  .home .home-hub {
-    position: relative;
-    left: auto;
-    top: auto;
-    grid-column: 1 / -1;
-    order: -1;
-    flex-direction: row;
-    justify-content: flex-start;
-    gap: 12px;
-    width: auto;
-    aspect-ratio: auto;
-    margin-bottom: 6px;
-    padding: 10px 10px 10px 12px;
-    border-radius: 18px;
-    text-align: left;
-    transform: none;
+  .home-board-wrap {
+    --pad-h: 96px;
   }
-  .home-hub-mark {
-    flex: none;
-    width: 46px;
+  .home-board-top {
+    padding: 12px 14px;
   }
-  .home .home-hub-label {
-    flex: 1;
+  .home-board-main {
+    padding: 14px;
+  }
+  .home-board-info {
+    flex-direction: column;
     align-items: flex-start;
-    min-width: 0;
+    gap: 6px;
+  }
+  .home-pads {
+    gap: 8px;
+    min-height: calc(var(--pad-h) * 2 + 8px);
   }
   .home .home-pad {
-    position: relative;
-    left: auto;
-    top: auto;
-    grid-template-columns: minmax(0, 1fr);
-    align-content: start;
-    gap: 6px;
-    width: auto;
-    min-width: 0;
-    min-height: 92px;
-    padding: 10px;
-    transform: none;
-  }
-  .home .home-pad:hover {
-    transform: translateY(-1px);
-  }
-  .home .home-pad:active,
-  .home .home-pad.is-playing {
-    transform: translateY(3px);
+    padding: 10px 9px;
   }
   .home-pad-icon {
-    width: 28px;
-    height: 28px;
+    width: 26px;
+    height: 26px;
   }
   .home-pad-title {
     font-size: 13px;
   }
   .home-pad-key {
-    top: 8px;
-    right: 8px;
+    top: 9px;
+    right: 9px;
+  }
+  .home-now-bar {
+    gap: 10px;
+    padding: 12px 14px;
   }
 }
 @media (max-width: 600px) {
@@ -1784,14 +1641,5 @@
   }
   .home-bar .home-status {
     font-size: 11px;
-  }
-  .home-orbit-head {
-    flex-direction: column;
-    align-items: flex-start;
-    gap: 4px;
-  }
-  .home-friends-label {
-    width: 100%;
-    margin-bottom: 2px;
   }
 }

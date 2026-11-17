@@ -7,7 +7,7 @@ import { onPulse } from './pulse';
 
 /**
  * The app's header ribbon, borrowed for the start page (homepage): the same strands, drawn by
- * ribbon/draw.ts, run across the hero with their crest on the pretend soundboard's hub, and a pad press
+ * ribbon/draw.ts, flow across the hero out of the pretend soundboard's Now playing bar, and a pad press
  * lifts them and sends a ripple along. Decorative (aria-hidden, no pointer events). It draws only while
  * on screen and the page is visible, at most 30 frames a second (an idle drift, cheap: 7 strands of 48
  * points). Under reduced motion or Header animation: Still it draws one still frame per change, and Off
@@ -26,7 +26,20 @@ function palette(element: Element): RibbonPalette {
   };
 }
 
-export function HomeRibbon({ anchor }: { anchor: string }) {
+/**
+ * `anchor` is the element the crest sits on; with `at="start"` the crest sits just outside its left
+ * edge instead, so the strands seem to flow out of it (the soundboard's Now playing bar).
+ */
+export function HomeRibbon({
+  anchor,
+  at = 'center',
+  clear,
+}: {
+  anchor: string;
+  at?: 'center' | 'start';
+  /** Text the strands must stay clear of (hidden left of its right edge). */
+  clear?: string;
+}) {
   const canvas = useRef<HTMLCanvasElement>(null);
   const reduced = useReducedMotion();
   const [animation] = usePref('headerAnimation');
@@ -56,7 +69,7 @@ export function HomeRibbon({ anchor }: { anchor: string }) {
       const box = host.getBoundingClientRect();
       if (!hub || !box.width) return;
       const r = hub.getBoundingClientRect();
-      const cx = r.left + r.width / 2 - box.left;
+      const cx = (at === 'start' ? r.left - 24 : r.left + r.width / 2) - box.left;
       const cy = r.top + r.height / 2 - box.top;
       width = Math.min(box.width, Math.max(cx / CREST_AT, box.width * 0.6));
       height = Math.min(320, Math.max(180, r.height * 1.4));
@@ -66,6 +79,12 @@ export function HomeRibbon({ anchor }: { anchor: string }) {
       element.style.width = `${width}px`;
       element.style.height = `${height}px`;
       element.style.top = `${cy - height / 2}px`;
+      // Never behind words: the strands appear only to the right of the text column, when it is beside.
+      const copy = clear ? document.querySelector(clear)?.getBoundingClientRect() : undefined;
+      const from = copy && copy.right < r.left ? copy.right - box.left + 8 : 0;
+      element.style.maskImage = from
+        ? `linear-gradient(90deg, transparent ${from}px, var(--surface-0) ${from + 70}px)`
+        : '';
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
       colors = palette(element);
     };
@@ -151,7 +170,7 @@ export function HomeRibbon({ anchor }: { anchor: string }) {
       document.removeEventListener('visibilitychange', shown);
       stop();
     };
-  }, [anchor, off, still]);
+  }, [anchor, at, clear, off, still]);
 
   if (off) return null;
   return <canvas ref={canvas} className="home-ribbon" aria-hidden="true" />;
