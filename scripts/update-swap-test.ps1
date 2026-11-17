@@ -10,6 +10,10 @@
 # test run that fails (each refused before anything is swapped; the old companion keeps running on its port and
 # token); and a new version that never becomes ready (the watchdog puts the old EXE back after 90 s and starts it
 # again, which answers on the same port and token).
+# 2.48, versioned names: the release serves SoundpadWeb.exe, SoundpadWeb-<new>.exe, SHA256.txt and SHA256SUMS.txt
+# (and once only the first and third, as releases up to 2.47 did). A companion named SoundpadWeb-<old>.exe (or with a
+# space) is updated to SoundpadWeb-<new>.exe and keeps SoundpadWeb-<old>.previous.exe; one that never becomes ready
+# gets its versioned name back; and a SoundpadWeb-<new>.exe already in the folder is never replaced (nameTaken).
 #
 #   scripts/update-swap-test.ps1 -Exe artifacts/release/SoundpadWeb.exe          (CI, after the smoke test)
 #   scripts/update-swap-test.ps1 -Dotnet <path to dotnet.exe>                     (publishes the old EXE itself)
@@ -48,6 +52,9 @@ public class FakeReleaseServer
     public byte[] Exe = new byte[0];
     public string Sha = "";
     public long Size;
+    /// Also publish SoundpadWeb-<version>.exe and SHA256SUMS.txt, as releases do since 2.48.
+    public bool Versioned = true;
+    public string VersionedName { get { return "SoundpadWeb-" + Version + ".exe"; } }
     /// -1 serves the whole EXE; otherwise only that many bytes (a truncated download).
     public int ServeBytes = -1;
     public List<string> Requests = new List<string>();
@@ -86,11 +93,14 @@ public class FakeReleaseServer
                 {
                     var json = "{\"tag_name\":\"" + tag + "\",\"draft\":false,\"prerelease\":false,\"html_url\":\"" + b + "/releases/tag/" + tag + "\",\"assets\":[" +
                         "{\"name\":\"SoundpadWeb.exe\",\"size\":" + Size + ",\"browser_download_url\":\"" + b + "/releases/download/" + tag + "/SoundpadWeb.exe\"}," +
+                        (Versioned ? "{\"name\":\"" + VersionedName + "\",\"size\":" + Size + ",\"browser_download_url\":\"" + b + "/releases/download/" + tag + "/" + VersionedName + "\"}," +
+                            "{\"name\":\"SHA256SUMS.txt\",\"size\":200,\"browser_download_url\":\"" + b + "/releases/download/" + tag + "/SHA256SUMS.txt\"}," : "") +
                         "{\"name\":\"SHA256.txt\",\"size\":66,\"browser_download_url\":\"" + b + "/releases/download/" + tag + "/SHA256.txt\"}]}";
                     Send(stream, 200, "application/json", Encoding.UTF8.GetBytes(json), method);
                 }
                 else if (path.EndsWith("/SHA256.txt")) Send(stream, 200, "text/plain", Encoding.UTF8.GetBytes(Sha + "\r\n"), method);
-                else if (path.EndsWith("/SoundpadWeb.exe"))
+                else if (Versioned && path.EndsWith("/SHA256SUMS.txt")) Send(stream, 200, "text/plain", Encoding.UTF8.GetBytes(Sha + "  SoundpadWeb.exe\n" + Sha + "  " + VersionedName + "\n"), method);
+                else if (path.EndsWith("/SoundpadWeb.exe") || (Versioned && path.EndsWith("/" + VersionedName)))
                 {
                     var body = Exe;
                     if (ServeBytes >= 0) { body = new byte[ServeBytes]; Array.Copy(Exe, body, ServeBytes); }
@@ -250,12 +260,23 @@ try {
     $pipe = $Matches[1]
     $server = [FakeReleaseServer]::new(); $server.Start()
 
-    function Run-Scenario([string]$name, [string]$serve, [int]$serveBytes, [string]$sha, [string]$mode, [string]$expect, [string]$windowFlag) {
+    # $appName: the companion's file name (2.48: a versioned one is updated to the new version's name).
+    # $plainOnly: the release has only SoundpadWeb.exe and SHA256.txt, as releases up to 2.47 did.
+    function Run-Scenario([string]$name, [string]$serve, [int]$serveBytes, [string]$sha, [string]$mode, [string]$expect, [string]$windowFlag, [string]$appName = 'SoundpadWeb.exe', [switch]$plainOnly) {
         if ($Skip -contains $name) { return "SKIP $name" }
         $app = Join-Path $root "app-$name"; $data = Join-Path $root "data-$name"
         New-Item -ItemType Directory -Path $app, $data | Out-Null
-        $appExe = Join-Path $app 'SoundpadWeb.exe'
+        $appExe = Join-Path $app $appName
         Copy-Item -LiteralPath $Exe -Destination $appExe
+        $stem = [IO.Path]::GetFileNameWithoutExtension($appName)
+        $targetExe = $appExe
+        if ($appName -match '^SoundpadWeb([- ])\d+\.\d+\.\d+\.exe$') { $targetExe = Join-Path $app "SoundpadWeb$($Matches[1])$new.exe" }
+        $previousExe = Join-Path $app "$stem.previous.exe"
+        $stalePrevious = Join-Path $app 'SoundpadWeb-0.0.1.previous.exe'
+        if ($targetExe -ne $appExe) { Set-Content -LiteralPath $stalePrevious -Value 'an older previous version' -Encoding ascii }
+        if ($expect -eq 'refused:nameTaken') { Set-Content -LiteralPath $targetExe -Value 'the host''s own copy' -Encoding ascii }
+        $server.Versioned = -not $plainOnly
+        [Threading.Monitor]::Enter($server.Requests); try { $server.Requests.Clear() } finally { [Threading.Monitor]::Exit($server.Requests) }
         if ($mode) { Set-Content -LiteralPath (Join-Path $app 'update-fixture.mode') -Value $mode -Encoding ascii }
         $bytes = [IO.File]::ReadAllBytes($serve)
         $server.Version = $new; $server.Exe = $bytes; $server.Size = $bytes.Length; $server.ServeBytes = $serveBytes
@@ -279,7 +300,8 @@ try {
                 $reason = $expect.Substring(8)
                 Assert ($client.WaitFor("`"reason`":`"$reason`"", 60000)) "$name : refused with $reason ($($client.LastUpdate()))"
                 Assert ((Version-Of $appExe) -eq $old) "$name : the EXE was not replaced"
-                Assert (-not (Test-Path -LiteralPath (Join-Path $app 'SoundpadWeb.previous.exe'))) "$name : nothing was swapped"
+                Assert (-not (Test-Path -LiteralPath $previousExe)) "$name : nothing was swapped"
+                if ($expect -eq 'refused:nameTaken') { Assert ((Get-Content -LiteralPath $targetExe -Raw).Trim() -eq 'the host''s own copy') "$name : the file with the new name was left alone" }
                 Assert (-not $proc.HasExited) "$name : the old companion keeps running"
                 $after = [BridgeClient]::TryConnect($port, $token, $origin, 10000)
                 Assert ($after -ne $null -and $after.WaitFor("`"companionVersion`":`"$old`"", 5000)) "$name : the same port and token answer"
@@ -295,12 +317,24 @@ try {
                 Assert ($after -ne $null) "$name : the same port and token answer after the update ($($pump.Text))"
                 Assert ($after.WaitFor("`"companionVersion`":`"$want`"", 10000)) "$name : version $want answers"
                 $child = Owner-Of $port
-                Assert ((Version-Of $appExe) -eq $want) "$name : SoundpadWeb.exe is version $want"
+                $installed = if ($expect -eq 'updated') { $targetExe } else { $appExe }
+                Assert ((Version-Of $installed) -eq $want) "$name : $([IO.Path]::GetFileName($installed)) is version $want"
                 if ($expect -eq 'updated') {
-                    Assert ((Version-Of (Join-Path $app 'SoundpadWeb.previous.exe')) -eq $old) "$name : the previous EXE stays beside it"
+                    Assert ((Version-Of $previousExe) -eq $old) "$name : the previous EXE stays beside it"
+                    $wantedExe = if ($plainOnly) { 'SoundpadWeb.exe' } else { $server.VersionedName }
+                    $requests = @($server.Requests.ToArray())
+                    Assert ($requests -contains "GET /releases/download/v$new/$wantedExe") "$name : $wantedExe was downloaded ($($requests -join ', '))"
+                    if ($targetExe -ne $appExe) {
+                        Assert (-not (Test-Path -LiteralPath $appExe)) "$name : the old versioned name is gone"
+                        Assert (-not (Test-Path -LiteralPath $stalePrevious)) "$name : an older version's previous EXE was removed"
+                    }
                 }
                 else {
-                    Assert (Test-Path -LiteralPath (Join-Path $app "SoundpadWeb.failed-$new.exe")) "$name : the failed EXE was put aside"
+                    Assert (Test-Path -LiteralPath (Join-Path $app "$stem.failed-$new.exe")) "$name : the failed EXE was put aside"
+                    if ($targetExe -ne $appExe) {
+                        Assert (-not (Test-Path -LiteralPath $targetExe)) "$name : nothing has the new name"
+                        Assert (Test-Path -LiteralPath $stalePrevious) "$name : nothing was cleaned without a successful start"
+                    }
                 }
                 Assert (@(Get-ChildItem -LiteralPath $data -Filter 'update-handoff.v1.bin*' -Force).Count -eq 0) "$name : the hand-over is gone"
             }
@@ -327,6 +361,11 @@ try {
     $results += Run-Scenario 'wrong-version' $Exe -1 '' '' 'refused:versionMismatch' '--no-window'
     $results += Run-Scenario 'probe-fail' $fixtureExe -1 '' 'probe-fail' 'refused:blocked' '--no-window'
     $results += Run-Scenario 'never-ready' $fixtureExe -1 '' '' 'rolledBack' '--no-window'
+    $results += Run-Scenario 'plain-only-release' $newExe -1 '' '' 'updated' '--no-window' -plainOnly
+    $results += Run-Scenario 'versioned' $newExe -1 '' '' 'updated' '--no-window' "SoundpadWeb-$old.exe"
+    $results += Run-Scenario 'versioned-space' $newExe -1 '' '' 'updated' '--no-window' "SoundpadWeb $old.exe"
+    $results += Run-Scenario 'versioned-name-taken' $newExe -1 '' '' 'refused:nameTaken' '--no-window' "SoundpadWeb-$old.exe"
+    $results += Run-Scenario 'versioned-never-ready' $fixtureExe -1 '' '' 'rolledBack' '--no-window' "SoundpadWeb-$old.exe"
     if ($Hidden) { $results += Run-Scenario 'success-hidden-window' $newExe -1 '' '' 'updated' '--hidden-window' }
     $results | ForEach-Object { Write-Output $_ }
     Write-Output 'PASS: self-update swap, verification refusals and rollback, with a local fake release server only. No internet, no real Soundpad, no window.'
