@@ -134,6 +134,16 @@ export function toPeaks(pairs: number[]) {
 /** First frame of the 30 s window ending at `end` (it can be negative at the start of a session). */
 export const windowStart = (end: number, rate: number) => end - msToFrames(WINDOW_MS, rate);
 
+/**
+ * Where the waveform as drawn ends (a whole frame): `shiftMs` (the live glide's lag, 2.47) before the end of
+ * the levels' window. The drawn edge usually falls between two frames; the frame at or just after it is taken,
+ * never the one before. "The last N seconds" up to this edge then start at or after the start of the view as
+ * drawn: rounding to the nearer frame put them up to half a frame earlier half the time, and a selection
+ * starting before the zoomed view widens it to the whole window.
+ */
+export const drawnEnd = (end: number, shiftMs: number, rate: number) =>
+  end - Math.floor((shiftMs * rate) / 1000);
+
 /** The oldest frame still held, or the live frame when nothing is. */
 export const oldestFrame = (t: Timeline) =>
   t.available.length ? t.available[0].startFrame : t.liveFrame;

@@ -39,6 +39,7 @@ import {
   bind,
   clampViewEnd,
   DEFAULT_HISTORY_VIEW,
+  drawnEnd,
   formatClock,
   formatSpan,
   framesToMs,
@@ -91,7 +92,7 @@ import {
 } from '../../library/voices';
 import { MimicWave } from './MimicWave';
 import { MimicOverview } from './MimicOverview';
-import { historyPoller, viewStillWanted } from '../../mimic/history-poll';
+import { historyPoller, levelsToDraw, viewStillWanted } from '../../mimic/history-poll';
 import { mimicKeysApply } from './keys';
 import { useFollowNewest } from '../../mimic/follow';
 import { followFocus } from '../../focus-follow';
@@ -233,7 +234,19 @@ export function MimicHistory({
   /** The current recording, also for replies that arrive after this render. */
   const currentSession = useRef(sessionId);
   currentSession.current = sessionId;
-  const main = ofSession(mainData, sessionId);
+  /** The waveform levels on screen (set once drawn), so a view held still keeps the window it was held on. */
+  const drawnMain = useRef<typeof mainData>(null);
+  const main = levelsToDraw(
+    ofSession(mainData, sessionId),
+    ofSession(drawnMain.current, sessionId),
+    {
+      follow,
+      viewEnd: timeline ? clampViewEnd(timeline, viewEnd) : viewEnd,
+    },
+  );
+  useLayoutEffect(() => {
+    drawnMain.current = main;
+  });
   const overview = ofSession(overviewData, sessionId);
   const shownTranscript = ofSession(transcript, sessionId);
   const words = useMemo(() => {
@@ -258,7 +271,7 @@ export function MimicHistory({
    * keeps its frame origin when they are fetched again) and the waveform keeps the glide's lag, so what was
    * seen stays where it was; "the last N seconds" are those up to this edge.
    */
-  const visibleEnd = () => Math.round(displayEnd - msToFrames(glideShift.current, rate));
+  const visibleEnd = () => drawnEnd(displayEnd, glideShift.current, rate);
 
   // Drafts: this person's (most recent first) and the other people's selections on this history.
   const { drafts: listed, budget } = useDraftStore();

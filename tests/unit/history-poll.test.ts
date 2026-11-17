@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { historyPoller, viewStillWanted } from '../../web/src/mimic/history-poll';
+import { historyPoller, levelsToDraw, viewStillWanted } from '../../web/src/mimic/history-poll';
 
 /**
  * Review finding (2.41): dragging the recording overview restarted the Mimic fetch loop on every pointer move,
@@ -121,5 +121,30 @@ describe('a waveform reply fits the view wanted now', () => {
   });
   it('drops a held reply once the view follows live again', () => {
     expect(viewStillWanted(held(48000), live)).toBe(false);
+  });
+});
+
+/**
+ * WebKit e2e flake (2.47): a live reply accepted while following was drawn in the same render as the press or
+ * quick select that held the view still, so the held view lost the live glide's lag and "Last 10 s" widened
+ * the 10 s view to 30 s (or a selection's edge slid from under the pointer).
+ */
+describe('a held view keeps the window it was held on', () => {
+  const at = (end: number) => ({ end, peaks: [end] });
+  const drawn = at(341908);
+  const newer = at(351142);
+  it('keeps drawing the held window when a live reply lands with the hold', () => {
+    expect(levelsToDraw(newer, drawn, { follow: false, viewEnd: drawn.end })).toBe(drawn);
+  });
+  it('draws the held window once it is fetched again', () => {
+    const again = at(drawn.end);
+    expect(levelsToDraw(again, drawn, { follow: false, viewEnd: drawn.end })).toBe(again);
+  });
+  it('follows live, and a moved view, with the newest levels as before', () => {
+    expect(levelsToDraw(newer, drawn, { follow: true, viewEnd: 0 })).toBe(newer);
+    // Moved elsewhere: the old window stays until the new one arrives, then the new one.
+    expect(levelsToDraw(drawn, drawn, { follow: false, viewEnd: 200000 })).toBe(drawn);
+    expect(levelsToDraw(at(200000), drawn, { follow: false, viewEnd: 200000 })).toEqual(at(200000));
+    expect(levelsToDraw(newer, null, { follow: false, viewEnd: drawn.end })).toBe(newer);
   });
 });
