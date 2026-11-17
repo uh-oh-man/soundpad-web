@@ -637,6 +637,28 @@ public sealed class VoiceLibraryTests : IDisposable
     }
 
     [Fact]
+    public async Task AGuestCannotPutBackAKeptClipTheHostTookOutOfTheLibrary()
+    {
+        await using var rig = new Rig(folder); var bridge = rig.Bridge;
+        await rig.Host();
+        rig.Advance(8);
+        var clip = Body(await Ok(bridge.Execute(Cmd("mimicClip") with { StartFrame = S(1.8), EndFrame = S(3), SourceId = rig.Session, Name = "Hosts line" }, "host")));
+        string assetId = clip.GetProperty("assetId").GetString()!;
+        var saved = Body(await Ok(bridge.Execute(Cmd("libraryKeep") with { AssetId = assetId }, "host")));
+        await Ok(bridge.Execute(Cmd("libraryRemove") with { RecordingIds = [saved.GetProperty("recordingId").GetString()!] }, "host"));
+        Assert.Equal(0, bridge.VoiceLibraryStore.Count);
+        // The clip is still kept (still listed), but the host decided it is not in the library: a guest can't undo that,
+        // neither by one-press Save nor by Keep naming its kept file.
+        Assert.Contains("Only the host can add it", await Refused(rig.As(Alice, Cmd("libraryKeep") with { AssetId = assetId })));
+        var kept = Body(await Ok(bridge.Execute(Cmd("audioAssets"), "host"))).GetProperty("manager").GetProperty("assets").EnumerateArray()
+            .First(a => a.GetProperty("id").GetString() == assetId).GetProperty("variants").EnumerateArray().First(v => v.GetProperty("permanent").GetBoolean()).GetProperty("id").GetString();
+        Assert.Contains("Only the host can add it", await Refused(rig.As(Alice, Cmd("keepAudio") with { AssetId = assetId, VariantId = kept })));
+        Assert.Equal(0, bridge.VoiceLibraryStore.Count);
+        // The host still can.
+        Assert.True(Body(await Ok(bridge.Execute(Cmd("libraryKeep") with { AssetId = assetId }, "host"))).GetProperty("added").GetBoolean());
+    }
+
+    [Fact]
     public async Task ADraftSavedToTheLibrarySaysItsNameAndWhereItWent()
     {
         await using var rig = new Rig(folder); var bridge = rig.Bridge;

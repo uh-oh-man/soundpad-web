@@ -259,7 +259,15 @@ public sealed partial class Bridge
         var asset = Audio.AssetById(assetId);
         var variant = (c.VariantId != null ? asset.Variants.SingleOrDefault(v => v.Id == c.VariantId) : KeepableVariant(assetId)) ?? throw new InvalidDataException("That clip is not ready to keep yet.");
         string guest = PersonKey(actor, participant, requester), name = Person(actor, participant).Name;
-        if (variant.Permanent) { LibraryFromKeep(assetId, guest, name, source, words); return; }
+        if (variant.Permanent)
+        {
+            // Kept already, so nothing is kept here: only its voice-library recording is made. A guest may do that only
+            // for a clip they made themselves (a keep of theirs the library could not take). Anyone else's kept clip,
+            // one the host removed from the library among them, stays as the host left it.
+            if (!GuestMade(assetId, actor, participant, requester)) throw new InvalidDataException("That clip is already kept. Only the host can add it to the voice library.");
+            LibraryFromKeep(assetId, guest, name, source, words);
+            return;
+        }
         if (budgets.CheckKeep(guest, name, variant.Bytes, settings) is { } refusal) { Publish(); throw new InvalidDataException(refusal); }
         // The host chose the destination once; a guest's command never carries a path.
         await Audio.Promote(assetId, variant.Id, settings.Destination, settings.CategoryId, settings.CategoryName, true);
@@ -268,6 +276,11 @@ public sealed partial class Bridge
         // Every kept clip is a voice-library recording (2.41).
         LibraryFromKeep(assetId, guest, name, source, words);
     }
+
+    /// <summary>A clip this guest added: from this connection, or (2.40) by this participant in this launch.</summary>
+    private bool GuestMade(string assetId, string actor, Participant? participant, string? requester) =>
+        actor != "host" && (Audio.OwnerOf(assetId) is { } owner && requester != null && owner.UploaderId == requester
+            || budgets.OwnerOf(assetId) is { } maker && maker == PersonKey(actor, participant, requester));
 
     /// <summary>
     /// Keep permanently into the voice library (2.41: a draft's "Keep in voice library"): the host's destination for
