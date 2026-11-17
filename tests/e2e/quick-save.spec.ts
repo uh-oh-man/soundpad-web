@@ -97,7 +97,7 @@ test('one-press Save: a selection, a Just mimicked clip and a clip in Voices go 
   await closeSection(page, 'Mimic');
   await page.getByRole('button', { name: 'Voices', exact: true }).click();
   const voices = section(page, 'Voices');
-  const unsaved = voices.getByRole('region', { name: 'In Temp, not saved yet' });
+  const unsaved = voices.getByRole('complementary', { name: 'In Temp, not saved yet' });
   // Only that one: the saved clips are kept for good, not in Temp any more.
   await expect(unsaved.getByRole('listitem')).toHaveCount(1, { timeout: TEMP_READY });
   const first = unsaved.getByRole('listitem').first();
@@ -144,7 +144,7 @@ test('one-press Save: a guest saves a Temp clip from Voices into the host’s li
   const guest = await joinGuest(page);
   await guest.getByRole('button', { name: 'Voices', exact: true }).click();
   const voices = section(guest, 'Voices');
-  const unsaved = voices.getByRole('region', { name: 'In Temp, not saved yet' });
+  const unsaved = voices.getByRole('complementary', { name: 'In Temp, not saved yet' });
   await expect(unsaved.getByRole('listitem')).toHaveCount(1, { timeout: 15000 });
   await unsaved.getByRole('button', { name: /^Save .+ to the voice library$/ }).click();
   const notice = saved(guest);

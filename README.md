@@ -30,7 +30,7 @@ Your browser keeps a private key for Soundpad Web, so the host knows it is you a
 
 ## Finding your way around
 
-- **Sections.** **Soundboard**, **Mimic**, **Voices** and **Sentences** are listed in the sidebar, or as tabs along the top if you choose **Top tabs** in **Settings → Appearance → Navigation**. Voices and Sentences remember their tab, what you had open and where you had scrolled.
+- **Sections.** **Soundboard**, **Mimic**, **Voices** and **Sentences** are tabs along the top, or listed in a sidebar if you choose **Sidebar** in **Settings → Appearance → Navigation**. Voices and Sentences remember their tab, what you had open and where you had scrolled.
 - **The editor panel.** The copy editor, a sound's editor and **Activity** open on the right, beside the board, which stays playable. Drag the panel's edge, or focus it and use the arrow keys, to change its width. On a phone the panel is a sheet: **Show board** folds it to a bar above the player, **Show editor** brings it back.
 - **A sound's editor.** Every tile has **Open editor for …**, and the player has **Details for …**: the sound's waveform with cues and regions, effect and speed copies, its icon and its statistics. With companion 2.43 or newer, copies can start from any Soundpad sound; older companions make them from Temp audio only.
 - **Tiles** say **Queued**, **Playing** or **Held**. Hover or focus a tile for quick **Reverse** and **Speed** (0.5× to 2×; the copy goes to Temp and plays when it is ready).

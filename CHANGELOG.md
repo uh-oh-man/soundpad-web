@@ -2,10 +2,14 @@
 
 Notable changes to Soundpad Web. Versions follow the website's `package.json`; the Windows companion is versioned separately and only needs updating when a release says so.
 
-## Unreleased
+## 2.47.0 — A new Mimic page, and fixes from a full review
+
+Mimic is one full page with the live transcript first and a smoothly moving waveform; top tabs are the default navigation; and the fixes from a review of 2.46. **Update the companion** for the Temp and live-subtitle fixes and the count of removed files waiting to be freed; with an older companion everything else in this release works.
+
 
 ### Changed
 
+- **Top tabs are the default navigation.** The sections (Soundboard, Mimic, Voices, Sentences) sit in the top bar unless you choose the sidebar in **Settings → Appearance**; a choice you already made is kept, in your browser and in the companion window.
 - **Mimic is redesigned as one full page** (from the Feedback button: "Mimic screen needs a complete overhaul", "a good looking full screen mimic page where i can do everything"). A short header holds the title, what Mimic is listening to, Start or Stop listening, **Mimic settings** (now a panel that opens over the page) and **Fill window**. Below it are two columns. The left column has the timeline strip with the waveform and its words, then the live transcript, then one action bar. The right column is **Clips**: your drafts, Just mimicked, and other people's selections. At 1440×900 and 1280×720 the transcript is on screen without scrolling.
 - **The newest words are easy to reach** ("cant ... get to the word they said imeeditly"). The newest sentence is marked. When you scroll back, **Jump to latest** floats over the transcript, and End still works.
 - **One action bar.** It holds what is selected, the clip name, Preview, Mimic & play (Play into game for a draft), Capture, Save, Share and the Keep buttons. Under them are the quick captures: Last 3/5/10 s, Latest phrase, Last 10 seconds and Play latest phrase. With nothing selected it is a single row. **Clear** is the ✕ beside the selection.

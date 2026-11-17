@@ -6,6 +6,7 @@ Every release stays on GitHub permanently, so any earlier version can be restore
 
 | Version | What it is | Git tag | Download |
 | --- | --- | --- | --- |
+| 2.47.0 | A new Mimic page, and fixes from a full review | `v2.47.0` | [Release](https://github.com/uh-oh-man/soundpad-web/releases/tag/v2.47.0) |
 | 2.46.0 | Reading transcript, full-page Mimic and sentence editor | `v2.46.0` | [Release](https://github.com/uh-oh-man/soundpad-web/releases/tag/v2.46.0) |
 | 2.45.0 | Feedback and real-Soundpad fixes | Untagged | Local builds in `artifacts/` |
 | 2.44.0 | Backups, updates, Organize and setup | `v2.44.0` | [Release](https://github.com/uh-oh-man/soundpad-web/releases/tag/v2.44.0) |
