@@ -63,6 +63,7 @@ import { clearWaveforms } from './waveform-cache';
 import { useAccessibilityPrefs } from './motion';
 import { KickCounter } from './components/KickCounter';
 import { Landing, PROJECT_URL, ProjectFooter } from './components/shell/Landing';
+import { HomeBar } from './components/home/HomeBar';
 import { DemoBanner } from './components/shell/DemoBanner';
 import { TopBar } from './components/shell/TopBar';
 import { SectionHeader } from './components/shell/SectionHeader';
@@ -124,6 +125,7 @@ import './organize.css';
 import './setup.css';
 import './feedback.css';
 import './mimic-page.css';
+import './home.css';
 
 const viewLabels: Record<(typeof viewModes)[number], string> = {
   icons: 'Icons',
@@ -820,27 +822,31 @@ function App() {
         rail={rail}
         mimicFill={full}
         topbar={
-          <TopBar
-            view={view}
-            connected={connected}
-            host={host}
-            mimicListening={mimicListening}
-            kept={kept}
-            canMimic={canMimic}
-            openMimic={() => openEditor({ kind: 'mimic' })}
-            openSettings={() => setSettings(true)}
-            nav={sectionNav('topbar')}
-            activity={{
-              unread,
-              open: shownPanel?.kind === 'activity',
-              show: () => openEditor({ kind: 'activity' }),
-            }}
-            feedback={
-              connected && !view.demo && supports(state.companionVersion, 'feedback')
-                ? () => setFeedbackOpen(true)
-                : undefined
-            }
-          />
+          mode === 'landing' ? (
+            <HomeBar view={view} />
+          ) : (
+            <TopBar
+              view={view}
+              connected={connected}
+              host={host}
+              mimicListening={mimicListening}
+              kept={kept}
+              canMimic={canMimic}
+              openMimic={() => openEditor({ kind: 'mimic' })}
+              openSettings={() => setSettings(true)}
+              nav={sectionNav('topbar')}
+              activity={{
+                unread,
+                open: shownPanel?.kind === 'activity',
+                show: () => openEditor({ kind: 'activity' }),
+              }}
+              feedback={
+                connected && !view.demo && supports(state.companionVersion, 'feedback')
+                  ? () => setFeedbackOpen(true)
+                  : undefined
+              }
+            />
+          )
         }
         banner={mode !== 'landing' && view.demo ? <DemoBanner inert={sheetShown} /> : undefined}
         sidebar={

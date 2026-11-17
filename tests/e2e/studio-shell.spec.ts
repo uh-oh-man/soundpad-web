@@ -603,7 +603,7 @@ async function startExample(page: Page) {
   const audio = await page.evaluate(
     () => 'AudioContext' in window || 'webkitAudioContext' in window,
   );
-  await page.getByRole('button', { name: 'Try the example' }).click();
+  await page.getByRole('button', { name: 'Mess with the demo' }).click();
   if (!audio) {
     await expect(page.getByText(/The example could not start/)).toBeVisible();
     return false;
@@ -756,7 +756,7 @@ test('example: notices never cover Leave example, the panel, Stop, Panic, the na
     await expect(panel).toHaveCount(0);
   }
   await page.getByRole('button', { name: 'Leave example' }).click();
-  await expect(page.getByRole('button', { name: 'Try the example' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Mess with the demo' })).toBeVisible();
 });
 
 test('phone widths: no view, the Mimic sheet, Settings or Kick details scroll sideways', async ({
@@ -1034,7 +1034,7 @@ test('leaving the example drops its Temp list, so the next session never shows i
     });
   await expect.poll(listed).toBe(true);
   await page.getByRole('button', { name: 'Leave example' }).click();
-  await expect(page.getByRole('button', { name: 'Try the example' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Mess with the demo' })).toBeVisible();
   await expect.poll(listed).toBe(false);
 });
 

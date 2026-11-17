@@ -88,6 +88,9 @@
   --sidebar-w: 234px;
   --ribbon-h: 120px;
   --font-ui: 'DM Sans Variable', 'Segoe UI Variable Text', 'Segoe UI', system-ui, sans-serif;
+  /* Code-like labels (the start page's eyebrows, keys and notes): fonts already on the device, never downloaded. */
+  --font-mono:
+    ui-monospace, 'Cascadia Mono', 'Cascadia Code', Consolas, 'SF Mono', Menlo, monospace;
   /* Dark text on a voice's colour (voices.css). */
   --voice-fallback-ink: #0b0f17;
   /* The shade under a tile's label (per theme) and the legacy drop shadow. */
