@@ -105,3 +105,20 @@ export type WantedView = { follow: boolean; viewEnd: number };
  */
 export const viewStillWanted = (asked: WantedView, now: WantedView) =>
   asked.follow ? now.follow : !now.follow && now.viewEnd === asked.viewEnd;
+
+/**
+ * The levels to draw now (2.47): `data` is the newest accepted reply, `drawn` the levels on screen. A reply
+ * accepted while following live can still be waiting to be drawn when a press or a quick select holds the view
+ * still on the window drawn then; both arrive in the same render, so the view jumped on by a poll under the new
+ * selection, the live glide's lag was dropped, and once the held window came back the selection started before the
+ * zoomed view (it widened to 30 s) or its edge had slid from under the pointer. While the view is held on the
+ * window drawn, that window stays drawn; any other move shows the newest levels as before.
+ */
+export function levelsToDraw<T extends { end: number }>(
+  data: T | null,
+  drawn: T | null,
+  now: WantedView,
+): T | null {
+  if (now.follow || !data || !drawn) return data;
+  return data.end !== now.viewEnd && drawn.end === now.viewEnd ? drawn : data;
+}

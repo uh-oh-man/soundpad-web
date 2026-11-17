@@ -3,6 +3,7 @@ import {
   behindLiveMs,
   bind,
   clampViewEnd,
+  drawnEnd,
   formatSpan,
   gapMarks,
   hiddenParts,
@@ -24,9 +25,11 @@ import {
   wordSelection,
   wordsText,
   visible,
+  WINDOW_MS,
   type Timeline,
   type Word,
 } from '../../web/src/mimic/history';
+import { lastSeconds, visibleRange } from '../../web/src/mimic/selection';
 import { commandSchema, isGuestAllowed, parseSnapshot, EMPTY } from '../../web/src/protocol';
 import { supports } from '../../web/src/version';
 
@@ -131,6 +134,39 @@ describe('recording history timeline', () => {
     expect(frames).toEqual({ startFrame: s(56), endFrame: s(59) });
     expect(selectionMs(frames, start, RATE)).toEqual({ from: 26000, to: 29000 });
     expect(selectionFrames({ from: 0, to: 500 }, -s(10), RATE).startFrame).toBe(0); // never before frame 0
+  });
+
+  it('"Last N s" while the live view glides stays in the zoomed view it was made in (2.47)', () => {
+    // As the page does it: the last N seconds up to the edge as drawn, then shown on the levels' window with
+    // the glide's lag, and the zoomed view widens only for a selection that starts before it.
+    const zoomedStart = (
+      displayEnd: number,
+      shiftMs: number,
+      picked = lastSeconds(10, WINDOW_MS),
+    ) => {
+      const sel = selectionMs(
+        selectionFrames(picked, windowStart(drawnEnd(displayEnd, shiftMs, RATE), RATE), RATE),
+        windowStart(displayEnd, RATE),
+        RATE,
+      );
+      return visibleRange(WINDOW_MS, 10000, { from: sel.from + shiftMs, to: sel.to + shiftMs })
+        .start;
+    };
+    // Lags measured in e2e runs where the view jumped to the whole 30 s (the drawn edge between two frames).
+    for (const [end, shift] of [
+      [378823, 185.9072690506946],
+      [358697, 191.0410495642136],
+      [260518, 325.55153989846985],
+    ])
+      expect(zoomedStart(end, shift)).toBe(20000);
+    for (let i = 0; i < 2000; i++) expect(zoomedStart(s(60) + i, 150 + i * 0.37)).toBe(20000);
+    // The edge is the frame at or just after the drawn one, never before it and never a frame later.
+    expect(drawnEnd(s(60), 187.5, RATE)).toBe(s(60) - 3000);
+    expect(drawnEnd(s(60), 187.51, RATE)).toBe(s(60) - 3000);
+    expect(drawnEnd(s(60), 0, RATE)).toBe(s(60));
+    // A selection that really starts before the zoomed view still widens it.
+    const earlier = { ...lastSeconds(10, WINDOW_MS), from: 19900 };
+    expect(zoomedStart(378823, 185.9072690506946, earlier)).toBe(0);
   });
 
   it('turns min/max pairs into peaks', () => {

@@ -161,8 +161,8 @@ export function MimicWave({
    */
   const aiming = useRef(false);
   // New levels while following live: the glide learns where they end (here, so the words below are laid out
-  // at the lag of this render). With the glide off, the lag stays until other levels arrive (a held view is
-  // fetched to end where the glide was).
+  // at the lag of this render). With the glide off, the lag stays until other levels arrive (a held view keeps
+  // the levels' window it was held on, so it stays where it was drawn).
   {
     const state = glide.current;
     if (live) {
