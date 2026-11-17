@@ -64,4 +64,52 @@ public sealed class SpotifyTests : IDisposable
         Assert.True(State(await bridge.Execute(Spotify("next"), "host")).Available);
         Assert.Equal(["next"], fixture.Presses);
     }
+
+    private static readonly Participant Alice = new("11111111-1111-1111-1111-111111111111", "Alice");
+    private static readonly Participant Bob = new("22222222-2222-2222-2222-222222222222", "Bob");
+    private static Command Permissions(bool guestSpotify) => new(2, Guid.NewGuid().ToString(), DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(), "permissions") { Permissions = new(GuestSpotify: guestSpotify) };
+
+    [Fact]
+    public async Task AWaitingGuestPressIsAskedAgainWhenItsTurnComes()
+    {
+        var (mock, pipe, bridge, fixture) = await Start();
+        await using var _m = mock; using var _p = pipe; using var _b = bridge;
+        fixture.StatusDelayMs = 600;
+        var poll = bridge.Execute(Spotify("status"), "host");
+        await Task.Delay(50);
+        var press = bridge.Execute(Spotify("toggle"), "guest", Alice, "peer-a");
+        await Task.Delay(100);
+        // The host turns guest Spotify off while Alice's press waits for the status read.
+        Assert.True((await bridge.Execute(Permissions(false), "host")).Ok);
+        var refused = await press;
+        Assert.False(refused.Ok);
+        Assert.Equal("Guest Spotify controls are disabled.", refused.Error);
+        Assert.Empty(fixture.Presses);
+        await poll;
+    }
+
+    [Fact]
+    public async Task RepeatedPressesOfOneButtonWhileTheyWaitArePressedOnce()
+    {
+        var (mock, pipe, bridge, fixture) = await Start();
+        await using var _m = mock; using var _p = pipe; using var _b = bridge;
+        fixture.StatusDelayMs = 600;
+        var poll = bridge.Execute(Spotify("status"), "host");
+        await Task.Delay(50);
+        // Alice presses Play/Pause three times while the read is under way; Bob once.
+        var presses = new[]
+        {
+            bridge.Execute(Spotify("toggle"), "guest", Alice, "peer-a"), bridge.Execute(Spotify("toggle"), "guest", Alice, "peer-a"),
+            bridge.Execute(Spotify("toggle"), "guest", Alice, "peer-a"), bridge.Execute(Spotify("next"), "guest", Alice, "peer-a"),
+            bridge.Execute(Spotify("toggle"), "guest", Bob, "peer-b"),
+        };
+        foreach (var reply in await Task.WhenAll(presses)) Assert.True(State(reply).Available, reply.Error);
+        // Until 2.47 each waited and then pressed: three toggles played, paused and played again.
+        Assert.Equal(2, fixture.Presses.Count(p => p == "toggle")); // one for Alice, one for Bob
+        Assert.Equal(1, fixture.Presses.Count(p => p == "next"));
+        await poll;
+        // Once a press went, pressing again is a new press.
+        Assert.True(State(await bridge.Execute(Spotify("toggle"), "guest", Alice, "peer-a")).Available);
+        Assert.Equal(3, fixture.Presses.Count(p => p == "toggle"));
+    }
 }
