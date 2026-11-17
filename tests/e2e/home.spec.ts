@@ -139,8 +139,8 @@ test('the start page never scrolls sideways, and reduced motion keeps it a still
   }
   await page.getByRole('button', { name: /^Wow/ }).click();
   await expect(page.locator('.home-board')).toHaveClass(/is-live/);
-  // Nothing moves: the waveform's bars and the pad's ripple stay still.
-  for (const selector of ['.home-wave i', '.home-pad-ripple']) {
+  // Nothing moves: the waveform's bars, the pad's ripple, the sound-wave ring and the light pools stay still.
+  for (const selector of ['.home-wave i', '.home-pad-ripple', '.home-rings-wave', '.home-aurora']) {
     expect(
       await page
         .locator(selector)

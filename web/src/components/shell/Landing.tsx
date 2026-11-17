@@ -4,6 +4,7 @@ import { controller } from '../../controller';
 import { APP_VERSION_LABEL } from '../../version';
 import { HomeBoard } from '../home/HomeBoard';
 import { HomeRibbon } from '../home/HomeRibbon';
+import { HomeRings } from '../home/HomeRings';
 import { demoLoading, startDemo } from '../home/HomeBar';
 
 /** The project's home, linked from the footer and the update notes. */
@@ -11,7 +12,6 @@ export const PROJECT_URL = 'https://github.com/uh-oh-man/soundpad-web';
 /** Where hosts get the companion: the latest release's page, with its notes and the EXE. */
 const RELEASE_URL = `${PROJECT_URL}/releases/latest`;
 const CHANGELOG_URL = `${PROJECT_URL}/blob/main/CHANGELOG.md`;
-const SOUND_CREDITS_URL = `${PROJECT_URL}/blob/main/web/public/demo/CREDITS.md`;
 
 /** The start page and footer (Stage G P0.6: moved out of main.tsx unchanged; WP-C owns them). */
 export function ProjectFooter() {
@@ -47,11 +47,10 @@ function Out({
 
 const STEPS: { title: string; body: ReactNode }[] = [
   {
-    title: 'Run the companion on your PC.',
+    title: 'Run the companion.',
     body: (
       <>
-        Open Soundpad, then start <b>SoundpadWeb.exe</b>. It’s one portable file for Windows 11: no
-        installer, no admin rights. It opens its own small window and hosts from there.
+        Open Soundpad, start <b>SoundpadWeb.exe</b>.
       </>
     ),
   },
@@ -59,19 +58,13 @@ const STEPS: { title: string; body: ReactNode }[] = [
     title: 'Send one link.',
     body: (
       <>
-        Press <b>Copy Invite</b> and drop it in the group chat. Treat it like a password: whoever
-        has it can join. You decide what guests may do, and you can replace the link any time.
+        <b>Copy Invite</b>, drop it in the chat.
       </>
     ),
   },
   {
     title: 'They click. Your PC plays it.',
-    body: (
-      <>
-        Friends open the link in a browser, on a computer or a phone, pick a name and start
-        pressing. Your Soundpad plays the sound, just as if you had pressed it yourself.
-      </>
-    ),
+    body: <>Any browser, phone or PC. Nothing to install.</>,
   },
 ];
 
@@ -102,7 +95,7 @@ const PREVIEWS: Record<string, ReactNode> = {
   mimic: (
     <div className="home-pv home-pv-mimic">
       <p className="home-pv-source">
-        <i /> Listening to <b>Discord</b> · last 10 min, kept on the host’s PC
+        <i /> Listening to <b>Discord</b> · last 10 min
       </p>
       <div className="home-pv-timeline">
         <Bars count={72} seed={1.3} />
@@ -125,14 +118,14 @@ const PREVIEWS: Record<string, ReactNode> = {
           <span>
             “absolutely <mark>legend</mark>ary”
           </span>
-          <small>Maya · 0:03</small>
+          <small>0:03</small>
         </li>
         <li style={{ '--dot': 'var(--voice-1)' } as CSSProperties}>
           <i />
           <span>
             “a <mark>legend</mark>, honestly”
           </span>
-          <small>Sam · 0:02</small>
+          <small>0:02</small>
         </li>
       </ul>
     </div>
@@ -183,37 +176,37 @@ const FEATURES: { id: string; name: string; title: string; body: string }[] = [
     id: 'mimic',
     name: 'Mimic',
     title: 'Grab what was just said.',
-    body: 'Someone says something legendary in Discord or a game. Mimic keeps a rolling recording of the app you pick, on your PC, with word-by-word subtitles. Select the moment and play it straight back. It never records a microphone, and everyone sees when it’s on.',
+    body: 'Replays the app you pick. Never a microphone.',
   },
   {
     id: 'voices',
     name: 'Voice library',
     title: 'Every keeper, searchable by what was said.',
-    body: 'Clips you keep land in Voices with their words. Search for a word or a phrase, tag who said it, star the classics, and click a single word to hear just that word.',
+    body: 'Click a word, hear just that word.',
   },
   {
     id: 'sentences',
     name: 'Sentences',
     title: 'Make them say it. Sort of.',
-    body: 'Type a sentence and it gets built from words people really said in your recordings. Nothing is synthesised or cloned: a word nobody said stays missing, and plays as a gap or a bleep. Your choice.',
+    body: 'Built only from words really said.',
   },
   {
     id: 'organize',
     name: 'Organize',
     title: 'Tidy up without the chaos.',
-    body: 'Tick sounds, drag them onto a category, then review the plan. Soundpad Web makes the changes Soundpad allows, checks every one, and says plainly which steps are yours to do in Soundpad.',
+    body: 'Tick, drag, review the plan, apply.',
   },
   {
     id: 'backups',
     name: 'Backups and updates',
     title: 'Safe to mess with.',
-    body: 'Daily backups to a folder you choose, with restores down to a single clip. New versions arrive inside the app, checked against a published hash, and your session carries on afterwards.',
+    body: 'Daily backups. Checked updates, in the app.',
   },
   {
     id: 'private',
     name: 'Private by default',
     title: 'No accounts. No cloud. A Panic button.',
-    body: 'No sign-ups, no hosted backend, no cloud database and nothing for guests to install. Up to 12 guests, with the permissions you pick. Panic stops the sound and pauses guests in one press.',
+    body: 'Up to 12 guests. One press stops the sound.',
   },
 ];
 
@@ -231,6 +224,8 @@ export function Landing({ view }: { view: ReturnType<typeof controller.getSnapsh
         </defs>
       </svg>
       <div className="home-hero-band">
+        <span className="home-aurora" aria-hidden="true" />
+        <span className="home-floor" aria-hidden="true" />
         <HomeRibbon anchor="#home-now-bar" at="start" clear=".home-hero-copy" />
         <section className="home-hero">
           <div className="home-hero-copy">
@@ -252,10 +247,6 @@ export function Landing({ view }: { view: ReturnType<typeof controller.getSnapsh
               </span>
             </h1>
             <p className="home-intro">They click a sound. Your PC plays it.</p>
-            <p className="home-lede">
-              Share your actual Soundpad library with one link. No installs for friends, no
-              accounts, and absolutely no guarantee of good timing.
-            </p>
             <div className="home-actions">
               <button
                 type="button"
@@ -273,7 +264,7 @@ export function Landing({ view }: { view: ReturnType<typeof controller.getSnapsh
                 Host from your PC
               </Out>
             </div>
-            <p id="try-example-note" className="home-note">
+            <p id="try-example-note" className="sr-only">
               The demo is the real app with example sounds: the soundboard, Mimic, voices and
               sentences. Nothing is sent to Soundpad; it all plays in this browser.
             </p>
@@ -284,11 +275,12 @@ export function Landing({ view }: { view: ReturnType<typeof controller.getSnapsh
             )}
             <p className="home-safe">
               <ShieldCheck size={15} aria-hidden="true" />
-              The audio stays on your computer. Guests just push buttons.
+              The audio stays on your PC.
             </p>
           </div>
           <div className="home-hero-demo">
             <div className="home-board-wrap">
+              <HomeRings />
               <span className="home-board-slab" aria-hidden="true" />
               <HomeBoard />
               <p className="home-scribble" aria-hidden="true">
@@ -301,13 +293,12 @@ export function Landing({ view }: { view: ReturnType<typeof controller.getSnapsh
             </div>
           </div>
         </section>
+        <ul className="home-promises" aria-label="The short version">
+          {PROMISES.map((line) => (
+            <li key={line}>{line}</li>
+          ))}
+        </ul>
       </div>
-
-      <ul className="home-promises" aria-label="The short version">
-        {PROMISES.map((line) => (
-          <li key={line}>{line}</li>
-        ))}
-      </ul>
 
       <section className="home-section home-how" id="how" tabIndex={-1} aria-labelledby="how-title">
         <p className="home-kicker">How it works</p>
@@ -334,18 +325,14 @@ export function Landing({ view }: { view: ReturnType<typeof controller.getSnapsh
           </ol>
         </div>
         <p className="home-how-foot">
-          <span>Joining a friend? Open their invitation link to connect.</span>
-          <Out href={RELEASE_URL}>Hosting? Get the companion</Out>
+          <Out href={RELEASE_URL}>Get the companion</Out>
         </p>
       </section>
 
       <section className="home-section home-features" aria-labelledby="features-title">
         <p className="home-kicker">What’s in the box</p>
         <h2 id="features-title">More than a wall of buttons.</h2>
-        <p className="home-section-lede">
-          The board is the easy part. Here’s what the rest of it does, explained by the AI that
-          built it, so blame us for the jokes.
-        </p>
+        <p className="home-section-lede">Explained by the AI that built it.</p>
         <ul className="home-bento">
           {FEATURES.map(({ id, name, title, body }) => (
             <li key={id} className={`home-bento-${id}`}>
@@ -372,44 +359,22 @@ export function Landing({ view }: { view: ReturnType<typeof controller.getSnapsh
         />
         <p className="home-kicker">The credits</p>
         <h2 id="credits-title">Built with AI. Credited like it.</h2>
-        <p className="home-credits-lede">
-          Soundpad Web is made by AI. The app, its docs and this page were written by AI models,
-          directed by one person who really wanted a better soundboard. Every change is written
-          down, and every release stays downloadable.
-        </p>
         <dl className="home-roll">
           <div>
             <dt>Written by</dt>
             <dd>
-              <b>Codex</b> (OpenAI): the first versions, up to 2.3.0, and again from 2.46.
-            </dd>
-            <dd>
-              <b>Claude</b> (Anthropic), in Claude Code: from 2.3.1 through the big overhaul, and
-              this page.
+              <b>Codex</b> (OpenAI) and <b>Claude</b> (Anthropic)
             </dd>
           </div>
           <div>
             <dt>Directed by</dt>
             <dd>
-              <b>uh-oh-man</b>, who has the ideas and the final say.
+              <b>uh-oh-man</b>
             </dd>
           </div>
           <div>
-            <dt>Look of this page</dt>
-            <dd>
-              Started as an AI-made image the owner liked, then rebuilt here for real, in the app’s
-              own colours.
-            </dd>
-          </div>
-          <div>
-            <dt>Demo sounds</dt>
-            <dd>
-              Public domain and CC0 recordings,{' '}
-              <Out href={SOUND_CREDITS_URL} className="home-text-link">
-                each one credited
-              </Out>
-              . The pads above are simple synthesised blips.
-            </dd>
+            <dt>Look</dt>
+            <dd>Started as an AI-made image</dd>
           </div>
         </dl>
         <Out href={CHANGELOG_URL} className="home-text-link home-credits-link">

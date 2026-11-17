@@ -140,7 +140,6 @@ export function HomeBoard() {
         <div className="home-board-info">
           <div>
             <h2 id="home-board-title">Go on. Press something.</h2>
-            <p>A tiny pretend soundboard. The real one uses your Soundpad library.</p>
           </div>
           <span className="home-board-count">{String(shown.length).padStart(2, '0')} SOUNDS</span>
         </div>

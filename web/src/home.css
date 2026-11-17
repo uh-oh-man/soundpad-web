@@ -185,14 +185,78 @@
 
 .home-hero-band {
   position: relative;
+  isolation: isolate;
   overflow: hidden;
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--brand-navy) 55%, var(--surface-0)),
+    var(--surface-0) 92%
+  );
+}
+/* Light pools in the icon's colours: violet behind the soundboard, cyan beside it and up left. */
+.home-aurora {
+  position: absolute;
+  z-index: -1;
+  inset: -12% -8%;
   background:
-    radial-gradient(640px 460px at 74% 52%, var(--home-glow), transparent 70%),
     radial-gradient(
-      520px 320px at 12% 0%,
-      color-mix(in srgb, var(--brand-cyan) 7%, transparent),
-      transparent 70%
+      38% 52% at 70% 46%,
+      color-mix(in srgb, var(--brand-violet) 38%, transparent),
+      transparent 72%
+    ),
+    radial-gradient(
+      26% 34% at 92% 76%,
+      color-mix(in srgb, var(--brand-cyan) 22%, transparent),
+      transparent 72%
+    ),
+    radial-gradient(
+      30% 26% at 42% 86%,
+      color-mix(in srgb, var(--brand-cyan) 12%, transparent),
+      transparent 72%
+    ),
+    radial-gradient(
+      28% 36% at 6% 14%,
+      color-mix(in srgb, var(--brand-violet) 16%, transparent),
+      transparent 72%
     );
+  pointer-events: none;
+}
+/* A floor grid in perspective, fading out toward the horizon. */
+.home-floor {
+  position: absolute;
+  z-index: -1;
+  left: -30%;
+  right: -30%;
+  bottom: 0;
+  height: 80%;
+  background-image:
+    linear-gradient(color-mix(in srgb, var(--brand-cyan) 32%, transparent) 1px, transparent 1px),
+    linear-gradient(
+      90deg,
+      color-mix(in srgb, var(--brand-violet) 30%, transparent) 1px,
+      transparent 1px
+    );
+  background-size: 64px 48px;
+  opacity: 0.8;
+  transform: perspective(700px) rotateX(58deg);
+  transform-origin: 50% 100%;
+  mask-image: linear-gradient(to top, transparent 2%, var(--surface-0) 18%, transparent 80%);
+  pointer-events: none;
+}
+/* The vignette: the edges fall off into the page. */
+.home-hero-band::before {
+  content: '';
+  position: absolute;
+  z-index: 0;
+  inset: 0;
+  background:
+    linear-gradient(to bottom, transparent 86%, var(--surface-0)),
+    radial-gradient(
+      120% 95% at 55% 42%,
+      transparent 55%,
+      color-mix(in srgb, var(--surface-0) 85%, transparent)
+    );
+  pointer-events: none;
 }
 /* Film grain: a fixed noise tile, drawn by the browser (no file, no request). */
 .home-hero-band::after {
@@ -268,12 +332,6 @@
   line-height: 1.4;
   letter-spacing: -0.4px;
 }
-.home .home-lede {
-  max-width: 500px;
-  color: var(--text-muted);
-  font-size: 16px;
-  line-height: 1.7;
-}
 .home-actions {
   display: flex;
   flex-wrap: wrap;
@@ -344,13 +402,6 @@
   border-color: var(--brand-cyan);
   color: var(--brand-cyan);
 }
-.home .home-note {
-  max-width: 500px;
-  margin-top: 22px;
-  color: var(--text-dim);
-  font-size: 13px;
-  line-height: 1.55;
-}
 .home .home-safe {
   display: flex;
   align-items: center;
@@ -396,6 +447,44 @@
 .home .home-resume-button:hover {
   background: var(--home-grad);
   filter: brightness(1.08);
+}
+
+/* ---- Sound-wave rings around the soundboard ------------------------------------------------------ */
+
+.home-rings {
+  position: absolute;
+  left: 50%;
+  top: 52%;
+  width: 0;
+  height: 0;
+  pointer-events: none;
+}
+.home-rings :is(i, b) {
+  position: absolute;
+  left: 0;
+  top: 0;
+  border: 1px solid color-mix(in srgb, var(--brand-cyan) 10%, transparent);
+  border-radius: 50%;
+  transform: translate(-50%, -50%);
+}
+.home-rings i:nth-child(1) {
+  width: 760px;
+  height: 760px;
+}
+.home-rings i:nth-child(2) {
+  width: 1040px;
+  height: 1040px;
+  border-color: color-mix(in srgb, var(--brand-violet) 9%, transparent);
+}
+.home-rings i:nth-child(3) {
+  width: 1320px;
+  height: 1320px;
+  border-color: color-mix(in srgb, var(--brand-cyan) 6%, transparent);
+}
+.home-rings-wave {
+  width: 560px;
+  height: 560px;
+  opacity: 0;
 }
 
 /* ---- The pretend soundboard: a small app window, tilted, on a back slab ------------------------- */
@@ -516,12 +605,6 @@
   font-size: 22px;
   font-weight: 850;
   letter-spacing: -0.6px;
-}
-.home .home-board-info p {
-  margin-top: 3px;
-  color: var(--text-muted);
-  font-size: 12.5px;
-  line-height: 1.45;
 }
 .home-board-count {
   flex: none;
@@ -789,6 +872,12 @@
 /* ---- Motion (only when it is welcome) ----------------------------------------------------------- */
 
 @media (prefers-reduced-motion: no-preference) {
+  html:not([data-motion='reduce']) .home-rings-wave {
+    animation: home-ring-out 1.8s cubic-bezier(0.1, 0.6, 0.3, 1);
+  }
+  html:not([data-motion='reduce']) .home-aurora {
+    animation: home-drift 40s ease-in-out infinite alternate;
+  }
   html:not([data-motion='reduce']) .home-board.is-live .home-wave i {
     animation: home-wave 0.7s ease-in-out var(--delay) infinite alternate;
   }
@@ -797,6 +886,25 @@
   }
   html:not([data-motion='reduce']) .home-pv-head {
     animation: home-playhead 2.6s linear infinite;
+  }
+}
+@keyframes home-ring-out {
+  from {
+    opacity: 1;
+    border-width: 2px;
+    border-color: color-mix(in srgb, var(--brand-cyan) 80%, transparent);
+    box-shadow: 0 0 24px color-mix(in srgb, var(--brand-cyan) 30%, transparent);
+  }
+  to {
+    opacity: 0;
+    width: 1200px;
+    height: 1200px;
+    border-color: color-mix(in srgb, var(--brand-violet) 20%, transparent);
+  }
+}
+@keyframes home-drift {
+  to {
+    transform: translate(-2%, 1.5%) scale(1.04);
   }
 }
 @keyframes home-wave {
@@ -826,6 +934,8 @@
 /* ---- Promises strip ----------------------------------------------------------------------------- */
 
 .home .home-promises {
+  position: relative;
+  z-index: 1;
   display: flex;
   flex-wrap: wrap;
   justify-content: space-between;
@@ -1402,6 +1512,7 @@
 }
 
 /* More contrast: no grain behind the words. */
+:root[data-contrast='high'] :is(.home-floor, .home-rings),
 :root[data-contrast='high'] .home-hero-band::after {
   display: none;
 }
@@ -1473,7 +1584,7 @@
   .home :is(.home-eyebrow, .home-actions, .home-safe) {
     justify-content: center;
   }
-  .home :is(.home-lede, .home-note),
+  .home .home-intro,
   .home h1,
   .home h1 > .home-highlight {
     margin-inline: auto;
