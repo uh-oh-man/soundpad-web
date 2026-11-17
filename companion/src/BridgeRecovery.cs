@@ -34,6 +34,17 @@ public sealed partial class Bridge
         return new(temp != null || recovered != null || kept != null, temp, recovered, kept);
     }
 
+    /// <summary>True while any part of a crash's Recover previous session / Discard is still unanswered (cheap; no sizes).</summary>
+    private bool RecoveryPendingNow
+    {
+        get
+        {
+            if (tempRecovery > 0) return true;
+            if (Interlocked.Read(ref recoveredMs) > 0 && history != null) return true;
+            lock (drafts) return recoveredDrafts.Count > 0 && history != null;
+        }
+    }
+
     /// <summary>The size of exactly the temporary files the crashed launch left.</summary>
     private long LeftoverBytes()
     {
