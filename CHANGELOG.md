@@ -4,7 +4,28 @@ Notable changes to Soundpad Web. Versions follow the website's `package.json`; t
 
 ## Unreleased
 
+### Changed
+
+- **Mimic is redesigned as one full page** (from the Feedback button: "Mimic screen needs a complete overhaul", "a good looking full screen mimic page where i can do everything"). A short header holds the title, what Mimic is listening to, Start or Stop listening, **Mimic settings** (now a panel that opens over the page) and **Fill window**. Below it are two columns. The left column has the timeline strip with the waveform and its words, then the live transcript, then one action bar. The right column is **Clips**: your drafts, Just mimicked, and other people's selections. At 1440×900 and 1280×720 the transcript is on screen without scrolling.
+- **The newest words are easy to reach** ("cant ... get to the word they said imeeditly"). The newest sentence is marked. When you scroll back, **Jump to latest** floats over the transcript, and End still works.
+- **One action bar.** It holds what is selected, the clip name, Preview, Mimic & play (Play into game for a draft), Capture, Save, Share and the Keep buttons. Under them are the quick captures: Last 3/5/10 s, Latest phrase, Last 10 seconds and Play latest phrase. With nothing selected it is a single row. **Clear** is the ✕ beside the selection.
+- **My drafts is a list in the Clips column** instead of the "Draft history" menu. Each draft has one-press Play, Keep in Temp and Delete (with Undo). Press a draft to open it.
+- **Just mimicked lists up to 100 clips**, newest first, in the Clips column, which scrolls on its own.
+- **Where a waveform click plays** (Preview or Game) is now a small switch in the timeline row.
+- **On phones** the transcript comes first, then the action bar, then the timeline. Clips is a tab. Nothing scrolls sideways.
+- **The live waveform moves smoothly** ("have the waveform move smoothly instead of choppy"). Between updates it now glides at the speed time passes, instead of jumping twice a second (once a second for guests). It stops gliding while the pointer or keyboard is on it, so you can aim at a word, and it catches up when you move away. It asks the companion for nothing extra. With reduced motion it steps as before.
+- **Mimic settings** and its source list follow the light theme.
+
 ### Fixed
+
+- **The player's Stop always reaches Soundpad.** Before, while a browser preview was open (even paused), Stop and the Stop key stopped only the preview, and a guest without Panic could not stop game audio. Stop now ends both. The player shows a preview only while Soundpad is stopped.
+- **Space on a focused word or button presses it.** Before, Space on a Mimic word or a Preview button paused playback instead. Space is still Play/Pause when focus is not on a control.
+- **Two deletes with the same name each keep their own Undo.** Before, they shared one notice.
+- **Delete in Mimic keeps its promise when the tab closes.** A deleted clip or draft disappears at once and is really deleted when its Undo notice goes. Before, closing the tab in that time could bring it back. Now the delete is remembered in this browser and finished the next time you connect.
+- **Fill window keeps the sections.** They move to the top bar, so a reload in Fill window never leaves you without navigation.
+- **A short disconnect keeps you on Mimic**, with your selection and the name you typed. The page says it is reconnecting.
+- **A guest whose Mimic is turned off while on the Clips tab is told why** instead of seeing a blank page.
+- **Playing a range again never reuses a clip that is being deleted.**
 
 - **Updates wait for Recover previous session or Discard.** After a crash, installing an update before answering that question lost the recovered drafts. The update now asks you to answer it first.
 - **Temp no longer fills up invisibly.** A removed clip's file stays on the host's PC until **Clear all temporary audio** or quitting, and it still uses Temp's space. Temp now says how many removed files wait to be freed and how big they are, and when Temp is full only because of them, the message says so and that Clear Temp frees them. A guest's removed clips keep counting in their Temp until their files are deleted. (Update the companion to see the count.)

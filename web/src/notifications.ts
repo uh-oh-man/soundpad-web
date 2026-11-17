@@ -99,19 +99,21 @@ function contextDetails(message: string, at: number) {
 }
 /**
  * Shows a notice and returns its id (for `dismissNotice`); '' when there was nothing to show. An error
- * notice always carries technical details (2.45): `details` when given, else the page's context.
+ * notice always carries technical details (2.45): `details` when given, else the page's context. A notice
+ * with the same words replaces the one showing, unless `distinct` (2.47 review: two Deletes of clips with
+ * the same name each keep their own Undo).
  */
-/** Shows a notice and returns its id (for `dismissNotice`); '' when there was nothing to show. */
 export function notify(
   message: string,
   kind: NoticeKind = 'info',
   action?: NoticeAction,
   detailsOrSecond?: string | NoticeAction,
+  { distinct = false }: { distinct?: boolean } = {},
 ) {
   const details = typeof detailsOrSecond === 'string' ? detailsOrSecond : undefined;
   const second = typeof detailsOrSecond === 'object' ? detailsOrSecond : undefined;
   if (!message) return '';
-  const existing = notices.find((n) => n.message === message);
+  const existing = distinct ? undefined : notices.find((n) => n.message === message);
   const now = Date.now();
   const technical = details || (kind === 'error' ? contextDetails(message, now) : undefined);
   const entry: Notice = {

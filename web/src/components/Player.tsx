@@ -81,7 +81,11 @@ export function Player({
       : null;
   // A click this page sent and the companion has not answered yet (2.35). "Playing" is the report.
   const pending = usePendingIntent();
-  const preview = usePreviewTransport();
+  // A browser preview (Mimic, Voices, Edit copy) is shown and paused here only while Soundpad itself is
+  // stopped (2.47 review): with game audio playing the player is that audio's, and Stop always reaches
+  // Soundpad, so a paused preview can never leave a guest without a way to stop the game audio.
+  const anyPreview = usePreviewTransport();
+  const preview = anyPreview && current.status === 'STOPPED' ? anyPreview : null;
   const paused = preview ? preview.paused : current.status === 'PAUSED';
   const held = guestHeld(state, host);
   const canPanic = host && supports(state.companionVersion, 'intents');
@@ -181,13 +185,21 @@ export function Player({
         </button>
         <button
           className="stop btn btn-danger"
-          disabled={!preview && disabled}
-          aria-disabled={(!preview && held) || undefined}
+          disabled={!anyPreview && disabled}
+          aria-disabled={(!anyPreview && held) || undefined}
           aria-keyshortcuts={ariaChord(stopKey)}
           title={
-            !preview && held ? HELD_BY_HOST : stopKey ? `Stop (${formatChord(stopKey)})` : undefined
+            !anyPreview && held
+              ? HELD_BY_HOST
+              : stopKey
+                ? `Stop (${formatChord(stopKey)})`
+                : undefined
           }
-          onClick={() => (preview ? preview.stop() : !held && void playback.stop())}
+          onClick={() => {
+            // Both: the preview in this browser, and whatever Soundpad plays (the host's or this guest's).
+            anyPreview?.stop();
+            if (!disabled && !held) void playback.stop();
+          }}
         >
           <Square size={15} fill="currentColor" aria-hidden="true" /> Stop
         </button>

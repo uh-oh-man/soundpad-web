@@ -6,7 +6,9 @@ import {
   deletedNow,
   deleteWithUndo,
   flushPendingDeletes,
+  replayStoredDeletes,
   resetPendingDeletes,
+  STORED_KEY,
 } from '../../web/src/mimic/pending-delete';
 import {
   dismissNotice,
@@ -88,7 +90,7 @@ describe('Delete with Undo (2.46)', () => {
     expect(deletedNow().has('clip-2')).toBe(false);
   });
 
-  it('a second Delete of the same item is ignored; leaving the page deletes what is waiting', async () => {
+  it('a second Delete of the same item is ignored', async () => {
     const commit = vi.fn(() => Promise.resolve());
     deleteWithUndo('clip-3', 'Deleted “A”.', commit);
     deleteWithUndo('clip-3', 'Deleted “A”.', commit);
@@ -96,6 +98,59 @@ describe('Delete with Undo (2.46)', () => {
     await vi.advanceTimersByTimeAsync(0);
     expect(commit).toHaveBeenCalledTimes(1);
     expect(deletedNow().has('clip-3')).toBe(true);
+  });
+
+  it('2.47 review: two deletes with the same words each keep their own notice and Undo', async () => {
+    const commit = vi.fn(() => Promise.resolve());
+    deleteWithUndo('draft-a', 'Deleted the draft.', commit);
+    deleteWithUndo('draft-b', 'Deleted the draft.', commit);
+    const [first, second] = noticeState().notices.slice(-2);
+    expect(first.id).not.toBe(second.id);
+    expect(runNoticeAction(first.id)).toBe(true);
+    expect(deletedNow().has('draft-a')).toBe(false);
+    expect(deletedNow().has('draft-b')).toBe(true);
+    expect(runNoticeAction(second.id)).toBe(true);
+    expect(deletedNow().has('draft-b')).toBe(false);
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(commit).not.toHaveBeenCalled();
+  });
+
+  it('2.47 review: a page closed before the Undo goes asks nothing while unloading; the next page deletes it', async () => {
+    const store = new Map<string, string>();
+    vi.stubGlobal('localStorage', {
+      getItem: (k: string) => store.get(k) ?? null,
+      setItem: (k: string, v: string) => void store.set(k, v),
+      removeItem: (k: string) => void store.delete(k),
+    });
+    try {
+      const commit = vi.fn(() => Promise.resolve());
+      deleteWithUndo('draft-c', 'Deleted the draft “C”.', commit, undefined, {
+        kind: 'draft',
+        sourceId: 'rec-1',
+      });
+      // The page goes away now: nothing is sent while it unloads (it may never arrive).
+      await vi.advanceTimersByTimeAsync(0);
+      expect(commit).not.toHaveBeenCalled();
+      expect(JSON.parse(store.get(STORED_KEY)!)).toMatchObject([
+        { key: 'draft-c', kind: 'draft', sourceId: 'rec-1' },
+      ]);
+      // A new page: what was waiting is deleted, and hidden until then.
+      resetPendingDeletesKeepingStorage();
+      const run = vi.fn(() => Promise.resolve(true));
+      const replay = replayStoredDeletes(run);
+      expect(deletedNow().has('draft-c')).toBe(true);
+      await replay;
+      expect(run).toHaveBeenCalledWith(expect.objectContaining({ key: 'draft-c', kind: 'draft' }));
+      expect(store.has(STORED_KEY)).toBe(false);
+      // Undo forgets it, so the next page leaves it alone.
+      deleteWithUndo('draft-d', 'Deleted the draft “D”.', commit, undefined, {
+        kind: 'clip',
+      });
+      runNoticeAction(lastNotice().id);
+      expect(store.has(STORED_KEY)).toBe(false);
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 
   it('retiring an action is only for one not yet used', () => {
@@ -145,3 +200,10 @@ describe('Mimic full screen is a per-browser preference (2.46)', () => {
     expect(readPref('mimicFull')).toBe(true);
   });
 });
+
+/** A new page's module state, with this browser's storage as it was left. */
+function resetPendingDeletesKeepingStorage() {
+  const saved = localStorage.getItem(STORED_KEY);
+  resetPendingDeletes();
+  if (saved) localStorage.setItem(STORED_KEY, saved);
+}

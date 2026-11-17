@@ -1550,7 +1550,7 @@ test('Mimic keyboard: number keys grab recent audio, Enter captures and keeps, E
   await name.blur();
   await page.keyboard.press('Escape');
   await expect(dialog.locator('.mimic-range')).toHaveCount(0);
-  await expect(dialog.getByLabel('Draft history')).toBeVisible();
+  await expect(dialog.getByRole('list', { name: 'My drafts' })).toBeVisible();
   await page.keyboard.press('3');
   await expect(dialog.locator('.mimic-range')).toContainText('3.0 s');
   await page.keyboard.press('Escape');
@@ -1811,7 +1811,7 @@ test('Mimic drafts: Capture opens a draft, an edge drags into the audio around i
   // Kept again with the same edges: the same clip, not a second one. Closing it ends the draft.
   await draft.getByRole('button', { name: 'Keep in Temp and close draft' }).click();
   await expect(draft).toHaveCount(0);
-  await expect(dialog.getByLabel('Draft history')).toHaveCount(0);
+  await expect(dialog.getByRole('list', { name: 'My drafts' })).toHaveCount(0);
   await expect(dialog.getByRole('button', { name: /Replay Draft one/ })).toHaveCount(1);
   expect(((await sendCommand(page, 'draftList')).data as DraftReply).drafts).toHaveLength(0);
 });

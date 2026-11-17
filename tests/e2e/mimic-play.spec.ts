@@ -73,6 +73,8 @@ test('Mimic words select silently in both views and Shift extends the range', as
   const timedWord = (wordId: string | null) => track.locator(`button[data-word-id="${wordId}"]`);
   const before = harness.plays.length;
 
+  // The live waveform glides between polls (2.47) and holds still under the pointer: aim first.
+  await track.hover();
   await timedWord(id).locator('.mimic-timed-label').click();
   await expect(words.first()).toHaveAttribute('aria-pressed', 'true');
   await expect(playingWords(dialog)).toHaveCount(0);

@@ -675,7 +675,10 @@ test('example: the ribbon follows a draft played into the game, with a new key f
   page,
 }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
-  if (!(await startExample(page))) return;
+  test.skip(
+    !(await startExample(page)),
+    'This browser has no Web Audio, so the example cannot start.',
+  );
   await expect(boardRibbon(page)).toHaveAttribute('data-ribbon-state', 'idle');
   await nav(page, 'Mimic').click();
   const mimic = mimicPanel(page);
@@ -716,7 +719,10 @@ test('example: notices never cover Leave example, the panel, Stop, Panic, the na
   ]) {
     await page.setViewportSize(size);
     if (!started) {
-      if (!(await startExample(page))) return;
+      test.skip(
+        !(await startExample(page)),
+        'This browser has no Web Audio, so the example cannot start.',
+      );
       started = true;
     }
     await nav(page, 'Mimic').click();
@@ -869,7 +875,10 @@ test('Mimic on a phone leaves the example banner and section navigation usable',
   page,
 }) => {
   await page.setViewportSize({ width: 412, height: 860 });
-  if (!(await startExample(page))) return;
+  test.skip(
+    !(await startExample(page)),
+    'This browser has no Web Audio, so the example cannot start.',
+  );
   await nav(page, 'Mimic').click();
   await expect(mimicPanel(page)).toBeVisible();
   const leave = page.getByRole('button', { name: 'Leave example' });
@@ -1014,7 +1023,10 @@ test('the sound editor asks for Statistics only once they are opened', async ({
 test('leaving the example drops its Temp list, so the next session never shows its sources', async ({
   page,
 }) => {
-  if (!(await startExample(page))) return;
+  test.skip(
+    !(await startExample(page)),
+    'This browser has no Web Audio, so the example cannot start.',
+  );
   const listed = () =>
     page.evaluate(async () => {
       const m = await import(/* @vite-ignore */ '/src/' + 'temp-assets.ts');
@@ -1030,7 +1042,10 @@ test('example at 1440: the compact Spotify row shows its name, the Host’s PC o
   page,
 }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
-  if (!(await startExample(page))) return;
+  test.skip(
+    !(await startExample(page)),
+    'This browser has no Web Audio, so the example cannot start.',
+  );
   const spotify = page.locator('section.spotify-player');
   await expect(spotify).toContainText('Spotify unavailable');
   // Nothing to control in the example: no transport takes the row's width.

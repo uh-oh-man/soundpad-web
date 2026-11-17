@@ -108,6 +108,31 @@
 .topbar .top-actions {
   gap: 12px;
 }
+/*
+ * Top tabs (the default from 2.47, and Fill window) share the bar with the status chips. On a desktop
+ * narrower than 1440 px the bar never overflows: the edition tag goes, the brand stays on one line and the
+ * capture chip gives way first (its full text stays in its title).
+ */
+@media (min-width: 1001px) {
+  .topbar .brand {
+    flex: none;
+    white-space: nowrap;
+  }
+  .topbar .top-actions {
+    min-width: 0;
+  }
+  .topbar .top-actions > * {
+    flex-shrink: 0;
+  }
+  .topbar .top-actions > .capture-chip {
+    flex-shrink: 1;
+  }
+}
+@media (min-width: 1001px) and (max-width: 1439px) {
+  .topbar:has(.nav-topbar) .edition {
+    display: none;
+  }
+}
 .capture-chip {
   display: inline-flex;
   align-items: center;

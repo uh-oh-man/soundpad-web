@@ -158,8 +158,10 @@ export const clipKey = (sessionId: string, r: FrameRange) =>
 export function reusableClip(
   assets: { id: string; hasTemporary: boolean; normal: { ready: boolean } | null }[] | undefined,
   assetId: string | undefined,
+  /** Clips this page is deleting or took out of Temp: never played again (2.47 review). */
+  gone: (assetId: string) => boolean = () => false,
 ) {
-  if (!assets || !assetId) return false;
+  if (!assets || !assetId || gone(assetId)) return false;
   const asset = assets.find((a) => a.id === assetId);
   return !!asset && asset.hasTemporary && asset.normal?.ready === true;
 }
