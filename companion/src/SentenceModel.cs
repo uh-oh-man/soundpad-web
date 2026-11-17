@@ -420,6 +420,15 @@ public sealed class SentenceStore
         Interlocked.Increment(ref revision);
     }
 
+    /// <summary>
+    /// Runs <paramref name="work"/> under the file's lock (2.47), so writing sentences' audio and recording the sentences
+    /// that refer to it is one step for <see cref="SweepAudio"/>, and removing a sentence and freeing its audio is one
+    /// step for a restore. Before, a sentence discarded while a backup restore was putting it back could have the audio
+    /// the restore had just written swept away (it was on disk while the sentence was not in the file yet).
+    /// The work may call this store's own methods (the lock is re-entrant), and nothing else that takes a lock.
+    /// </summary>
+    public T Exclusive<T>(Func<T> work) { lock (gate) return work(); }
+
     /// <summary>Reads under the lock. The callback must not keep references past the call (copy what it needs).</summary>
     public T Read<T>(Func<SentenceFile, T> read) { lock (gate) return read(file); }
 

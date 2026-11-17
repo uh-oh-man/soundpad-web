@@ -270,14 +270,23 @@ public sealed partial class Bridge
         foreach (var r in chosen) if (!File.Exists(r.Path)) outcome.Warnings.Add($"The file of “{r.Title}” is not back; it plays once the file is there again.");
     }
 
+    /// <summary>Test seam: a sentence restore has its audio in place and is about to record the sentences.</summary>
+    internal Action? SentenceAudioRestored { get; set; }
+
     /// <summary>Sentences, with all their versions: each version's audio only to its exact name, checked by hash.</summary>
     private void RestoreSentenceItems(OpenBackup b, BackupParts p, IReadOnlyCollection<string> ids, bool replace, RestoreOutcome outcome)
     {
-        var ok = new List<SentenceProject>();
-        foreach (var s in p.Sentences!.Sentences.Where(s => ids.Contains(s.Id)))
-            if (RestoreSentenceAudio(b, s, outcome)) ok.Add(s);
-        if (ok.Count == 0) return;
-        var (restored, skipped, undo) = SentenceData.Merge(ok, replace);
+        // Audio written and sentences recorded as one step under the sentence file's lock (2.47): a sentence discarded
+        // meanwhile can't have its sweep take the audio this restore just put back.
+        var (restored, skipped, undo) = SentenceData.Exclusive(() =>
+        {
+            var ok = new List<SentenceProject>();
+            foreach (var s in p.Sentences!.Sentences.Where(s => ids.Contains(s.Id)))
+                if (RestoreSentenceAudio(b, s, outcome)) ok.Add(s);
+            SentenceAudioRestored?.Invoke();
+            return ok.Count == 0 ? (0, 0, []) : SentenceData.Merge(ok, replace);
+        });
+        if (restored == 0 && skipped == 0) return;
         outcome.Restored = restored; outcome.Skipped = skipped;
         if (undo.Count > 0) { var token = Guid.NewGuid().ToString("N"); sentenceUndo[token] = undo; outcome.UndoToken = token; if (sentenceUndo.Count > 64) foreach (var old in sentenceUndo.Keys.Take(sentenceUndo.Count - 64)) sentenceUndo.TryRemove(old, out _); }
         SentencesChanged();
@@ -352,8 +361,8 @@ public sealed partial class Bridge
             if (p.Library != null) { Voices.ReplaceAll(p.Library, p.Words); outcome.Restored += p.Library.Recordings.Count; }
             if (p.Sentences != null)
             {
-                foreach (var s in p.Sentences.Sentences) RestoreSentenceAudio(b, s, outcome);
-                SentenceData.ReplaceAll(p.Sentences); outcome.Restored += p.Sentences.Sentences.Count;
+                SentenceData.Exclusive(() => { foreach (var s in p.Sentences.Sentences) RestoreSentenceAudio(b, s, outcome); SentenceData.ReplaceAll(p.Sentences); return 0; });
+                outcome.Restored += p.Sentences.Sentences.Count;
                 SentencesChanged();
             }
             // Missing audio back to its paths: kept clips, then the library's other files.

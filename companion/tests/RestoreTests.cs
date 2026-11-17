@@ -189,6 +189,32 @@ public sealed class RestoreTests
     }
 
     [Fact]
+    public async Task ADiscardDuringASentenceRestoreNeverLeavesTheSentenceWithoutItsAudio()
+    {
+        await using var rig = new BackupRig(NewRoot());
+        await rig.Host();
+        var store = rig.Bridge.SentenceStoreForTests;
+        var (id, file, _) = rig.Sentence("Kept line");
+        await rig.SetFolder();
+        var run = await rig.Backup();
+        // The host discards the kept sentence just as a restore of it has checked its audio, before it records it.
+        Task<Reply>? discard = null;
+        rig.Bridge.SentenceAudioRestored = () =>
+        {
+            rig.Bridge.SentenceAudioRestored = null;
+            discard = Task.Run(() => rig.Bridge.Execute(BackupRig.Cmd("sentenceDiscard") with { SentenceId = id }, "host"));
+            discard.Wait(500); // until 2.47 it ran (and swept the audio) here
+        };
+        await rig.OkOp("backupRestore", new { snapshot = run.Id, kind = "sentence", ids = new[] { id } });
+        Assert.NotNull(discard);
+        var discarded = await discard!;
+        Assert.True(discarded.Ok, discarded.Error);
+        // Whatever the order, a sentence in the list has its audio, and audio without a sentence is gone.
+        bool listed = store.Read(f => f.Sentences.Any(s => s.Id == id));
+        Assert.Equal(listed, File.Exists(store.AudioPath(id, file)));
+    }
+
+    [Fact]
     public async Task WholeLibraryRefusedWhilePlayingOrPromoting()
     {
         var (rig, asset) = await WithClip();

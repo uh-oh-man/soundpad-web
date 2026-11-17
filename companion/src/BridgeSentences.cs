@@ -480,18 +480,23 @@ public sealed partial class Bridge
 
     private object DiscardSentence(string? id, string key, bool host)
     {
-        bool kept = SentenceData.Change(f =>
-        {
-            var s = FindSentence(f, id);
-            // A kept sentence goes from the list only by the host's hand.
-            if (s.Kept ? !host : s.Owner != key && !host) throw new InvalidDataException(s.Kept ? "Only the host can remove a kept sentence." : "Only its maker can discard this sentence.");
-            f.Sentences.Remove(s); return s.Kept;
-        }, !host);
-        SentencesChanged();
         // 2.45 (D10): the removed sentence's rendered audio goes with it, file by file, once no version refers to it.
+        // Removing and freeing are one step under the file's lock (2.47), as a restore's writing and recording are.
+        var (kept, files, bytes) = SentenceData.Exclusive(() =>
+        {
+            bool wasKept = SentenceData.Change(f =>
+            {
+                var s = FindSentence(f, id);
+                // A kept sentence goes from the list only by the host's hand.
+                if (s.Kept ? !host : s.Owner != key && !host) throw new InvalidDataException(s.Kept ? "Only the host can remove a kept sentence." : "Only its maker can discard this sentence.");
+                f.Sentences.Remove(s); return s.Kept;
+            }, !host);
+            var (n, size) = wasKept && id != null ? SentenceData.SweepAudio(id) : (0, 0L);
+            return (wasKept, n, size);
+        });
+        SentencesChanged();
         if (kept && id != null)
         {
-            var (files, bytes) = SentenceData.SweepAudio(id);
             if (files > 0) Log($"Freed {files} kept sentence audio file{(files == 1 ? "" : "s")} ({bytes / 1024} KB)");
             return new { removed = true, freedFiles = files, freedBytes = bytes };
         }
