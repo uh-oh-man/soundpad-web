@@ -12,7 +12,7 @@ A static website plus one portable Windows program on the host PC. No accounts, 
 
 ## Host a session
 
-1. Download **SoundpadWeb.exe** from the [latest release](https://github.com/uh-oh-man/soundpad-web/releases/latest). It requires Windows 11 x64, with no installer, administrator access or separate .NET.
+1. Download the companion from the [latest release](https://github.com/uh-oh-man/soundpad-web/releases/latest). Its name carries its version, for example **SoundpadWeb-2.48.0.exe** (a hyphen, because GitHub turns spaces in file names into dots; you may rename it to `SoundpadWeb 2.48.0.exe`). **SoundpadWeb.exe** in the same release is the same file under the name older versions use. It requires Windows 11 x64, with no installer, administrator access or separate .NET.
 2. Open Soundpad normally, then run the EXE. Since 2.36 it opens its own **Soundpad Web window**, which hosts your session: guests stay connected as long as that window is open, even minimized, and you need no browser tab.
 3. Click **Copy Invite** and share the link. Each launch makes a fresh invitation; reloading the window keeps it.
 
@@ -96,13 +96,13 @@ More: [docs/ORGANIZE.md](docs/ORGANIZE.md).
 
 Open a backup to restore a single kept clip, recording, voice or sentence, a layout, or the whole library. A **Before restore** backup is made first, and restored recordings, voices and sentences can be undone from the notice. A clip goes back only to where it was; a different file already there is reported, never overwritten. If Soundpad no longer lists a restored clip, you are told which file to add again in Soundpad: nothing is added to Soundpad by itself. Restoring the whole library asks first and needs playback stopped.
 
-Backups contain your companion's identity, as its data folder does: keep the folder private and don't share it. If the companion ever says its local state is unreadable, the message tells you where the copy in your newest backup is; or close the companion and run `SoundpadWeb.exe --restore-state "<backup folder>"`. More: [docs/BACKUPS.md](docs/BACKUPS.md).
+Backups contain your companion's identity, as its data folder does: keep the folder private and don't share it. If the companion ever says its local state is unreadable, the message tells you where the copy in your newest backup is; or close the companion and run it with `--restore-state "<backup folder>"` (for example `SoundpadWeb-2.48.0.exe --restore-state "<backup folder>"`; the message names your EXE). More: [docs/BACKUPS.md](docs/BACKUPS.md).
 
 ## Updates
 
 When a newer Soundpad Web is released, the companion offers it at launch: **Update now**, **Later** or **What's new**. After **Later**, **Update** stays in the header and in Settings, where you can also **Check again** or turn off checking at launch. The update is downloaded from this project's GitHub releases and checked against the size and SHA-256 hash published with it; the EXE is not code-signed, so this proves it is the file that was published, not who built it.
 
-Updating makes a backup first (if you set a backup folder), then the companion closes and opens again by itself and continues your session: Temp, drafts, history and the invitation stay, guests reconnect on their own, recording continues on the same output and the timeline marks the gap. Sounds already playing in Soundpad keep playing. If the new version doesn't start, the previous one comes back; it also stays beside the new one as `SoundpadWeb.previous.exe` (see [going back](docs/ROLLBACK.md)). Builds from a fork or a development checkout don't update themselves. More: [docs/UPDATES.md](docs/UPDATES.md).
+Updating makes a backup first (if you set a backup folder), then the companion closes and opens again by itself and continues your session: Temp, drafts, history and the invitation stay, guests reconnect on their own, recording continues on the same output and the timeline marks the gap. Sounds already playing in Soundpad keep playing. If the new version doesn't start, the previous one comes back; it also stays beside the new one as `SoundpadWeb.previous.exe` (see [going back](docs/ROLLBACK.md)). A companion whose name carries its version, such as `SoundpadWeb-2.48.0.exe`, is updated to the new version's name (`SoundpadWeb-2.49.0.exe`) in the same folder and keeps the old one as `SoundpadWeb-2.48.0.previous.exe`; `SoundpadWeb.exe` keeps its name, so shortcuts to it keep working. Builds from a fork or a development checkout don't update themselves. More: [docs/UPDATES.md](docs/UPDATES.md).
 
 ## Setup and shortcuts
 
@@ -166,14 +166,14 @@ Connections use public relays to find each other, then encrypted peer-to-peer We
 
 ## Going back to an older version
 
-Every release stays on GitHub. Download any older `SoundpadWeb.exe` from [Releases](https://github.com/uh-oh-man/soundpad-web/releases); your saved data keeps working. Rolling back to the pre-Mimic v2.3.1, and mixing old and new website and companion versions, has been tested. Details: [docs/ROLLBACK.md](docs/ROLLBACK.md).
+Every release stays on GitHub. Download any older `SoundpadWeb.exe` (from 2.48 also named `SoundpadWeb-<version>.exe`) from [Releases](https://github.com/uh-oh-man/soundpad-web/releases); your saved data keeps working. Rolling back to the pre-Mimic v2.3.1, and mixing old and new website and companion versions, has been tested. Details: [docs/ROLLBACK.md](docs/ROLLBACK.md).
 
 ## What's in this repository
 
 | Part | Where | What it does |
 | --- | --- | --- |
 | Website | `web/` | The static React site on GitHub Pages: soundboard, Temp, Mimic window, host settings. Guests only ever need this. |
-| Windows companion | `companion/` | One portable `SoundpadWeb.exe` on the host PC. It talks to Soundpad, manages Temp audio, runs Mimic (capture, local Whisper transcript, the F6–F10 hotkey, preview, trim and effects) keeps the voice library and its word index, puts sentences together from its recordings, backs up and restores your data, updates itself and applies Organize plans to Soundpad. |
+| Windows companion | `companion/` | One portable EXE on the host PC (`SoundpadWeb-<version>.exe`, also published as `SoundpadWeb.exe`). It talks to Soundpad, manages Temp audio, runs Mimic (capture, local Whisper transcript, the F6–F10 hotkey, preview, trim and effects) keeps the voice library and its word index, puts sentences together from its recordings, backs up and restores your data, updates itself and applies Organize plans to Soundpad. |
 | Voice Replay Studio | `mimic/` | The original Mimic desktop app (V1.1), kept intact with its own [README](mimic/README.md), tests and licenses. |
 | Docs | `docs/` | [Mimic](docs/MIMIC.md), [sentences](docs/SENTENCES.md), [Organize](docs/ORGANIZE.md), [backups](docs/BACKUPS.md), [updates](docs/UPDATES.md), [setup and shortcuts](docs/SETUP.md), [rolling back](docs/ROLLBACK.md), [developers](docs/DEVELOPERS.md), API research, protocol and verification notes. Version histories: [2.3](docs/V2.3.md), [V2](docs/V2.md). |
 

@@ -2,6 +2,14 @@
 
 Notable changes to Soundpad Web. Versions follow the website's `package.json`; the Windows companion is versioned separately and only needs updating when a release says so.
 
+## Unreleased
+
+### Changed
+
+- **The companion's file name carries its version** ("start labeling the version number on the exe host"). Each release now also publishes the companion as **SoundpadWeb-<version>.exe**, for example `SoundpadWeb-2.48.0.exe`. It uses a hyphen because GitHub turns spaces in file names into dots; you can rename it to `SoundpadWeb 2.48.0.exe` and it works the same. **SoundpadWeb.exe** stays in every release as the same file, so companions 2.44–2.47 still update themselves and every "Download the Windows companion" link keeps working. Releases also gain `SHA256SUMS.txt`, which lists the hash for both names; `SHA256.txt` is unchanged.
+- **A companion named with its version updates to the new version's name.** `SoundpadWeb-2.48.0.exe` becomes `SoundpadWeb-2.49.0.exe` in the same folder and keeps the old one as `SoundpadWeb-2.48.0.previous.exe` (older previous versions are removed once the new one has started). If the new version doesn't start, the old file gets its name back. `SoundpadWeb.exe` is still updated in place, so shortcuts to it keep working. If a file with the new name is already in the folder, the update stops and says so instead of replacing it. Needs the companion from this release.
+- When the companion tells you to run `--restore-state`, it names your EXE.
+
 ## 2.47.0 — A new Mimic page, and fixes from a full review
 
 Mimic is one full page with the live transcript first and a smoothly moving waveform; top tabs are the default navigation; and the fixes from a review of 2.46. **Update the companion** for the Temp and live-subtitle fixes and the count of removed files waiting to be freed; with an older companion everything else in this release works.

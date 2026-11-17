@@ -16,6 +16,37 @@ guide part is in README.md; the restore points are in ROLLBACK.md.
 - Rebuilt old releases (`rebuild-old-release.yml`) are created with `--latest=false`, so they never become the
   latest release. The companion also never installs a version that is not newer than itself.
 
+## Release assets and EXE names (2.48)
+
+Every release publishes:
+
+| Asset | What it is | Who reads it |
+|---|---|---|
+| `SoundpadWeb-<version>.exe` | the companion, e.g. `SoundpadWeb-2.48.0.exe` | people downloading it; the updater from 2.48 |
+| `SoundpadWeb.exe` | the same bytes under the old name | companions 2.44–2.47 (they look for exactly this name), and every `releases/latest/download/SoundpadWeb.exe` link (README, the website's download buttons) |
+| `SHA256.txt` | the bare hash, 64 hex characters and a line end | companions 2.44–2.47, which accept nothing else, so it never gains file names |
+| `SHA256SUMS.txt` | `<hash>  SoundpadWeb.exe` and `<hash>  SoundpadWeb-<version>.exe`, as `sha256sum` writes them | the updater from 2.48, and people checking a download by hand |
+
+The versioned name uses a hyphen: GitHub turns spaces in asset names into dots (`SoundpadWeb 2.48.0.exe` would be
+published as `SoundpadWeb.2.48.0.exe`). A host may rename the download to `SoundpadWeb 2.48.0.exe`; the companion
+treats both spellings the same. `build-windows.yml` makes the versioned copy from the EXE's ProductVersion, checks
+that both files have the same hash, and the release job refuses a tag that is not that version.
+
+Which files update themselves: `SoundpadWeb.exe`, `SoundpadWeb-X.Y.Z.exe` and `SoundpadWeb X.Y.Z.exe` (any case;
+`UpdateNames.Updatable`). Any other name (a dev build, the harness, `SoundpadWeb (1).exe`) is `unsupported` with
+"This build doesn't update itself", as before 2.48. Where the new version goes (`UpdateNames.Target`):
+
+- `SoundpadWeb.exe` is updated in place, so shortcuts to it keep working;
+- a versioned name is updated to the new version's name in the same folder, with the same separator:
+  `SoundpadWeb-2.48.0.exe` → `SoundpadWeb-2.49.0.exe`, `SoundpadWeb 2.48.0.exe` → `SoundpadWeb 2.49.0.exe`. A
+  shortcut to the old versioned name stops working after the update, as the file's name says another version. If a
+  file with the new name is already in the folder, the update is refused before anything is downloaded (reason
+  `nameTaken`, "<name> is already in this folder. Start that one, or move it away and update again."); it is never
+  replaced.
+
+The window title stays "Soundpad Web"; the process name is the file's name, as it always was. The
+unreadable-state message names the running EXE when it tells the host to run `--restore-state`.
+
 ## The check
 
 - At launch (once, a few seconds after the first poll, unless the host turned "Check for updates when the companion
@@ -26,8 +57,12 @@ guide part is in README.md; the restore points are in ROLLBACK.md.
 - A 304, or a 403 or 429 with `x-ratelimit-remaining: 0` or `retry-after`, falls back to
   `HEAD https://github.com/<repo>/releases/latest` and reads its `/releases/tag/vX.Y.Z` redirect (no API size or
   digest then; the size comes from Content-Length). Without a usable redirect: failed, reason `rateLimited`.
-- Only a non-draft, non-prerelease tag `vX.Y.Z` strictly newer than the running version counts, with assets named
-  exactly `SoundpadWeb.exe` and `SHA256.txt` on GitHub's hosts.
+- Only a non-draft, non-prerelease tag `vX.Y.Z` strictly newer than the running version counts, with an EXE and a
+  hash file on GitHub's hosts. Since 2.48 the EXE is `SoundpadWeb-<that version>.exe` when the release has it
+  (a versioned asset of any other version is ignored), else `SoundpadWeb.exe`; the hash file is `SHA256SUMS.txt`
+  when the release has it, else `SHA256.txt`. Releases up to 2.47 have only `SoundpadWeb.exe` and `SHA256.txt` and
+  still install. The rate-limited path below (no asset list) always uses `SoundpadWeb.exe` and `SHA256.txt`, which
+  every release has.
 - The EXE's folder must be on a local NTFS drive and writable (a probe file is written and deleted). Otherwise the
   state is `unsupported` with the new version and a "Download it yourself" link.
 
@@ -35,10 +70,12 @@ guide part is in README.md; the restore points are in ROLLBACK.md.
 
 HTTPS only, redirects followed by hand and only to `github.com`, `objects.githubusercontent.com` and
 `release-assets.githubusercontent.com` (never to http), at most 256 MiB, 30 s without data ends it. The file is
-`<exe folder>\.SoundpadWeb.<version>.download`. Then, in this order:
+`<exe folder>\.<exe stem>.<version>.download` (e.g. `.SoundpadWeb.2.48.0.download`). Then, in this order:
 
 1. Its size equals the asset size (or Content-Length).
-2. Its SHA-256 equals `SHA256.txt` (64 hex characters, any case, whitespace trimmed).
+2. Its SHA-256 equals the published one: `SHA256.txt` (64 hex characters, any case, whitespace trimmed), or since
+   2.48 the one `SHA256SUMS.txt` line for exactly the downloaded asset's name (missing, listed twice with different
+   hashes, or any malformed line: refused, `hashMismatch`).
 3. It equals the API's `sha256:` digest when the API gave one (no digest is "unknown", not a failure).
 4. It is a PE file whose ProductVersion is the release's version (`2.44.1` or `2.44.1+<commit>`).
 5. A test run of `<download> --licenses` (no window, output read by the companion, 20 s) exits 0 and prints the
@@ -62,8 +99,12 @@ Stage H step registered with `Bridge.BlockUpdatesWhile` is busy (a whole-library
    CleanupSession or RetireSession).
 3. Pages whose hello said `updates: true` get `{type: "updating", version}`; the companion window closes through
    `CloseForExit` (no quit question); the server, the Soundpad pipe and `companion.lock` are released.
-4. The hand-over is written (below), `SoundpadWeb.exe` is renamed to `SoundpadWeb.previous.exe` (replacing an older
-   one), and the download takes its name. Windows allows renaming a running program on NTFS.
+4. The hand-over is written (below), the running EXE is renamed to `<stem>.previous.exe` (`SoundpadWeb.previous.exe`,
+   replacing an older one), and the download takes its name. Windows allows renaming a running program on NTFS. From
+   a versioned name (2.48) the download takes the new version's name instead: `SoundpadWeb-2.48.0.exe` becomes
+   `SoundpadWeb-2.48.0.previous.exe` and the download becomes `SoundpadWeb-2.49.0.exe`, which is what starts. Only
+   after the new version reported ready are earlier versions' `SoundpadWeb-X.Y.Z.previous.exe` removed, so one
+   previous version stays (the plain name's `SoundpadWeb.previous.exe` is left alone).
 5. The new EXE starts with the original safe flags (`--data-dir`, `--pipe`, `--site`, `--dev`, `--hidden-window`,
    `--no-window`, `--no-browser`, `--update-source`) plus `--resume-update <id> --wait-pid <old pid>`, through
    CreateProcess: no console window, standard output and errors in `<data>\update-child.log`, standard input from
@@ -71,8 +112,8 @@ Stage H step registered with `Bridge.BlockUpdatesWhile` is busy (a whole-library
    a new console that starts minimized and is not activated.
 6. Watchdog: the old process stays alive, holding nothing, and waits up to 90 s for `update-ready.<id>` with the new
    version. On a non-zero exit, a timeout, a ready file of another version, or a failed move or start, the new
-   process is stopped, the failed EXE becomes `SoundpadWeb.failed-<version>.exe`, the previous EXE gets its name
-   back, the hand-over is written again from memory, and the old version starts again with `--resume-update`. If
+   process is stopped, the failed EXE becomes `<stem>.failed-<version>.exe` (`SoundpadWeb.failed-2.49.0.exe`, or
+   `SoundpadWeb-2.48.0.failed-2.49.0.exe` from a versioned name), the previous EXE gets its own name back, the hand-over is written again from memory, and the old version starts again with `--resume-update`. If
    that fails too, the hand-over is deleted and the next start takes the crash path (Recover or Discard for Temp).
 
 ## The hand-over
@@ -81,7 +122,7 @@ Stage H step registered with `Bridge.BlockUpdatesWhile` is busy (a whole-library
 entropy). It is valid for 5 minutes, for the same data folder, and only for the process the watchdog started (the
 writer must have ended or be the `--wait-pid` process). The new process renames it to `.consumed` when it reads it
 and deletes that once it is running; a normal start deletes every `update-handoff.v1.bin*`, `update-ready.*`,
-`update-child.log`, unfinished `.SoundpadWeb.*.download` and `SoundpadWeb.failed-*.exe`. Keys and tokens are never
+`update-child.log`, and the running EXE's own unfinished `.<stem>.*.download` and `<stem>.failed-*.exe`. Keys and tokens are never
 logged.
 
 It carries:
@@ -135,13 +176,16 @@ ended before the update) shows Resume hosting instead of starting a new invitati
 | `update-ready.<id>` | data folder | seconds; deleted by the watchdog and by every normal start |
 | `update-child.log` | data folder | the relaunched process's output; deleted by the next normal start |
 | `SoundpadWeb.previous.exe` | beside the EXE | until the next update; rename it to `SoundpadWeb.exe` to go back by hand |
-| `.SoundpadWeb.<ver>.download`, `SoundpadWeb.failed-<ver>.exe` | beside the EXE | until the next normal start |
+| `SoundpadWeb-<old>.previous.exe` (2.48, from a versioned name) | beside the EXE | until the next successful update; start it (or rename it to `SoundpadWeb-<old>.exe`) to go back by hand |
+| `.<stem>.<ver>.download`, `<stem>.failed-<ver>.exe` | beside the EXE | until the next normal start of that EXE |
 
 ## Tests
 
 - xUnit: `UpdateReleaseTests` (check, fallback, redirect allow-list, SHA256.txt, size/hash/digest/version checks,
-  test-run refusal, settings file), `UpdateHandoffTests` (DPAPI round trip, every refusal deletes it, leftovers),
-  `UpdateSwapTests` (every failing step rolls back and restarts the old version), `UpdateContinuityTests` (one Bridge
+  test-run refusal, settings file), `UpdateNamesTests` (2.48: the versioned asset preferred, the plain fallback,
+  SHA256SUMS.txt lines and the bare SHA256.txt older companions read, the target name rule, which names update,
+  stale previous EXEs, `nameTaken`), `UpdateHandoffTests` (DPAPI round trip, every refusal deletes it, leftovers),
+  `UpdateSwapTests` (every failing step rolls back and restarts the old version, also from a versioned name), `UpdateContinuityTests` (one Bridge
   hands its session to the next: same history and gap, drafts, Temp, joins, capture, F7, Panic, Kick; the crash path
   without a hand-over; host-only, strict ops).
 - Harness: `--handoff-out` (verb `update-exit`, or Update now in the page, ends the harness through the update path
@@ -151,8 +195,9 @@ ended before the update) shows Resume hosting instead of starting a new invitati
   while hosting was ended.
 - `scripts/update-swap-test.ps1` (Windows PowerShell 5.1; CI runs it after the smoke test): real EXEs, the mock
   Soundpad and a TcpListener fake release server. A good update, a wrong hash, a truncated download, a wrong
-  version, a failing test run, and a new version that never becomes ready (rolled back after 90 s); `-Hidden` adds a
-  `--hidden-window` run. It reads the token from `--launch-file` (accepted only with `--dev`).
+  version, a failing test run, and a new version that never becomes ready (rolled back after 90 s); since 2.48 also
+  a release with only the old two assets, updates from `SoundpadWeb-<old>.exe` and `SoundpadWeb <old>.exe`, a taken
+  new name, and a never-ready version from a versioned name; `-Hidden` adds a `--hidden-window` run. It reads the token from `--launch-file` (accepted only with `--dev`).
 
 ## Not proven
 
