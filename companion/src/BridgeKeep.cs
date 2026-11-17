@@ -57,11 +57,17 @@ public sealed partial class Bridge
         budgets.Touch();
     }
 
-    /// <summary>The ids of the assets that are in Temp right now (a lookup for the budget sums).</summary>
+    /// <summary>
+    /// The ids of the assets whose temporary files take a guest's Temp budget right now (a lookup for the budget sums):
+    /// those in Temp, and (2.47) those the guest removed whose files are still on the PC. With the real Soundpad a
+    /// removed file waits for Clear Temp or quitting, and it still takes Temp's capacity meanwhile; freeing the budget
+    /// at once let a guest fill the host's Temp by making and removing clips. A clip the host removed counts for nobody.
+    /// </summary>
     private Func<string, bool> TemporaryIds()
     {
-        var ids = Audio.Public.Assets.Where(a => a.HasTemporary).Select(a => a.Id).ToHashSet(StringComparer.Ordinal);
-        return ids.Contains;
+        var audio = Audio;
+        var ids = audio.Public.Assets.Where(a => a.HasTemporary).Select(a => a.Id).ToHashSet(StringComparer.Ordinal);
+        return id => ids.Contains(id) || audio.WaitingRemovedBy(id) is { } by && by != "host";
     }
 
     /// <summary>Clips in Temp that quitting would remove: sources with a current temporary file not already on its way out.</summary>

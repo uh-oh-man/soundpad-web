@@ -32,6 +32,8 @@ public sealed partial class Bridge
                 managed.Changed += Publish;
                 // Exact playback (2.37): the slot files may go with the Temp category, and only a second after audio stopped.
                 managed.OwnedSlotPaths = () => Slots.Owned(); managed.PlaybackActivity = () => Interlocked.Read(ref lastAudio);
+                // A guest's Undo window is timed on the Bridge's clock (UseClock in tests).
+                managed.Ticks = () => utcNow();
                 return managed;
             }
         }
@@ -286,7 +288,7 @@ public sealed partial class Bridge
                     else if (playback.SoundId is string playing && parsed.Public.Sounds.FirstOrDefault(s => s.Id == playing)?.AssetId == assetId
                         && await pipe.Request("GetPlayStatus()") != "STOPPED")
                         throw new InvalidDataException("Stop playback before removing this audio. Nothing was removed.");
-                    await Audio.Remove(assetId);
+                    await Audio.Remove(assetId, PersonKey(actor, participant, requester));
                 }
                 else if (c.Op == "tempRemoveMine")
                 {
@@ -300,17 +302,25 @@ public sealed partial class Bridge
                         await StopNow(ReserveInternal(true));
                         for (int i = 0; i < 20 && await pipe.Request("GetPlayStatus()") != "STOPPED"; i++) await Task.Delay(100);
                     }
-                    var removed = mine.Length == 0 ? [] : await Audio.RemoveMany(mine);
+                    var removed = mine.Length == 0 ? [] : await Audio.RemoveMany(mine, PersonKey(actor, participant, requester));
                     Log($"A guest removed {removed.Length} of their Temp clip(s)");
                     await gate.EnterAsync(PriorityGate.Lane.Normal); try { await RefreshInner(); SaveAudioReceipt(c); Publish(); } finally { gate.Release(); }
                     return new("ack", c.Id, true, Data: new { removed = removed.Length, assetIds = removed });
                 }
                 else if (c.Op == "tempRestore")
                 {
-                    // Undo of a removal in this launch (2.46), while its files are still there.
-                    int restored = 0; var back = new List<string>();
-                    foreach (var id in RestoreIds(c)) if (await Audio.Restore(id) > 0) { restored++; back.Add(id); }
-                    if (restored == 0) throw new InvalidDataException("It is already gone from Soundpad, so it can't come back.");
+                    // Undo of a removal in this launch (2.46), while its files are still there: only by whoever removed
+                    // it, and a guest's only for ManagedAudioStore.GuestUndoMs.
+                    string by = PersonKey(actor, participant, requester);
+                    int restored = 0; var back = new List<string>(); var ids = RestoreIds(c);
+                    foreach (var id in ids) if (await Audio.Restore(id, by) > 0) { restored++; back.Add(id); }
+                    if (restored == 0)
+                    {
+                        var removers = ids.Select(Audio.RemovedBy).OfType<string>().ToArray();
+                        if (removers.Length > 0 && removers.All(r => r != by)) throw new InvalidDataException(removers.Contains("host") ? "The host removed it, so only the host can bring it back." : "Someone else removed it, so only they can bring it back.");
+                        if (removers.Length > 0 && by != "host") throw new InvalidDataException("It was removed more than 10 minutes ago, so it can't come back.");
+                        throw new InvalidDataException("It is already gone from Soundpad, so it can't come back.");
+                    }
                     await gate.EnterAsync(PriorityGate.Lane.Normal); try { await RefreshInner(); SaveAudioReceipt(c); Publish(); } finally { gate.Release(); }
                     return new("ack", c.Id, true, Data: new { restored, assetIds = back });
                 }

@@ -91,7 +91,10 @@ public sealed class PromotionPlan
 public record AudioIssue(string Id, string? AssetId, string Code, string Message, string Severity = "error", string Action = "retry");
 public record AudioVariantView(string Id, string? SoundId, string Orientation, string State, bool Ready, bool Permanent, string? NativeLabel, bool Current, bool LegacyApproval);
 public record AudioAssetView(string Id, string Name, string Origin, string Uploader, string State, long CreatedAt, AudioVariantView? Normal, AudioVariantView? Reversed, AudioVariantView[] Variants, bool HasTemporary);
-public record AudioManagerView(long Revision, AudioAssetView[] Assets, AudioIssue[] Issues, int? TempCategoryId, string? TempCategoryName, bool Blocked, long TemporaryBytes);
+/// <param name="Waiting">2.47: removed temporary files still on the PC (they count in <paramref name="TemporaryBytes"/> and Temp's capacity until deleted); null when none.</param>
+public record AudioManagerView(long Revision, AudioAssetView[] Assets, AudioIssue[] Issues, int? TempCategoryId, string? TempCategoryName, bool Blocked, long TemporaryBytes, TempWaiting? Waiting = null);
+/// <summary>Removed temporary files waiting to be deleted (2.47): with the real Soundpad, until Clear Temp or quitting.</summary>
+public record TempWaiting(int Files, long Bytes);
 public record NativeEntry(int Index, string Path);
 public record NativeCategory(int Index, string Name, string? Type, string[] Paths);
 public record NativeCatalog(NativeEntry[] Entries, NativeCategory[] Categories, string Fingerprint);

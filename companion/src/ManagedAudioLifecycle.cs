@@ -71,42 +71,57 @@ public sealed partial class ManagedAudioStore
     /// Temp category to go, as one, when the companion quits or Temp is cleared (see <see cref="Deferred"/>). The
     /// caller decides about the source's own playback (Bridge: Undo stops it, otherwise a playing source is refused).
     /// </summary>
-    public async Task Remove(string assetId)
+    /// <param name="by">Who removed it ("host", or the guest's person key): only they may Undo it (see <see cref="Restore"/>).</param>
+    public async Task Remove(string assetId, string by = "host")
     {
         RequireWritable(); var asset = Asset(assetId);
-        Retire(asset); Save(); await Cleanup(assetId);
+        Retire(asset, by); Save(); await Cleanup(assetId);
     }
     /// <summary>Removes several sources at once (2.46, a guest's "Remove all my Temp clips"): one save and one cleanup.</summary>
-    public async Task<string[]> RemoveMany(IReadOnlyCollection<string> assetIds)
+    public async Task<string[]> RemoveMany(IReadOnlyCollection<string> assetIds, string by = "host")
     {
         RequireWritable();
         var assets = assetIds.Select(Asset).Where(a => a.Promotion is not { State: not "committed" }).ToArray();
-        foreach (var asset in assets) Retire(asset);
+        foreach (var asset in assets) Retire(asset, by);
         Save();
         foreach (var asset in assets) await Cleanup(asset.Id);
         return [.. assets.Select(a => a.Id)];
     }
-    private void Retire(AudioAsset asset)
+    private void Retire(AudioAsset asset, string by)
     {
         if (asset.Promotion is { State: not "committed" }) throw new InvalidDataException("Resolve the pending permanent save first. Its source must remain available for recovery.");
         var retired = new List<string>();
         foreach (var variant in asset.Variants.Where(v => v.OwnsFile && !v.Permanent && !v.LegacyApproval && v.Storage is "session" or "legacy" && v.State != "removed" && !v.Retired)) { variant.Retired = true; retired.Add(variant.Id); }
-        if (retired.Count > 0) lock (removedNow) removedNow[asset.Id] = [.. retired];
+        if (retired.Count > 0) lock (removedNow) removedNow[asset.Id] = new([.. retired], by, Ticks());
         if (asset.Input != null) asset.Input.State = "retired";
         asset.State = "cleanup-pending";
     }
+    /// <summary>One Remove in this launch: the variants it retired, who removed them and when (<see cref="Ticks"/>).</summary>
+    private sealed record Removal(string[] VariantIds, string By, long At);
     /// <summary>The variants each Remove in this launch retired (2.46), which Undo may bring back while their files are still there.</summary>
-    private readonly Dictionary<string, string[]> removedNow = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, Removal> removedNow = new(StringComparer.Ordinal);
+    /// <summary>How long a guest's Undo of their own removal stays possible (the host's lasts until the companion quits).</summary>
+    public const long GuestUndoMs = 10 * 60 * 1000;
+    /// <summary>Who removed this source in this launch ("host" or a guest's person key), while its Undo is remembered; else null.</summary>
+    public string? RemovedBy(string assetId) { lock (removedNow) return removedNow.GetValueOrDefault(assetId)?.By; }
+    /// <summary>The clock removals are timed with (milliseconds; a test seam).</summary>
+    internal Func<long> Ticks { get; set; } = () => Environment.TickCount64;
     /// <summary>
     /// Undo of a Remove in this launch (2.46): the files it retired come back, as long as each one is still on disk
     /// unchanged and still listed in Soundpad. With the real Soundpad that is until the companion quits or Temp is
     /// cleared; with a pipe that removes entries itself, until the cleanup ran. Returns how many files came back.
+    /// Only whoever removed it may bring it back: the host any of the host's removals while the companion runs, a
+    /// guest their own removal for <see cref="GuestUndoMs"/> (so a guest can't undo the host taking their clip away).
+    /// Nothing is added to Temp's capacity or a guest's budget: a removed file still counts in both until it is
+    /// deleted (<see cref="Capacity"/>, <see cref="Waiting"/>).
     /// </summary>
-    public async Task<int> Restore(string assetId)
+    public async Task<int> Restore(string assetId, string by = "host")
     {
         RequireWritable(); var asset = journal.Assets.SingleOrDefault(a => a.Id == assetId);
         if (asset == null) return 0; // forgotten after Clear Temp
-        string[] ids; lock (removedNow) ids = removedNow.GetValueOrDefault(asset.Id) ?? [];
+        Removal? removal; lock (removedNow) removal = removedNow.GetValueOrDefault(asset.Id);
+        if (removal == null || removal.By != by || by != "host" && Ticks() - removal.At > GuestUndoMs) return 0;
+        var ids = removal.VariantIds;
         var candidates = asset.Variants.Where(v => ids.Contains(v.Id) && v.Retired && v.OwnsFile && !v.Permanent && !v.LegacyApproval && v.State == "ready" && v.Native is { VerifiedAt: > 0 } && ManagedFiles.Verified(v.Path, v.FileHash, v.Bytes)).ToArray();
         if (candidates.Length == 0) return 0;
         var catalog = await Native(() => ManagedSoundpad.Read(pipe));
