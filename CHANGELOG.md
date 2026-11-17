@@ -21,6 +21,7 @@ A redesigned start page, and the companion's file name now carries its version. 
 
 ### Fixed
 
+- **Guests no longer see "Too many requests" for a burst of lookups.** A guest's page spaces its requests out, but a slow PC or network can still deliver several at once, and the host's page counted them as too many. A lookup refused only for that (sounds, statistics, the voice library, the history, sentences) is now asked again a second later instead of failing. Anything that changes something is still never sent twice.
 - **On a phone, Mimic's zoom buttons are never stuck under the notices.** With notices showing, the timeline's zoom row could sit below the end of the page's Mimic column, where it could not be scrolled into view. The column is now at least a screen tall and grows when it needs to.
 
 

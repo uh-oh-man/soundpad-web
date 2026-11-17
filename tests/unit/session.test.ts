@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { joinRoom } from 'trystero';
-import { GUEST_RATES, Session } from '../../web/src/network/session';
+import { GUEST_RATES, RATE_REFUSAL, Session } from '../../web/src/network/session';
 import { createIdentity, type HostIdentity } from '../../web/src/network/identity';
 import { command, EMPTY, type Command, type Snapshot } from '../../web/src/protocol';
 type Handler = (data: unknown, context: { peerId: string }) => void;
@@ -295,8 +295,46 @@ describe('authoritative sessions over deterministic transport (no public relay)'
     expect(settled.filter((r) => r.status === 'rejected')).toEqual([]);
     expect(Date.now() - started).toBeGreaterThanOrEqual(900); // the last six waited for the next second
     const order = h.commands.map((c) => c.id);
-    expect(order.filter((id) => id !== stop.id)).toEqual(queries.map((c) => c.id));
+    // Each query once. Their order is paced, but a query the host page refused for a bunched arrival is
+    // asked again later (2.48), so only Stop's place is checked.
+    expect([...order.filter((id) => id !== stop.id)].sort()).toEqual(
+      queries.map((c) => c.id).sort(),
+    );
     expect(order.indexOf(stop.id)).toBeLessThan(order.indexOf(queries.at(-1)!.id));
+    expect(h.guests()).toEqual(['guest']);
+  });
+  it('asks a read-only query again when the host page refused it for a burst, but never an edit (2.48)', async () => {
+    const n = new MemoryNetwork(),
+      a = await createIdentity();
+    const h = setup(n, a, 'host', true),
+      g = setup(n, a, 'guest');
+    await vi.waitFor(() => expect(g.status()).toBe('Connected'));
+    // The host page refuses the first arrival of each of these, as it does when a burst arrives bunched together.
+    const query = command('statistics');
+    const edit = command('libraryEdit', { recordingId: 'a'.repeat(32), name: 'x' });
+    const room = [...n.groups.values()][0].get('host')!;
+    const inner = room.handler!;
+    const arrivals = new Map<string, number>();
+    room.handler = (data, context) => {
+      const m = data as { type?: string; command?: { id: string } };
+      const id = m.type === 'command' ? m.command?.id : undefined;
+      if (id === query.id || id === edit.id) {
+        const count = (arrivals.get(id!) ?? 0) + 1;
+        arrivals.set(id!, count);
+        if (count === 1) {
+          inject(n, 'guest', 'host', { v: 1, type: 'ack', id, ok: false, error: RATE_REFUSAL });
+          return;
+        }
+      }
+      inner(data, context);
+    };
+    const asked = g.session.sendCommand(query);
+    const changed = g.session.sendCommand(edit);
+    await expect(changed).rejects.toThrow(RATE_REFUSAL);
+    // The query goes again after about a second, and its answer arrives; the edit is never sent again.
+    await asked; // answered, not refused
+    expect(arrivals.get(query.id)).toBe(2);
+    expect(arrivals.get(edit.id)).toBe(1);
     expect(h.guests()).toEqual(['guest']);
   });
   it('keeps the 2.34 budget of 12 a second per guest when the companion is older than 2.35', async () => {

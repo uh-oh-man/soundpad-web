@@ -111,6 +111,35 @@ export const GUEST_RATES = { control: 100, other: 12, abuse: 400 } as const;
  * hellos and for messages a busy host page handles in a bunch.
  */
 export const GUEST_PACE = 8;
+/** What a host page answers a command it refused for its guest's rate (2.48: one shared text). */
+export const RATE_REFUSAL = 'Too many requests. Please try again shortly.';
+/**
+ * Queries that only read (2.48): safe to ask again when a host page refused one for arriving in a burst.
+ * Nothing that changes anything is listed.
+ */
+const READ_ONLY_OPS: ReadonlySet<string> = new Set([
+  'statistics',
+  'budgetStatus',
+  'audioAssets',
+  'waveform',
+  'libraryStatus',
+  'libraryList',
+  'libraryGet',
+  'librarySearch',
+  'libraryVocabulary',
+  'libraryAudit',
+  'historyTimeline',
+  'historyLevels',
+  'historyTranscript',
+  'historySearch',
+  'speakerGroups',
+  'draftList',
+  'sentenceList',
+  'sentenceGet',
+  'sentenceAlternatives',
+  'paletteSearch',
+  'performanceSets',
+]);
 /** A guest only listens to the host, whose acks and reports can come in bursts; this is a flood guard. */
 const HOST_FLOOD = 1000;
 /**
@@ -326,6 +355,8 @@ export class Session {
       reject: (e: Error) => void;
       timer: ReturnType<typeof setTimeout>;
       control: boolean;
+      /** A read-only query: sent again once if the host page refused it only for arriving in a burst. */
+      again?: () => void;
     }
   >();
   /** Unanswered commands other than playback and transport ones; only these count toward the cap. */
@@ -1287,7 +1318,7 @@ export class Session {
               type: 'ack',
               id: envelope.data.id,
               ok: false,
-              error: 'Too many requests. Please try again shortly.',
+              error: RATE_REFUSAL,
             },
             peer,
           );
@@ -1484,6 +1515,19 @@ export class Session {
         else this.send({ v: 1, type: 'hello', nonce: this.nonce }, peer);
       } else if (m.type === 'ack') {
         const ack = ackSchema.parse({ ...m, type: 'ack', v: undefined });
+        // Paced by when this page sent them, a burst of queries can still reach the host page bunched
+        // together (a slow PC or network delivers late ones at once), and the host page counts arrivals.
+        // A read-only query refused only for that is asked again once, a second later, instead of
+        // failing; anything that changes something is never sent twice (2.48).
+        const waiting = this.pending.get(ack.id);
+        if (!ack.ok && ack.error === RATE_REFUSAL && waiting?.again) {
+          const again = waiting.again;
+          waiting.again = undefined;
+          setTimeout(() => {
+            if (this.pending.get(ack.id) === waiting) this.paced(again);
+          }, 1100);
+          return;
+        }
         const p = this.settle(ack.id);
         if (p) {
           // An ok ack whose data says { superseded: true } (2.35) is a success like any other: the
@@ -1718,7 +1762,7 @@ export class Session {
         delete command.autoplay;
         // Refused here rather than sent: one more message could cost this guest its connection.
         if (!this.olderHostRate.accept()) {
-          reject(Error('Too many requests. Please try again shortly.'));
+          reject(Error(RATE_REFUSAL));
           return;
         }
       }
@@ -1738,7 +1782,13 @@ export class Session {
       );
       // A repeated id replaces its earlier request, so the count above stays exact.
       this.settle(c.id)?.reject(Error('Command sent again.'));
-      const entry = { resolve, reject, timer, control };
+      const entry: {
+        resolve: (data: unknown) => void;
+        reject: (e: Error) => void;
+        timer: ReturnType<typeof setTimeout>;
+        control: boolean;
+        again?: () => void;
+      } = { resolve, reject, timer, control };
       this.pending.set(c.id, entry);
       if (!control) this.waiting++;
       const send = () => {
@@ -1746,6 +1796,7 @@ export class Session {
         if (this.pending.get(c.id) === entry && this.hostPeer)
           this.send({ v: 1, type: 'command', command }, this.hostPeer);
       };
+      if (!control && READ_ONLY_OPS.has(c.op)) entry.again = send;
       // Playback never waits; toward a tab from before 2.35, olderHostRate above already applies.
       if (control || !siteRelaysIntents(this.welcomedSite)) send();
       else this.paced(send);
