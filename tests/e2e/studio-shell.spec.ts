@@ -509,8 +509,9 @@ test('keyboard order: skip links, topbar, nav, search, tiles, then the player; S
       await page.evaluate(() => {
         const el = document.activeElement as HTMLElement;
         if (el.closest('.skip-links')) return 'skip';
-        if (el.closest('header.topbar')) return 'topbar';
+        // The section nav first: with top tabs (the default since 2.47) it sits inside the topbar.
         if (el.closest('nav[aria-label="Sections"]')) return 'nav';
+        if (el.closest('header.topbar')) return 'topbar';
         if (el.matches('[aria-label="Search sounds"]')) return 'search';
         if (el.matches('.tile-play-strip, .tile-art-button, .sound-entry *')) return 'tile';
         if (el.closest('.player')) return 'player';

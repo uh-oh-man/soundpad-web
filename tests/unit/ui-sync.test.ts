@@ -9,7 +9,7 @@ import type { UiPrefs } from '../../web/src/protocol';
 const companion = vi.hoisted(() => {
   const defaults = {
     version: 1 as const,
-    navStyle: 'sidebar' as const,
+    navStyle: 'tabs' as const,
     theme: 'red-blue' as const,
     motion: 'system' as const,
     contrast: 'standard' as const,
@@ -55,7 +55,7 @@ beforeEach(() => {
   companion.run.mockClear();
   resetHostStyleSync();
   resetPrefsForTests();
-  writePref('nav', 'sidebar');
+  writePref('nav', 'tabs');
   writePref('motion', 'system');
   writePref('contrast', 'standard');
   writePref('headerAnimation', 'on');
@@ -93,7 +93,7 @@ it('a choice made while the first page seeds ui.json is sent afterwards, and not
 });
 
 it('a choice made while a change is being sent after the read wins, and reaches ui.json', async () => {
-  companion.state.file = { navStyle: 'tabs' };
+  companion.state.file = { navStyle: 'sidebar' };
   start();
   // This page changed motion while the get was on its way; the send of that change is held.
   let releaseSet!: () => void;
@@ -119,9 +119,9 @@ it('a choice made while a change is being sent after the read wins, and reaches 
   await flush();
   expect(currentTheme()).toBe('ocean');
   expect(readPref('motion')).toBe('reduce');
-  expect(readPref('nav')).toBe('tabs');
+  expect(readPref('nav')).toBe('sidebar');
   expect(companion.state.file).toMatchObject({
-    navStyle: 'tabs',
+    navStyle: 'sidebar',
     motion: 'reduce',
     theme: 'ocean',
   });
@@ -129,7 +129,7 @@ it('a choice made while a change is being sent after the read wins, and reaches 
 
 it('a browser that syncs for the first time keeps its own earlier choices where ui.json has the default', async () => {
   // The companion window connected first and seeded ui.json with its defaults; this browser chose Ocean
-  // and top tabs back in 2.42, when the choice was kept per browser.
+  // and the sidebar back in 2.42 (top tabs became the default in 2.47), when the choice was kept per browser.
   const storage = new Map<string, string>();
   vi.stubGlobal('localStorage', {
     getItem: (k: string) => storage.get(k) ?? null,
@@ -138,18 +138,18 @@ it('a browser that syncs for the first time keeps its own earlier choices where 
   });
   resetPrefsForTests();
   applyTheme('ocean');
-  writePref('nav', 'tabs');
+  writePref('nav', 'sidebar');
   companion.state.file = { ...companion.state.defaults, motion: 'reduce' };
   start();
   await sync.pull();
   await flush();
   expect(currentTheme()).toBe('ocean');
-  expect(readPref('nav')).toBe('tabs');
+  expect(readPref('nav')).toBe('sidebar');
   // A non-default shared choice still applies here.
   expect(readPref('motion')).toBe('reduce');
   expect(companion.state.file).toMatchObject({
     theme: 'ocean',
-    navStyle: 'tabs',
+    navStyle: 'sidebar',
     motion: 'reduce',
   });
   // Later, ui.json's value wins again: the owner went back to Blue studio on the other page.

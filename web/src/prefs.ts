@@ -42,7 +42,8 @@ export type Prefs = {
 export type PrefName = keyof Prefs;
 
 export const PREF_DEFAULTS: Prefs = {
-  nav: 'sidebar',
+  // Top tabs by default (2.47, the owner's choice); the sidebar stays one choice away in Settings.
+  nav: 'tabs',
   editorWidth: 480,
   motion: 'system',
   contrast: 'standard',
