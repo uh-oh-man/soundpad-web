@@ -120,7 +120,8 @@ internal static class Program
             using var instanceLock = Lock(directory, resumeId != null);
             // Only the instance that holds the lock writes the log.
             CompanionLog.Start(directory);
-            var exePath = Environment.ProcessPath is { } running && Path.GetFileName(running).Equals("SoundpadWeb.exe", StringComparison.OrdinalIgnoreCase) ? running : null;
+            // SoundpadWeb.exe, or since 2.48 a versioned name such as SoundpadWeb-2.48.0.exe (UpdateNames); other names never update.
+            var exePath = Environment.ProcessPath is { } running && UpdateNames.Updatable(Path.GetFileName(running)) ? running : null;
             UpdateHandoff? handoff = null;
             if (resumeId != null)
             {
@@ -218,7 +219,10 @@ internal static class Program
                 var serverPart = server.Export();
                 UpdateHandoff Make() => new() { Id = id, CreatedUtcMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(), DataDir = directory, OldPid = Environment.ProcessId, FromVersion = current, ToVersion = exit.Version, Server = serverPart, Bridge = exit.Bridge, Window = window };
                 if (exePath == null || exit.DownloadPath == null) { Console.WriteLine("This build cannot replace its own EXE."); return; }
-                pendingUpdate = new PendingUpdate(new SwapPlan(exePath, exit.DownloadPath, exit.Version, current, directory, id, SafeFlags(args, directory), () => UpdateHandoffFile.Protect(Make()), ConsoleLink.OwnConsole));
+                // 2.48: from a versioned name the new version gets its own versioned name; otherwise it replaces this file.
+                var target = UpdateNames.Target(exePath, exit.Version);
+                var plan = new SwapPlan(exePath, exit.DownloadPath, exit.Version, current, directory, id, SafeFlags(args, directory), () => UpdateHandoffFile.Protect(Make()), ConsoleLink.OwnConsole, target == exePath ? null : target);
+                pendingUpdate = new PendingUpdate(target == exePath ? plan : plan with { StalePrevious = UpdateNames.StalePrevious(Path.GetDirectoryName(exePath)!, plan.PreviousPath) });
                 updating = true;
                 ui?.CloseForUpdate();
                 shutdown.Cancel();

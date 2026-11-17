@@ -50,9 +50,23 @@ jobs:
       - name: Self-update swap test
         shell: powershell
         run: ./scripts/update-swap-test.ps1 -Exe artifacts/release/SoundpadWeb.exe
-      - name: Hash portable executable
+      # 2.48: the same EXE twice, as SoundpadWeb.exe (what companions 2.44-2.47 update from and what
+      # releases/latest/download/SoundpadWeb.exe links to) and SoundpadWeb-<version>.exe (a hyphen: GitHub turns spaces
+      # in asset names into dots). SHA256.txt stays the bare hash, the only form 2.44-2.47 accept; SHA256SUMS.txt names
+      # both files. See docs/UPDATES.md.
+      - name: Hash portable executable and add its versioned copy
         shell: pwsh
-        run: (Get-FileHash artifacts/release/SoundpadWeb.exe -Algorithm SHA256).Hash | Set-Content artifacts/release/SHA256.txt
+        run: |
+          $exe = 'artifacts/release/SoundpadWeb.exe'
+          $version = ((Get-Item -LiteralPath $exe).VersionInfo.ProductVersion -split '\+')[0]
+          if ($version -notmatch '^\d+\.\d+\.\d+$') { throw "Unexpected companion version '$version'" }
+          $versioned = "SoundpadWeb-$version.exe"
+          Copy-Item -LiteralPath $exe -Destination "artifacts/release/$versioned"
+          $hash = (Get-FileHash -LiteralPath $exe -Algorithm SHA256).Hash
+          if ((Get-FileHash -LiteralPath "artifacts/release/$versioned" -Algorithm SHA256).Hash -ne $hash) { throw "$versioned differs from SoundpadWeb.exe" }
+          $hash | Set-Content artifacts/release/SHA256.txt
+          "$hash  SoundpadWeb.exe`n$hash  $versioned`n" | Set-Content -NoNewline artifacts/release/SHA256SUMS.txt
+          Get-Content artifacts/release/SHA256SUMS.txt
       - uses: actions/upload-artifact@v7
         with:
           name: SoundpadWeb-win-x64
@@ -113,7 +127,10 @@ jobs:
         run: |
           $title = node scripts/release-notes.mjs $env:RELEASE_TAG release-notes.md
           if ($LASTEXITCODE -ne 0) { exit 1 }
-          gh release create $env:RELEASE_TAG release/SoundpadWeb.exe release/SHA256.txt --repo $env:REPOSITORY --title "$title" --notes-file release-notes.md
+          # Both EXE names (2.48), and the tag must be the EXE's own version.
+          $versioned = "release/SoundpadWeb-$($env:RELEASE_TAG.TrimStart('v')).exe"
+          if (-not (Test-Path -LiteralPath $versioned)) { throw "$versioned is missing: the tag does not match the companion's version" }
+          gh release create $env:RELEASE_TAG release/SoundpadWeb.exe $versioned release/SHA256.txt release/SHA256SUMS.txt --repo $env:REPOSITORY --title "$title" --notes-file release-notes.md
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ github.ref_name }}

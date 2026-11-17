@@ -25,6 +25,8 @@ describe('release notes', () => {
     expect(notes).toContain('- Fixed things.');
     expect(notes).not.toContain('Older');
     expect(notes).toContain('version 2.15.9');
+    expect(notes).toContain('**SoundpadWeb-2.15.9.exe**');
+    expect(notes).toContain('**SoundpadWeb.exe** is the same file');
   });
   it('takes the last section up to the end of the file', () => {
     expect(releaseNotes(changelog, '2.15.8').notes).toContain('- Old.');

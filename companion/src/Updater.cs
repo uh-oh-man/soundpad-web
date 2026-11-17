@@ -6,7 +6,8 @@ public sealed class UpdateOptions
     /// <summary>Null for builds that do not update themselves (dev, forks, the test harness): state "unsupported".</summary>
     public UpdateSource? Source { get; init; }
     public required string Current { get; init; }
-    /// <summary>The running SoundpadWeb.exe; null when there is none to replace (the harness, tests).</summary>
+    /// <summary>The running SoundpadWeb.exe or SoundpadWeb-&lt;version&gt;.exe (2.48, see UpdateNames); null when there is
+    /// none to replace (the harness, tests, any other name).</summary>
     public string? ExePath { get; init; }
     public string? DataDir { get; init; }
     /// <summary>Tests: a canned HTTP handler instead of the network.</summary>
@@ -141,6 +142,10 @@ public sealed class Updater : IDisposable
             if (Status.State == "ready" && DownloadPath != null && File.Exists(DownloadPath)) return true;
             var exe = options.ExePath!;
             if (options.LocationProblem(exe) is { } problem) { Set(new("unsupported", options.Current, found.Version, found.NotesUrl, Reason: problem, Error: "Soundpad Web cannot update itself in this folder.")); return false; }
+            // 2.48: a versioned EXE is updated to the new version's name; a file already there is the host's, never replaced.
+            var target = UpdateNames.Target(exe, found.Version);
+            if (!string.Equals(target, exe, StringComparison.OrdinalIgnoreCase) && File.Exists(target))
+                throw new UpdateRefusedException(UpdateReasons.NameTaken, $"{Path.GetFileName(target)} is already in this folder. Start that one, or move it away and update again.");
             path = Path.Combine(Path.GetDirectoryName(exe)!, $".{Path.GetFileNameWithoutExtension(exe)}.{found.Version}.download");
             Set(new("downloading", options.Current, found.Version, found.NotesUrl, 0, found.ExeSize));
             using var sha = new MemoryStream();
@@ -164,7 +169,7 @@ public sealed class Updater : IDisposable
             var (exit, output) = await options.Probe(path, stop.Token);
             if (exit != 0 || !output.Contains(UpdateVerifier.NoticesMarker, StringComparison.Ordinal))
                 throw new UpdateRefusedException(UpdateReasons.Blocked, "The new version would not start on this PC (Windows or an antivirus blocked it).");
-            DownloadPath = path; verifiedHash = Sha256Text.Parse(shaText);
+            DownloadPath = path; verifiedHash = Sha256Text.ParseFor(shaText, found.ExeName);
             Set(new("ready", options.Current, found.Version, found.NotesUrl, bytes, bytes));
             Log?.Invoke($"Version {found.Version} is downloaded and checked against the hash published with the release.");
             return true;

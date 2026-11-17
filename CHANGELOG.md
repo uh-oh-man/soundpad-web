@@ -2,18 +2,22 @@
 
 Notable changes to Soundpad Web. Versions follow the website's `package.json`; the Windows companion is versioned separately and only needs updating when a release says so.
 
-## Unreleased
+## 2.48.0 — A new start page, and the version in the EXE's name
+
+A redesigned start page, and the companion's file name now carries its version. **Update the companion** for an update that keeps a versioned file name versioned; everything else works with any companion.
 
 ### Changed
 
-- **The start page's header is simpler.** The version sits right beside the name, and the header keeps only How it works and GitHub (the status line and the second demo link are gone; **Mess with the demo** starts it).
-
-- **A new start page.** The screen you see before connecting is redesigned, after an AI-made concept the owner liked, in the colours of the app's icon, with fewer words. It has its own header with the icon, name, version and connection status, and links to **How it works**, **Try the real demo** and GitHub. Connected screens keep the usual header.
+- **A new start page.** The screen you see before connecting is redesigned, after an AI-made concept the owner liked, in the colours of the app's icon, with fewer words. Its own header shows the icon, the name with the version beside it, and links to **How it works** and GitHub. Connected screens keep the usual header.
 - **"Give your friends the soundboard. They click a sound. Your PC plays it."** Then two buttons: **Mess with the demo** (the example session; it was called **Try the example**) and **Host from your PC**, which opens the latest release.
 - **A soundboard you can press right away.** Beside it sits a small pretend soundboard window: six pads (Vine boom, Bruh, Victory, Airhorn, Wow, Applause), categories, and a Now playing bar with a waveform and Stop. A press plays a short tone in your browser, pushes the pad down with a ripple, sends a ring out through the background and a ripple through the app's header ribbon, which flows out of the Now playing bar. Keys 1 to 6 press the pads. It downloads nothing and sends nothing anywhere.
 - **A background with some depth:** soft cyan and violet light, faint sound-wave rings and a floor grid that fades into the distance. No images and no downloads.
 - **How it works, the features and the credits, short.** Three steps of a few words, one line per feature with a small picture of the real thing, and credits saying the app and the page are written by AI (Codex and Claude), directed by the owner.
 - **Calm when you ask for it.** With reduced motion the page is a still picture: the card stands straight and nothing moves. Header animation **Off** hides the ribbon here too.
+- **The companion's file name carries its version** ("start labeling the version number on the exe host"). Each release now also publishes the companion as **SoundpadWeb-<version>.exe**, for example `SoundpadWeb-2.48.0.exe`. It uses a hyphen because GitHub turns spaces in file names into dots; you can rename it to `SoundpadWeb 2.48.0.exe` and it works the same. **SoundpadWeb.exe** stays in every release as the same file, so companions 2.44–2.47 still update themselves and every "Download the Windows companion" link keeps working. Releases also gain `SHA256SUMS.txt`, which lists the hash for both names; `SHA256.txt` is unchanged.
+- **A companion named with its version updates to the new version's name.** `SoundpadWeb-2.48.0.exe` becomes `SoundpadWeb-2.49.0.exe` in the same folder and keeps the old one as `SoundpadWeb-2.48.0.previous.exe` (older previous versions are removed once the new one has started). If the new version doesn't start, the old file gets its name back. `SoundpadWeb.exe` is still updated in place, so shortcuts to it keep working. If a file with the new name is already in the folder, the update stops and says so instead of replacing it. Needs the companion from this release.
+- **Older releases can get versioned names too.** A new **Add versioned EXE names to past releases** workflow (run once from GitHub's Actions tab) adds a `SoundpadWeb-<version>.exe` copy to every earlier release. It only adds files, checked against each release's own `SHA256.txt`, so old links keep working.
+- When the companion tells you to run `--restore-state`, it names your EXE.
 
 ## 2.47.0 — A new Mimic page, and fixes from a full review
 

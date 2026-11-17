@@ -26,7 +26,7 @@ export function releaseNotes(changelog, tag) {
     '',
     '---',
     '',
-    `Download **SoundpadWeb.exe** below (Windows companion, version ${version}); the website updates by itself.`,
+    `Download **SoundpadWeb-${version}.exe** below (Windows companion, version ${version}). **SoundpadWeb.exe** is the same file under the name older companions update from. The website updates by itself.`,
     'Every older version stays on the Releases page as a backup; see docs/ROLLBACK.md.',
     '',
   ].join('\n');
