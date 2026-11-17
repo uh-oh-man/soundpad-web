@@ -45,7 +45,10 @@ test('example copy: the start page says what can be tried, and the banner what l
     'Try the example: sounds, Mimic history and drafts, voices and sentences. Nothing is sent to Soundpad; sounds play in this browser.',
   );
   expect(await axe(page)).toEqual([]);
-  if (!(await startExample(page))) return;
+  test.skip(
+    !(await startExample(page)),
+    'This browser has no Web Audio, so the example cannot start.',
+  );
   const banner = page.getByRole('complementary', { name: 'Example session' });
   await expect(banner.locator('span')).toHaveText(
     'Solo example. Sounds play only in this browser when you choose to play them. Leaving clears the example’s recordings, drafts and clips.',
@@ -71,7 +74,10 @@ test('example copy: the start page says what can be tried, and the banner what l
 test('example Mimic: rolling history, a Latest phrase draft, preview and play, and Keep in Temp', async ({
   page,
 }) => {
-  if (!(await startExample(page))) return;
+  test.skip(
+    !(await startExample(page)),
+    'This browser has no Web Audio, so the example cannot start.',
+  );
   await page.getByRole('button', { name: 'Mimic', exact: true }).click();
   const mimic = page.getByRole('main', { name: 'Mimic', exact: true });
   await mimic.getByRole('button', { name: 'Start listening' }).click();
@@ -82,6 +88,8 @@ test('example Mimic: rolling history, a Latest phrase draft, preview and play, a
   ).toBeVisible({ timeout: 15000 });
   const timed = mimic.getByRole('group', { name: 'Words on the waveform' });
   const first = timed.getByRole('button', { name: 'man,', exact: true }).first();
+  // The live waveform glides between polls (2.47) and holds still under the pointer: aim first.
+  await timed.hover();
   await first.scrollIntoViewIfNeeded();
   const last = timed.getByRole('button', { name: 'step', exact: true }).first();
   await expect(last).toBeVisible();
@@ -138,7 +146,10 @@ test('example Mimic: rolling history, a Latest phrase draft, preview and play, a
 test('example voices and sentences: search finds a word; "hello [laugh]" with a bleep plays, is kept and reopens', async ({
   page,
 }) => {
-  if (!(await startExample(page))) return;
+  test.skip(
+    !(await startExample(page)),
+    'This browser has no Web Audio, so the example cannot start.',
+  );
   // Voices (2.41): the example's own clips, with simulated voices.
   await page.getByRole('button', { name: 'Voices', exact: true }).click();
   const voices = section(page, 'Voices');
@@ -159,6 +170,8 @@ test('example voices and sentences: search finds a word; "hello [laugh]" with a 
   await voices.getByRole('button', { name: 'Preview all of it' }).click();
   const player = page.locator('.player');
   await expect(player.getByText('Browser preview')).toBeVisible();
+  // Space is the Play/Pause shortcut away from controls; on a focused button it presses that button (2.47).
+  await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
   await page.keyboard.press('Space');
   await expect(player.getByRole('button', { name: 'Resume playback' })).toBeEnabled();
   await player.getByRole('button', { name: 'Stop', exact: true }).click();

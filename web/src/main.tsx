@@ -43,7 +43,8 @@ import { BackupLayoutSync } from './components/backups/BackupLayoutSync';
 import { LobbyRequests } from './components/LobbyRequests';
 import { BudgetRequests, QuitPromptDialog, TempRecovery } from './components/StoragePanel';
 import { RecoverSession } from './components/RecoverSession';
-import { useBudgetSync, useDraftStore, useDraftSync } from './mimic/draft-store';
+import { refreshDrafts, useBudgetSync, useDraftStore, useDraftSync } from './mimic/draft-store';
+import { replayStoredDeletes } from './mimic/pending-delete';
 import type { ConnectionInfo } from './network/session';
 import { WhatsNew } from './components/WhatsNew';
 import { MimicPanel } from './components/MimicPanel';
@@ -164,13 +165,17 @@ function useSpaceToggle() {
         const media = target.closest(
           '.tile-play-strip,.tile-art-button,.tile-wave-surface,.wave-surface',
         );
+        // A focused control keeps its own Space (2.47 review: a word or Preview button is pressed by it).
+        // Only the Mimic waveform, a slider with no Space of its own, passes it on to the transport.
         const interactive = target.closest('button,a,[role="slider"]');
-        const playbackSurface = interactive?.matches(
-          '.mimic-wave canvas, .mimic-word, .voices-word, [data-playback-trigger]',
-        );
+        const playbackSurface = interactive?.matches('.mimic-wave canvas');
         if (interactive && !media && !playbackSurface) return;
       }
-      if (preview) {
+      const soundpadBusy = ['PLAYING', 'PAUSED', 'SEEKING'].includes(
+        controller.getSnapshot().state.playback.status,
+      );
+      // A browser preview takes Space only while Soundpad is quiet; game audio comes first.
+      if (preview && !soundpadBusy) {
         event.preventDefault();
         event.stopPropagation();
         if (!event.repeat) preview.toggle();
@@ -275,11 +280,11 @@ function useStopShortcut() {
           ))
       )
         return;
+      // Stop ends both (2.47 review): a browser preview, and what Soundpad plays when this page may stop it.
       const preview = currentPreview();
       if (preview) {
         event.preventDefault();
         if (!event.repeat) preview.stop();
-        return;
       }
       const current = controller.getSnapshot();
       if (
@@ -400,6 +405,28 @@ function App() {
   const draftsReady =
     connected && supports(state.companionVersion, 'drafts') && (host || controller.relaysDrafts());
   useDraftSync(state, draftsReady && canMimic);
+  // Deletes a closed page left waiting for their Undo (2.47 review): Mimic drafts and clips go now.
+  const replayDeletes = connected && canMimic && !view.demo;
+  useEffect(() => {
+    if (!replayDeletes) return;
+    void replayStoredDeletes(async (d) => {
+      try {
+        if (d.kind === 'clip') await removeNewTempAudio(d.key);
+        else
+          await controller.run(
+            'draftDiscard',
+            { draftId: d.key, ...(d.sourceId && { sourceId: d.sourceId }) },
+            { quiet: true },
+          );
+        return true;
+      } catch (e) {
+        // Gone already (kept elsewhere, another recording, Temp cleared): what was asked for.
+        return e instanceof Error && /is gone|no such|not found|unknown/i.test(e.message);
+      } finally {
+        if (d.kind === 'draft') void refreshDrafts();
+      }
+    });
+  }, [replayDeletes]);
   useBudgetSync(state, host, draftsReady);
   const { budget } = useDraftStore();
   // The voice library (2.41): a guest also needs a host page that relays its commands.
@@ -434,6 +461,11 @@ function App() {
   const belowWide = useMediaQuery('(max-width: 1279px)');
   const mimicCompact = useMediaQuery('(max-width: 1365px)');
   const viewport = useViewportWidth();
+  // A short disconnect keeps Mimic on screen (2.47 review), with its selection, name and scroll; the page
+  // says it is reconnecting. Only a session that had Mimic keeps it.
+  const mimicSeen = useRef(false);
+  if (connected && mimicSupported) mimicSeen.current = true;
+  else if (mode === 'landing') mimicSeen.current = false;
   const [section, setSection] = useState<ShellView>(() =>
     recall('shell').panel?.kind === 'mimic' ? 'mimic' : (recall('shell').view ?? 'board'),
   );
@@ -443,7 +475,7 @@ function App() {
       ? 'voices'
       : section === 'sentences' && sentencesReady
         ? 'sentences'
-        : section === 'mimic' && connected && mimicSupported
+        : section === 'mimic' && (connected ? mimicSupported : mimicSeen.current)
           ? 'mimic'
           : 'board';
   const [panel, setPanel] = useState<Exclude<EditorRequest, { kind: 'mimic' }> | null>(
@@ -474,7 +506,8 @@ function App() {
   const sidebarWidth = full || (navStyle === 'tabs' && shown !== 'board') ? 0 : rail ? 64 : 234;
   const editorMax = editorMaxWidth(viewport, sidebarWidth);
   const editorWidth = clampEditorWidth(dragWidth ?? storedWidth, viewport, sidebarWidth);
-  const placement = navPlacement(navStyle, narrow);
+  // Fill window hides the sidebar, never the way out (2.47 review): its sections move to the top bar.
+  const placement = full ? 'topbar' : navPlacement(navStyle, narrow);
   const unread = useUnreadNotices();
   useNoticeSounds();
   useSharedActivity(view, host);

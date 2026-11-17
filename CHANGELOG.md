@@ -2,6 +2,31 @@
 
 Notable changes to Soundpad Web. Versions follow the website's `package.json`; the Windows companion is versioned separately and only needs updating when a release says so.
 
+## Unreleased
+
+### Changed
+
+- **Mimic is redesigned as one full page** (from the Feedback button: "Mimic screen needs a complete overhaul", "a good looking full screen mimic page where i can do everything"). A short header holds the title, what Mimic is listening to, Start or Stop listening, **Mimic settings** (now a panel that opens over the page) and **Fill window**. Below it are two columns. The left column has the timeline strip with the waveform and its words, then the live transcript, then one action bar. The right column is **Clips**: your drafts, Just mimicked, and other people's selections. At 1440×900 and 1280×720 the transcript is on screen without scrolling.
+- **The newest words are easy to reach** ("cant ... get to the word they said imeeditly"). The newest sentence is marked. When you scroll back, **Jump to latest** floats over the transcript, and End still works.
+- **One action bar.** It holds what is selected, the clip name, Preview, Mimic & play (Play into game for a draft), Capture, Save, Share and the Keep buttons. Under them are the quick captures: Last 3/5/10 s, Latest phrase, Last 10 seconds and Play latest phrase. With nothing selected it is a single row. **Clear** is the ✕ beside the selection.
+- **My drafts is a list in the Clips column** instead of the "Draft history" menu. Each draft has one-press Play, Keep in Temp and Delete (with Undo). Press a draft to open it.
+- **Just mimicked lists up to 100 clips**, newest first, in the Clips column, which scrolls on its own.
+- **Where a waveform click plays** (Preview or Game) is now a small switch in the timeline row.
+- **On phones** the transcript comes first, then the action bar, then the timeline. Clips is a tab. Nothing scrolls sideways.
+- **The live waveform moves smoothly** ("have the waveform move smoothly instead of choppy"). Between updates it now glides at the speed time passes, instead of jumping twice a second (once a second for guests). It stops gliding while the pointer or keyboard is on it, so you can aim at a word, and it catches up when you move away. It asks the companion for nothing extra. With reduced motion it steps as before.
+- **Mimic settings** and its source list follow the light theme.
+
+### Fixed
+
+- **The player's Stop always reaches Soundpad.** Before, while a browser preview was open (even paused), Stop and the Stop key stopped only the preview, and a guest without Panic could not stop game audio. Stop now ends both. The player shows a preview only while Soundpad is stopped.
+- **Space on a focused word or button presses it.** Before, Space on a Mimic word or a Preview button paused playback instead. Space is still Play/Pause when focus is not on a control.
+- **Two deletes with the same name each keep their own Undo.** Before, they shared one notice.
+- **Delete in Mimic keeps its promise when the tab closes.** A Just-mimicked clip now leaves Temp at once, and Undo asks the companion to bring it back (with an older companion there is no Undo). A deleted draft is remembered in this browser until its Undo has gone, and is let go of the next time you connect if the tab closed first.
+- **Fill window keeps the sections.** They move to the top bar, so a reload in Fill window never leaves you without navigation.
+- **A short disconnect keeps you on Mimic**, with your selection and the name you typed. The page says it is reconnecting.
+- **A guest whose Mimic is turned off while on the Clips tab is told why** instead of seeing a blank page.
+- **Playing a range again never reuses a clip that is being deleted.**
+
 ## 2.46.0 — Fixes from your feedback
 
 Fixes and ideas sent from the Feedback button on 2026-11-15, by the host and a guest. **Update the companion** for Undo after removing Temp audio, **Remove all my Temp clips**, removing while something plays, and Spotify presses that no longer get "busy". With an older companion those parts are hidden or work as before, and everything else in this release works.
