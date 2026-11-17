@@ -51,16 +51,17 @@ public sealed class WhisperEngine(string modelPath, string? sharedModelPath = nu
     /// <summary>
     /// Recognises a long file piece by piece, taking <paramref name="busy"/> for each piece only (2.41), so live
     /// subtitles, on-demand history requests and copy naming get the engine between pieces instead of waiting for
-    /// the whole file (up to 10 minutes of audio).
+    /// the whole file (up to 10 minutes of audio). Each piece waits in the background lane (2.47), so whatever
+    /// waits in the live lane goes first, also ahead of another file's pieces.
     /// </summary>
-    internal static async Task<IReadOnlyList<TranscribedSpan>> InPieces(float[] samples16k, SemaphoreSlim busy, Func<float[], Task<IReadOnlyList<TranscribedSpan>>> recognise, CancellationToken cancel)
+    internal static async Task<IReadOnlyList<TranscribedSpan>> InPieces(float[] samples16k, WhisperGate busy, Func<float[], Task<IReadOnlyList<TranscribedSpan>>> recognise, CancellationToken cancel)
     {
         var all = new List<TranscribedSpan>();
         for (int at = 0; at < samples16k.Length; at += PieceSeconds * MimicTranscriber.SpeechRate)
         {
             int length = samples16k.Length <= MaxCallSeconds * MimicTranscriber.SpeechRate ? samples16k.Length : Math.Min(PieceSeconds * MimicTranscriber.SpeechRate, samples16k.Length - at);
             var piece = length == samples16k.Length ? samples16k : samples16k.AsSpan(at, length).ToArray();
-            await busy.WaitAsync(cancel);
+            await busy.EnterBackground(cancel);
             IReadOnlyList<TranscribedSpan> spans;
             try { spans = await recognise(piece); }
             finally { busy.Release(); }
@@ -130,10 +131,10 @@ public sealed class WhisperEngine(string modelPath, string? sharedModelPath = nu
         catch (Exception ex) when (ex is not OutOfMemoryException) { Status = "Speech model setup failed: " + ex.Message; throw new InvalidDataException(Status); }
         finally { if (File.Exists(temporary)) File.Delete(temporary); }
     }
-    private readonly SemaphoreSlim busy = new(1, 1);
+    private readonly WhisperGate busy = new();
     public async Task<IReadOnlyList<TranscribedSpan>> Transcribe(float[] samples16k, CancellationToken cancel)
     {
-        await busy.WaitAsync(cancel);
+        await busy.EnterLive(cancel);
         try
         {
             if (samples16k.Length <= MaxCallSeconds * MimicTranscriber.SpeechRate) return await OnOwnThread(samples16k, cancel);
@@ -205,9 +206,40 @@ public sealed class WhisperEngine(string modelPath, string? sharedModelPath = nu
     public void Dispose()
     {
         // Never free the native processor under a running recognition; if one is stuck, leaking beats crashing.
-        if (!busy.Wait(TimeSpan.FromSeconds(15))) return;
+        if (!busy.Hold(TimeSpan.FromSeconds(15))) return;
         foreach (var p in processors) p.Processor.Dispose();
         processors.Clear(); factory?.Dispose(); factory = null;
+    }
+}
+
+/// <summary>
+/// The speech engine's one-at-a-time lock, with two lanes (2.47). Live work (subtitles, on-demand history stretches,
+/// copy naming: <see cref="WhisperEngine.Transcribe"/>) takes it before background work (library files and the
+/// category word index, piece by piece). Until 2.46 it was one first-come queue, so a live chunk could wait behind
+/// every background piece queued before it, each up to 25 s of audio. A running piece is never interrupted, and
+/// background work runs whenever nothing live waits (live requests come one at a time, so it is never starved).
+/// </summary>
+internal sealed class WhisperGate
+{
+    // No ageing: a background piece never takes a turn ahead of a live request that is waiting.
+    private readonly PriorityGate gate = new(int.MaxValue / 2, int.MaxValue / 2);
+    public Task EnterLive(CancellationToken cancel) => Enter(PriorityGate.Lane.Urgent, cancel);
+    public Task EnterBackground(CancellationToken cancel) => Enter(PriorityGate.Lane.Background, cancel);
+    private async Task Enter(PriorityGate.Lane lane, CancellationToken cancel)
+    {
+        cancel.ThrowIfCancellationRequested();
+        var waiter = gate.Enter(lane);
+        bool entered;
+        using (cancel.Register(() => gate.Cancel(waiter))) entered = await waiter.Entered;
+        // Cancelled while waiting; one that got the lock first holds it (its caller releases it as usual).
+        if (!entered) throw new OperationCanceledException(cancel);
+    }
+    public void Release() => gate.Release();
+    /// <summary>Takes the lock for good (disposal), waiting at most <paramref name="wait"/>; false when it stayed busy.</summary>
+    public bool Hold(TimeSpan wait)
+    {
+        var waiter = gate.Enter(PriorityGate.Lane.Urgent);
+        return waiter.Entered.Wait(wait) ? waiter.Entered.Result : !gate.Cancel(waiter);
     }
 }
 

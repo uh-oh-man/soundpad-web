@@ -531,20 +531,44 @@ public sealed class VoiceLibraryTests : IDisposable
     public async Task ALongBackgroundFileGivesTheSpeechEngineBackBetweenItsPieces()
     {
         // 60 s: three pieces of at most 25 s. A live subtitle (or copy naming) waiting meanwhile runs after the first.
-        var gate = new SemaphoreSlim(1, 1); var order = new List<string>(); Task? live = null;
+        var gate = new WhisperGate(); var order = new List<string>(); Task? live = null;
         var spans = await WhisperEngine.InPieces(new float[60 * MimicTranscriber.SpeechRate], gate, piece =>
         {
             lock (order) order.Add("piece " + piece.Length / MimicTranscriber.SpeechRate);
             // Queued for the engine here, while the first piece holds it, as a live subtitle that arrives meanwhile is.
             // (Queued from Task.Run instead, it could reach the gate only after the second piece took it again: the
             // test failed so on a busy PC, though a request that is already waiting always gets its turn.)
-            live ??= gate.WaitAsync().ContinueWith(_ => { lock (order) order.Add("live"); gate.Release(); }, TaskScheduler.Default);
+            live ??= gate.EnterLive(default).ContinueWith(_ => { lock (order) order.Add("live"); gate.Release(); }, TaskScheduler.Default);
             return Task.FromResult<IReadOnlyList<TranscribedSpan>>([new(TimeSpan.Zero, TimeSpan.FromSeconds(1), "word")]);
         }, CancellationToken.None);
         await live!;
         Assert.Equal(["piece 25", "live", "piece 25", "piece 10"], order);
         Assert.Equal([0.0, 25.0, 50.0], spans.Select(s => s.Start.TotalSeconds));
-        Assert.Equal(1, gate.CurrentCount);
+        Assert.True(gate.Hold(TimeSpan.Zero)); // free again
+    }
+
+    [Fact]
+    public async Task ALiveRecognitionGoesAheadOfBackgroundPiecesQueuedBeforeIt()
+    {
+        // 2.47: a piece of a library file holds the engine; another file's piece queues, then a live subtitle chunk.
+        // Until 2.46 one first-come queue let the second file's 25 s piece go first.
+        var gate = new WhisperGate(); var order = new List<string>();
+        await gate.EnterBackground(default); // the running piece
+        var second = gate.EnterBackground(default).ContinueWith(_ => { lock (order) order.Add("background"); gate.Release(); }, TaskScheduler.Default);
+        await Task.Delay(20);
+        var live = gate.EnterLive(default).ContinueWith(_ => { lock (order) order.Add("live"); gate.Release(); }, TaskScheduler.Default);
+        await Task.Delay(20);
+        gate.Release(); // the running piece ends
+        await Task.WhenAll(second, live);
+        Assert.Equal(["live", "background"], order);
+        // A live request that gives up while waiting leaves the queue; the gate still works.
+        await gate.EnterBackground(default);
+        using var cancel = new CancellationTokenSource();
+        var given = gate.EnterLive(cancel.Token);
+        cancel.Cancel();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => given);
+        gate.Release();
+        Assert.True(gate.Hold(TimeSpan.FromSeconds(1)));
     }
 
     [Fact]
