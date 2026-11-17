@@ -2,6 +2,21 @@
 
 Notable changes to Soundpad Web. Versions follow the website's `package.json`; the Windows companion is versioned separately and only needs updating when a release says so.
 
+## Unreleased
+
+### Fixed
+
+- **Updates wait for Recover previous session or Discard.** After a crash, installing an update before answering that question lost the recovered drafts. The update now asks you to answer it first.
+- **Temp no longer fills up invisibly.** A removed clip's file stays on the host's PC until **Clear all temporary audio** or quitting, and it still uses Temp's space. Temp now says how many removed files wait to be freed and how big they are, and when Temp is full only because of them, the message says so and that Clear Temp frees them. A guest's removed clips keep counting in their Temp until their files are deleted. (Update the companion to see the count.)
+- **Undo of a Temp removal is for whoever removed it.** A guest could bring back their own clip after the host had removed it, for the rest of the session. Now only the host can undo the host's removals, and a guest can undo their own for 10 minutes.
+- **Guests can't put a kept clip back into the voice library.** A guest's Save of a clip that was already kept made its library recording under the guest's name, so a recording the host had removed could come back. A guest can now do that only for their own clips.
+- **Spotify presses.** A guest's press that was waiting for a slow Spotify read still went through after the host turned guest Spotify controls off; it is now checked again when its turn comes. Pressing the same button again while your press waits no longer queues a second press (two Play/Pause presses played and paused again).
+- **Removing a kept sentence during a backup restore** could delete the audio the restore had just put back, leaving the sentence silent.
+- **Live subtitles no longer clip or repeat words.** In Balanced and Fast, a word spoken across a forced cut was cut in two and its rest recognised again as another word, and those words reached clip names, the voice library and sentences. The words near such a cut are now recognised once, whole, with what follows. **Gaming** is back to recognising continuous speech every 10 seconds on one low-priority thread, as promised in 2.39.
+- **Live subtitles go first.** A live subtitle no longer waits behind background work (voice library and category words) that was queued before it.
+- **Recover previous session** showed a size that included clips the crashed session had already removed.
+- **Temp for guests.** On a 2.45 companion, a guest allowed only Mimic was offered **Remove my clip** in Temp and then refused. A clip deleted in Mimic stayed listed in Temp while its Undo notice showed, so removing or keeping it there failed or kept a deleted clip.
+
 ## 2.46.0 — Fixes from your feedback
 
 Fixes and ideas sent from the Feedback button on 2026-11-15, by the host and a guest. **Update the companion** for Undo after removing Temp audio, **Remove all my Temp clips**, removing while something plays, and Spotify presses that no longer get "busy". With an older companion those parts are hidden or work as before, and everything else in this release works.
