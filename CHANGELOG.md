@@ -19,6 +19,11 @@ A redesigned start page, and the companion's file name now carries its version. 
 - **Older releases can get versioned names too.** A new **Add versioned EXE names to past releases** workflow (run once from GitHub's Actions tab) adds a `SoundpadWeb-<version>.exe` copy to every earlier release. It only adds files, checked against each release's own `SHA256.txt`, so old links keep working.
 - When the companion tells you to run `--restore-state`, it names your EXE.
 
+### Fixed
+
+- **On a phone, Mimic's zoom buttons are never stuck under the notices.** With notices showing, the timeline's zoom row could sit below the end of the page's Mimic column, where it could not be scrolled into view. The column is now at least a screen tall and grows when it needs to.
+
+
 ## 2.47.0 — A new Mimic page, and fixes from a full review
 
 Mimic is one full page with the live transcript first and a smoothly moving waveform; top tabs are the default navigation; and the fixes from a review of 2.46. **Update the companion** for the Temp and live-subtitle fixes and the count of removed files waiting to be freed; with an older companion everything else in this release works.

@@ -256,7 +256,8 @@ test('after an update that happened while hosting was ended, the new owner page 
     await fresh.goto(b.launch);
     const resume = fresh.getByRole('button', { name: 'Resume hosting', exact: true });
     await expect(resume).toBeVisible();
-    await expect(fresh.locator('header .status')).toHaveText('Not connected');
+    // The start page (2.48 has no status line there): nothing has started by itself.
+    await expect(fresh.locator('header.home-bar')).toBeVisible();
     await resume.click();
     await expect(playButton(fresh, 'Airhorn')).toBeEnabled();
     // A new invitation, as Resume hosting always gives after End hosting.

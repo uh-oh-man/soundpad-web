@@ -1283,12 +1283,16 @@
    * the sticky top bar and the player (and a notice), so the newest words and their actions are seen
    * together, never one over the other.
    */
+  /* At least one screen, never fixed to it (2.48): with notices showing, a fixed height let the timeline's
+     zoom row spill past the column's end, where the page could not scroll it clear of them. */
   .mimic-page .mimic-main {
-    height: calc(
-      100svh - var(--topbar-bottom, 0px) - var(--player-height, 0px) - var(--notice-height, 0px) -
-        16px
+    min-height: max(
+      440px,
+      calc(
+        100svh - var(--topbar-bottom, 0px) - var(--player-height, 0px) - var(--notice-height, 0px) -
+          16px
+      )
     );
-    min-height: 440px;
   }
 
   .mimic-actionbar {
