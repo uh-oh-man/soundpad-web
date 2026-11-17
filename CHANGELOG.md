@@ -6,11 +6,12 @@ Notable changes to Soundpad Web. Versions follow the website's `package.json`; t
 
 ### Changed
 
-- **A new start page.** The screen you see before connecting is redesigned, after an AI-made concept the owner liked, in the colours of the app's icon. It has its own header with the icon, name, version and connection status, and links to **How it works**, **Try the real demo** and GitHub. Connected screens keep the usual header.
-- **"Give your friends the soundboard."** The top of the page says what the app is in one line, with **Mess with the demo** (the example session; it was called **Try the example**) and **Host from your PC**, which opens the latest release.
-- **A soundboard you can press right away.** Beside it sits a small pretend soundboard window: six pads (Vine boom, Bruh, Victory, Airhorn, Wow, Applause), categories, and a Now playing bar with a waveform and Stop. A press plays a short tone in your browser, pushes the pad down with a ripple, and sends a ripple through the app's header ribbon, which flows out of the Now playing bar. Keys 1 to 6 press the pads. It downloads nothing and sends nothing anywhere.
-- **How it works, the features and the credits.** Three steps along an arc; Mimic, the voice library, Sentences, Organize, backups and updates, and privacy and Panic, each with a small picture of the real thing; and credits saying the app and the page are written by AI (Codex and Claude), directed by the owner.
-- **Calm when you ask for it.** With reduced motion the page is a still picture: the card stands straight, nothing dances, and the ribbon is drawn once. Header animation **Off** hides the ribbon here too.
+- **A new start page.** The screen you see before connecting is redesigned, after an AI-made concept the owner liked, in the colours of the app's icon, with fewer words. It has its own header with the icon, name, version and connection status, and links to **How it works**, **Try the real demo** and GitHub. Connected screens keep the usual header.
+- **"Give your friends the soundboard. They click a sound. Your PC plays it."** Then two buttons: **Mess with the demo** (the example session; it was called **Try the example**) and **Host from your PC**, which opens the latest release.
+- **A soundboard you can press right away.** Beside it sits a small pretend soundboard window: six pads (Vine boom, Bruh, Victory, Airhorn, Wow, Applause), categories, and a Now playing bar with a waveform and Stop. A press plays a short tone in your browser, pushes the pad down with a ripple, sends a ring out through the background and a ripple through the app's header ribbon, which flows out of the Now playing bar. Keys 1 to 6 press the pads. It downloads nothing and sends nothing anywhere.
+- **A background with some depth:** soft cyan and violet light, faint sound-wave rings and a floor grid that fades into the distance. No images and no downloads.
+- **How it works, the features and the credits, short.** Three steps of a few words, one line per feature with a small picture of the real thing, and credits saying the app and the page are written by AI (Codex and Claude), directed by the owner.
+- **Calm when you ask for it.** With reduced motion the page is a still picture: the card stands straight and nothing moves. Header animation **Off** hides the ribbon here too.
 
 ## 2.47.0 — A new Mimic page, and fixes from a full review
 
