@@ -27,13 +27,17 @@ jobs:
         with:
           node-version: '24'
           cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            .github/actions/second-network-host/package-lock.json
       - uses: actions/setup-dotnet@v6
         with:
           dotnet-version: '10.0.x'
       - run: npm ci
       - run: dotnet build companion/harness/SoundpadWeb.Harness.csproj -c Release
       - run: npx playwright install chromium
-      - run: npm install --prefix .github/actions/second-network-host --no-save --package-lock=false --no-audit @actions/artifact@6.3.1
+      # The action's own dependencies, pinned by its lockfile (@actions/artifact and everything under it).
+      - run: npm ci --prefix .github/actions/second-network-host --ignore-scripts --no-audit --no-fund
       - uses: ./.github/actions/second-network-host
       - uses: actions/upload-artifact@v7
         if: always()
