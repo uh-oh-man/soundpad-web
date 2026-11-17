@@ -49,6 +49,10 @@
   --warning: #ffb547;
   --warning-soft: #2a1d06;
   --success: #45d69b;
+  /* The app icon's colours ("Minimal orbit"): the start page's orbit, ribbon and accents in every theme. */
+  --brand-cyan: #3ff0ff;
+  --brand-violet: #a66bff;
+  --brand-navy: #0f1430;
   --voice-1: #f2a65a;
   --voice-2: #7fd1ae;
   --voice-3: #c792ea;
@@ -88,6 +92,9 @@
   --sidebar-w: 234px;
   --ribbon-h: 120px;
   --font-ui: 'DM Sans Variable', 'Segoe UI Variable Text', 'Segoe UI', system-ui, sans-serif;
+  /* Code-like labels (the start page's eyebrows, keys and notes): fonts already on the device, never downloaded. */
+  --font-mono:
+    ui-monospace, 'Cascadia Mono', 'Cascadia Code', Consolas, 'SF Mono', Menlo, monospace;
   /* Dark text on a voice's colour (voices.css). */
   --voice-fallback-ink: #0b0f17;
   /* The shade under a tile's label (per theme) and the legacy drop shadow. */

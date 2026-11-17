@@ -42,7 +42,7 @@ async function firstTile(page: Page, scene: string, s: Size) {
 }
 async function example(page: Page) {
   await page.goto('/');
-  await page.getByRole('button', { name: 'Try the example' }).click();
+  await page.getByRole('button', { name: 'Mess with the demo' }).click();
   await expect(
     page.getByRole('button', { name: 'Play from start: Air Horn', exact: true }),
   ).toBeEnabled({ timeout: 20000 });

@@ -1,56 +1,18 @@
 /*
- * Surfaces (Stage G): the landing, the example banner, simulated and host-only tags, the modal look
+ * Surfaces (Stage G): the example banner, simulated and host-only tags, the modal look
  * (.dialog, .scrim), Settings, Session & access, Storage, WhatsNew, GuestName, PersonalLayout and
  * OrganizeSound. Owned by WP-C. Only selectors for WP-C components; overrides studio.css by load order at
- * equal specificity, never with !important.
+ * equal specificity, never with !important. The start page moved to home.css (homepage).
  */
 
-/* ---- The start page ------------------------------------------------------------------------------ */
+/* ---- The setup card ------------------------------------------------------------------------------ */
 
-.welcome .eyebrow {
-  color: var(--accent-text);
-  font-size: 12px;
-  font-weight: 650;
-  letter-spacing: 1.6px;
-}
-.welcome h1 {
-  color: var(--text-primary);
-}
-.welcome h1 span {
-  color: var(--text-muted);
-}
 .setup-card {
   border-color: var(--line);
   border-radius: var(--radius-l);
   background: var(--surface-glass);
   backdrop-filter: blur(var(--blur));
   box-shadow: var(--shadow-1);
-}
-.setup-icon {
-  border-radius: var(--radius);
-  background: var(--accent-soft);
-  color: var(--accent-text);
-}
-.steps b {
-  border: 1px solid var(--line-strong);
-  background: var(--surface-2);
-  font-variant-numeric: tabular-nums;
-}
-.welcome .join-note,
-.try-example p {
-  color: var(--text-muted);
-}
-.text-link {
-  color: var(--accent-text);
-}
-.privacy {
-  color: var(--text-dim);
-}
-/* The way into the example is the page's one primary action. */
-.try-example .btn {
-  min-height: 40px;
-  padding: 0 var(--space-4);
-  font-weight: 650;
 }
 
 /* ---- The example banner and honest tags ------------------------------------------------------------ */
@@ -120,18 +82,18 @@
   font-size: 20px;
   letter-spacing: -0.2px;
 }
-/* Primary actions in dialogs and on the start page: the token fill with white text. */
-:is(.dialog, .welcome) .primary {
+/* Primary actions in dialogs: the token fill with white text. */
+.dialog .primary {
   border-color: var(--accent-fill);
   background: var(--accent-fill);
   color: var(--text-on-accent);
   box-shadow: var(--glow-soft);
 }
-:is(.dialog, .welcome) .primary:hover:not(:disabled, [aria-disabled='true']) {
+.dialog .primary:hover:not(:disabled, [aria-disabled='true']) {
   border-color: var(--accent-fill-hover);
   background: var(--accent-fill-hover);
 }
-:is(.dialog, .welcome) .primary:focus-visible {
+.dialog .primary:focus-visible {
   outline: 2px solid var(--focus);
   outline-offset: 2px;
 }

@@ -27,7 +27,7 @@ async function startExample(page: Page) {
   const audio = await page.evaluate(
     () => 'AudioContext' in window || 'webkitAudioContext' in window,
   );
-  await page.getByRole('button', { name: 'Try the example' }).click();
+  await page.getByRole('button', { name: 'Mess with the demo' }).click();
   if (!audio) {
     await expect(page.getByText(/The example could not start/)).toBeVisible();
     return false;
@@ -42,7 +42,7 @@ test('example copy: the start page says what can be tried, and the banner what l
   await page.goto('/');
   await expect(page.getByText('See every feature')).toHaveCount(0);
   await expect(page.locator('#try-example-note')).toHaveText(
-    'Try the example: sounds, Mimic history and drafts, voices and sentences. Nothing is sent to Soundpad; sounds play in this browser.',
+    'The demo is the real app with example sounds: the soundboard, Mimic, voices and sentences. Nothing is sent to Soundpad; it all plays in this browser.',
   );
   expect(await axe(page)).toEqual([]);
   test.skip(
@@ -68,7 +68,7 @@ test('example copy: the start page says what can be tried, and the banner what l
   );
   await page.getByRole('button', { name: 'Done organizing' }).click();
   await page.getByRole('button', { name: 'Leave example' }).click();
-  await expect(page.getByRole('button', { name: 'Try the example' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Mess with the demo' })).toBeVisible();
 });
 
 test('example Mimic: rolling history, a Latest phrase draft, preview and play, and Keep in Temp', async ({
@@ -140,7 +140,7 @@ test('example Mimic: rolling history, a Latest phrase draft, preview and play, a
   // Leaving works with notices on screen, and clears the history and drafts.
   await expect(page.locator('.notification-stack .toast').first()).toBeVisible();
   await page.getByRole('button', { name: 'Leave example' }).click();
-  await expect(page.getByRole('button', { name: 'Try the example' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Mess with the demo' })).toBeVisible();
 });
 
 test('example voices and sentences: search finds a word; "hello [laugh]" with a bleep plays, is kept and reopens', async ({

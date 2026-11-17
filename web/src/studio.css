@@ -472,31 +472,6 @@ p {
 .mobile-categories {
   display: none;
 }
-.welcome {
-  max-width: 830px;
-  margin: 75px auto;
-  padding: 0 32px 50px;
-}
-.welcome .eyebrow {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  color: var(--accent);
-}
-.welcome h1 {
-  font-size: 62px;
-  line-height: 1.12;
-  letter-spacing: -2.8px;
-  margin: 22px 0;
-}
-.welcome h1 span {
-  color: var(--text-muted);
-}
-.welcome > p {
-  max-width: 510px;
-  color: var(--text-muted);
-  font-size: 15px;
-}
 .setup-card {
   display: flex;
   gap: 20px;
@@ -508,16 +483,6 @@ p {
   margin-top: 34px;
   max-width: 600px;
 }
-.setup-icon {
-  display: grid;
-  place-items: center;
-  color: var(--text-primary);
-  background: color-mix(in srgb, var(--accent) 8%, transparent);
-  width: 57px;
-  height: 57px;
-  border-radius: 12px;
-  flex: none;
-}
 .setup-card h2 {
   font-size: 17px;
 }
@@ -525,49 +490,6 @@ p {
   color: var(--text-muted);
   font-size: 12px;
   margin-top: 7px;
-}
-.steps {
-  display: flex;
-  align-items: center;
-  gap: 18px;
-  margin: 26px 0 32px;
-  color: var(--text-muted);
-  font-size: 12px;
-}
-.steps span {
-  display: flex;
-  align-items: center;
-  gap: 9px;
-}
-.steps b {
-  font-size: 12px;
-  background: var(--surface-2);
-  color: var(--text-primary);
-  border-radius: 50%;
-  width: 20px;
-  height: 20px;
-  display: grid;
-  place-items: center;
-}
-.welcome .join-note {
-  font-size: 12px;
-  color: var(--text-muted);
-}
-.text-link {
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  font-size: 12px;
-  color: var(--accent);
-  text-decoration: none;
-  margin: 14px 0 35px;
-}
-.privacy {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  color: var(--text-dim);
-  font-size: 12px;
 }
 .scrim {
   position: fixed;
@@ -912,45 +834,12 @@ p {
     width: 37px;
     height: 34px;
   }
-  .welcome {
-    margin: 50px auto 0;
-    padding: 0 22px 35px;
-  }
-  .welcome h1 {
-    font-size: 44px;
-    letter-spacing: -1.7px;
-  }
-  .welcome > p {
-    font-size: 13px;
-  }
   .setup-card {
     padding: 20px 17px;
     gap: 14px;
   }
-  .setup-icon {
-    width: 44px;
-    height: 44px;
-  }
   .setup-card h2 {
     font-size: 15px;
-  }
-  .steps {
-    gap: 9px;
-    flex-wrap: wrap;
-    font-size: 12px;
-  }
-  .steps svg {
-    width: 10px;
-  }
-  .steps span {
-    gap: 6px;
-  }
-  .privacy {
-    align-items: flex-start;
-    font-size: 12px;
-  }
-  .privacy svg {
-    flex: none;
   }
   .scrim {
     padding: 12px;
@@ -991,9 +880,6 @@ p {
   color: var(--text-muted);
   max-width: 230px;
   white-space: normal;
-}
-.resume-host {
-  margin: 0 0 24px;
 }
 .view-toolbar {
   display: flex;
@@ -3113,21 +2999,7 @@ html {
 .connection-banner button {
   margin-left: 8px;
 }
-/* "Try the example" on the landing page, and the example session's banner. */
-.try-example {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 10px 14px;
-  max-width: 600px;
-  margin: 18px 0 8px;
-}
-.try-example p {
-  flex: 1 1 260px;
-  margin: 0;
-  color: var(--text-muted);
-  font-size: 12px;
-}
+/* The example session's banner. */
 /* Between the header and the workspace, so it comes first on phones too (above Spotify there). */
 .demo-banner {
   display: flex;

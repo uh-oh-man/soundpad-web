@@ -41,9 +41,12 @@ async function captureAndKeep(dialog: Locator) {
 test('landing page has an honest disconnected state', async ({ page }) => {
   await page.goto('/');
   await expect(
-    page.getByRole('heading', { name: 'A soundboard. For the whole party.' }),
+    page.getByRole('heading', { name: 'Give your friends the soundboard.' }),
   ).toBeVisible();
-  await expect(page.getByText('Not connected', { exact: true })).toBeVisible();
+  // The start page has its own header (2.48: no status line there) and claims no connection.
+  await expect(page.locator('header.home-bar')).toBeVisible();
+  await expect(page.locator('header.topbar')).toHaveCount(0);
+  await expect(page.getByText(/^(Connected|Hosting)$/)).toHaveCount(0);
   expect(await page.getByRole('button', { name: /Play / }).count()).toBe(0);
 });
 
@@ -4350,9 +4353,9 @@ test('example session: plays example sounds in this browser, edits a copy, and l
   await expect(page.getByRole('button', { name: /Play / })).toHaveCount(0);
   await expect(page.locator('#try-example-note')).toHaveText(
     // What can actually be tried (2.41), not "every feature".
-    'Try the example: sounds, Mimic history and drafts, voices and sentences. Nothing is sent to Soundpad; sounds play in this browser.',
+    'The demo is the real app with example sounds: the soundboard, Mimic, voices and sentences. Nothing is sent to Soundpad; it all plays in this browser.',
   );
-  await page.getByRole('button', { name: 'Try the example' }).click();
+  await page.getByRole('button', { name: 'Mess with the demo' }).click();
   // Playwright's Windows WebKit has no Web Audio at all (real Safari has it): the example must say it cannot
   // start, and stay on the start screen, rather than fail silently (2.38.0 CI).
   if (
@@ -4365,7 +4368,7 @@ test('example session: plays example sounds in this browser, edits a copy, and l
       ),
     ).toBeVisible();
     await expect(
-      page.getByRole('heading', { name: 'A soundboard. For the whole party.' }),
+      page.getByRole('heading', { name: 'Give your friends the soundboard.' }),
     ).toBeVisible();
     expect(sockets).toEqual([]);
     return;
@@ -4450,8 +4453,8 @@ test('example session: plays example sounds in this browser, edits a copy, and l
   );
   // Leaving returns to the start page, with nothing left playing.
   await page.getByRole('button', { name: 'Leave example' }).click();
-  await expect(page.getByRole('button', { name: 'Try the example' })).toBeVisible();
-  await expect(page.getByText('Not connected', { exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Mess with the demo' })).toBeVisible();
+  await expect(page.locator('header.home-bar')).toBeVisible();
   await expect(page.getByRole('button', { name: /Play / })).toHaveCount(0);
   expect(sockets).toEqual([]);
   expect(harness.plays).toEqual([]);
@@ -4479,7 +4482,7 @@ test('notices never cover Mimic’s close button, Leave example, Stop, Panic or 
   ]) {
     await page.setViewportSize(size);
     await page.goto('/');
-    await page.getByRole('button', { name: 'Try the example' }).click();
+    await page.getByRole('button', { name: 'Mess with the demo' }).click();
     await page.getByRole('button', { name: 'Mimic', exact: true }).click();
     const dialog = page.getByRole('main', { name: 'Mimic', exact: true });
     await dialog.getByRole('button', { name: 'Start listening' }).click();
@@ -4531,7 +4534,7 @@ test('notices never cover Mimic’s close button, Leave example, Stop, Panic or 
     await sectionNav(page).getByRole('button', { name: 'Mimic', exact: true }).click();
     await closeSection(page, 'Mimic');
     await page.getByRole('button', { name: 'Leave example' }).click();
-    await expect(page.getByRole('button', { name: 'Try the example' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Mess with the demo' })).toBeVisible();
   }
 });
 

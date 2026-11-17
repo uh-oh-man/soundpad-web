@@ -69,7 +69,7 @@ test('Feedback: the host and a guest send notes that land in one file, and an em
 test('Feedback: the example session has no Feedback button', async ({ page, browserName }) => {
   test.skip(browserName === 'webkit', "Playwright's Windows WebKit cannot start the example");
   await page.goto(ORIGIN + '/');
-  await page.getByRole('button', { name: 'Try the example' }).click();
+  await page.getByRole('button', { name: 'Mess with the demo' }).click();
   await expect(page.getByRole('button', { name: 'Leave example' })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Feedback' })).toHaveCount(0);
 });
