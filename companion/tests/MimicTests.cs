@@ -189,7 +189,6 @@ public sealed class MimicTests : IDisposable
         int calls = engine.Calls;
         store.AppendSilence(MimicFixture.Rate * 5);
         Assert.True(await transcriber.Step(store, false, default));
-        Assert.True(await transcriber.Step(store, true, default)); // flush the last second when recording stops
         Assert.Equal(calls, engine.Calls); // silent chunks never reach the recognizer
         Assert.Empty(transcriber.PendingBetween(store, [new(0, store.LiveFrame)], 1000, store.LiveFrame)); // all of it is recognised now
         var (other, otherWords) = NewHistory("other"); using var closeOther = other;
@@ -232,6 +231,7 @@ public sealed class MimicTests : IDisposable
     {
         var engine = new TranscriptFixture();
         using var transcriber = new MimicTranscriber(engine);
+        transcriber.UseMode(SubtitleMode.Balanced);
         var (store, words) = NewHistory(); using var closeStore = store;
         transcriber.Attach(store, words);
         Assert.False(await transcriber.Step(store, false, default));
@@ -243,16 +243,185 @@ public sealed class MimicTests : IDisposable
         Assert.True(await transcriber.Step(store, false, default)); // pause: transcribe the whole sentence
         Assert.Single(transcriber.Lines(store, HistoryAccess.Host, 0, store.LiveFrame));
         store.Append(Tone(4));
-        Assert.True(await transcriber.Step(store, false, default)); // continuous speech publishes a cut within four seconds
+        Assert.True(await transcriber.Step(store, false, default)); // Balanced publishes continuous speech within 3.5 s
         Assert.Equal(2, engine.Calls);
-        // The words at a forced cut that was not at a pause are marked uncertain, never "done".
-        var last = transcriber.WordsBetween(store, HistoryAccess.Host, 0, store.LiveFrame).Select(w => w.Word).Last();
-        Assert.Equal(WordStatus.Uncertain, last.Status);
+        // What reaches into the last second before the forced cut waits for the next chunk (overlap, 2.47).
         var pending = transcriber.PendingBetween(store, [new(0, store.LiveFrame)], 0, store.LiveFrame);
-        Assert.All(pending, p => Assert.InRange(p.EndFrame - p.StartFrame, 0, MimicFixture.Rate));
+        Assert.Single(pending);
+        Assert.InRange(pending[0].EndFrame - pending[0].StartFrame, MimicFixture.Rate, MimicFixture.Rate * 3);
         store.Append(Tone(4));
         Assert.True(await transcriber.Step(store, false, default));
         Assert.Equal(3, engine.Calls);
+    }
+
+    [Fact]
+    public async Task GamingKeepsItsTenSecondChunksAndOneThread()
+    {
+        // The 2.39 Gaming promise: one below-normal thread, and continuous speech is recognised once per 10 s.
+        Assert.All(new[] { 1, 2, 4, 8, 16, 64 }, cores => Assert.Equal(1, WhisperEngine.LiveThreads(SubtitleMode.Gaming, cores)));
+        Assert.Equal(1, new WhisperEngine("missing.bin").Threads); // Gaming is the default
+        var engine = new TranscriptFixture();
+        using var transcriber = new MimicTranscriber(engine);
+        var (store, words) = NewHistory(); using var closeStore = store;
+        transcriber.Attach(store, words);
+        Assert.False(await transcriber.Step(store, false, default));
+        float[] Tone(double seconds) => Enumerable.Range(0, (int)(seconds * MimicFixture.Rate)).Select(i => 0.5f * MathF.Sin(i * 0.17f)).ToArray();
+        store.Append(Tone(9.5));
+        Assert.False(await transcriber.Step(store, false, default)); // no pause, under 10 s: wait
+        Assert.Equal(0, engine.Calls);
+        store.Append(Tone(1));
+        Assert.True(await transcriber.Step(store, false, default)); // 10 s without a pause forces a cut
+        Assert.Equal(1, engine.Calls);
+        // At the quietest moment of the last three seconds, and nothing is taken back for an overlap.
+        var pending = transcriber.PendingBetween(store, [new(0, store.LiveFrame)], 0, store.LiveFrame);
+        Assert.All(pending, p => Assert.True(p.StartFrame >= MimicFixture.Rate * 7L, $"pending from {p.StartFrame}"));
+        Assert.Equal(WordStatus.Uncertain, transcriber.WordsBetween(store, HistoryAccess.Host, 0, store.LiveFrame).Select(w => w.Word).Last().Status);
+    }
+
+    /// <summary>
+    /// Continuous speech without pauses (2.47): word k is 500 ms of a tone at one of five loudness levels, the next word
+    /// at the next level, phrases of five words that end with the quietest one (where a forced cut lands). The engine hears each level as a word, with Whisper-like word timing
+    /// (a token at each end), and a word cut off by the end of its audio as a shorter word, as Whisper would.
+    /// </summary>
+    private sealed class LevelWords : ITranscriptEngine
+    {
+        public const double WordMs = 500;
+        public static float Level(int k) => 0.30f + 0.04f * (k % 5);
+        public static float[] Speech(int fromWord, int words) =>
+            [.. Enumerable.Range(0, (int)(words * WordMs * MimicFixture.Rate / 1000)).Select(i =>
+            {
+                int k = fromWord + (int)(i * 1000.0 / MimicFixture.Rate / WordMs);
+                return Level(k) * MathF.Sin((fromWord * (float)(WordMs * MimicFixture.Rate / 1000) + i) * 0.17f);
+            })];
+        public bool Available => true;
+        public string Status => "";
+        public int Calls { get; private set; }
+        public Task Prepare(CancellationToken cancel) => Task.CompletedTask;
+        public Task<IReadOnlyList<TranscribedSpan>> Transcribe(float[] samples, CancellationToken cancel)
+        {
+            Calls++;
+            const int window = MimicTranscriber.SpeechRate / 100; // 10 ms
+            var runs = new List<(int Level, int From, int To)>();
+            for (int i = 0; i < samples.Length; i += window)
+            {
+                float peak = 0;
+                for (int j = i; j < Math.Min(samples.Length, i + window); j++) peak = Math.Max(peak, Math.Abs(samples[j]));
+                int level = peak < 0.2f ? -1 : Math.Clamp((int)Math.Round((peak - 0.30f) / 0.04f), 0, 4);
+                int to = Math.Min(samples.Length, i + window);
+                if (runs.Count > 0 && runs[^1].Level == level) runs[^1] = (level, runs[^1].From, to); else runs.Add((level, i, to));
+            }
+            // Under 50 ms is no word (a window across a level change, or a sliver at an edge).
+            var heard = runs.Where(r => r.Level >= 0 && r.To - r.From >= 5 * window).ToList();
+            var spans = new List<TranscribedSpan>();
+            var phrase = new List<(int Level, int From, int To)>();
+            void Flush()
+            {
+                if (phrase.Count == 0) return;
+                var tokens = new List<TranscribedToken> { new("[_BEG_]", phrase[0].From / 160, phrase[0].From / 160, -1, 1) };
+                foreach (var w in phrase)
+                {
+                    long from = w.From / 160, to = w.To / 160;
+                    tokens.Add(new($" L{w.Level}", from, (from + to) / 2, from, 0.9f));
+                    tokens.Add(new("x", (from + to) / 2, to, to, 0.9f));
+                }
+                spans.Add(new(TimeSpan.FromSeconds((double)phrase[0].From / MimicTranscriber.SpeechRate), TimeSpan.FromSeconds((double)phrase[^1].To / MimicTranscriber.SpeechRate),
+                    string.Join(" ", phrase.Select(w => $"L{w.Level}x")), 0.9f, [.. tokens]));
+                phrase.Clear();
+            }
+            foreach (var w in heard) { if (w.Level == 1) Flush(); phrase.Add(w); }
+            Flush();
+            return Task.FromResult<IReadOnlyList<TranscribedSpan>>(spans);
+        }
+        public void Dispose() { }
+    }
+
+    [Theory]
+    [InlineData(SubtitleMode.Balanced)]
+    [InlineData(SubtitleMode.Fast)]
+    public async Task FastCaptionsNeverClipOrRepeatAWordSpokenAcrossACut(SubtitleMode mode)
+    {
+        var engine = new LevelWords();
+        using var transcriber = new MimicTranscriber(engine);
+        transcriber.UseMode(mode);
+        var (store, words) = NewHistory(); using var closeStore = store;
+        transcriber.Attach(store, words);
+        Assert.False(await transcriber.Step(store, false, default));
+        // 40 words (20 s) arriving half a second at a time, the live loop stepping as it goes, then a pause.
+        const int count = 40;
+        var speech = LevelWords.Speech(0, count);
+        int quarter = MimicFixture.Rate / 2;
+        for (int at = 0; at < speech.Length; at += quarter)
+        {
+            store.Append(speech.AsSpan(at, Math.Min(quarter, speech.Length - at)).ToArray());
+            while (await transcriber.Step(store, false, default)) { }
+        }
+        store.AppendSilence(MimicFixture.Rate);
+        while (await transcriber.Step(store, false, default)) { }
+        while (await transcriber.Step(store, true, default)) { }
+        Assert.True(engine.Calls > 5, $"{engine.Calls} calls"); // the cuts were forced, many times
+        var kept = transcriber.WordsBetween(store, HistoryAccess.Host, 0, store.LiveFrame).Select(w => w.Word).OrderBy(w => w.Start).ToList();
+        double Ms(long frames) => frames * 1000.0 / MimicFixture.Rate;
+        // Continuous: all of the speech is recognised, with no hole between chunks (a silent tail under 0.3 s may wait).
+        Assert.Empty(transcriber.PendingBetween(store, [new(0, store.LiveFrame)], 0, speech.Length).Select(p => $"{p.StartFrame}-{p.EndFrame}"));
+        // Each word exactly once, whole, where it was said.
+        Assert.Equal(count, kept.Count);
+        for (int k = 0; k < count; k++)
+        {
+            var w = kept[k];
+            Assert.Equal($"L{k % 5}x", w.Text);
+            Assert.InRange(Ms(w.Start), k * LevelWords.WordMs - 70, k * LevelWords.WordMs + 70);
+            Assert.InRange(Ms(w.End), (k + 1) * LevelWords.WordMs - 70, (k + 1) * LevelWords.WordMs + 70);
+            if (k > 0) Assert.True(w.Start >= kept[k - 1].End - MimicFixture.Rate / 50, $"word {k} overlaps the one before");
+        }
+    }
+
+    /// <summary>Answers each call with phrases placed relative to the end of the audio it was given.</summary>
+    private sealed class ScriptedEngine(Func<double, IReadOnlyList<TranscribedSpan>> spans) : ITranscriptEngine
+    {
+        public bool Available => true;
+        public string Status => "";
+        public int Calls { get; private set; }
+        public Task Prepare(CancellationToken cancel) => Task.CompletedTask;
+        public Task<IReadOnlyList<TranscribedSpan>> Transcribe(float[] samples, CancellationToken cancel) { Calls++; return Task.FromResult(spans(samples.Length * 1000.0 / MimicTranscriber.SpeechRate)); }
+        public void Dispose() { }
+    }
+
+    [Theory]
+    // The last phrase starts 0.8 s before a forced cut: held back whole, in every mode.
+    [InlineData(SubtitleMode.Balanced, 800, true)]
+    // 1.6 s before the cut: past Balanced's 1 s hold-back limit, so the overlap applies instead (its first word is kept).
+    [InlineData(SubtitleMode.Balanced, 1600, false)]
+    // Gaming has no such limit (as in 2.39): held back whole.
+    [InlineData(SubtitleMode.Gaming, 1600, true)]
+    public async Task APhraseAtAForcedCutIsHeldBackWithinItsLimit(SubtitleMode mode, int phraseMs, bool held)
+    {
+        static TranscribedSpan At(double fromMs, double toMs, string text) => new(TimeSpan.FromMilliseconds(fromMs), TimeSpan.FromMilliseconds(toMs), text, 0.9f);
+        var engine = new ScriptedEngine(length => [At(0, length - phraseMs - 100, "one two"), At(length - phraseMs, length - 100, "three four five")]);
+        using var transcriber = new MimicTranscriber(engine);
+        transcriber.UseMode(mode);
+        var (store, words) = NewHistory(); using var closeStore = store;
+        transcriber.Attach(store, words);
+        Assert.False(await transcriber.Step(store, false, default));
+        store.Append([.. Enumerable.Range(0, MimicFixture.Rate * (mode == SubtitleMode.Gaming ? 10 : 4)).Select(i => 0.5f * MathF.Sin(i * 0.17f))]);
+        Assert.True(await transcriber.Step(store, false, default));
+        Assert.Equal(1, engine.Calls);
+        var kept = transcriber.WordsBetween(store, HistoryAccess.Host, 0, store.LiveFrame).Select(w => w.Word.Text).ToList();
+        var pending = transcriber.PendingBetween(store, [new(0, store.LiveFrame)], 0, store.LiveFrame);
+        long next = pending[0].StartFrame;
+        if (held)
+        {
+            Assert.Equal(["one", "two"], kept);
+            // The next chunk starts where the phrase did: at the pause before it.
+            long phraseStart = words.Between(0, store.LiveFrame).Select(w => w.Word.End).DefaultIfEmpty(0).Max();
+            Assert.InRange(next - phraseStart, 0, MimicFixture.Rate / 5);
+        }
+        else
+        {
+            // "three" ends before the last second; "four" reaches into it and starts the next chunk.
+            Assert.Equal(["one", "two", "three"], kept);
+            var three = words.Between(0, store.LiveFrame).Select(w => w.Word).Single(w => w.Text == "three");
+            Assert.True(next >= three.End);
+        }
     }
 
     [Fact]
