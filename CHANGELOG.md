@@ -4,7 +4,7 @@ Notable changes to Soundpad Web. Versions follow the website's `package.json`; t
 
 ## 2.48.0 — A new start page, and the version in the EXE's name
 
-A redesigned start page, and the companion's file name now carries its version. **Update the companion** for an update that keeps a versioned file name versioned; everything else works with any companion.
+A redesigned start page, and the companion's file name now carries its version. It also brings everything from 2.47.0, which was tagged but has no download (a test timing flaw failed its release build). **Update the companion** for an update that keeps a versioned file name versioned; everything else works with any companion.
 
 ### Changed
 
@@ -21,6 +21,7 @@ A redesigned start page, and the companion's file name now carries its version. 
 
 ### Fixed
 
+- **The tests for a slow Soundpad check the waiting state from a recording.** The clicked tile's "Preparing audio…" state lasts about as long as Soundpad's answer; checked live one step at a time, a slow test machine missed its end and failed 2.47.0's release build. Each part of it (the tile, the player, the play button and the hint) is now checked from what the page recorded while it waited.
 - **Guests no longer see "Too many requests" for a burst of lookups.** A guest's page spaces its requests out, but a slow PC or network can still deliver several at once, and the host's page counted them as too many. A lookup refused only for that (sounds, statistics, the voice library, the history, sentences) is now asked again a second later instead of failing. Anything that changes something is still never sent twice.
 - **On a phone, Mimic's zoom buttons are never stuck under the notices.** With notices showing, the timeline's zoom row could sit below the end of the page's Mimic column, where it could not be scrolled into view. The column is now at least a screen tall and grows when it needs to.
 

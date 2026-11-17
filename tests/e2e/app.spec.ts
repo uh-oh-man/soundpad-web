@@ -3679,7 +3679,9 @@ test.describe('with a Soundpad that takes 150 ms to answer', () => {
       at: number;
       answered: boolean;
       pending: boolean;
+      playerPending: boolean;
       busy: boolean;
+      unavailable: boolean;
       hint: string;
       playing: boolean;
       reported: boolean;
@@ -3717,7 +3719,13 @@ test.describe('with a Soundpad that takes 150 ms to answer', () => {
             at: performance.now(),
             answered: watch.answered,
             pending: tile.getAttribute('data-intent') === 'pending',
+            playerPending:
+              document.querySelector('.player')?.getAttribute('data-intent') === 'pending',
             busy: tile.querySelector('.sound-button')?.getAttribute('aria-busy') === 'true',
+            unavailable:
+              tile
+                .querySelector(`[aria-label="Play from start: ${name}"]`)
+                ?.getAttribute('aria-disabled') === 'true',
             hint: tile.querySelector('.sound-hint')?.textContent ?? '',
             playing:
               tile.classList.contains('now-playing') ||
@@ -3736,10 +3744,8 @@ test.describe('with a Soundpad that takes 150 ms to answer', () => {
       }, name);
       const tile = who.locator('.sound-entry', { has: playButton(who, name) });
       await playButton(who, name).click();
-      await expect(tile).toHaveAttribute('data-intent', 'pending');
-      await expect(who.locator('.player')).toHaveAttribute('data-intent', 'pending');
-      await expect(tile.locator('.sound-hint')).toHaveText('Preparing audio…');
-      await expect(playButton(who, name)).toHaveAttribute('aria-disabled', 'true');
+      // The pending state lasts only as long as Soundpad's answer (about 300 ms here): read live one after
+      // another, a slow runner missed its end (2.47.0 tag run). The recording below checks every part of it.
       await expect(tile).toHaveClass(/now-playing/);
       await expect(tile).not.toHaveAttribute('data-intent');
       await expect(who.locator('.player')).not.toHaveAttribute('data-intent');
@@ -3756,7 +3762,14 @@ test.describe('with a Soundpad that takes 150 ms to answer', () => {
       expect(
         samples
           .slice(pendingFrom, answeredFrom)
-          .filter((s) => !s.pending || !s.busy || s.hint !== 'Preparing audio…'),
+          .filter(
+            (s) =>
+              !s.pending ||
+              !s.playerPending ||
+              !s.busy ||
+              !s.unavailable ||
+              s.hint !== 'Preparing audio…',
+          ),
       ).toEqual([]);
       expect(samples.slice(answeredFrom).filter((s) => s.pending)).toEqual([]);
       // ...and "playing" only ever together with the companion's report of it.
