@@ -25,13 +25,18 @@ public static class UpdateReasons
     public const string NoRepository = "noRepository", NoExe = "noExe", NotWritable = "notWritable", NotNtfs = "notNtfs",
         RateLimited = "rateLimited", Network = "network", NoAssets = "noAssets", TooLarge = "tooLarge", SizeMismatch = "sizeMismatch",
         HashMismatch = "hashMismatch", DigestMismatch = "digestMismatch", VersionMismatch = "versionMismatch", Blocked = "blocked",
-        Busy = "busy", SwapFailed = "swapFailed", RolledBack = "rolledBack";
+        Busy = "busy", SwapFailed = "swapFailed", RolledBack = "rolledBack",
+        // 2.48: the new version's file name (SoundpadWeb-<version>.exe) is already taken beside a versioned EXE.
+        NameTaken = "nameTaken";
 }
 
 /// <summary>A release newer than the running companion, as the check found it.</summary>
 /// <param name="ExeSize">The asset size from the API, or Content-Length when the API was rate limited; null when unknown.</param>
 /// <param name="ExeDigest">The API's "sha256:…" digest when it has one (absent means unknown, not a failure).</param>
-public sealed record ReleaseInfo(string Version, string Tag, string NotesUrl, Uri ExeUrl, long? ExeSize, string? ExeDigest, Uri ShaUrl);
+/// <param name="ShaUrl">SHA256SUMS.txt when the release has it (2.48), else SHA256.txt.</param>
+/// <param name="ExeName">The asset <paramref name="ExeUrl"/> is (2.48): SoundpadWeb-&lt;version&gt;.exe when the release
+/// has it, else SoundpadWeb.exe. Its line in SHA256SUMS.txt is the hash it must match.</param>
+public sealed record ReleaseInfo(string Version, string Tag, string NotesUrl, Uri ExeUrl, long? ExeSize, string? ExeDigest, Uri ShaUrl, string ExeName = UpdateNames.Plain);
 
 /// <summary>
 /// update-settings.v1.json in the data folder (2.44): whether to check for updates at launch. At most 4 KiB, checked

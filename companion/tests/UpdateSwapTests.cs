@@ -125,6 +125,73 @@ public sealed class UpdateSwapTests
         Assert.Equal("old", files.All[Exe]);
     }
 
+    // 2.48: a versioned EXE is updated to the new version's name (UpdateNames.Target).
+    private const string VersionedExe = @"C:\App\SoundpadWeb-2.44.0.exe", VersionedNew = @"C:\App\SoundpadWeb-2.44.1.exe", VersionedDownload = @"C:\App\.SoundpadWeb-2.44.0.2.44.1.download";
+
+    private static (Files Files, SwapPlan Plan) SetupVersioned()
+    {
+        var files = new Files();
+        files.All[VersionedExe] = "old"; files.All[VersionedDownload] = "new";
+        files.All[@"C:\App\SoundpadWeb-2.43.0.previous.exe"] = "older previous";
+        files.All[@"C:\App\SoundpadWeb.previous.exe"] = "the plain name's previous";
+        int written = 0;
+        var plan = new SwapPlan(VersionedExe, VersionedDownload, "2.44.1", "2.44.0", Data, Id, ["--data-dir", Data], () => System.Text.Encoding.UTF8.GetBytes("handoff " + ++written), false,
+            UpdateNames.Target(VersionedExe, "2.44.1"), [@"C:\App\SoundpadWeb-2.43.0.previous.exe", @"C:\App\SoundpadWeb-2.44.0.previous.exe"]);
+        return (files, plan);
+    }
+
+    [Fact]
+    public void AVersionedExeIsUpdatedToTheNewVersionsNameAndKeepsOnePreviousVersion()
+    {
+        var (files, plan) = SetupVersioned();
+        Assert.Equal(VersionedNew, plan.NewPath);
+        Assert.Equal(@"C:\App\SoundpadWeb-2.44.0.previous.exe", plan.PreviousPath);
+        var launcher = new Launcher(files, Ready(files, "2.44.1"));
+        Assert.Equal(SwapResult.Updated, Swap(files, launcher).Run(plan));
+        Assert.Equal(VersionedNew, Assert.Single(launcher.Started).Exe); // the new name is started
+        Assert.Equal("new", files.All[VersionedNew]);
+        Assert.Equal("old", files.All[plan.PreviousPath]);
+        Assert.False(files.Exists(VersionedExe)); // the old versioned file is now the previous version
+        Assert.False(files.Exists(@"C:\App\SoundpadWeb-2.43.0.previous.exe")); // removed only after the new one took over
+        Assert.Equal("the plain name's previous", files.All[@"C:\App\SoundpadWeb.previous.exe"]);
+        Assert.Equal(["write update-handoff.v1.bin", "move SoundpadWeb-2.44.0.exe -> SoundpadWeb-2.44.0.previous.exe", "move .SoundpadWeb-2.44.0.2.44.1.download -> SoundpadWeb-2.44.1.exe"], files.Log);
+    }
+
+    [Theory]
+    [MemberData(nameof(Failures))]
+    public void AFailedUpdateFromAVersionedNameBringsBackTheOldNameAndKeepsThePreviousVersions(string failure)
+    {
+        var (files, plan) = SetupVersioned();
+        var first = failure switch { "timeout" => Hang(), "wrongVersion" => Ready(files, "2.43.0"), "crash" => Crash(), _ => Ready(files, "2.44.1") };
+        var launcher = new Launcher(files, failure is "move1" or "move2" or "launch" ? Ready(files, "2.44.0") : first, Ready(files, "2.44.0"));
+        if (failure == "move1") files.FailMove = (from, to) => from == VersionedExe && to == plan.PreviousPath;
+        if (failure == "move2") files.FailMove = (from, _) => from == VersionedDownload;
+        if (failure == "launch") launcher.Throw = new System.ComponentModel.Win32Exception(5, "Access is denied (test)");
+        Assert.Equal(SwapResult.RolledBack, Swap(files, launcher).Run(plan));
+        Assert.Equal("old", files.All[VersionedExe]); // back under its own versioned name
+        Assert.Equal(VersionedExe, launcher.Started[^1].Exe);
+        Assert.Equal("old", launcher.Started[^1].Contents);
+        Assert.False(files.Exists(VersionedNew));
+        Assert.Equal("older previous", files.All[@"C:\App\SoundpadWeb-2.43.0.previous.exe"]); // nothing is cleaned without a successful start
+        if (failure is "timeout" or "wrongVersion" or "crash" or "launch")
+        {
+            Assert.Equal(@"C:\App\SoundpadWeb-2.44.0.failed-2.44.1.exe", plan.FailedPath);
+            Assert.Equal("new", files.All[plan.FailedPath]);
+        }
+    }
+
+    [Fact]
+    public void AVersionedTargetThatAppearedMeanwhileIsNeverReplaced()
+    {
+        var (files, plan) = SetupVersioned();
+        files.All[VersionedNew] = "the host's own copy";
+        var launcher = new Launcher(files, Ready(files, "2.44.0"));
+        Assert.Equal(SwapResult.RolledBack, Swap(files, launcher).Run(plan));
+        Assert.Equal("the host's own copy", files.All[VersionedNew]);
+        Assert.Equal(("old", "new"), (files.All[VersionedExe], files.All[VersionedDownload]));
+        Assert.Equal(VersionedExe, Assert.Single(launcher.Started).Exe);
+    }
+
     /// <summary>
     /// The real launcher keeps the started process's exit code (2.44 real-hardware proof, 2026-11-15): a new version
     /// that stopped while starting was logged as "exit code unknown", because the launcher closed its own handle to the

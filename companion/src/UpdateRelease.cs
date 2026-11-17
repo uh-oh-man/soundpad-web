@@ -138,7 +138,7 @@ public sealed class ReleaseClient : IDisposable
                 {
                     var version = UpdateVersion.Parse(tag)!;
                     if (version <= current) return CheckResult.None;
-                    return new(new(Plain(version), tag, source.ReleasePage(tag), source.Download(tag, "SoundpadWeb.exe"), null, null, source.Download(tag, "SHA256.txt")));
+                    return new(new(Plain(version), tag, source.ReleasePage(tag), source.Download(tag, UpdateNames.Plain), null, null, source.Download(tag, "SHA256.txt")));
                 }
             }
         }
@@ -159,23 +159,30 @@ public sealed class ReleaseClient : IDisposable
         var tag = root.TryGetProperty("tag_name", out var t) && t.ValueKind == JsonValueKind.String ? t.GetString() : null;
         if (UpdateVersion.Parse(tag) is not { } version || version <= current) return CheckResult.None;
         string notes = root.TryGetProperty("html_url", out var html) && html.ValueKind == JsonValueKind.String && Uri.TryCreate(html.GetString(), UriKind.Absolute, out var page) && (source.TestBase != null ? source.AllowedDownload(page) : page.Scheme == "https" && page.Host == "github.com") ? page.ToString() : source.ReleasePage(tag!);
-        (Uri Url, long? Size, string? Digest)? exe = null; Uri? sha = null;
+        // 2.48: the versioned asset (SoundpadWeb-<version>.exe) is preferred, SoundpadWeb.exe is the fallback (every
+        // release has it, the same bytes); SHA256SUMS.txt names each file, SHA256.txt is the bare hash 2.44-2.47 read.
+        (Uri Url, long? Size, string? Digest)? plain = null, versioned = null; Uri? sha = null, sums = null;
+        var versionedName = UpdateNames.Versioned(Plain(version));
         if (root.TryGetProperty("assets", out var assets) && assets.ValueKind == JsonValueKind.Array)
             foreach (var asset in assets.EnumerateArray().Take(64))
             {
                 if (asset.ValueKind != JsonValueKind.Object || !asset.TryGetProperty("name", out var n) || n.ValueKind != JsonValueKind.String) continue;
                 if (!asset.TryGetProperty("browser_download_url", out var u) || u.ValueKind != JsonValueKind.String || !Uri.TryCreate(u.GetString(), UriKind.Absolute, out var url) || !source.AllowedDownload(url)) continue;
-                if (n.GetString() == "SoundpadWeb.exe")
+                var name = n.GetString();
+                if (name == UpdateNames.Plain || name == versionedName)
                 {
                     long? size = asset.TryGetProperty("size", out var s) && s.ValueKind == JsonValueKind.Number && s.TryGetInt64(out long bytes) && bytes > 0 ? bytes : null;
                     string? digest = asset.TryGetProperty("digest", out var d) && d.ValueKind == JsonValueKind.String && d.GetString() is { } dg && dg.StartsWith("sha256:", StringComparison.OrdinalIgnoreCase) && Sha256Text.IsHex(dg[7..]) ? dg[7..].ToLowerInvariant() : null;
-                    exe = (url, size, digest);
+                    if (name == UpdateNames.Plain) plain = (url, size, digest); else versioned = (url, size, digest);
                 }
-                else if (n.GetString() == "SHA256.txt") sha = url;
+                else if (name == "SHA256.txt") sha = url;
+                else if (name == Sha256Text.SumsName) sums = url;
             }
-        if (exe == null || sha == null) return new(null, UpdateReasons.NoAssets, $"Release {tag} has no SoundpadWeb.exe and SHA256.txt.");
+        var exe = versioned ?? plain;
+        var exeName = versioned != null ? versionedName : UpdateNames.Plain;
+        if (exe == null || (sha ?? sums) == null) return new(null, UpdateReasons.NoAssets, $"Release {tag} has no SoundpadWeb.exe and SHA256.txt.");
         if (exe.Value.Size > MaxExeBytes) return new(null, UpdateReasons.TooLarge, "The new version is larger than the updater accepts.");
-        return new(new(Plain(version), tag!, notes, exe.Value.Url, exe.Value.Size, exe.Value.Digest, sha));
+        return new(new(Plain(version), tag!, notes, exe.Value.Url, exe.Value.Size, exe.Value.Digest, (sums ?? sha)!, exeName));
     }
 
     /// <summary>
@@ -237,14 +244,43 @@ public sealed class UpdateRefusedException(string reason, string message) : Exce
     public string Reason { get; } = reason;
 }
 
-/// <summary>SHA256.txt as the release workflow writes it: 64 hex characters (any case), then optional whitespace.</summary>
-public static class Sha256Text
+/// <summary>
+/// The release's hashes. SHA256.txt: 64 hex characters (any case), then optional whitespace, and nothing else: that
+/// is all companions 2.44-2.47 accept, so it never gains names. SHA256SUMS.txt (2.48): one "&lt;hash&gt;  &lt;name&gt;"
+/// line per EXE, as sha256sum writes it, for both SoundpadWeb.exe and SoundpadWeb-&lt;version&gt;.exe.
+/// </summary>
+public static partial class Sha256Text
 {
+    public const string SumsName = "SHA256SUMS.txt";
     public static bool IsHex(string text) => text.Length == 64 && text.All(Uri.IsHexDigit);
     public static string? Parse(string text)
     {
         var trimmed = text.Trim();
         return IsHex(trimmed) ? trimmed.ToLowerInvariant() : null;
+    }
+
+    [GeneratedRegex(@"^([0-9A-Fa-f]{64}) [ *](.+)$")] private static partial Regex SumsLine();
+
+    /// <summary>
+    /// The hash of <paramref name="name"/>: a bare hash (SHA256.txt) is taken as it is; otherwise the one
+    /// SHA256SUMS.txt line for exactly that name (null when it is missing, listed twice with different hashes, or any
+    /// line is not a hash and a name).
+    /// </summary>
+    public static string? ParseFor(string text, string name)
+    {
+        if (Parse(text) is { } bare) return bare;
+        string? found = null;
+        foreach (var raw in text.Split('\n'))
+        {
+            var line = raw.TrimEnd('\r', ' ', '\t');
+            if (line.Length == 0) continue;
+            if (SumsLine().Match(line) is not { Success: true } m) return null;
+            if (m.Groups[2].Value != name) continue;
+            var hash = m.Groups[1].Value.ToLowerInvariant();
+            if (found != null && found != hash) return null;
+            found = hash;
+        }
+        return found;
     }
 }
 
@@ -269,7 +305,7 @@ public static class UpdateVerifier
         long? expected = release.ExeSize ?? contentLength;
         if (expected is long size && bytes != size) throw new UpdateRefusedException(UpdateReasons.SizeMismatch, "The download is incomplete. Try again.");
         if (new FileInfo(path).Length != bytes) throw new UpdateRefusedException(UpdateReasons.SizeMismatch, "The download is incomplete. Try again.");
-        var published = Sha256Text.Parse(sha256Text) ?? throw new UpdateRefusedException(UpdateReasons.HashMismatch, "The release's SHA256.txt is not a SHA-256 hash.");
+        var published = Sha256Text.ParseFor(sha256Text, release.ExeName) ?? throw new UpdateRefusedException(UpdateReasons.HashMismatch, $"The release's hashes do not include {release.ExeName}.");
         var actual = Hash(path);
         if (actual != published) throw new UpdateRefusedException(UpdateReasons.HashMismatch, "The download does not match the hash published with the release.");
         if (release.ExeDigest != null && release.ExeDigest != actual) throw new UpdateRefusedException(UpdateReasons.DigestMismatch, "The download does not match GitHub's digest for the release.");

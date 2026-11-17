@@ -126,6 +126,6 @@ public static class BackupLocator
     public static string Hint(string dataDirectory)
     {
         if (NewestState(dataDirectory) is not { } snapshot) return "";
-        return $" A copy from your newest backup is at {Path.Combine(snapshot, "data")}\\state.json; quit, copy it over {Path.Combine(dataDirectory, "state.json")}, and start again. Or run SoundpadWeb.exe --restore-state \"{snapshot}\".";
+        return $" A copy from your newest backup is at {Path.Combine(snapshot, "data")}\\state.json; quit, copy it over {Path.Combine(dataDirectory, "state.json")}, and start again. Or run {UpdateNames.ForMessages(Environment.ProcessPath)} --restore-state \"{snapshot}\".";
     }
 }

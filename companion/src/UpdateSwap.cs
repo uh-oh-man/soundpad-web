@@ -94,8 +94,13 @@ public sealed class UpdateFiles : IUpdateFiles
 /// <summary>What the old process does once its own server, pipe and lock are gone.</summary>
 /// <param name="Args">The relaunch arguments without --resume-update and --wait-pid (added here).</param>
 /// <param name="Handoff">Writes the hand-over again (from memory, with a fresh time) for a rollback relaunch.</param>
-public sealed record SwapPlan(string ExePath, string DownloadPath, string Version, string CurrentVersion, string DataDir, string Id, IReadOnlyList<string> Args, Func<byte[]> Handoff, bool Console)
+/// <param name="Target">Where the new version goes (2.48, <see cref="UpdateNames.Target"/>): the new versioned name beside
+/// a versioned EXE; null (or <paramref name="ExePath"/>) updates in place.</param>
+/// <param name="StalePrevious">Earlier versions' SoundpadWeb-X.Y.Z.previous.exe, removed once the new version took over.</param>
+public sealed record SwapPlan(string ExePath, string DownloadPath, string Version, string CurrentVersion, string DataDir, string Id, IReadOnlyList<string> Args, Func<byte[]> Handoff, bool Console, string? Target = null, IReadOnlyList<string>? StalePrevious = null)
 {
+    /// <summary>The new version's file: <see cref="Target"/>, or the running EXE's own name.</summary>
+    public string NewPath => Target ?? ExePath;
     public string PreviousPath => Path.Combine(Path.GetDirectoryName(ExePath)!, Path.GetFileNameWithoutExtension(ExePath) + ".previous.exe");
     public string FailedPath => Path.Combine(Path.GetDirectoryName(ExePath)!, Path.GetFileNameWithoutExtension(ExePath) + ".failed-" + Version + ".exe");
     public string HandoffPath => Path.Combine(DataDir, UpdateHandoffFile.Name);
@@ -107,7 +112,8 @@ public enum SwapResult { Updated, RolledBack, Failed }
 
 /// <summary>
 /// The file swap and watchdog (2.44). The running EXE is renamed to &lt;stem&gt;.previous.exe (Windows allows renaming a
-/// running program on NTFS), the verified download takes its name, and the new version is started with
+/// running program on NTFS), the verified download takes its name (or, from a versioned name since 2.48, the new
+/// version's name, <see cref="SwapPlan.NewPath"/>), and the new version is started with
 /// --resume-update. The old process then waits up to 90 s for the new one's ready file. If anything fails (a move, the
 /// start, a crash, the time limit, a ready file of another version), the new one is stopped, the previous EXE goes back
 /// to its name (the failed one becomes &lt;stem&gt;.failed-&lt;ver&gt;.exe) and the old version is started again with the
@@ -131,7 +137,7 @@ public sealed class UpdateSwap(IUpdateFiles files, IProcessLauncher launcher, Ac
             files.Delete(plan.ReadyPath);
             files.WriteAtomic(plan.HandoffPath, plan.Handoff());
             files.Move(plan.ExePath, plan.PreviousPath, true); movedOld = true;
-            try { files.Move(plan.DownloadPath, plan.ExePath, false); movedNew = true; }
+            try { files.Move(plan.DownloadPath, plan.NewPath, false); movedNew = true; }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
             {
                 files.Move(plan.PreviousPath, plan.ExePath, false); movedOld = false;
@@ -145,7 +151,7 @@ public sealed class UpdateSwap(IUpdateFiles files, IProcessLauncher launcher, Ac
             return Rollback(plan, movedOld, movedNew);
         }
         IUpdateChild? child = null;
-        try { child = launcher.Start(plan.ExePath, Arguments(plan), plan.ChildLog, plan.Console); }
+        try { child = launcher.Start(plan.NewPath, Arguments(plan), plan.ChildLog, plan.Console); }
         catch (Exception ex) when (ex is Win32Exception or IOException or InvalidOperationException or UnauthorizedAccessException)
         {
             Problem = "Windows did not start the new version (" + ex.Message + ").";
@@ -154,7 +160,15 @@ public sealed class UpdateSwap(IUpdateFiles files, IProcessLauncher launcher, Ac
         }
         using var started = child;
         var waited = WaitReady(plan, started, plan.Version);
-        if (waited == null) { log($"Version {plan.Version} started and took over."); files.Delete(plan.ReadyPath); return SwapResult.Updated; }
+        if (waited == null)
+        {
+            log($"Version {plan.Version} started and took over" + (plan.NewPath != plan.ExePath ? $" as {Path.GetFileName(plan.NewPath)}." : "."));
+            files.Delete(plan.ReadyPath);
+            // Only now, with the new version running: older versions' previous EXEs go, so one previous version stays.
+            foreach (var stale in plan.StalePrevious ?? [])
+                if (!string.Equals(stale, plan.PreviousPath, StringComparison.OrdinalIgnoreCase)) { try { files.Delete(stale); } catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { } }
+            return SwapResult.Updated;
+        }
         Problem = waited;
         log(Problem);
         Stop(started);
@@ -192,7 +206,7 @@ public sealed class UpdateSwap(IUpdateFiles files, IProcessLauncher launcher, Ac
     {
         try
         {
-            if (movedNew) files.Move(plan.ExePath, plan.FailedPath, true);
+            if (movedNew) files.Move(plan.NewPath, plan.FailedPath, true);
             if (movedOld) files.Move(plan.PreviousPath, plan.ExePath, false);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
