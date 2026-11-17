@@ -59,8 +59,16 @@ test('the start page header: name with the version beside it, and links, only be
   await expect(credits).toContainText('Codex (OpenAI)');
   await expect(credits).toContainText('Claude (Anthropic)');
   expect(await axe(page)).toEqual([]);
-  // The demo starts the example; the app's own header takes over.
+  // The demo starts the example; the app's own header takes over. Playwright's Windows WebKit has no Web
+  // Audio, so there the example says it can't start (as the other example tests expect) and the rest is moot.
+  const audio = await page.evaluate(
+    () => 'AudioContext' in window || 'webkitAudioContext' in window,
+  );
   await page.getByRole('button', { name: 'Mess with the demo' }).click();
+  if (!audio) {
+    await expect(page.getByText(/The example could not start/)).toBeVisible();
+    return;
+  }
   await expect(page.getByRole('complementary', { name: 'Example session' })).toBeVisible();
   await expect(page.locator('header.home-bar')).toHaveCount(0);
   await expect(page.locator('header.topbar .status')).toHaveText('Example session');
@@ -73,6 +81,8 @@ test('the pretend soundboard plays in this browser, filters, and Stop ends it', 
 }) => {
   // Count what the page asks Web Audio to play, without hearing it.
   await page.addInitScript(() => {
+    // No Web Audio (Playwright's Windows WebKit): the pads still light up and Stop works, with no tone to count.
+    if (typeof OscillatorNode === 'undefined') return;
     const start = OscillatorNode.prototype.start;
     (window as unknown as { tones: number[] }).tones = [];
     OscillatorNode.prototype.start = function (this: OscillatorNode, ...args: [number?]) {
@@ -93,9 +103,11 @@ test('the pretend soundboard plays in this browser, filters, and Stop ends it', 
   await expect(now).toHaveText('Airhorn');
   await expect(board).toHaveClass(/is-live/);
   await expect(board.getByRole('button', { name: /^Airhorn/ })).toHaveClass(/is-playing/);
-  expect(await page.evaluate(() => (window as unknown as { tones: number[] }).tones)).toEqual([
-    260,
-  ]);
+  const audio = await page.evaluate(() => typeof OscillatorNode !== 'undefined');
+  if (audio)
+    expect(await page.evaluate(() => (window as unknown as { tones: number[] }).tones)).toEqual([
+      260,
+    ]);
   await board.getByRole('button', { name: 'STOP' }).click();
   await expect(now).toHaveText('Nothing yet. Go ahead.');
   // It lights up for a moment, then lets go by itself.
