@@ -5,7 +5,7 @@ import type { Snapshot } from '../../protocol';
 import { supports } from '../../version';
 import { guestHeld, HELD_BY_HOST, intentKey, playback, usePendingIntent } from '../../playback';
 import { removeNewTempAudio } from '../../remove-temp';
-import { guestOwns, refreshTempAssets, useTempAssets } from '../../temp-assets';
+import { guestOwns, hideTemp, refreshTempAssets, showTemp, useTempAssets } from '../../temp-assets';
 import { clipDeletable, deleteWithUndo, useDeleted } from '../../mimic/pending-delete';
 import { followFocus } from '../../focus-follow';
 import { canQuickSave, saveClip } from '../../library/quick-save';
@@ -49,7 +49,12 @@ export function MimicRecent({
   const clips = [...(state.mimic?.recent ?? []), ...(state.mimic?.moreRecent ?? [])].filter(
     (clip) => !deleted.has(clip.assetId) && visibleAssets.has(clip.assetId),
   );
-  if (!clips.length) return <p className="muted">Clips you make appear here.</p>;
+  if (!clips.length)
+    return (
+      <p className="muted mimic-recent-empty">
+        Clips you keep or play appear here, newest first (the last 100).
+      </p>
+    );
   const query = filter.trim().toLocaleLowerCase();
   const recent = clips.filter(
     (clip) => !query || `${clip.name} ${clip.by}`.toLocaleLowerCase().includes(query),
@@ -72,8 +77,20 @@ export function MimicRecent({
   function remove(index: number, from: Element) {
     const clip = recent[index];
     const next = recent[index + 1] ?? recent[index - 1];
-    deleteWithUndo(clip.assetId, `Deleted “${clip.name}” from Temp.`, () =>
-      removeNewTempAudio(clip.assetId).finally(refreshTempAssets),
+    // Hidden here and in Temp at once; the companion is asked once the Undo notice has gone. Written down,
+    // so a tab closed before then still deletes it the next time (2.47 review).
+    hideTemp([clip.assetId]);
+    deleteWithUndo(
+      clip.assetId,
+      `Deleted “${clip.name}” from Temp.`,
+      () =>
+        removeNewTempAudio(clip.assetId).then(refreshTempAssets, (e: unknown) => {
+          showTemp([clip.assetId]);
+          refreshTempAssets();
+          throw e;
+        }),
+      () => showTemp([clip.assetId]),
+      { kind: 'clip' },
     );
     // The row's buttons go with it: the keyboard moves to the next clip (or the one before), else the heading.
     followFocus(

@@ -1,33 +1,59 @@
-/* Mimic's full-page layout. Shared transport, waveform and buttons are styled in mimic.css. */
+/*
+ * Mimic's full page (2.47): owns everything under #mimic-page. A compact header (title, listening status,
+ * source and Start/Stop, settings, Fill window), then two columns: the timeline strip, the live transcript
+ * and the action bar on the left, the Clips column on the right. The transcript takes the height left over,
+ * so it is on screen without scrolling. Phones show the transcript or the clips, chosen by tabs. The shared
+ * waveform, badge, recent-clip and library pieces keep their base rules in mimic.css.
+ */
 .app-shell[data-view='mimic'] #board {
   padding: 0;
   container: mimic / inline-size;
 }
 
 .mimic-page {
-  grid-template-columns: minmax(0, 1fr);
-  align-content: start;
-  gap: 14px;
-  min-height: 100%;
-  padding: clamp(12px, 2vw, 26px);
-  align-items: start;
+  --mimic-rail-w: 330px;
+  --mimic-wave-h: clamp(64px, 11vh, 132px);
+  --mimic-read-size: 18px;
+  --mimic-gap: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: var(--mimic-gap);
+  box-sizing: border-box;
+  height: 100%;
+  min-height: 0;
+  padding: 14px 20px calc(14px + var(--notice-height, 0px));
 }
 
+.app-shell[data-view='mimic'] #board > :is(.playback-suspended, .recover-session) {
+  margin-inline: 20px;
+}
+
+/* ---- Header ------------------------------------------------------------------------------------- */
+
 .mimic-page-head {
-  grid-column: 1 / -1;
   display: flex;
+  flex: none;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 14px;
+  gap: 10px 16px;
   min-width: 0;
-  padding-bottom: 10px;
-  border-bottom: 1px solid var(--line);
+}
+
+.mimic-page-title {
+  display: flex;
+  flex: 1 1 auto;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
 }
 
 .mimic-page-head h1 {
+  flex: none;
   margin: 0;
   color: var(--text-primary);
-  font-size: clamp(25px, 3vw, 36px);
-  line-height: 1.1;
+  font-size: 26px;
+  line-height: 1.15;
+  letter-spacing: -0.01em;
 }
 
 .mimic-page-icon {
@@ -35,339 +61,245 @@
   color: var(--accent);
 }
 
-.mimic-page-head .btn {
+.mimic-page .mimic-status {
+  min-width: 0;
+  max-width: 52ch;
+  padding: 5px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-pill);
+  background: var(--surface-2);
+  font-size: 13px;
+}
+
+.mimic-page .mimic-status span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mimic-page .mimic-status i {
+  flex: none;
+}
+
+.mimic-page .mimic-status.live {
+  border-color: color-mix(in srgb, var(--danger) 40%, var(--line));
+}
+
+.mimic-page-tools {
+  display: flex;
+  flex: 0 1 auto;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  min-width: 0;
   margin-inline-start: auto;
 }
 
-.mimic-page-live,
-.mimic-page-clips {
-  display: grid;
-  gap: 10px;
+.mimic-page .mimic-source {
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 6px;
   min-width: 0;
 }
 
-.mimic-page-clips {
-  align-content: start;
+.mimic-page .mimic-source label {
+  display: block;
+  flex: 0 1 300px;
+  min-width: 140px;
+}
+
+.mimic-page .mimic-source button:not(.icon-button) {
+  white-space: nowrap;
+}
+
+/* While listening the source can't change: the status says what it is, and only Stop stays. */
+.mimic-page[data-listening] .mimic-source :is(label, .icon-button) {
+  display: none;
+}
+
+.mimic-page :is(input, select) {
+  color-scheme: inherit;
+}
+
+.mimic-page-tools :is(button, .mimic-page-settings > summary) {
+  min-height: 36px;
+}
+
+/* Settings: a disclosure whose body opens over the page, under its button. */
+.mimic-page-settings {
+  position: relative;
+}
+
+.mimic-page-settings > summary {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
   border: 1px solid var(--line);
   border-radius: var(--radius);
-  padding: 14px;
   background: var(--surface-1);
-}
-
-.mimic-page-clips h2 {
-  margin: 0;
   color: var(--text-primary);
-  font-size: 17px;
+  font-size: 13px;
+  white-space: nowrap;
+  cursor: pointer;
+  list-style: none;
 }
 
-.mimic-page-clips .mimic-recent {
-  max-block-size: min(50vh, 560px);
-  overflow: auto;
-  overscroll-behavior: contain;
-  scrollbar-gutter: stable;
+.mimic-page-settings > summary::-webkit-details-marker {
+  display: none;
 }
 
-.mimic-page-clips .mimic-recent-item {
-  padding-block: 6px;
+.mimic-page-settings > summary:hover {
+  background: var(--surface-hover);
 }
 
-.mimic-page-clips .mimic-recent-item > button:first-child {
-  flex-basis: 100%;
+.mimic-page-settings[open] > summary {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.mimic-settings-body {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: var(--z-popover);
+  display: grid;
+  gap: 12px;
+  box-sizing: border-box;
+  width: min(460px, calc(100vw - 32px));
+  max-height: min(70vh, 560px);
+  overflow-y: auto;
+  padding: 14px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-l);
+  background: var(--surface-2);
+  box-shadow: var(--shadow-2);
+}
+
+.mimic-settings-body .mimic-transcribe + .mimic-transcribe {
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+
+.mimic-fill span {
+  white-space: nowrap;
+}
+
+.mimic-alerts:empty {
+  display: none;
+}
+
+.mimic-alerts {
+  display: grid;
+  flex: none;
+  gap: 6px;
+}
+
+.mimic-alerts > * {
+  margin: 0;
 }
 
 .mimic-page-tabs {
   display: none;
 }
 
-.mimic-page .mimic-transcript {
-  align-content: start;
-  min-height: 96px;
-  max-height: clamp(112px, 24vh, 250px);
-  padding: 10px 12px;
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
-  background: var(--surface-0);
-  scrollbar-gutter: stable;
-  overscroll-behavior: contain;
-}
-
-.mimic-page .mimic-transcript .mimic-word {
-  font-size: clamp(14px, 1.35vw, 18px);
-  line-height: 1.5;
-}
-
-.mimic-page .mimic-actions {
-  padding: 10px;
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
-  background: var(--surface-1);
-}
-
-.mimic-page .mimic-page-settings {
-  min-width: 0;
-}
-
-.mimic-page-settings summary {
-  color: var(--text-muted);
-  cursor: pointer;
-  width: fit-content;
-}
-
-.mimic-page-settings summary svg {
-  display: inline;
-  vertical-align: text-bottom;
-  margin-inline-end: 4px;
-}
-
-.mimic-page-settings[open] {
-  padding: 8px;
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
-}
-
-.mimic-page .mimic-transcript-head h2 {
-  margin: 0;
-  color: var(--text-primary);
-  font-size: 17px;
-}
-
-.mimic-page .mimic-words time {
-  width: 6.5ch;
-  font-size: 11px;
-  line-height: 1.8;
-  white-space: nowrap;
-}
+/* ---- Two columns ------------------------------------------------------------------------------- */
 
 .mimic-page .mimic-history {
-  gap: 8px;
+  display: grid;
+  flex: 1 1 auto;
+  grid-template-columns: minmax(0, 1fr) var(--mimic-rail-w);
+  gap: 14px;
+  min-height: 0;
 }
 
-.app-shell[data-view='mimic'] #board > :is(.playback-suspended, .recover-session) {
-  margin-inline: clamp(12px, 2vw, 26px);
-}
-
-@container mimic (min-width: 721px) {
-  .mimic-page-live {
-    grid-template-columns: minmax(0, 1fr) auto;
-  }
-
-  .mimic-page-live > * {
-    grid-column: 1 / -1;
-  }
-
-  .mimic-page-live:has(.mimic-page-settings:not([open])) > .mimic-source {
-    grid-column: 1;
-  }
-
-  .mimic-page-live > .mimic-page-settings:not([open]) {
-    grid-column: 2;
-    align-self: end;
-    padding-block: 8px;
-  }
-}
-
-@container mimic (max-width: 720px) {
-  .mimic-page {
-    grid-template-columns: minmax(0, 1fr);
-    grid-template-rows: auto auto minmax(0, 1fr);
-    gap: 10px;
-  }
-
-  .mimic-page .mimic-history {
-    display: flex;
-    flex-direction: column;
-    min-width: 0;
-  }
-
-  .mimic-page .mimic-source {
-    align-items: center;
-  }
-
-  .mimic-page .mimic-source label {
-    flex-basis: 135px;
-  }
-
-  .mimic-page-tabs {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 6px;
-  }
-
-  .mimic-page-tabs button[aria-pressed='true'] {
-    border-color: var(--accent);
-    background: var(--accent-soft);
-  }
-
-  .mimic-page[data-tab='live'] .mimic-page-clips,
-  .mimic-page[data-tab='clips'] .mimic-page-live > :not(.mimic-history),
-  .mimic-page[data-tab='clips'] .mimic-history > :not(.mimic-workbench, .mimic-page-clips),
-  .mimic-page[data-tab='clips'] .mimic-editor-column {
-    display: none;
-  }
-}
-
-/* Reading surface. Timestamps form a quiet gutter and the words read as continuous text. */
-.mimic-reading {
+.mimic-main {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
   min-width: 0;
-  overflow: hidden;
+  min-height: 0;
+}
+
+.mimic-main > :is(.mimic-guest-note, .mimic-waiting, .mimic-shared, .mimic-speakers) {
+  flex: none;
+}
+
+.mimic-empty {
+  display: grid;
+  flex: 1 1 auto;
+  place-content: center;
+  justify-items: center;
+  gap: 8px;
+  min-height: 200px;
+  padding: 24px;
+  border: 1px dashed var(--line-strong);
+  border-radius: var(--radius-l);
+  color: var(--accent);
+  text-align: center;
+}
+
+.mimic-empty h2 {
+  margin: 4px 0 0;
+  color: var(--text-primary);
+  font-size: 19px;
+}
+
+.mimic-empty p {
+  max-width: 52ch;
+  margin: 0;
+}
+
+.mimic-empty .mimic-intro {
+  color: var(--text-primary);
+}
+
+.mimic-empty-page {
+  flex: 1 1 auto;
+}
+
+/* ---- Timeline strip ---------------------------------------------------------------------------- */
+
+.mimic-page .mimic-timeline {
+  position: relative;
+  display: grid;
+  flex: none;
+  gap: 8px;
+  min-width: 0;
+  padding: 10px 12px 12px;
   border: 1px solid var(--line);
-  border-radius: calc(var(--radius) + 4px);
+  border-radius: var(--radius-l);
   background: var(--surface-1);
+  box-shadow: var(--shadow-1);
 }
 
-.mimic-reading .mimic-transcript-head {
-  padding: 9px 14px;
-  border-bottom: 1px solid var(--line);
-  background: var(--surface-2);
-}
-
-.mimic-reading-actions {
+.mimic-page .mimic-nav {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: 6px;
+  /* Room for the zoom buttons, which sit at the strip's top right. */
+  padding-inline-end: 136px;
 }
 
-.mimic-reading-actions button {
+.mimic-page .mimic-nav button {
   min-height: 32px;
-  padding: 4px 9px;
-  font-size: 12px;
+  padding: 4px 10px;
+  font-size: 13px;
 }
 
-.mimic-reading .mimic-reading-body {
-  display: block;
-  min-height: 104px;
-  max-height: clamp(138px, 22vh, 275px);
-  padding: 9px 16px 12px;
-  border: 0;
-  border-radius: 0;
-  background: transparent;
-  overflow-anchor: none;
-}
-
-.mimic-reading .mimic-reading-body .mimic-reading-line {
-  display: grid;
-  position: relative;
-  grid-template-columns: 60px minmax(0, 1fr);
-  align-items: baseline;
-  gap: 0 12px;
-  padding: 7px 0;
-  border: 0;
-  border-radius: 0;
-  background: transparent;
-}
-
-.mimic-reading .mimic-reading-line time {
-  grid-column: 1;
-  grid-row: 1;
-  align-self: first baseline;
+.mimic-page .mimic-when {
+  margin-inline-start: 6px;
   color: var(--text-muted);
-  font-size: 11px;
-  letter-spacing: 0.02em;
-}
-
-.mimic-reading .mimic-reading-line > :not(time) {
-  grid-column: 2;
-}
-
-.mimic-reading .mimic-reading-line .mimic-sentence {
-  display: block;
-  border-inline-start: 1px solid var(--line);
-  padding-inline-start: 11px;
-  font-size: clamp(15px, 1.45vw, 20px);
-  line-height: 1.6;
-}
-
-.mimic-reading .mimic-reading-body .mimic-word {
-  display: inline;
-  width: auto;
-  padding: 0 2px;
-  margin-inline-end: 0.23em;
-  border: 0;
-  border-radius: 3px;
-  font-size: inherit;
-  line-height: inherit;
-  white-space: normal;
-  overflow-wrap: anywhere;
-}
-
-.mimic-reading .mimic-reading-body .mimic-word[aria-pressed='true'] {
-  background: var(--accent-soft);
-  color: var(--text-primary);
-  box-shadow: 0 1px 0 var(--accent);
-}
-
-.mimic-reading .mimic-reading-body .mimic-word.playing {
-  color: var(--text-primary);
-  background: var(--accent-soft);
-  box-shadow: inset 0 -2px 0 var(--accent);
-}
-
-.mimic-reading .mimic-pending {
-  padding-inline-start: 83px;
   font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 
-@container mimic (max-width: 720px) {
-  .mimic-reading .mimic-transcript-head {
-    gap: 6px;
-    padding-inline: 9px;
-  }
-
-  .mimic-reading .mimic-reading-body {
-    padding-inline: 9px;
-  }
-
-  .mimic-reading .mimic-reading-body .mimic-reading-line {
-    grid-template-columns: 47px minmax(0, 1fr);
-    column-gap: 6px;
-  }
-
-  .mimic-reading .mimic-reading-line .mimic-sentence {
-    padding-inline-start: 6px;
-  }
-
-  .mimic-reading .mimic-pending {
-    padding-inline-start: 53px;
-  }
-
-  .mimic-reading .mimic-follow-key {
-    display: none;
-  }
-}
-
-.mimic-reading .mimic-search {
-  padding: 7px 14px;
-  border-bottom: 1px solid var(--line);
-}
-
-.mimic-reading .mimic-search input {
-  min-width: 0;
-  flex: 1 1 180px;
-  max-width: 330px;
-}
-
-.mimic-reading .mimic-search button {
-  min-height: 32px;
-  padding-block: 4px;
-}
-
-.mimic-reading .mimic-reading-empty {
-  padding: 14px 4px;
-}
-
-.mimic-timeline {
+.mimic-page .mimic-timeline .mimic-wave {
   display: grid;
-  min-width: 0;
-  gap: 9px;
-  padding: clamp(9px, 1.4vw, 17px);
-  border: 1px solid color-mix(in srgb, var(--accent) 38%, var(--line));
-  border-radius: calc(var(--radius) + 4px);
-  background: var(--surface-1);
-}
-
-.mimic-timeline .mimic-wave {
-  position: relative;
   gap: 0;
   min-width: 0;
   overflow: hidden;
@@ -376,24 +308,51 @@
   background: var(--surface-0);
 }
 
-.mimic-timeline .mimic-wave canvas {
-  height: clamp(84px, 12vh, 152px);
+.mimic-page .mimic-timeline .mimic-wave canvas {
+  height: var(--mimic-wave-h);
   border: 0;
   border-radius: 0;
   background: repeating-linear-gradient(to right, var(--line) 0 1px, transparent 1px 10%);
 }
 
+/* The zoom buttons move up to the strip's own top row; the axis words are in the ruler already. */
+.mimic-page .mimic-timeline .mimic-axis {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  min-height: 0;
+  padding: 0;
+  border: 0;
+}
+
+.mimic-page .mimic-timeline .mimic-axis > :not(.mimic-zoom) {
+  display: none;
+}
+
+.mimic-page .mimic-zoom button {
+  min-height: 28px;
+  padding: 2px 9px;
+  font-size: 12px;
+}
+
+/* The ruler lies over the waveform's top edge, so it costs no height. */
 .mimic-ruler {
   position: relative;
-  height: 25px;
-  margin-top: 4px;
+  z-index: 1;
+  height: 20px;
+  margin-bottom: -20px;
+  pointer-events: none;
   color: var(--text-muted);
   font-size: 11px;
+  line-height: 20px;
   font-variant-numeric: tabular-nums;
 }
 
 .mimic-ruler span {
   position: absolute;
+  padding: 0 4px;
+  border-radius: var(--radius-s);
+  background: color-mix(in srgb, var(--surface-0) 75%, transparent);
   left: calc((var(--tick, 0)) * 20%);
   transform: translateX(-50%);
 }
@@ -411,20 +370,30 @@
   --tick: 4;
 }
 .mimic-ruler span:first-child {
-  left: 5px;
+  left: 6px;
   transform: none;
 }
 .mimic-ruler span:last-child {
-  right: 5px;
+  right: 6px;
   left: auto;
   transform: none;
 }
 
 .mimic-word-track {
   position: relative;
-  height: calc(29px + var(--visible-lanes, 0) * 20px);
+  height: calc(24px + var(--visible-lanes, 0) * 18px);
+  overflow: hidden;
   border-top: 1px solid var(--line);
   background: var(--surface-1);
+  touch-action: pan-y;
+  user-select: none;
+}
+
+/* The words move with the live glide (2.47) as one layer, so nothing re-renders per frame. */
+.mimic-word-lane {
+  position: absolute;
+  inset: 0;
+  will-change: transform;
 }
 
 .mimic-word-track:has([data-timed-lane='1']) {
@@ -432,12 +401,6 @@
 }
 .mimic-word-track:has([data-timed-lane='2']) {
   --visible-lanes: 2;
-}
-.mimic-word-track:has([data-timed-lane='3']) {
-  --visible-lanes: 3;
-}
-.mimic-word-track:has([data-timed-lane='4']) {
-  --visible-lanes: 4;
 }
 
 .mimic-word-track .mimic-word {
@@ -473,7 +436,7 @@
   width: var(--label-w);
   padding: 1px 3px;
   border: 1px solid var(--line);
-  border-radius: 4px;
+  border-radius: var(--radius-s);
   color: var(--text-muted);
   background: var(--surface-2);
   font-size: 12px;
@@ -497,75 +460,793 @@
   background: color-mix(in srgb, var(--accent) 24%, var(--surface-1));
 }
 
-.mimic-timeline-head,
-.mimic-timeline-options,
-.mimic-timeline-tools {
+.mimic-page .mimic-timeline .mimic-overview canvas {
+  height: 22px;
+}
+
+.mimic-page .mimic-gaps {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  margin: 0;
+  padding: 0;
+  color: var(--text-dim);
+  font-size: 12px;
+  list-style: none;
+}
+
+/* ---- Transcript ------------------------------------------------------------------------------ */
+
+.mimic-page .mimic-reading {
+  position: relative;
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 150px;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-l);
+  background: var(--surface-1);
+  box-shadow: var(--shadow-1);
+}
+
+.mimic-page .mimic-transcript-head {
+  display: flex;
+  flex: none;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 6px 10px;
+  margin: 0;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--line);
+  background: var(--surface-2);
+}
+
+.mimic-page .mimic-transcript-head h2 {
+  margin: 0;
+  color: var(--text-primary);
+  font-size: 15px;
+}
+
+.mimic-reading-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  margin-inline-start: auto;
+}
+
+.mimic-reading-actions button,
+.mimic-page .mimic-follow {
+  min-height: 30px;
+  padding: 3px 10px;
+  font-size: 12px;
+}
+
+.mimic-page .mimic-follow.live {
+  border-color: transparent;
+  background: transparent;
+  color: var(--text-muted);
+}
+
+/* Scrolled back: the same button floats where the newest words are, so the way back is seen at once. */
+.mimic-page .mimic-reading:not([data-following]) .mimic-follow {
+  position: absolute;
+  bottom: 14px;
+  left: 50%;
+  z-index: 2;
+  min-height: 36px;
+  padding: 6px 16px;
+  border-radius: var(--radius-pill);
+  box-shadow: var(--shadow-2);
+  font-size: 13px;
+  transform: translateX(-50%);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .mimic-page .mimic-reading:not([data-following]) .mimic-follow {
+    animation: mimic-pill-in var(--dur-fast) var(--ease-out);
+  }
+}
+
+@keyframes mimic-pill-in {
+  from {
+    opacity: 0;
+    translate: 0 8px;
+  }
+}
+
+.mimic-page .mimic-search {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.mimic-page .mimic-search input {
+  flex: 1 1 150px;
+  width: 170px;
+  min-width: 0;
+  min-height: 30px;
+  padding: 3px 8px;
+}
+
+.mimic-found {
+  flex: none;
+  max-height: 150px;
+  overflow-y: auto;
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--line);
+  background: var(--surface-0);
+}
+
+.mimic-found ul {
+  display: grid;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.mimic-found p {
+  margin: 0;
+}
+
+.mimic-page .mimic-reading .mimic-reading-body {
+  display: block;
+  flex: 1 1 auto;
+  min-height: 0;
+  max-height: none;
+  padding: 10px 16px 18px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  overflow-y: auto;
+  overflow-anchor: none;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+  scroll-padding-bottom: calc(var(--notice-height, 0px) + 8px);
+}
+
+.mimic-page .mimic-reading:not([data-following]) .mimic-reading-body {
+  padding-bottom: 64px;
+}
+
+.mimic-page .mimic-reading-body .mimic-reading-line {
+  display: grid;
+  position: relative;
+  grid-template-columns: 64px minmax(0, 1fr);
+  align-items: baseline;
+  gap: 0 12px;
+  padding: 6px 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
+.mimic-page .mimic-reading-line time {
+  grid-column: 1;
+  grid-row: 1;
+  align-self: first baseline;
+  color: var(--text-dim);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.02em;
+}
+
+.mimic-page .mimic-reading-line > :not(time) {
+  grid-column: 2;
+}
+
+.mimic-page .mimic-reading-line .mimic-sentence {
+  display: block;
+  padding-inline-start: 12px;
+  border-inline-start: 2px solid var(--line);
+  color: var(--text-primary);
+  font-size: var(--mimic-read-size);
+  line-height: 1.55;
+}
+
+/* The newest sentence is marked, so the eye finds where the words are arriving. */
+.mimic-page .mimic-reading-newest .mimic-sentence {
+  border-inline-start-color: var(--accent);
+}
+
+.mimic-page .mimic-reading-newest time {
+  color: var(--accent-text);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .mimic-page .mimic-reading-newest {
+    animation: mimic-line-in 160ms var(--ease-out);
+  }
+}
+
+@keyframes mimic-line-in {
+  from {
+    opacity: 0.6;
+    translate: 0 4px;
+  }
+}
+
+.mimic-page .mimic-reading-body .mimic-word {
+  display: inline;
+  width: auto;
+  min-height: 0;
+  padding: 0 2px;
+  margin-inline-end: 0.2em;
+  border: 0;
+  border-radius: var(--radius-s);
+  font-size: inherit;
+  line-height: inherit;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  user-select: none;
+}
+
+.mimic-page .mimic-reading-body .mimic-word:hover {
+  background: var(--surface-hover);
+}
+
+.mimic-page .mimic-reading-body .mimic-word[aria-pressed='true'] {
+  background: var(--selection);
+  color: var(--text-primary);
+  box-shadow: 0 2px 0 var(--accent);
+}
+
+.mimic-page .mimic-reading-body .mimic-word.playing {
+  color: var(--text-primary);
+  background: var(--accent-soft);
+  box-shadow: inset 0 -2px 0 var(--accent);
+}
+
+.mimic-page .mimic-reading-empty {
+  padding: 14px 4px;
+  color: var(--text-muted);
+}
+
+/* The 30 s view of older companions reads as lines. */
+.mimic-page .mimic-lines li + li {
+  margin-top: 2px;
+}
+
+.mimic-page .mimic-lines button {
+  font-size: 16px;
+}
+
+/* ---- Action bar ------------------------------------------------------------------------------- */
+
+.mimic-actionbar {
+  display: grid;
+  flex: none;
+  gap: 8px;
+  min-width: 0;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-l);
+  background: var(--surface-2);
+  box-shadow: var(--shadow-1);
+}
+
+.mimic-actionbar[data-state='draft'] {
+  border-color: color-mix(in srgb, var(--accent) 50%, var(--line));
+}
+
+.mimic-page .mimic-bar-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: none;
+}
+
+.mimic-bar-what {
+  display: flex;
+  flex: 0 1 auto;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+.mimic-actionbar[data-state='idle'] .mimic-bar-what,
+.mimic-actionbar:not([data-state]) .mimic-bar-row:not(:has(input)) .mimic-bar-what {
+  flex: 1 1 260px;
+}
+
+.mimic-bar-what .mimic-range {
+  color: var(--text-primary);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.mimic-bar-swatch {
+  flex: none;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+}
+
+.mimic-page .mimic-bar-row input[aria-label='Clip name'] {
+  flex: 1 1 160px;
+  min-width: 120px;
+  max-width: 300px;
+  min-height: 36px;
+}
+
+.mimic-page .mimic-transport,
+.mimic-bar-keep {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  padding: 0;
+}
+
+.mimic-actionbar button {
+  min-height: 36px;
+  padding: 6px 12px;
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+/* On wide screens the playback and keep groups flow in the row with the name; a phone scrolls them. */
+.mimic-bar-actions {
+  display: contents;
+}
+
+.mimic-page .mimic-bar-clear {
+  min-width: 28px;
+  min-height: 28px;
+  padding: 4px;
+}
+
+.mimic-transport-stop {
+  color: var(--text-primary);
+}
+
+.mimic-bar-quick {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 14px;
+  padding-top: 8px;
+  border-top: 1px solid var(--line);
+}
+
+.mimic-bar-quick .mimic-quick {
+  gap: 6px;
+}
+
+.mimic-bar-quick .mimic-quick:first-child button {
+  padding-inline: 10px;
+}
+
+/* Nothing selected: one row, the quick captures first and the keys after them. */
+.mimic-actionbar[data-state='idle'] {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: 8px 16px;
 }
 
-.mimic-timeline-head .mimic-nav {
-  flex: 1 1 auto;
+.mimic-actionbar[data-state='idle'] .mimic-bar-quick {
+  order: -1;
+  padding-top: 0;
+  border-top: 0;
 }
 
-.mimic-timeline-head .mimic-nav button,
-.mimic-timeline-options .mimic-quick button {
-  min-height: 34px;
-  padding-block: 5px;
+.mimic-actionbar[data-state='idle'] .mimic-bar-row {
+  flex: 1 1 220px;
 }
 
-.mimic-timeline-options {
-  justify-content: space-between;
+.mimic-page .mimic-nav .mimic-play-mode {
+  margin-inline-start: auto;
 }
 
-.mimic-timeline .mimic-overview canvas {
-  height: 29px;
-}
-
-.mimic-timeline-tools .mimic-quick-drafts {
-  flex: 1 1 auto;
-}
-
-.mimic-timeline .mimic-axis {
-  min-height: 31px;
-  justify-content: center;
-  padding-inline: 8px;
-  border-top: 1px solid var(--line);
-}
-
-.mimic-workbench {
-  display: grid;
-  grid-template-columns: minmax(230px, 1fr) minmax(0, 2.2fr);
-  gap: 10px;
-  align-items: start;
-}
-
-.mimic-editor {
-  min-width: 0;
-  padding: 13px;
+/* Where waveform clicks play: a small two-way switch. */
+.mimic-page .mimic-play-mode > [role='radiogroup'] {
+  gap: 2px;
+  padding: 2px;
   border: 1px solid var(--line);
-  border-radius: var(--radius);
+  border-radius: var(--radius-pill);
   background: var(--surface-1);
 }
 
-.mimic-editor .mimic-actions {
-  padding: 0;
-  border: 0;
+.mimic-page .mimic-play-mode [role='radiogroup'] > span:first-child {
+  padding-inline: 8px 4px;
 }
 
-.mimic-editor :is(.mimic-help-keys, .mimic-help-touch) {
+.mimic-page .mimic-play-mode label {
+  position: relative;
+  padding: 4px 10px;
+  border-radius: var(--radius-pill);
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.mimic-page .mimic-play-mode input {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
   margin: 0;
+  opacity: 0;
+  cursor: pointer;
 }
 
-@container mimic (max-width: 720px) {
-  .mimic-workbench {
-    grid-template-columns: minmax(0, 1fr);
+.mimic-page .mimic-play-mode label:has(input:checked) {
+  background: var(--accent-soft);
+  color: var(--text-primary);
+}
+
+.mimic-page .mimic-play-mode label:has(input:focus-visible) {
+  outline: 2px solid var(--focus);
+  outline-offset: 1px;
+}
+
+.mimic-page .mimic-play-mode label:has(input:disabled) {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* ---- Clips column ---------------------------------------------------------------------------- */
+
+.mimic-page .mimic-page-clips {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-width: 0;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+  scroll-padding-bottom: calc(var(--notice-height, 0px) + 8px);
+  padding: 12px 10px 14px 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-l);
+  background: var(--surface-1);
+  box-shadow: var(--shadow-1);
+}
+
+.mimic-clips-title {
+  margin: 0;
+  color: var(--text-primary);
+  font-size: 15px;
+}
+
+.mimic-clip-group {
+  display: grid;
+  gap: 6px;
+}
+
+.mimic-eyebrow,
+.mimic-page .mimic-recent > small {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  color: var(--text-dim);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.mimic-eyebrow span {
+  padding: 0 6px;
+  border-radius: var(--radius-pill);
+  background: var(--surface-3);
+  color: var(--text-muted);
+  letter-spacing: 0;
+}
+
+.mimic-draft-list {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.mimic-draft-list li {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto auto;
+  align-items: center;
+  gap: 2px;
+  padding: 3px 4px 3px 0;
+  border: 1px solid var(--line);
+  border-inline-start: 3px solid var(--band, var(--accent));
+  border-radius: var(--radius);
+  background: var(--surface-2);
+}
+
+.mimic-draft-list li.open {
+  border-color: var(--accent);
+  border-inline-start-color: var(--band, var(--accent));
+  background: var(--accent-soft);
+  box-shadow: var(--glow-active);
+}
+
+.mimic-page .mimic-draft-open {
+  display: grid;
+  justify-items: start;
+  gap: 1px;
+  min-width: 0;
+  min-height: 0;
+  padding: 4px 8px;
+  border: 0;
+  background: none;
+  text-align: start;
+}
+
+.mimic-page .mimic-draft-open[aria-pressed='true'] {
+  background: none;
+}
+
+.mimic-draft-name {
+  max-width: 100%;
+  overflow: hidden;
+  color: var(--text-primary);
+  font-size: 13px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mimic-draft-open small {
+  color: var(--text-muted);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+.mimic-draft-list .icon-button {
+  min-width: 32px;
+  min-height: 32px;
+  padding: 6px;
+}
+
+.mimic-page .mimic-page-clips .mimic-recent {
+  gap: 6px;
+  padding-top: 0;
+  border-top: 0;
+}
+
+.mimic-page .mimic-page-clips .mimic-recent-item {
+  padding: 4px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface-2);
+}
+
+.mimic-page .mimic-page-clips .mimic-recent-item > button:first-child {
+  flex-basis: 100%;
+  border: 0;
+  background: none;
+  font-size: 13px;
+}
+
+.mimic-page .mimic-page-clips .mimic-recent input[type='search'] {
+  flex: 1 1 100%;
+  min-height: 32px;
+}
+
+.mimic-page .mimic-page-clips .mimic-bands li {
+  border: 1px solid var(--line);
+  border-inline-start-width: 3px;
+  background: var(--surface-2);
+}
+
+.mimic-page .mimic-page-clips .mimic-library {
+  padding-top: 0;
+  border-top: 0;
+}
+
+/* ---- Narrower and shorter windows --------------------------------------------------------------- */
+
+@container mimic (max-width: 1100px) {
+  .mimic-page {
+    --mimic-rail-w: 300px;
   }
 
-  .mimic-timeline .mimic-when {
-    margin-inline-start: 0;
+  .mimic-bar-what .mimic-range small {
+    display: none;
+  }
+}
+
+@container mimic (max-width: 900px) {
+  .mimic-page {
+    --mimic-rail-w: 260px;
+  }
+
+  .mimic-page .mimic-source label {
+    flex-basis: 200px;
+  }
+}
+
+@media (max-height: 820px) {
+  .mimic-page {
+    --mimic-wave-h: clamp(52px, 8vh, 80px);
+    --mimic-read-size: 16px;
+    --mimic-gap: 8px;
+    padding-block-start: 10px;
+  }
+
+  .mimic-page-head h1 {
+    font-size: 22px;
+  }
+
+  .mimic-page .mimic-timeline {
+    gap: 6px;
+    padding: 8px 10px 10px;
+  }
+
+  .mimic-page .mimic-timeline .mimic-axis {
+    top: 9px;
+    right: 10px;
+  }
+
+  .mimic-ruler {
+    height: 16px;
+    line-height: 16px;
+  }
+
+  .mimic-page .mimic-timeline .mimic-overview canvas {
+    height: 16px;
+  }
+
+  .mimic-page .mimic-reading-body .mimic-reading-line {
+    padding-block: 3px;
+  }
+
+  .mimic-actionbar {
+    gap: 6px;
+    padding: 8px 10px;
+  }
+
+  .mimic-actionbar button {
+    min-height: 32px;
+    padding-block: 4px;
+  }
+
+  .mimic-bar-quick {
+    padding-top: 6px;
+  }
+
+  .mimic-page .mimic-reading {
+    min-height: 110px;
+  }
+
+  /* One lane of word labels: the third row's words keep their marks and stay clickable in the transcript. */
+  .mimic-word-track {
+    height: calc(24px + min(var(--visible-lanes, 0), 1) * 18px);
+  }
+
+  .mimic-word-track [data-timed-lane='2'] .mimic-timed-label {
+    display: none;
+  }
+}
+
+.mimic-page .mimic-play-mode [role='radiogroup'] > span:first-child {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+/* Phones and narrow windows: one column, Live transcript or Clips by tabs. */
+@container mimic (max-width: 720px) {
+  .mimic-page {
+    --mimic-read-size: 17px;
+    --mimic-wave-h: 56px;
+    height: auto;
+    min-height: 100%;
+    padding: 10px 12px calc(12px + var(--notice-height, 0px));
+  }
+
+  .mimic-page-icon {
+    width: 22px;
+    height: 22px;
+  }
+
+  .mimic-page-head {
+    gap: 8px;
+  }
+
+  .mimic-page-head h1 {
+    font-size: 22px;
+  }
+
+  .mimic-page-tools {
+    flex: 1 1 100%;
+    justify-content: flex-start;
+  }
+
+  .mimic-page .mimic-source {
+    flex: 1 1 auto;
+  }
+
+  .mimic-page .mimic-source label {
+    flex: 1 1 140px;
+  }
+
+  .mimic-page-tools > .mimic-page-settings {
+    margin-inline-start: auto;
+  }
+
+  .mimic-page-tabs {
+    display: grid;
+    flex: none;
+    grid-template-columns: 1fr 1fr;
+    gap: 4px;
+    padding: 3px;
+    border: 1px solid var(--line);
+    border-radius: var(--radius-pill);
+    background: var(--surface-1);
+  }
+
+  .mimic-page-tabs button {
+    min-height: 36px;
+    border: 0;
+    border-radius: var(--radius-pill);
+    background: none;
+  }
+
+  .mimic-page-tabs button[aria-pressed='true'] {
+    background: var(--accent-soft);
+    color: var(--text-primary);
+  }
+
+  .mimic-page .mimic-history {
+    display: flex;
+    flex-direction: column;
+  }
+
+  .mimic-page[data-tab='live'] .mimic-page-clips,
+  .mimic-page[data-tab='clips'] .mimic-main,
+  .mimic-page[data-tab='clips'] .mimic-source {
+    display: none;
+  }
+
+  .mimic-page .mimic-page-clips {
+    overflow: visible;
+    padding: 10px;
+  }
+
+  .mimic-page .mimic-timeline {
+    gap: 6px;
+    padding: 8px;
+  }
+
+  .mimic-page .mimic-nav {
+    gap: 4px;
+    padding-inline-end: 0;
+  }
+
+  .mimic-page .mimic-nav button {
+    min-height: 34px;
+    padding-inline: 8px;
+  }
+
+  .mimic-page .mimic-timeline .mimic-axis {
+    position: static;
+    justify-content: flex-end;
+    padding: 4px 6px;
+    border-top: 1px solid var(--line);
   }
 
   .mimic-ruler span:nth-child(2n) {
@@ -575,107 +1256,92 @@
   .mimic-ruler span:last-child {
     display: inline;
   }
-}
 
-.mimic-timeline .mimic-axis > :not(.mimic-zoom) {
-  display: none;
-}
-
-.mimic-section-head {
-  display: flex;
-  align-items: baseline;
-  gap: 8px;
-}
-
-.mimic-section-head h2 {
-  margin: 0;
-  font-size: 16px;
-  font-weight: 650;
-  color: var(--text-primary);
-}
-
-.mimic-editor .mimic-section-head {
-  margin-block-end: 8px;
-}
-
-.mimic-editor input[aria-label='Clip name'] {
-  flex: 1 1 210px;
-}
-
-.mimic-primary-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  flex: 0 1 auto;
-}
-
-.mimic-primary-actions button {
-  min-height: 36px;
-}
-
-.mimic-page .mimic-source button:not(.icon-button) {
-  white-space: nowrap;
-}
-
-@container mimic (max-width: 720px) {
-  .mimic-page-icon {
-    width: 23px;
-    height: 23px;
+  .mimic-page .mimic-reading .mimic-reading-body {
+    padding-inline: 10px;
   }
 
-  .mimic-page-head {
-    gap: 8px;
+  .mimic-page .mimic-reading-body .mimic-reading-line {
+    grid-template-columns: 48px minmax(0, 1fr);
+    column-gap: 8px;
   }
 
-  .mimic-page .mimic-when {
-    margin-inline-start: 0;
+  .mimic-page .mimic-reading-line .mimic-sentence {
+    padding-inline-start: 8px;
   }
-}
 
-.mimic-editor-column {
-  display: grid;
-  gap: 10px;
-  min-width: 0;
-}
+  .mimic-page .mimic-follow-key {
+    display: none;
+  }
 
-.mimic-word-track {
-  touch-action: pan-y;
-}
+  .mimic-page .mimic-search input {
+    width: 120px;
+  }
 
-.mimic-word-track,
-.mimic-reading .mimic-word {
-  user-select: none;
-}
+  /*
+   * The transcript, the action bar right under it and the timeline strip share one screen's height between
+   * the sticky top bar and the player (and a notice), so the newest words and their actions are seen
+   * together, never one over the other.
+   */
+  .mimic-page .mimic-main {
+    height: calc(
+      100svh - var(--topbar-bottom, 0px) - var(--player-height, 0px) - var(--notice-height, 0px) -
+        16px
+    );
+    min-height: 440px;
+  }
 
-.mimic-transport {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 7px;
-  padding-block: 2px;
-}
+  .mimic-actionbar {
+    order: -1;
+  }
 
-.mimic-transport button {
-  min-height: 38px;
-}
+  .mimic-page .mimic-bar-row input[aria-label='Clip name'] {
+    flex: 1 1 100%;
+    max-width: none;
+  }
 
-.mimic-transport > :is(.mimic-range, .muted) {
-  margin-inline-start: 5px;
-  flex: 1 1 auto;
-  font-size: 12px;
-  font-variant-numeric: tabular-nums;
-}
+  /* The selection's actions: one strip of buttons that scrolls sideways inside the bar. */
+  .mimic-bar-actions {
+    display: flex;
+    gap: 6px;
+    min-width: 0;
+    flex: 1 1 100%;
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
 
-.mimic-transport .mimic-range {
-  color: var(--text-primary);
-  font-weight: 650;
-}
+  .mimic-bar-actions > * {
+    flex-wrap: nowrap;
+  }
 
-.mimic-transport .mimic-range small {
-  color: var(--text-muted);
-  font-weight: 400;
-}
+  /* With something selected the bar is about that selection; Clear brings the quick captures back. */
+  .mimic-actionbar:not([data-state='idle']) .mimic-bar-quick {
+    display: none;
+  }
 
-.mimic-transport-stop {
-  color: var(--danger-text, var(--text-primary));
+  .mimic-actionbar button {
+    min-height: 40px;
+  }
+
+  /* The transcript comes first on a phone, then the action bar, then the timeline strip. */
+  .mimic-page .mimic-reading {
+    order: -2;
+    min-height: 200px;
+  }
+
+  /* The quick captures are one row of chips that scrolls sideways inside the bar. */
+  .mimic-bar-quick {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+
+  .mimic-bar-quick .mimic-quick {
+    flex-wrap: nowrap;
+  }
+
+  .mimic-actionbar[data-state='idle'] .mimic-bar-quick {
+    flex: 1 1 100%;
+  }
 }

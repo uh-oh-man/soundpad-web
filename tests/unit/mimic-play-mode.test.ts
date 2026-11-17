@@ -208,6 +208,8 @@ describe('Mimic play into the game: the same range replays its clip', () => {
     ];
     expect(reusableClip(assets, 'a')).toBe(true);
     for (const id of ['b', 'c', 'd', 'gone']) expect(reusableClip(assets, id)).toBe(false);
+    // 2.47 review: never one this page is deleting or took out of Temp.
+    expect(reusableClip(assets, 'a', (id) => id === 'a')).toBe(false);
     expect(reusableClip(undefined, 'a')).toBe(false);
     expect(reusableClip(assets, undefined)).toBe(false);
   });

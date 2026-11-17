@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
+import { useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
 import {
   Activity,
   ArrowDownToLine,
@@ -26,7 +26,7 @@ import {
   type Selection,
 } from '../mimic/selection';
 import { MimicWave } from './mimic/MimicWave';
-import { MimicHostControls } from './mimic/MimicHostControls';
+import { useMimicHostControls } from './mimic/MimicHostControls';
 import { MimicRecent } from './mimic/MimicRecent';
 import { MimicLibrary } from './mimic/MimicLibrary';
 import { MimicHistory } from './mimic/MimicHistory';
@@ -212,38 +212,86 @@ export function MimicPanel({
   }, []);
 
   const showHistory = allowed && historyMode && (active || recorded);
-  const clips = allowed && (
-    <aside className="mimic-page-clips" aria-label="Clips">
-      <h2>Recent clips</h2>
+  // Phones show the transcript or the clips (2.46); a guest who loses Mimic is back on the transcript side,
+  // where the page says why (2.47: the Clips side alone was blank).
+  useEffect(() => {
+    if (!allowed) setTab('live');
+  }, [allowed]);
+  const clipItems = allowed && (
+    <>
       <MimicRecent state={state} host={host} canPlay={canPlay} onTempRequest={onTempRequest} />
       {host && supports(state.companionVersion, 'voiceReplayLibrary') && (
         <MimicLibrary connected={connected} canPlay={canPlay} />
       )}
+    </>
+  );
+  const clips = allowed && (
+    <aside className="mimic-page-clips" aria-label="Clips">
+      <h2 className="mimic-clips-title">Clips</h2>
+      {clipItems}
     </aside>
   );
+  const status = !connected
+    ? 'Reconnecting…'
+    : active
+      ? `Listening to ${mimic?.source ?? 'a source'}`
+      : (mimic?.status ?? 'Off');
+  const intro = demo ? 'Mimic listens to a loop of Apollo 11 clips in this example.' : null;
 
-  return (
-    <div id="mimic-page" className="mimic-panel mimic-page" data-tab={tab}>
+  const page = (parts: MimicHostParts | null) => (
+    <div
+      id="mimic-page"
+      className="mimic-panel mimic-page"
+      data-tab={tab}
+      data-listening={active || undefined}
+      data-mode={showHistory ? 'history' : active && peek ? 'live' : 'empty'}
+    >
       <header className="mimic-page-head">
-        <Activity className="mimic-page-icon" size={32} aria-hidden="true" />
-        <h1 id="mimic-title" tabIndex={-1}>
-          Mimic
-        </h1>
-        <div className={active ? 'mimic-status live' : 'mimic-status'} role="status">
-          <i />
-          {active ? `Listening to ${mimic?.source ?? 'a source'}` : (mimic?.status ?? 'Off')}
+        <div className="mimic-page-title">
+          <Activity className="mimic-page-icon" size={26} aria-hidden="true" />
+          <h1 id="mimic-title" tabIndex={-1}>
+            Mimic
+          </h1>
+          <div
+            className={active && connected ? 'mimic-status live' : 'mimic-status'}
+            role="status"
+            title={intro ?? status}
+          >
+            <i />
+            <span>{status}</span>
+          </div>
         </div>
-        {onFull && (
-          <button type="button" className="btn" aria-pressed={!!full} onClick={onFull}>
-            {full ? (
-              <Shrink size={16} aria-hidden="true" />
-            ) : (
-              <Expand size={16} aria-hidden="true" />
-            )}
-            Fill window
-          </button>
-        )}
+        <div className="mimic-page-tools">
+          {parts?.source}
+          {parts?.settings}
+          {onFull && (
+            <button
+              type="button"
+              className="btn mimic-fill"
+              aria-pressed={!!full}
+              title={full ? 'Show the sections again' : 'Use the whole window for Mimic'}
+              onClick={onFull}
+            >
+              {full ? (
+                <Shrink size={16} aria-hidden="true" />
+              ) : (
+                <Expand size={16} aria-hidden="true" />
+              )}
+              <span>Fill window</span>
+            </button>
+          )}
+        </div>
       </header>
+      <div className="mimic-alerts">
+        {/* 2.47 review: a dropped connection keeps the page; what is selected and typed stays. */}
+        {!connected && (
+          <p className="warning mimic-offline">
+            The connection dropped. Mimic waits here with your selection and carries on when it is
+            back.
+          </p>
+        )}
+        {parts?.alerts}
+      </div>
       {allowed && (
         <div className="mimic-page-tabs" role="group" aria-label="Mimic view">
           <button type="button" aria-pressed={tab === 'live'} onClick={() => setTab('live')}>
@@ -254,151 +302,206 @@ export function MimicPanel({
           </button>
         </div>
       )}
-      <div className="mimic-page-live">
-        {demo && (
-          <p className="mimic-intro">Mimic listens to a loop of Apollo 11 clips in this example.</p>
-        )}
-        {host && <MimicHostControls state={state} connected={connected} />}
-        {!allowed ? (
+      {intro && active && <p className="mimic-intro sr-only">{intro}</p>}
+      {!allowed ? (
+        <div className="mimic-empty mimic-empty-page">
+          <Activity size={28} aria-hidden="true" />
+          <h2>Not turned on for guests</h2>
           <p className="muted">The host has not enabled Mimic for guests.</p>
-        ) : showHistory ? (
-          <MimicHistory
-            state={state}
-            host={host}
-            connected={connected}
-            canPlay={canPlay}
-            recentClips={clips}
-          />
-        ) : !active ? (
-          <p className="muted">
-            {host ? 'Choose a source and start listening.' : 'Waiting for the host to start Mimic.'}
-          </p>
-        ) : peek ? (
-          <>
-            <MimicWave peek={peek} selection={selection} onSelect={setSelection} />
-            {mimic?.transcribing && (
-              <div className="mimic-transcript-head">
-                <span className="muted">
-                  {newest.following
-                    ? 'New words show as they are said'
-                    : 'Newer words are further down'}
-                </span>
-                <button
-                  type="button"
-                  className={newest.following ? 'mimic-follow live' : 'mimic-follow primary'}
-                  aria-pressed={newest.following}
-                  title="Show the newest words and follow them (End)"
-                  aria-keyshortcuts="End"
-                  onClick={newest.jump}
-                >
-                  <ArrowDownToLine size={14} aria-hidden="true" />{' '}
-                  {newest.following ? 'Following latest' : 'Jump to latest'}
-                  <kbd className="mimic-follow-key" aria-hidden="true">
-                    End
-                  </kbd>
-                </button>
+        </div>
+      ) : showHistory ? (
+        <MimicHistory
+          state={state}
+          host={host}
+          connected={connected}
+          canPlay={canPlay}
+          recentClips={clipItems}
+        />
+      ) : (
+        <div className="mimic-history">
+          <div className="mimic-main">
+            {!active ? (
+              <div className="mimic-empty">
+                <Activity size={28} aria-hidden="true" />
+                <h2>{host ? 'Choose what to listen to' : 'Waiting for the host'}</h2>
+                {intro && <p className="mimic-intro">{intro}</p>}
+                <p className="muted">
+                  {host
+                    ? 'Pick an output above and press Start listening. Mimic records that output of this PC, never a microphone, and keeps the last minutes so you can replay what was just said.'
+                    : 'Waiting for the host to start Mimic.'}
+                </p>
               </div>
-            )}
-            {mimic?.transcribing && (
-              <ol
-                ref={newest.ref}
-                onScroll={newest.onScroll}
-                onPointerDown={newest.onPointerDown}
-                onPointerUp={newest.onPointerUp}
-                onPointerCancel={newest.onPointerUp}
-                onPointerLeave={newest.onPointerUp}
-                className="mimic-transcript"
-                aria-label="Transcript"
-              >
-                {lines.length ? (
-                  lines.map((line) => (
-                    <li key={`${line.startMs}-${line.text}`}>
-                      <button
-                        aria-pressed={!!selection && overlaps(line, selection)}
-                        onClick={() => {
-                          setSelection(lineSelection(line, peek.windowMs));
-                          setName('');
-                        }}
-                      >
-                        <time>{ago(Math.max(0, line.startMs), peek.windowMs)}</time>
-                        <span>{line.text}</span>
-                      </button>
-                    </li>
-                  ))
-                ) : (
-                  <li className="muted">
-                    Words will appear here a few seconds after they are said.
-                  </li>
-                )}
-              </ol>
-            )}
-            <div className="mimic-quick" role="group" aria-label="Quick select">
-              {QUICK_SECONDS.map((s) => (
-                <button key={s} onClick={() => setSelection(lastSeconds(s, peek.windowMs))}>
-                  Last {s} s
-                </button>
-              ))}
-              {selection && (
-                <button onClick={() => setSelection(null)}>
-                  <X size={14} /> Clear
-                </button>
-              )}
-            </div>
-            {selection ? (
-              <div className="mimic-actions">
-                <span className="mimic-range">
-                  {ago(selection.from, peek.windowMs)} → {ago(selection.to, peek.windowMs)} ·{' '}
-                  {((selection.to - selection.from) / 1000).toFixed(1)} s
-                </span>
-                <input
-                  ref={nameField}
-                  aria-label="Clip name"
-                  placeholder={suggestion || 'Name (optional)'}
-                  maxLength={100}
-                  value={name}
-                  onChange={(e) => setName(e.target.value)}
-                />
-                {host && supports(state.companionVersion, 'preview') && (
-                  <button
-                    title="Hear the selection on this PC only; nobody else hears it"
-                    onClick={() => (previewing ? stopPreview() : playPreview())}
-                  >
-                    <Headphones size={15} /> {previewing ? 'Stop preview' : 'Preview'}
-                  </button>
-                )}
-                <button aria-disabled={busy || undefined} onClick={() => !busy && void clip(false)}>
-                  <Scissors size={15} /> Mimic it
-                </button>
-                <button
-                  className="primary"
-                  disabled={!canPlay}
-                  aria-disabled={busy || held || undefined}
-                  title={held ? HELD_BY_HOST : undefined}
-                  onClick={() => !busy && !held && void clip(true)}
-                >
-                  <Play size={15} /> Mimic &amp; play
-                </button>
-              </div>
-            ) : (
+            ) : peek ? (
               <>
-                {/* Keyboard help is shown where there is a mouse; touch screens get touch wording (mimic.css). */}
-                <p className="muted mimic-help-keys">
-                  Drag across the waveform, click a transcript line, or press <kbd>3</kbd>{' '}
-                  <kbd>5</kbd> <kbd>0</kbd> for the last 3, 5 or 10 seconds. Then <kbd>Enter</kbd>{' '}
-                  mimics, <kbd>Shift</kbd>+<kbd>Enter</kbd> mimics and plays, <kbd>Esc</kbd> clears.
-                </p>
-                <p className="muted mimic-help-touch">
-                  Drag across the waveform, tap a transcript line, or tap Last 3 s, 5 s or 10 s.
-                  Then Mimic it.
-                </p>
+                <section className="mimic-timeline" aria-label="Recording">
+                  <MimicWave peek={peek} selection={selection} onSelect={setSelection} />
+                </section>
+                <section className="mimic-reading" data-following={newest.following || undefined}>
+                  <div className="mimic-transcript-head">
+                    <h2>Transcript</h2>
+                    {mimic?.transcribing && (
+                      <button
+                        type="button"
+                        className={newest.following ? 'mimic-follow live' : 'mimic-follow primary'}
+                        aria-pressed={newest.following}
+                        title="Show the newest words and follow them (End)"
+                        aria-keyshortcuts="End"
+                        onClick={newest.jump}
+                      >
+                        <ArrowDownToLine size={14} aria-hidden="true" />{' '}
+                        {newest.following ? 'Following latest' : 'Jump to latest'}
+                        <kbd className="mimic-follow-key" aria-hidden="true">
+                          End
+                        </kbd>
+                      </button>
+                    )}
+                  </div>
+                  {mimic?.transcribing ? (
+                    <ol
+                      ref={newest.ref}
+                      onScroll={newest.onScroll}
+                      onPointerDown={newest.onPointerDown}
+                      onPointerUp={newest.onPointerUp}
+                      onPointerCancel={newest.onPointerUp}
+                      onPointerLeave={newest.onPointerUp}
+                      className="mimic-transcript mimic-reading-body mimic-lines"
+                      aria-label="Transcript"
+                    >
+                      {lines.length ? (
+                        lines.map((line) => (
+                          <li key={`${line.startMs}-${line.text}`}>
+                            <button
+                              aria-pressed={!!selection && overlaps(line, selection)}
+                              onClick={() => {
+                                setSelection(lineSelection(line, peek.windowMs));
+                                setName('');
+                              }}
+                            >
+                              <time>{ago(Math.max(0, line.startMs), peek.windowMs)}</time>
+                              <span>{line.text}</span>
+                            </button>
+                          </li>
+                        ))
+                      ) : (
+                        <li className="muted mimic-reading-empty">
+                          Words will appear here a few seconds after they are said.
+                        </li>
+                      )}
+                    </ol>
+                  ) : (
+                    <p className="muted mimic-reading-empty">
+                      {host
+                        ? 'Turn on Transcript in Mimic settings to see the words here.'
+                        : 'Words appear here when the host turns on transcripts.'}
+                    </p>
+                  )}
+                </section>
+                <div className="mimic-actionbar">
+                  <div className="mimic-bar-row mimic-actions">
+                    <div className="mimic-bar-what">
+                      {selection ? (
+                        <span className="mimic-range">
+                          {ago(selection.from, peek.windowMs)} → {ago(selection.to, peek.windowMs)}{' '}
+                          · {((selection.to - selection.from) / 1000).toFixed(1)} s
+                        </span>
+                      ) : (
+                        <>
+                          {/* Keyboard help where there is a mouse; touch screens get touch wording (mimic.css). */}
+                          <span className="mimic-help-keys">
+                            Drag the waveform or click a line · <kbd>3</kbd> <kbd>5</kbd>{' '}
+                            <kbd>0</kbd> last seconds · <kbd>Enter</kbd> mimics · <kbd>Shift</kbd>+
+                            <kbd>Enter</kbd> plays · <kbd>Esc</kbd> clears
+                          </span>
+                          <span className="mimic-help-touch">
+                            Drag across the waveform, tap a line, or tap Last 3 s, 5 s or 10 s.
+                          </span>
+                        </>
+                      )}
+                    </div>
+                    {selection && (
+                      <input
+                        ref={nameField}
+                        aria-label="Clip name"
+                        placeholder={suggestion || 'Name (optional)'}
+                        maxLength={100}
+                        value={name}
+                        onChange={(e) => setName(e.target.value)}
+                      />
+                    )}
+                    {selection && (
+                      <div className="mimic-bar-keep">
+                        {host && supports(state.companionVersion, 'preview') && (
+                          <button
+                            title="Hear the selection on this PC only; nobody else hears it"
+                            onClick={() => (previewing ? stopPreview() : playPreview())}
+                          >
+                            <Headphones size={15} /> {previewing ? 'Stop preview' : 'Preview'}
+                          </button>
+                        )}
+                        <button
+                          aria-disabled={busy || undefined}
+                          onClick={() => !busy && void clip(false)}
+                        >
+                          <Scissors size={15} /> Mimic it
+                        </button>
+                        <button
+                          className="primary"
+                          disabled={!canPlay}
+                          aria-disabled={busy || held || undefined}
+                          title={held ? HELD_BY_HOST : undefined}
+                          onClick={() => !busy && !held && void clip(true)}
+                        >
+                          <Play size={15} /> Mimic &amp; play
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                  <div className="mimic-bar-quick">
+                    <div className="mimic-quick" role="group" aria-label="Quick select">
+                      {QUICK_SECONDS.map((s) => (
+                        <button key={s} onClick={() => setSelection(lastSeconds(s, peek.windowMs))}>
+                          Last {s} s
+                        </button>
+                      ))}
+                      {selection && (
+                        <button onClick={() => setSelection(null)}>
+                          <X size={14} /> Clear
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                </div>
               </>
+            ) : (
+              <div className="mimic-empty">
+                <p className="muted">Loading the live buffer…</p>
+              </div>
             )}
-          </>
-        ) : (
-          <p className="muted">Loading the live buffer…</p>
-        )}
-      </div>
-      {!showHistory && clips}
+          </div>
+          {clips}
+        </div>
+      )}
     </div>
   );
+  return host ? (
+    <MimicHostControls state={state} connected={connected}>
+      {page}
+    </MimicHostControls>
+  ) : (
+    page(null)
+  );
+}
+
+type MimicHostParts = ReturnType<typeof useMimicHostControls>;
+/** The host's source, settings and alerts (their hook asks the companion for sources: never on a guest's page). */
+function MimicHostControls({
+  state,
+  connected,
+  children,
+}: {
+  state: Snapshot;
+  connected: boolean;
+  children: (parts: MimicHostParts) => ReactNode;
+}) {
+  return children(useMimicHostControls(state, connected));
 }

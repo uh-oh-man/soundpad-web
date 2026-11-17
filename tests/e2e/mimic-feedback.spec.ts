@@ -121,7 +121,7 @@ test('Mimic Delete: one press takes a clip and a draft away, Undo brings them ba
   // The draft: Delete closes it at once, Undo opens it again.
   await draft.getByRole('button', { name: 'Delete', exact: true }).press('Enter');
   await expect(draft).toHaveCount(0);
-  await expect(dialog.getByLabel('Draft history')).toHaveCount(0);
+  await expect(dialog.getByRole('list', { name: 'My drafts' })).toHaveCount(0);
   await expect(page.locator('#mimic-title')).toBeFocused();
   const draftNotice = page
     .getByRole('status')
