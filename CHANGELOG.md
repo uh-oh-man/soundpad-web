@@ -6,11 +6,11 @@ Notable changes to Soundpad Web. Versions follow the website's `package.json`; t
 
 ### Changed
 
-- **A new start page.** The screen you see before connecting is redesigned, after an AI-generated mockup the owner made. It has its own header with the app's icon, name, version and connection status, and links to **How it works**, **Try the real demo** and GitHub. Connected screens keep the usual header.
+- **A new start page.** The screen you see before connecting is redesigned around the app's icon, the "Minimal orbit". It has its own header with the icon, name, version and connection status, and links to **How it works**, **Try the real demo** and GitHub. Connected screens keep the usual header.
 - **"Give your friends the soundboard."** The top of the page says what the app is in one line, with **Mess with the demo** (the example session; it was called **Try the example**) and **Host from your PC**, which opens the latest release.
-- **A tiny soundboard you can press right away.** Six pretend pads (Vine boom, Bruh, Victory, Airhorn, Wow, Applause) play a short tone in your browser, with categories, a Now playing bar with a moving waveform, and Stop. Keys 1 to 6 press them too. It downloads nothing and sends nothing anywhere. With reduced motion the card stays level and the waveform stays still.
-- **How it works and the features, explained.** Three steps for hosting, then short notes on Mimic, the voice library, Sentences, Organize, backups and updates, and privacy and Panic.
-- **Credits for the AI that made it.** A credits section says the app and the page are written by AI (Codex and Claude), directed by the owner, and that the page's look started as an AI-made image.
+- **A soundboard you can press right away.** Six pretend pads (Vine boom, Bruh, Victory, Airhorn, Wow, Applause) sit on an orbit around a hub that shows what is playing, with Stop. A press plays a short tone in your browser, lights the pad and sends a ripple through the app's header ribbon, which runs across the page. Choose who you are under **Pressing as** (You, Sam, Maya or Jo) and a small feed says who pressed what. Keys 1 to 6 press the pads, and the categories filter them. It downloads nothing and sends nothing anywhere.
+- **How it works, the features and the credits.** Three steps along an orbit's arc; Mimic, the voice library, Sentences, Organize, backups and updates, and privacy and Panic, each with a small picture of the real thing; and credits saying the app and the page are written by AI (Codex and Claude), directed by the owner.
+- **Calm when you ask for it.** With reduced motion the page is a still picture: nothing spins, dances or flies, and the ribbon is drawn once. Header animation **Off** hides the ribbon here too.
 
 ## 2.47.0 — A new Mimic page, and fixes from a full review
 
