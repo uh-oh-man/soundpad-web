@@ -6,6 +6,7 @@ Every release stays on GitHub permanently, so any earlier version can be restore
 
 | Version | What it is | Git tag | Download |
 | --- | --- | --- | --- |
+| 2.48.1 | The companion no longer crashes at start | `v2.48.1` | [Release](https://github.com/uh-oh-man/soundpad-web/releases/tag/v2.48.1) |
 | 2.48.0 | A new start page, and the version in the EXE's name | `v2.48.0` | [Release](https://github.com/uh-oh-man/soundpad-web/releases/tag/v2.48.0) |
 | 2.47.0 | A new Mimic page, and fixes from a full review | `v2.47.0` | No release yet: the tag's build failed on a WebKit test timing flaw (fixed in 2.48.0); its changes are all in 2.48.0. The *Rebuild an old release* workflow can rebuild it from source. |
 | 2.46.0 | Reading transcript, full-page Mimic and sentence editor | `v2.46.0` | [Release](https://github.com/uh-oh-man/soundpad-web/releases/tag/v2.46.0) |

@@ -441,6 +441,45 @@ public sealed class VoiceLibraryTests : IDisposable
         }
     }
 
+    [Fact]
+    public async Task AFileThatStoppedTheCompanionIsSkippedAtTheNextStartInsteadOfReadAgain()
+    {
+        // 2.48.0 crashed at every start: native speech recognition aborted on one short kept clip, and the worker read it
+        // again each time. The worker now names the file it reads in a marker; a marker left by the last run means skip.
+        var sounds = Path.Combine(folder, "sounds"); Directory.CreateDirectory(sounds);
+        foreach (var name in new[] { "airhorn", "laugh", "other-laugh", "long" }) Burst(Path.Combine(sounds, name + ".wav"));
+        void Point(MockSoundpad mock) { mock.AllXml = MockSoundpad.Sounds.Replace(@"C:\Private\", sounds + @"\"); mock.CategoryXml = MockSoundpad.Categories.Replace(@"C:\Private\", sounds + @"\"); }
+        var data = Path.Combine(folder, "data"); Directory.CreateDirectory(data);
+        string laugh = Path.Combine(sounds, "laugh.wav");
+        await using (var rig = new Rig(data, Point))
+        {
+            await rig.Host(listen: false);
+            var added = Body(await Ok(rig.Bridge.Execute(Cmd("libraryAdd") with { SoundId = rig.Bridge.Snapshot.Library.Sounds.First(s => s.Name == "Airhorn").Id }, "host")));
+            string recording = added.GetProperty("recordingId").GetString()!;
+            await Ok(rig.Bridge.Execute(Cmd("libraryIndex") with { Categories = ["Reactions"], Action = "pause" }, "host"));
+            // What a crash while reading leaves behind: the kept recording is named, then (another run) a sound file.
+            File.WriteAllText(rig.Bridge.WorkingMarkerPath, "recording:" + recording);
+            int calls = rig.Engine.Calls;
+            Assert.True(await rig.Bridge.DrainLibraryWorker(TimeSpan.FromSeconds(5)));
+            Assert.Equal(calls, rig.Engine.Calls); // not read again
+            var failed = rig.Bridge.VoiceLibraryStore.Get(recording)!;
+            Assert.Equal(("failed", Bridge.StoppedCompanionError), (failed.WordsState, failed.WordsError));
+            Assert.False(File.Exists(rig.Bridge.WorkingMarkerPath));
+        }
+        await using (var rig = new Rig(data, Point))
+        {
+            await rig.Host(listen: false);
+            File.WriteAllText(rig.Bridge.WorkingMarkerPath, "sound:" + laugh);
+            await Ok(rig.Bridge.Execute(Cmd("libraryIndex") with { Action = "resume" }, "host"));
+            Assert.True(await rig.Bridge.DrainLibraryWorker(TimeSpan.FromSeconds(20)));
+            Assert.Equal(1, rig.Engine.Calls); // only airhorn.wav
+            Assert.Equal(Bridge.StoppedCompanionError, rig.Bridge.SoundWordStore.Get(laugh)!.Error);
+            Assert.NotNull(rig.Bridge.SoundWordStore.Get(Path.Combine(sounds, "airhorn.wav"))!.Words);
+            // A file read to the end takes its marker away, so a normal start skips nothing.
+            Assert.False(File.Exists(rig.Bridge.WorkingMarkerPath));
+        }
+    }
+
     // ---- Speaker grouping --------------------------------------------------------------------------------------
 
     /// <summary>A synthetic voice: a pitch pulse train through three formant resonators, vowels changing every 150 ms.</summary>

@@ -171,8 +171,36 @@ public sealed class WhisperEngine(string modelPath, string? sharedModelPath = nu
     }
     /// <summary>Whisper always encodes a 30 s window; this smaller one still covers the audio plus two seconds, in steps of 250 frames.</summary>
     public static int ShortContext(int samples16k) => Math.Min(1500, (samples16k / 320 + 100 + 249) / 250 * 250);
-    private IReadOnlyList<TranscribedSpan> Recognise(float[] samples16k)
+    /// <summary>
+    /// Whisper's word timing (DTW) aborts the whole process, past any catch, when one call has under about 170 ms of
+    /// audio that holds speech (WHISPER_ASSERT filter_width &lt; ne[2], measured 2.48.1 at 160 ms): a short kept clip
+    /// in the library crashed the companion at every start. Every call therefore gets at least one second.
+    /// </summary>
+    public const int MinimumCallSamples = MimicTranscriber.SpeechRate;
+    /// <summary>The audio itself when long enough, else a copy followed by silence up to <see cref="MinimumCallSamples"/>.</summary>
+    public static float[] PadShort(float[] samples16k)
     {
+        if (samples16k.Length >= MinimumCallSamples) return samples16k;
+        var padded = new float[MinimumCallSamples];
+        samples16k.CopyTo(padded, 0);
+        return padded;
+    }
+    /// <summary>Keeps phrases and token times inside the real audio when it was padded with silence.</summary>
+    public static TranscribedSpan ClampTo(TranscribedSpan span, int samples16k)
+    {
+        var end = TimeSpan.FromSeconds((double)samples16k / MimicTranscriber.SpeechRate);
+        long cs = samples16k / (MimicTranscriber.SpeechRate / 100);
+        if (span.End <= end && (span.Tokens ?? []).All(t => t.EndCs <= cs && t.DtwCs <= cs)) return span;
+        return span with
+        {
+            Start = span.Start < end ? span.Start : end, End = span.End < end ? span.End : end,
+            Tokens = span.Tokens?.Select(t => t with { StartCs = Math.Min(t.StartCs, cs), EndCs = Math.Min(t.EndCs, cs), DtwCs = Math.Min(t.DtwCs, cs) }).ToArray()
+        };
+    }
+    private IReadOnlyList<TranscribedSpan> Recognise(float[] audio16k)
+    {
+        int real = audio16k.Length;
+        var samples16k = PadShort(audio16k);
         if (factory == null) UseEmbeddedNativeLibraries();
         // One pass gives phrases, token timestamps and the DTW anchors of every token. The heads preset must match the model (base.en).
         factory ??= WhisperFactory.FromPath(Model ?? throw new InvalidDataException("Download the speech model first."),
@@ -199,7 +227,7 @@ public sealed class WhisperEngine(string modelPath, string? sharedModelPath = nu
         while (processors.Count > 4) { processors[0].Processor.Dispose(); processors.RemoveAt(0); }
         entry.Collected.Clear();
         entry.Processor.Process(samples16k);
-        var result = entry.Collected.ToArray();
+        var result = real == samples16k.Length ? entry.Collected.ToArray() : entry.Collected.Select(span => ClampTo(span, real)).ToArray();
         entry.Collected.Clear();
         return result;
     }

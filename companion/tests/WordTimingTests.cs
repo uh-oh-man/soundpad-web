@@ -85,6 +85,45 @@ public sealed class WordTimingTests
         Assert.Equal(1500, WhisperEngine.ShortContext(Rate * 30));
     }
 
+    [Fact]
+    public void ShortAudioIsPaddedToOneSecondAndItsTimesStayInsideTheRealAudio()
+    {
+        // Whisper's word timing aborts the process on a call of 160 ms with speech (2.48.0 crashed at every start).
+        var clip = Enumerable.Repeat(0.25f, Rate * 150 / 1000).ToArray();
+        var padded = WhisperEngine.PadShort(clip);
+        Assert.Equal(WhisperEngine.MinimumCallSamples, padded.Length);
+        Assert.Equal(clip, padded[..clip.Length]);
+        Assert.All(padded[clip.Length..], v => Assert.Equal(0f, v));
+        var long1 = new float[Rate * 2];
+        Assert.Same(long1, WhisperEngine.PadShort(long1));
+        // A phrase heard in the padding ends where the audio does (150 ms = 15 cs).
+        var span = new TranscribedSpan(TimeSpan.FromMilliseconds(50), TimeSpan.FromMilliseconds(600), "hi", 1, [new("hi", 5, 60, 40, 1), new("!", 2, 3, -1, 1)]);
+        var kept = WhisperEngine.ClampTo(span, clip.Length);
+        Assert.Equal((TimeSpan.FromMilliseconds(50), TimeSpan.FromMilliseconds(150)), (kept.Start, kept.End));
+        Assert.Equal((5L, 15L, 15L), (kept.Tokens![0].StartCs, kept.Tokens[0].EndCs, kept.Tokens[0].DtwCs));
+        Assert.Equal(-1, kept.Tokens[1].DtwCs);
+    }
+
+    [WhisperSampleFact]
+    public async Task RealWhisperSurvivesAClipTooShortForItsWordTiming()
+    {
+        // 150 ms of jfk.wav from 0.4 s ended the process (WHISPER_ASSERT filter_width < ne[2]) before 2.48.1.
+        using var file = new NAudio.Wave.WaveFileReader(WhisperSampleFactAttribute.Sample()!);
+        var provider = NAudio.Wave.WaveExtensionMethods.ToSampleProvider(file);
+        var mono = new List<float>(); var block = new float[provider.WaveFormat.Channels * 4096]; int read;
+        while ((read = provider.Read(block)) > 0)
+            for (int i = 0; i + provider.WaveFormat.Channels <= read; i += provider.WaveFormat.Channels) mono.Add(block[i]);
+        var speech = MimicTranscriber.Resample([.. mono], provider.WaveFormat.SampleRate, MimicTranscriber.SpeechRate);
+        using var engine = new WhisperEngine(WhisperSampleFactAttribute.Model);
+        foreach (int ms in new[] { 100, 150, 160 })
+        {
+            var clip = speech.AsSpan(Rate * 4 / 10, Rate * ms / 1000).ToArray();
+            var live = await engine.Transcribe(clip, default);
+            var background = await engine.TranscribeBackground(clip, default);
+            Assert.All(live.Concat(background), s => Assert.True(s.End <= TimeSpan.FromMilliseconds(ms)));
+        }
+    }
+
     /// <summary>Runs only where the Whisper model and the sample recording are on this PC; skipped elsewhere (CI).</summary>
     private sealed class WhisperSampleFactAttribute : FactAttribute
     {

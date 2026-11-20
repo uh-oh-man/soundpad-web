@@ -2,6 +2,15 @@
 
 Notable changes to Soundpad Web. Versions follow the website's `package.json`; the Windows companion is versioned separately and only needs updating when a release says so.
 
+## 2.48.1 — The companion no longer crashes at start
+
+**Update the companion.** The website is unchanged.
+
+### Fixed
+
+- **The companion crashed a few seconds after every start** ("hey, its crashing at start"). The voice library finds the words of each kept recording in the background, and one kept clip was only 0.15 s long. Whisper's word timing can't handle speech that short: it ended the whole companion, past anything the app could catch. Because the clip still had no words, the next start read it again and crashed again. Speech shorter than one second is now followed by silence up to a second before Whisper reads it, so no length of clip can do this. Measured on the owner's PC: clips of 160 ms or less with speech crashed, 180 ms and longer did not.
+- **A file that stops the companion is never read again at the next start.** While it reads a file for its words, the companion now notes which file that is, and removes the note when it's done. If it finds the note at the next start, that file is marked as skipped ("Its words could not be found: reading it stopped the companion last time, so it was skipped.") instead of being read again. That keeps any future problem of this kind from repeating at every start. A recording skipped this way can be tried again from the voice library.
+
 ## 2.48.0 — A new start page, and the version in the EXE's name
 
 A redesigned start page, and the companion's file name now carries its version. It also brings everything from 2.47.0, which was tagged but has no download (a test timing flaw failed its release build). **Update the companion** for an update that keeps a versioned file name versioned; everything else works with any companion.

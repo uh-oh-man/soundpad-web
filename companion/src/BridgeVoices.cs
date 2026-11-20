@@ -704,11 +704,52 @@ public sealed partial class Bridge
         Interlocked.Increment(ref voicesRevision); Publish();
     }
 
+    // ---- Crash guard (2.48.1) ------------------------------------------------------------------------------------------
+    // Speech recognition runs native code that can end the process past any catch (a 160 ms clip did, 2.48.0). The
+    // worker names the file it is reading in a small marker and removes it afterwards; a marker found at the next start
+    // means that file stopped the companion, so it is marked failed instead of read again (which crashed every start).
+
+    /// <summary>The file being read for its words: "recording:&lt;id&gt;" or "sound:&lt;path&gt;". Only while it is read.</summary>
+    internal string WorkingMarkerPath => Path.Combine(store.DirectoryPath, "library", "words-working.v1.txt");
+    public const string StoppedCompanionError = "reading it stopped the companion last time, so it was skipped";
+    private bool stoppedChecked;
+    private string? stoppedLastTime;
+    /// <summary>The marker the last run left behind (read and removed once per process), or null.</summary>
+    private string? StoppedLastTime()
+    {
+        lock (workerGate)
+        {
+            if (stoppedChecked) return stoppedLastTime;
+            stoppedChecked = true;
+            try
+            {
+                if (File.Exists(WorkingMarkerPath))
+                {
+                    stoppedLastTime = File.ReadAllText(WorkingMarkerPath).Trim();
+                    File.Delete(WorkingMarkerPath);
+                    Log("Finding the words of a file stopped the companion last time; that file is skipped.");
+                }
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
+            return stoppedLastTime;
+        }
+    }
+    private void MarkWorking(string key)
+    {
+        try { Directory.CreateDirectory(Path.GetDirectoryName(WorkingMarkerPath)!); File.WriteAllText(WorkingMarkerPath, key); }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
+    }
+    private void ClearWorking()
+    {
+        try { File.Delete(WorkingMarkerPath); } catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
+    }
+
     private async Task<bool> WorkOnce(CancellationToken token)
     {
         var library = Voices;
         LibraryRecording? pending;
         lock (workerGate) pending = library.NextPending(failedRecordings);
+        var stopped = StoppedLastTime();
         var settings = library.Settings;
         bool categories = settings.IndexCategories.Count > 0 && !settings.IndexPaused;
         if (pending == null && !categories) { workerStatus = ""; return false; }
@@ -719,9 +760,16 @@ public sealed partial class Bridge
         }
         if (pending != null)
         {
+            if (stopped == "recording:" + pending.Id)
+            {
+                lock (workerGate) failedRecordings.Add(pending.Id);
+                library.SetWordsFailed(pending.Id, StoppedCompanionError);
+                return true;
+            }
             workerStatus = "Finding the words of new recordings"; workerCurrent = pending.Title; ProgressChanged(true);
             try
             {
+                MarkWorking("recording:" + pending.Id);
                 var words = await transcriber.WordsOfFile(pending.Path, token);
                 library.SetWords(pending.Id, words);
                 CheckWantedRecording(pending.Id);
@@ -731,7 +779,7 @@ public sealed partial class Bridge
                 lock (workerGate) failedRecordings.Add(pending.Id);
                 library.SetWordsFailed(pending.Id, ex is InvalidDataException ? ex.Message : "The kept file could not be read.");
             }
-            finally { workerCurrent = null; }
+            finally { ClearWorking(); workerCurrent = null; }
             return true;
         }
         // The category index: one file at a time; files already indexed at this length and time are skipped.
@@ -763,10 +811,17 @@ public sealed partial class Bridge
             long size = info.Length, modified = info.LastWriteTimeUtc.Ticks;
             if (SoundIndex.Done(next.Path, size, modified)) continue;
             if (Voices.Settings.IndexPaused) { lock (workerGate) categoryQueue = null; return false; }
+            if (stopped == "sound:" + next.Path)
+            {
+                SoundIndex.Store(new(next.Path, size, modified, null, StoppedCompanionError, utcNow()));
+                ProgressChanged(true);
+                return true;
+            }
             workerStatus = "Indexing the words of Soundpad sounds"; workerCurrent = next.Title; ProgressChanged(true);
             SoundWords.Entry entry;
             try
             {
+                MarkWorking("sound:" + next.Path);
                 var words = await transcriber.WordsOfFile(next.Path, token);
                 // Changed while it was read: not indexed now; the next pass sees the new version.
                 info.Refresh();
@@ -783,6 +838,7 @@ public sealed partial class Bridge
             {
                 entry = new(next.Path, size, modified, null, ex is InvalidDataException ? ex.Message : "The file could not be read.", utcNow());
             }
+            finally { ClearWorking(); }
             SoundIndex.Store(entry);
             workerCurrent = null; ProgressChanged(true);
             return true;
